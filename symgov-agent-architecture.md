@@ -242,6 +242,11 @@ Outputs:
 - `validation_reports`
 - normalized technical metadata
 - pass or fail recommendation
+- for PNG multi-symbol sheets in Phase 1:
+  - `split_plan` artifacts
+  - `derivative_manifest` artifacts
+  - proposed child crop assets
+  - review escalation into `raster_split_review`
 
 Why first:
 
@@ -292,6 +297,10 @@ Why in wave 1:
 - `agent_definitions` contains seeded rows for `scott`, `vlad`, and `tracy`
 - `Scott` has been verified writing `agent_queue_items`, `agent_runs`, `agent_output_artifacts`, and `intake_records`
 - `Vlad` has been verified writing `agent_queue_items`, `agent_runs`, `agent_output_artifacts`, and `validation_reports`
+- `Vlad` Phase 1 raster split persistence has now also been verified for:
+  - additional `agent_output_artifacts`
+  - derivative child `attachments`
+  - `review_cases`
 - `Tracy` is wired for the same bridge path, but a live DB-backed provenance smoke write has not yet been verified in this pass
 - independent output contract
 - manageable even before advanced orchestration exists
@@ -468,6 +477,11 @@ Recommended payload fields:
 - `compare_root`
 - `submitted_by`
 - `submission_context`
+- `intake_record_id`
+- `attachment_id`
+- `attachment_ids`
+- `raw_object_key`
+- `submission_batch_id`
 
 Allowed `expected_checks` values in the first slice:
 
@@ -482,7 +496,23 @@ Allowed `expected_checks` values in the first slice:
 
 - `agent_runs`
 - `agent_output_artifacts` with `artifact_type = validation_report`
+- additional Phase 1 raster artifact types:
+  - `split_plan`
+  - `derivative_manifest`
 - `validation_reports`
+
+Phase 1 PNG split extension:
+
+- when `asset_format == png`, `Vlad` may now:
+  - infer candidate symbol regions deterministically
+  - build a `split_plan` artifact with padded bounding boxes
+  - create proposed child crop PNGs and a `derivative_manifest`
+  - escalate to human review instead of silently finalizing a split
+- multi-symbol raster sheets should currently escalate into Workspace review with proposed child crops preserved as candidate derivatives
+- ambiguous raster sheets should currently create review-first artifacts rather than child crops only
+- derivative child crops can now be mirrored into `attachments` linked to the `validation_report`
+- raster split escalations can now create `review_cases`
+- `control_exceptions` are available for rule-based raster anomalies when the deterministic path cannot classify the sheet cleanly
 
 `validation_reports` fields for the first slice:
 

@@ -32,6 +32,8 @@ from .models import (
     ExternalIdentity,
     IntakeRecord,
     ProvenanceAssessment,
+    ReviewCase,
+    ControlException,
     ValidationReport,
 )
 
@@ -347,6 +349,83 @@ class RuntimePersistenceBridge:
             )
             session.add(row)
         return {"id": str(event_id), "action": action}
+
+    def create_agent_output_artifact(
+        self,
+        *,
+        queue_item_id: str | uuid.UUID,
+        artifact_type: str,
+        schema_version: str,
+        payload_json: dict[str, Any],
+        created_at: str | datetime | None = None,
+    ) -> dict[str, str]:
+        artifact_id = uuid.uuid4()
+        created_value = created_at if isinstance(created_at, datetime) else parse_timestamp(created_at) if created_at else datetime.now(timezone.utc).replace(microsecond=0)
+        with self.session_scope() as session:
+            row = AgentOutputArtifact(
+                id=artifact_id,
+                queue_item_id=coerce_uuid(queue_item_id),
+                artifact_type=artifact_type,
+                schema_version=schema_version,
+                payload_json=payload_json,
+                created_at=created_value,
+            )
+            session.add(row)
+        return {"id": str(artifact_id), "artifact_type": artifact_type}
+
+    def create_review_case(
+        self,
+        *,
+        source_entity_type: str,
+        source_entity_id: str | uuid.UUID,
+        current_stage: str,
+        escalation_level: str,
+        owner_id: str | uuid.UUID | None = None,
+        opened_at: str | datetime | None = None,
+    ) -> dict[str, str]:
+        review_case_id = uuid.uuid4()
+        opened_value = opened_at if isinstance(opened_at, datetime) else parse_timestamp(opened_at) if opened_at else datetime.now(timezone.utc).replace(microsecond=0)
+        with self.session_scope() as session:
+            row = ReviewCase(
+                id=review_case_id,
+                source_entity_type=source_entity_type,
+                source_entity_id=coerce_uuid(source_entity_id),
+                current_stage=current_stage,
+                owner_id=coerce_uuid(owner_id),
+                escalation_level=escalation_level,
+                opened_at=opened_value,
+                closed_at=None,
+            )
+            session.add(row)
+        return {"id": str(review_case_id), "current_stage": current_stage}
+
+    def create_control_exception(
+        self,
+        *,
+        source_type: str,
+        source_id: str | uuid.UUID,
+        severity: str,
+        rule_code: str,
+        detail: str,
+        status: str = "open",
+        created_at: str | datetime | None = None,
+    ) -> dict[str, str]:
+        exception_id = uuid.uuid4()
+        created_value = created_at if isinstance(created_at, datetime) else parse_timestamp(created_at) if created_at else datetime.now(timezone.utc).replace(microsecond=0)
+        with self.session_scope() as session:
+            row = ControlException(
+                id=exception_id,
+                source_type=source_type,
+                source_id=coerce_uuid(source_id),
+                severity=severity,
+                rule_code=rule_code,
+                detail=detail,
+                status=status,
+                created_at=created_value,
+                updated_at=created_value,
+            )
+            session.add(row)
+        return {"id": str(exception_id), "rule_code": rule_code}
 
     def persist_agent_execution(
         self,

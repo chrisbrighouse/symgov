@@ -4,7 +4,8 @@
 
 - This standalone repository can be cloned and worked from any local path.
 - The SymGov app version uses a fixed three-sector format: `major.minor.build`.
-- The current SymGov app version is `0.0.1`.
+- The current SymGov app version is `0.1.1`.
+- `package.json` is the canonical version source for the standalone repo frontend and backend runtime metadata.
 - Do not change the app version unless explicitly requested.
 - Treat VPS nginx, compose, and public URL changes as a later deployment step.
 - The public site may continue serving the older published bundle until the React/Vite dist/ output is intentionally published.
@@ -50,6 +51,10 @@ Supporting routes still exist for focused tasks, but the product intent is now e
   - `index.html`
   - `src/`
   - `public/`
+- In the active workspace deployment path at `/data/.openclaw/workspace/symgov`, the frontend source and published static target are now separated:
+  - `frontend/` is the active Vite source root
+  - the workspace root receives published `index.html`, `assets/`, and `submit/index.html`
+  - `npm run build:publish` is the normal local publish step there
 - Production assets are emitted into `dist/` with `npm run build`.
 - Until that build output is intentionally published on the VPS, the public site may still reflect an older bundle than the local workspace source.
 - In the current VPS deployment, the app is published under `/apps/workspace/symgov/` through the existing `applications-web` nginx mount.
@@ -86,7 +91,12 @@ Current intake/validation baseline:
 
 - `Scott` now accepts `.png` submissions as supported intake alongside `.svg` and `.json`
 - accepted and eligible PNG intake can now enqueue `Vlad`
-- `Vlad` now has a first deterministic PNG `raster_sheet_analysis` path for estimating symbol count, candidate regions, sheet type, and `split_recommended`
+- `Vlad` now has a Phase 1 deterministic PNG raster split path that:
+  - estimates symbol count, candidate regions, sheet type, and `split_recommended`
+  - emits `split_plan` and `derivative_manifest` artifacts
+  - creates proposed child crop PNG files in a runtime `derivative_assets/` root
+  - escalates multi-symbol and ambiguous sheets into `raster_split_review`
+- the current Scott -> Vlad handoff now also carries intake and attachment references needed for Phase 1 split persistence
 
 ## Run
 
@@ -108,7 +118,8 @@ When serving through the VPS webserver, publish the built `dist/` contents toget
 ## Versioning
 
 - SymGov uses a three-sector application version: `major.minor.build`.
-- The current version is `0.0.1`.
+- The current version is `0.1.1`.
+- Update `package.json` when you want to increment the standalone repo version baseline.
 - Treat this as intentional product metadata, separate from the deploy-time build marker.
 - Only increment the version when explicitly requested.
 
@@ -183,6 +194,11 @@ Current verified runtime baseline:
 - `Vlad` has been verified writing one queue item, run record, output artifact, and `validation_report` into PostgreSQL
 - `Tracy` has been verified writing one queue item, run record, output artifact, and `provenance_assessment` into PostgreSQL
 - the DB bridge currently maps legacy local string IDs into deterministic UUIDs so existing file-backed queue payloads can be mirrored into the live schema without immediate queue-format churn
+- Vlad Phase 1 raster split persistence has now also been verified in a controlled live test for:
+  - persisted `split_plan` and `derivative_manifest` artifacts
+  - persisted derivative child `attachments`
+  - persisted `raster_split_review` review cases
+  - the temporary test rows were cleaned up after verification
 
 The current MinIO bootstrap assets live outside this workspace in:
 

@@ -28,7 +28,7 @@ function inferApiRoot() {
 }
 
 export const appConfig = {
-  version: window.SYMGOV_CONFIG?.version || '',
+  version: window.SYMGOV_CONFIG?.version || __SYMGOV_VERSION__,
   build: window.SYMGOV_CONFIG?.build || '',
   apiRoot: inferApiRoot()
 };

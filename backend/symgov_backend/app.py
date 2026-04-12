@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -12,9 +15,14 @@ from .routes.public import router as public_router
 from .settings import get_settings
 
 
+def load_app_version() -> str:
+    package_json_path = Path(__file__).resolve().parents[2] / "package.json"
+    return json.loads(package_json_path.read_text(encoding="utf-8"))["version"]
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="Symgov API", version="0.1.0")
+    app = FastAPI(title="Symgov API", version=load_app_version())
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(_, exc: StarletteHTTPException) -> JSONResponse:

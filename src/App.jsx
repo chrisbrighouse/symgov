@@ -46,7 +46,7 @@ function Header() {
           Submit
         </NavLink>
       </nav>
-      <div className="build-chip">v{appConfig.version || '0.0.1'} · Build {appConfig.build || 'local'}</div>
+      <div className="build-chip">v{appConfig.version} · Build {appConfig.build || 'local'}</div>
     </header>
   );
 }
@@ -415,6 +415,9 @@ function SubmissionPage() {
             <input
               required
               type="password"
+              inputMode="numeric"
+              pattern="[0-9]{4}"
+              maxLength="4"
               value={formState.pin}
               onChange={(event) => updateField('pin', event.target.value)}
             />

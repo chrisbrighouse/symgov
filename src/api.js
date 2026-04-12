@@ -14,6 +14,48 @@ async function parseJson(response) {
   }
 }
 
+function formatValidationIssues(issues) {
+  if (!Array.isArray(issues) || issues.length === 0) {
+    return '';
+  }
+
+  return issues
+    .map((issue) => {
+      const location = Array.isArray(issue?.loc) ? issue.loc.slice(1).join('.') : 'request';
+      const message = issue?.msg || 'Validation failed.';
+      return `${location}: ${message}`;
+    })
+    .join(' ');
+}
+
+function hasMissingWrappedRequestIssue(issues) {
+  if (!Array.isArray(issues)) {
+    return false;
+  }
+
+  return issues.some(
+    (issue) =>
+      issue?.type === 'missing' &&
+      Array.isArray(issue?.loc) &&
+      issue.loc.length >= 2 &&
+      issue.loc[0] === 'body' &&
+      issue.loc[1] === 'request'
+  );
+}
+
+async function postExternalSubmission(payload, wrapped = false) {
+  const requestBody = wrapped ? { request: payload } : payload;
+
+  const response = await fetch(`${appConfig.apiRoot}/public/external-submissions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody)
+  });
+
+  const parsed = await parseJson(response);
+  return { response, payload: parsed };
+}
+
 export async function fetchHealth() {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.' };
@@ -68,22 +110,23 @@ export async function submitExternalSubmission(formState) {
     }))
   );
 
-  const response = await fetch(`${appConfig.apiRoot}/public/external-submissions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      pin: formState.pin,
-      submitter_name: formState.submitterName,
-      submitter_email: formState.submitterEmail,
-      overall_description: formState.description,
-      files
-    })
-  });
+  const submissionPayload = {
+    pin: formState.pin.trim(),
+    submitter_name: formState.submitterName.trim(),
+    submitter_email: formState.submitterEmail.trim(),
+    overall_description: formState.description.trim(),
+    files
+  };
 
-  const payload = await parseJson(response);
+  let { response, payload } = await postExternalSubmission(submissionPayload, false);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await postExternalSubmission(submissionPayload, true));
+  }
 
   if (!response.ok) {
-    throw new Error(payload?.detail || 'Submission failed.');
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Submission failed.');
   }
 
   return payload;

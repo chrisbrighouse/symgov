@@ -57,6 +57,8 @@ def guess_declared_format(filename: str) -> str:
     suffix = Path(filename).suffix.lower()
     if suffix == ".svg":
         return "svg"
+    if suffix == ".png":
+        return "png"
     if suffix == ".json":
         return "json"
     return "unknown"
