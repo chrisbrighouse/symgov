@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="symgov-build" content="2026-04-12.01" />
+    <meta name="symgov-api-root" content="https://apps.chrisbrighouse.com/api/v1" />
+    <meta name="symgov-api-base-url" content="" />
+    <title>symgov</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      window.SYMGOV_CONFIG = Object.freeze({
+        build: document.querySelector('meta[name="symgov-build"]')?.content || '',
+        apiRoot: document.querySelector('meta[name="symgov-api-root"]')?.content || '',
+        apiBaseUrl: document.querySelector('meta[name="symgov-api-base-url"]')?.content || ''
+      });
+    </script>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>symgov Standards View Prototype</title>
+    <link rel="stylesheet" href="prototype-styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="header">
+        <div class="header__brand">
+          <div class="brand-mark">STD</div>
+          <div>
+            <p class="eyebrow">Published standards portal</p>
+            <h1>Standards View</h1>
+          </div>
+        </div>
+        <div class="header__actions">
+          <label class="search" aria-label="Search approved symbols">
+            <span>Search</span>
+            <input type="search" value="control valve" />
+          </label>
+          <span class="badge">Current pack: PID-CORE-2026.03</span>
+        </div>
+      </header>
+
+      <section class="hero">
+        <div class="hero__copy">
+          <div>
+            <p class="eyebrow">Representative browse screen</p>
+            <h2>Find the approved symbol first, then read just enough guidance.</h2>
+          </div>
+          <p>
+            This layout keeps the catalog and the selected symbol visible together. It is intentionally light,
+            avoids governance noise, and makes the symbol graphic the primary recognition element.
+          </p>
+          <div class="button-row">
+            <a class="button button--primary" href="#">Open published record</a>
+            <a class="button" href="#">Download SVG</a>
+          </div>
+        </div>
+        <aside class="hero__panel">
+          <p class="eyebrow">Why this works</p>
+          <p>Persistent preview supports quick comparison across multiple symbols without route hopping.</p>
+          <div class="mini-stat"><span>Primary task</span><strong>Browse and confirm</strong></div>
+          <div class="mini-stat"><span>Visual priority</span><strong>Large symbol stage</strong></div>
+        </aside>
+      </section>
+
+      <div class="chip-row" aria-label="Filters">
+        <button class="chip chip--active">Valve</button>
+        <button class="chip">Instrument</button>
+        <button class="chip">Current revision</button>
+        <button class="chip">Core pack</button>
+        <button class="chip">Contractor-ready</button>
+      </div>
+
+      <section class="grid-standards">
+        <div class="catalog" aria-label="Approved symbol catalog">
+          <a class="symbol-card" href="#" aria-label="Open FV-201A Flow Control Valve">
+            <div class="symbol-card__art">
+              <svg class="svg-symbol" viewBox="0 0 320 140" fill="none" stroke="#1f7a5c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="16" y1="70" x2="100" y2="70" />
+                <line x1="220" y1="70" x2="304" y2="70" />
+                <path d="M100 70 L160 26 L220 70" />
+                <path d="M100 70 L160 114 L220 70" />
+                <line x1="160" y1="26" x2="160" y2="2" stroke="#236e8c" />
+                <circle cx="160" cy="-6" r="18" stroke="#236e8c" />
+                <path d="M196 24 h60" stroke="#236e8c" stroke-width="3" />
+                <text x="226" y="20" text-anchor="middle" font-size="14" fill="#236e8c" stroke="none" font-family="Arial, sans-serif">FC</text>
+              </svg>
+            </div>
+            <div class="symbol-card__body">
+              <div class="card__meta">
+                <span class="badge badge--ok">FV-201A</span>
+                <span class="badge">Rev 4</span>
+                <span class="badge">Approved</span>
+              </div>
+              <div>
+                <h2>Flow Control Valve</h2>
+                <p>Used for closed-loop flow regulation with actuator and fail-position guidance.</p>
+              </div>
+              <div class="mini-stat"><span>Typical use</span><strong>Loop control</strong></div>
+            </div>
+          </a>
+
+          <a class="symbol-card" href="#" aria-label="Open HV-110 Manual Gate Valve">
+            <div class="symbol-card__art">
+              <svg class="svg-symbol" viewBox="0 0 320 140" fill="none" stroke="#2a6b57" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="16" y1="70" x2="110" y2="70" />
+                <line x1="210" y1="70" x2="304" y2="70" />
+                <path d="M110 70 L160 30 L210 70" />
+                <path d="M110 70 L160 110 L210 70" />
+                <line x1="160" y1="30" x2="160" y2="14" stroke="#236e8c" />
+                <circle cx="160" cy="10" r="6" stroke="#236e8c" />
+              </svg>
+            </div>
+            <div class="symbol-card__body">
+              <div class="card__meta">
+                <span class="badge">HV-110</span>
+                <span class="badge">Rev 2</span>
+                <span class="badge">Core pack</span>
+              </div>
+              <div>
+                <h2>Manual Gate Valve</h2>
+                <p>Default isolation symbol with minimal annotation and consistent pack export.</p>
+              </div>
+              <div class="mini-stat"><span>Typical use</span><strong>Manual isolation</strong></div>
+            </div>
+          </a>
+
+          <a class="symbol-card" href="#" aria-label="Open PI-301 Pressure Indicator Bubble">
+            <div class="symbol-card__art">
+              <svg class="svg-symbol" viewBox="0 0 320 140" fill="none" stroke="#2a6b57" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <line x1="20" y1="70" x2="120" y2="70" />
+                <circle cx="170" cy="70" r="38" />
+                <line x1="208" y1="70" x2="300" y2="70" />
+                <text x="170" y="79" text-anchor="middle" font-size="28" fill="#236e8c" stroke="none" font-family="Arial, sans-serif">PI</text>
+              </svg>
+            </div>
+            <div class="symbol-card__body">
+              <div class="card__meta">
+                <span class="badge">PI-301</span>
+                <span class="badge">Rev 3</span>
+                <span class="badge">Instrumentation</span>
+              </div>
+              <div>
+                <h2>Pressure Indicator Bubble</h2>
+                <p>Published local pressure indicator with preferred reduced-print treatment.</p>
+              </div>
+              <div class="mini-stat"><span>Typical use</span><strong>Local indication</strong></div>
+            </div>
+          </a>
+        </div>
+
+        <aside class="stage panel" aria-labelledby="selected-symbol-title">
+          <div>
+            <p class="eyebrow">Selected symbol</p>
+            <h2 id="selected-symbol-title">FV-201A · Flow Control Valve</h2>
+          </div>
+          <div class="stage__art">
+            <svg class="svg-symbol" viewBox="0 0 480 240" fill="none" stroke="#1f7a5c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-labelledby="fvTitle fvDesc">
+              <title id="fvTitle">Flow control valve approved symbol</title>
+              <desc id="fvDesc">A line-connected valve diamond with actuator circle and FC label for flow control.</desc>
+              <line x1="28" y1="120" x2="152" y2="120" />
+              <line x1="328" y1="120" x2="452" y2="120" />
+              <path d="M152 120 L240 44 L328 120" />
+              <path d="M152 120 L240 196 L328 120" />
+              <line x1="240" y1="44" x2="240" y2="8" stroke="#236e8c" />
+              <circle cx="240" cy="-6" r="28" stroke="#236e8c" />
+              <path d="M300 38 h92" stroke="#236e8c" stroke-width="4" />
+              <text x="346" y="33" text-anchor="middle" font-size="18" fill="#236e8c" stroke="none" font-family="Arial, sans-serif">FC</text>
+            </svg>
+          </div>
+          <div class="panel__split">
+            <div class="mini-stat"><span>Current revision</span><strong>Rev 4</strong></div>
+            <div class="mini-stat"><span>Last published</span><strong>22 Mar 2026</strong></div>
+            <div class="mini-stat"><span>Pack</span><strong>PID-CORE-2026.03</strong></div>
+            <div class="mini-stat"><span>Formats</span><strong>SVG, DWG, PDF</strong></div>
+          </div>
+          <div class="note">
+            <strong>Guidance snippet</strong>
+            <p>Use when closed-loop flow regulation is required and the fail-position callout must remain explicit in contractor issue packs.</p>
+          </div>
+          <div class="button-row">
+            <a class="button button--primary" href="#">Download SVG</a>
+            <a class="button" href="#">Open feedback</a>
+          </div>
+        </aside>
+      </section>
+    </main>
+  </body>
+</html>

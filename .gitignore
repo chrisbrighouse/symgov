@@ -1,0 +1,12 @@
+node_modules/
+dist/
+
+.env.backend.database
+.env.backend.storage
+
+backend/.venv/
+backend/.deps/
+backend/.deps-api/
+
+__pycache__/
+*.py[cod]

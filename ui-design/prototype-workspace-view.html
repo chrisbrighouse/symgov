@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>symgov Workspace View Prototype</title>
+    <link rel="stylesheet" href="prototype-styles.css" />
+  </head>
+  <body class="workspace-tone">
+    <main class="shell">
+      <header class="header">
+        <div class="header__brand">
+          <div class="brand-mark workspace-mark">GOV</div>
+          <div>
+            <p class="eyebrow">Governance workspace</p>
+            <h1>Workspace View</h1>
+          </div>
+        </div>
+        <div class="header__actions workspace-status">
+          <span class="badge badge--workspace">In review</span>
+          <span class="badge">FV-201A</span>
+          <span class="badge">Assignee: A. Shah</span>
+          <span class="badge">Due 08 Apr</span>
+        </div>
+      </header>
+
+      <section class="hero workspace-tone">
+        <div class="hero__copy">
+          <div>
+            <p class="eyebrow">Representative review screen</p>
+            <h2>Compare the symbol, understand the delta, and decide without switching context.</h2>
+          </div>
+          <p>
+            The workspace prototype moves away from the dark console shell and uses a full-width, three-zone review surface:
+            queue context, compare canvas, and decision rail.
+          </p>
+          <div class="button-row">
+            <a class="button button--workspace" href="#">Approve revision</a>
+            <a class="button" href="#">Request changes</a>
+          </div>
+        </div>
+        <aside class="hero__panel">
+          <p class="eyebrow">Review intent</p>
+          <div class="mini-stat"><span>Main task</span><strong>Compare and approve</strong></div>
+          <div class="mini-stat"><span>Visible together</span><strong>Baseline, variant, rationale</strong></div>
+          <div class="mini-stat"><span>Downstream impact</span><strong>Pack + audience</strong></div>
+        </aside>
+      </section>
+
+      <section class="workspace-grid">
+        <aside class="queue" aria-label="Queue and context">
+          <article class="queue-card">
+            <p class="eyebrow">Queue</p>
+            <h2>Open governance items</h2>
+            <div class="card__meta">
+              <span class="badge badge--warning">CR-182</span>
+              <span class="badge">TT-410</span>
+            </div>
+            <p>Approve temperature transmitter symbol for Q2 overlay.</p>
+          </article>
+          <article class="queue-card">
+            <div class="card__meta">
+              <span class="badge badge--ok">CR-177</span>
+              <span class="badge">FV-201A</span>
+            </div>
+            <p>Confirm fail-close notation for LNG retrofit pack.</p>
+          </article>
+          <article class="queue-card">
+            <p class="eyebrow">Feedback routed back</p>
+            <p>EPC reviewer asked when the fail-state callout is mandatory on reduced-size contractor packs.</p>
+          </article>
+        </aside>
+
+        <div class="compare-board">
+          <article class="panel">
+            <div>
+              <p class="eyebrow">Variant comparison</p>
+              <h2>FV-201A baseline vs company-approved variant</h2>
+            </div>
+            <div class="compare-stage">
+              <section class="compare-stage__panel">
+                <div class="card__meta">
+                  <span class="badge">Base standard</span>
+                  <span class="badge">ISA baseline</span>
+                </div>
+                <div class="compare-stage__art">
+                  <svg class="svg-symbol" viewBox="0 0 420 220" fill="none" stroke="#236e8c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-labelledby="baseTitle baseDesc">
+                    <title id="baseTitle">Base control valve symbol</title>
+                    <desc id="baseDesc">Baseline control valve with actuator circle and no company-specific annotation.</desc>
+                    <line x1="24" y1="110" x2="132" y2="110" />
+                    <line x1="288" y1="110" x2="396" y2="110" />
+                    <path d="M132 110 L210 42 L288 110" />
+                    <path d="M132 110 L210 178 L288 110" />
+                    <line x1="210" y1="42" x2="210" y2="10" />
+                    <circle cx="210" cy="-4" r="24" />
+                  </svg>
+                </div>
+                <p>Matches the standard actuator notation without extra fail-state annotation.</p>
+              </section>
+
+              <section class="compare-stage__panel">
+                <div class="card__meta">
+                  <span class="badge badge--workspace">Company variant</span>
+                  <span class="badge">Rev 4</span>
+                </div>
+                <div class="compare-stage__art">
+                  <svg class="svg-symbol" viewBox="0 0 420 220" fill="none" stroke="#1f7a5c" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-labelledby="variantTitle variantDesc">
+                    <title id="variantTitle">Company approved control valve variant</title>
+                    <desc id="variantDesc">Control valve with actuator circle and an additional FC annotation line representing company guidance.</desc>
+                    <line x1="24" y1="110" x2="132" y2="110" />
+                    <line x1="288" y1="110" x2="396" y2="110" />
+                    <path d="M132 110 L210 42 L288 110" />
+                    <path d="M132 110 L210 178 L288 110" />
+                    <line x1="210" y1="42" x2="210" y2="10" stroke="#236e8c" />
+                    <circle cx="210" cy="-4" r="24" stroke="#236e8c" />
+                    <path d="M274 40 h84" stroke="#1f7a5c" stroke-width="4" />
+                    <text x="316" y="35" text-anchor="middle" font-size="18" fill="#1f7a5c" stroke="none" font-family="Arial, sans-serif">FC</text>
+                  </svg>
+                </div>
+                <p>Company variant adds fail-position clarity and smart-positioner annotation for contractor issue packs.</p>
+              </section>
+            </div>
+          </article>
+
+          <article class="panel">
+            <p class="eyebrow">Delta summary</p>
+            <div class="panel__split">
+              <div class="note">
+                <strong>Why this exists</strong>
+                <p>Brownfield retrofit work repeatedly misread the shutdown-state intent without the company callout.</p>
+              </div>
+              <div class="note">
+                <strong>Publication impact</strong>
+                <p>If approved, the next core pack will expose this variant to EPC framework users and internal engineering.</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="timeline">
+            <div class="timeline-item">
+              <p class="eyebrow">Timeline</p>
+              <p><strong>18 Mar 2026</strong> Approval captured after governance review board sign-off.</p>
+            </div>
+            <div class="timeline-item">
+              <p><strong>11 Mar 2026</strong> Contractor feedback incorporated into positioner note.</p>
+            </div>
+          </article>
+        </div>
+
+        <aside class="panel" aria-label="Decision rail">
+          <div>
+            <p class="eyebrow">Decision rail</p>
+            <h2>Approve with full context</h2>
+          </div>
+          <div class="mini-stat"><span>Status</span><strong>Awaiting approver</strong></div>
+          <div class="mini-stat"><span>Published pack</span><strong>PID-CORE-2026.03</strong></div>
+          <div class="mini-stat"><span>Audience</span><strong>Internal + EPC</strong></div>
+          <div class="note">
+            <strong>Reviewer note</strong>
+            <p>Confirm whether LNG retrofit pack inherits the site fail-state appendix or needs a distinct project note.</p>
+          </div>
+          <div class="button-row">
+            <a class="button button--workspace" href="#">Approve</a>
+            <a class="button" href="#">Request changes</a>
+            <a class="button" href="#">Assign owner</a>
+          </div>
+        </aside>
+      </section>
+    </main>
+  </body>
+</html>
