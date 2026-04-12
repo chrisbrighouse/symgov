@@ -46,7 +46,7 @@ function Header() {
           Submit
         </NavLink>
       </nav>
-      <div className="build-chip">Build {appConfig.build || 'local'}</div>
+      <div className="build-chip">v{appConfig.version || '0.0.1'} · Build {appConfig.build || 'local'}</div>
     </header>
   );
 }

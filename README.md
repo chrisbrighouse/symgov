@@ -3,6 +3,9 @@
 ## Current development convention
 
 - This standalone repository can be cloned and worked from any local path.
+- The SymGov app version uses a fixed three-sector format: `major.minor.build`.
+- The current SymGov app version is `0.0.1`.
+- Do not change the app version unless explicitly requested.
 - Treat VPS nginx, compose, and public URL changes as a later deployment step.
 - The public site may continue serving the older published bundle until the React/Vite dist/ output is intentionally published.
 
@@ -101,6 +104,13 @@ npm run build
 ```
 
 When serving through the VPS webserver, publish the built `dist/` contents together.
+
+## Versioning
+
+- SymGov uses a three-sector application version: `major.minor.build`.
+- The current version is `0.0.1`.
+- Treat this as intentional product metadata, separate from the deploy-time build marker.
+- Only increment the version when explicitly requested.
 
 ---
 

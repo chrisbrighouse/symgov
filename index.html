@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="symgov-version" content="0.0.1" />
     <meta name="symgov-build" content="2026-04-12.01" />
     <meta name="symgov-api-root" content="https://apps.chrisbrighouse.com/api/v1" />
     <meta name="symgov-api-base-url" content="" />
@@ -12,6 +13,7 @@
     <div id="root"></div>
     <script>
       window.SYMGOV_CONFIG = Object.freeze({
+        version: document.querySelector('meta[name="symgov-version"]')?.content || '',
         build: document.querySelector('meta[name="symgov-build"]')?.content || '',
         apiRoot: document.querySelector('meta[name="symgov-api-root"]')?.content || '',
         apiBaseUrl: document.querySelector('meta[name="symgov-api-base-url"]')?.content || ''
