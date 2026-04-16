@@ -38,7 +38,7 @@ from .models import (
 )
 
 
-DEFAULT_STORAGE_ENV_FILE = BACKEND_ROOT.parent / ".env.backend.storage"
+DEFAULT_STORAGE_ENV_FILE = Path("/data/.openclaw/workspace/symgov/.env.backend.storage")
 LEGACY_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "symgov/runtime-legacy-id")
 AGENT_DEFINITION_SEEDS = (
     {

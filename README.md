@@ -2,11 +2,8 @@
 
 ## Current development convention
 
-- This standalone repository can be cloned and worked from any local path.
-- The SymGov app version uses a fixed three-sector format: `major.minor.build`.
-- The current SymGov app version is `0.1.1`.
-- `package.json` is the canonical version source for the standalone repo frontend and backend runtime metadata.
-- Do not change the app version unless explicitly requested.
+- Do frontend work inside openclaw-hz0t-openclaw-1 under /data/.openclaw/workspace/symgov.
+- Use `/data/symgov` as the standalone GitHub-facing repository for commits and pushes that should contain only Symgov app and support files.
 - Treat VPS nginx, compose, and public URL changes as a later deployment step.
 - The public site may continue serving the older published bundle until the React/Vite dist/ output is intentionally published.
 
@@ -48,16 +45,17 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 ## Frontend deployment notes
 
 - The current frontend source is a Vite app rooted in:
+  - `frontend/index.html`
+  - `frontend/src/`
+  - `frontend/public/`
+- The workspace root now acts as the published static target and receives:
   - `index.html`
-  - `src/`
-  - `public/`
-- In the active workspace deployment path at `/data/.openclaw/workspace/symgov`, the frontend source and published static target are now separated:
-  - `frontend/` is the active Vite source root
-  - the workspace root receives published `index.html`, `assets/`, and `submit/index.html`
-  - `npm run build:publish` is the normal local publish step there
+  - `assets/`
+  - `submit/index.html`
 - Production assets are emitted into `dist/` with `npm run build`.
+- Use `npm run build:publish` to build and sync the current `dist/` output into the published workspace root.
 - Until that build output is intentionally published on the VPS, the public site may still reflect an older bundle than the local workspace source.
-- In the current VPS deployment, the app is published under `/apps/workspace/symgov/` through the existing `applications-web` nginx mount.
+- Because this workspace lives under `/data/.openclaw/workspace/symgov`, it is publishable directly through the existing `applications-web` nginx mount and should appear under `/apps/workspace/symgov/`.
 - The main app entry is:
   - `https://apps.chrisbrighouse.com/apps/workspace/symgov/`
 - A direct static submission entrypoint is also available at:
@@ -73,7 +71,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - If no explicit API config is provided, local file launches still fall back to `http://127.0.0.1:8010/api/v1`, localhost-served runs fall back to `${location.origin}/api/v1`, and non-local published hosts stay unconfigured until a real public API root is provided.
 - The Standards submission route now probes `https://apps.chrisbrighouse.com/api/v1/health` and submits to `https://apps.chrisbrighouse.com/api/v1/public/external-submissions` on the live VPS deployment.
 - The published submission gate must not expose the secret PIN in helper text or placeholder copy.
-- Static frontend changes only become visible on the public site after the built files under `dist/` are published to the VPS-mounted frontend location.
+- Static frontend changes only become visible on the public site after the built files under `dist/` are published into the workspace root static target.
 - When forcing a visible frontend refresh on the published site, bump the build marker and republish the generated asset filenames from `dist/assets/`.
 
 ## Agent implementation status
@@ -98,6 +96,37 @@ Current intake/validation baseline:
   - escalates multi-symbol and ambiguous sheets into `raster_split_review`
 - the current Scott -> Vlad handoff now also carries intake and attachment references needed for Phase 1 split persistence
 
+## OpenClaw resilience
+
+To make SymGov more resilient to OpenClaw upgrades, the current workspace now keeps a SymGov-owned OpenClaw manifest at:
+
+- `openclaw-agents.manifest.json`
+
+That manifest is now the local source of truth for:
+
+- the expected safe OpenClaw plugin profile for SymGov operations
+- registered SymGov agent ids, names, workspaces, models, and tool profile
+- managed OpenClaw `bindings[]` entries for deterministic channel/account/peer routing
+- expected OpenClaw `agent.json` metadata paths
+- required workspace files that prove each SymGov agent is still runnable
+
+Use the backend CLI to audit or repair OpenClaw registration after upgrades:
+
+```bash
+cd /data/.openclaw/workspace/symgov/backend
+python manage_symgov.py check-openclaw
+python manage_symgov.py reconcile-openclaw
+```
+
+Current intent:
+
+- SymGov-owned files remain the source of truth
+- OpenClaw config and agent metadata are treated as rebuildable runtime state
+- OpenClaw bindings are also treated as rebuildable runtime state
+- after an OpenClaw upgrade, `reconcile-openclaw` should be the first repair step before doing manual edits
+- the current managed SymGov binding set is intentionally empty until concrete channel/account targets are chosen
+- OpenClaw bindings are deterministic channel/account/peer matches; they are not free-form keyword routing rules
+
 ## Run
 
 Install dependencies and run the frontend locally:
@@ -113,15 +142,18 @@ Generate production assets with:
 npm run build
 ```
 
-When serving through the VPS webserver, publish the built `dist/` contents together.
+Build and sync the published static target with:
 
-## Versioning
+```bash
+npm run build:publish
+```
 
-- SymGov uses a three-sector application version: `major.minor.build`.
-- The current version is `0.1.1`.
-- Update `package.json` when you want to increment the standalone repo version baseline.
-- Treat this as intentional product metadata, separate from the deploy-time build marker.
-- Only increment the version when explicitly requested.
+## Repository split
+
+- `/data/.openclaw/workspace/symgov` remains the active local implementation workspace inside the broader OpenClaw environment.
+- `/data/symgov` is the standalone GitHub-facing repository synced to `git@github.com:chrisbrighouse/symgov.git`.
+- Keep `/data/symgov` limited to publishable Symgov source and support files only.
+- Do not commit live `.env.backend.database`, live `.env.backend.storage`, dependency directories, virtualenvs, or generated build output to the standalone repo.
 
 ---
 
@@ -132,16 +164,11 @@ This repository is now referred to as **symgov** (symbol governance). See the ar
 - `symgov-governance-architecture.md` — backend architecture, data model, deployment, and runbook.
 - `symgov-agent-architecture.md` — agent model, queue contracts, and the first `Vlad` validation runtime.
 - `.env.backend.database.example` — database-only backend environment snippet for the `symgov_app` runtime path, with a commented `symgov_migrator` migration example.
-- `.env.backend.storage.example` — object-storage environment template for local MinIO or another S3-compatible store.
+- `.env.backend.database` — current VPS database credentials snippet for the local Symgov backend runtime.
+- `.env.backend.storage` — current VPS object-storage snippet for the local MinIO deployment on `ai-stack`.
 - `backend/` — current backend scaffold containing SQLAlchemy models, Alembic config, and the first live migration set.
 - `backend/manage_symgov.py` — current backend bootstrap and inspection entrypoint for agent-definition seeding, DB/storage health checks, and the FastAPI server.
-
-Create local runtime env files by copying the examples:
-
-```bash
-cp .env.backend.database.example .env.backend.database
-cp .env.backend.storage.example .env.backend.storage
-```
+- `openclaw-agents.manifest.json` — current SymGov-owned OpenClaw registration manifest for `Scott`, `Tracy`, and `Vlad`.
 
 ## Current VPS backend support
 
@@ -152,7 +179,7 @@ For the first backend phase on this VPS:
 - the current Symgov backend scaffold lives in:
   - `backend/symgov_backend/`
   - `backend/alembic/`
-- runtime env files are expected beside this README and are intentionally gitignored:
+- the current runtime-facing env snippets live beside this README:
   - `.env.backend.database`
   - `.env.backend.storage`
 

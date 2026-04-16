@@ -15,7 +15,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 
-DEFAULT_ENV_FILE = BACKEND_ROOT.parent / ".env.backend.database"
+DEFAULT_ENV_FILE = Path("/data/.openclaw/workspace/symgov/.env.backend.database")
 
 
 def read_env_file(env_file: Path) -> dict[str, str]:

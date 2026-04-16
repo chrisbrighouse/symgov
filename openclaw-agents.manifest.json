@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "safe_plugins": {
+    "allow": [
+      "telegram",
+      "discord",
+      "acpx",
+      "browser",
+      "openai",
+      "anthropic",
+      "google",
+      "memory-core"
+    ],
+    "disable": [
+      "googlechat",
+      "nostr",
+      "slack"
+    ]
+  },
+  "bindings": [],
+  "agents": [
+    {
+      "id": "scott",
+      "name": "Scott",
+      "workspace": "/data/.openclaw/workspaces/scott",
+      "agent_dir": "/data/.openclaw/agents/scott/agent",
+      "model": "openai/gpt-5-mini",
+      "identity_name": "Scott",
+      "tools": {
+        "profile": "full",
+        "allow": [
+          "group:runtime",
+          "group:sessions"
+        ],
+        "elevated": {
+          "enabled": true,
+          "allowFrom": {
+            "telegram": [
+              7643191699
+            ]
+          }
+        }
+      },
+      "agent_to_agent": true,
+      "required_workspace_files": [
+        "AGENTS.md",
+        "IDENTITY.md",
+        "run_scott_intake.py",
+        "runtime/agent_definitions/scott.json"
+      ]
+    },
+    {
+      "id": "tracy",
+      "name": "Tracy",
+      "workspace": "/data/.openclaw/workspaces/tracy",
+      "agent_dir": "/data/.openclaw/agents/tracy/agent",
+      "model": "openai/gpt-5-mini",
+      "identity_name": "Tracy",
+      "tools": {
+        "profile": "full",
+        "allow": [
+          "group:runtime",
+          "group:sessions"
+        ],
+        "elevated": {
+          "enabled": true,
+          "allowFrom": {
+            "telegram": [
+              7643191699
+            ]
+          }
+        }
+      },
+      "agent_to_agent": true,
+      "required_workspace_files": [
+        "AGENTS.md",
+        "IDENTITY.md",
+        "run_tracy_provenance.py",
+        "runtime/agent_definitions/tracy.json"
+      ]
+    },
+    {
+      "id": "vlad",
+      "name": "Vlad",
+      "workspace": "/data/.openclaw/workspaces/vlad",
+      "agent_dir": "/data/.openclaw/agents/vlad/agent",
+      "model": "openai/gpt-5-mini",
+      "identity_name": "Vlad",
+      "tools": {
+        "profile": "full",
+        "allow": [
+          "group:runtime",
+          "group:sessions"
+        ],
+        "elevated": {
+          "enabled": true,
+          "allowFrom": {
+            "telegram": [
+              7643191699
+            ]
+          }
+        }
+      },
+      "agent_to_agent": true,
+      "required_workspace_files": [
+        "AGENTS.md",
+        "IDENTITY.md",
+        "run_vlad_validation.py",
+        "runtime/agent_definitions/vlad.json"
+      ]
+    }
+  ]
+}

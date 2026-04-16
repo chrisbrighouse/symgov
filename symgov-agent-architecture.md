@@ -29,7 +29,7 @@ Current implementation baseline:
 - baseline `agent_definitions` rows for `scott`, `vlad`, and `tracy` now exist in the live Symgov database
 - the current local runners remain file-backed first, but now support a first verified PostgreSQL write-through bridge for queue items, agent runs, output artifacts, and durable agent-specific records
 - the current verified smoke path is `Scott` intake -> downstream enqueue -> `Vlad` validation + `Tracy` provenance
-- the current bootstrap and inspection entrypoint is `backend/manage_symgov.py`
+- the current bootstrap and inspection entrypoint is `/data/.openclaw/workspace/symgov/backend/manage_symgov.py`
 
 ## Product alignment
 
@@ -282,11 +282,11 @@ Why in wave 1:
 ## Current bootstrap and usage notes
 
 - Seed baseline agent rows with:
-  - `python backend/manage_symgov.py seed-agent-definitions`
+  - `python /data/.openclaw/workspace/symgov/backend/manage_symgov.py seed-agent-definitions`
 - Inspect the live database with:
-  - `python backend/manage_symgov.py check-db`
+  - `python /data/.openclaw/workspace/symgov/backend/manage_symgov.py check-db`
 - Inspect local MinIO with:
-  - `python backend/manage_symgov.py check-storage`
+  - `python /data/.openclaw/workspace/symgov/backend/manage_symgov.py check-storage`
 - Mirror a local runner execution into PostgreSQL with:
   - `python /data/.openclaw/workspaces/scott/run_scott_intake.py --queue-item ... --runtime-root ... --persist-db`
   - `python /data/.openclaw/workspaces/vlad/run_vlad_validation.py --queue-item ... --runtime-root ... --persist-db`
