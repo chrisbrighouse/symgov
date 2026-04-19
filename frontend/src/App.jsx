@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { fetchHealth, submitExternalSubmission } from './api.js';
+import { fetchHealth, fetchWorkspaceDaisyReports, fetchWorkspaceReviewCases, submitExternalSubmission } from './api.js';
 import { appConfig } from './config.js';
-import { changeQueue, submissionPresets, symbols } from './data.js';
+import { changeQueue, daisyCoordinationReports, submissionPresets, symbols } from './data.js';
 
 function App() {
   const location = useLocation();
@@ -197,21 +197,87 @@ function StandardsPage() {
 
 function WorkspacePage() {
   const [query, setQuery] = useState('');
+  const [workspaceState, setWorkspaceState] = useState({
+    loading: true,
+    mode: appConfig.apiRoot ? 'loading' : 'seeded',
+    message: appConfig.apiRoot ? 'Loading live Workspace review…' : 'No API root configured. Showing seeded queue.',
+    items: appConfig.apiRoot ? [] : changeQueue
+  });
+  const [daisyState, setDaisyState] = useState({
+    loading: true,
+    mode: appConfig.apiRoot ? 'loading' : 'seeded',
+    message: appConfig.apiRoot ? 'Loading Daisy coordination…' : 'No API root configured. Showing seeded coordination.',
+    items: appConfig.apiRoot ? [] : daisyCoordinationReports
+  });
   const [activeId, setActiveId] = useState(changeQueue[0]?.id || '');
+  const [sourceComments, setSourceComments] = useState({});
+  const [childReviewState, setChildReviewState] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.all([fetchWorkspaceReviewCases(), fetchWorkspaceDaisyReports()]).then(([reviewResult, daisyResult]) => {
+      if (cancelled) {
+        return;
+      }
+
+      if (reviewResult.ok) {
+        setWorkspaceState({
+          loading: false,
+          mode: 'live',
+          message: reviewResult.items.length ? reviewResult.message : 'No live Workspace review cases are currently open.',
+          items: reviewResult.items
+        });
+      } else {
+        setWorkspaceState({
+          loading: false,
+          mode: 'seeded',
+          message: `${reviewResult.message} Showing seeded queue instead.`,
+          items: changeQueue
+        });
+      }
+
+      if (daisyResult.ok) {
+        setDaisyState({
+          loading: false,
+          mode: 'live',
+          message: daisyResult.items.length ? daisyResult.message : 'No live Daisy coordination reports are available yet.',
+          items: daisyResult.items
+        });
+      } else {
+        setDaisyState({
+          loading: false,
+          mode: 'seeded',
+          message: `${daisyResult.message} Showing seeded coordination instead.`,
+          items: daisyCoordinationReports
+        });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const filteredQueue = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
     if (!normalizedQuery) {
-      return changeQueue;
+      return workspaceState.items;
     }
 
-    return changeQueue.filter((item) =>
-      [item.id, item.symbolId, item.title, item.owner, item.summary].some((value) =>
-        value.toLowerCase().includes(normalizedQuery)
-      )
+    return workspaceState.items.filter((item) =>
+      [
+        item.id,
+        item.symbolId,
+        item.title,
+        item.owner,
+        item.summary,
+        item.sourceFileName || '',
+        ...(item.children || []).map((child) => child.proposedSymbolName || '')
+      ].some((value) => String(value).toLowerCase().includes(normalizedQuery))
     );
-  }, [query]);
+  }, [query, workspaceState.items]);
 
   useEffect(() => {
     if (!filteredQueue.some((item) => item.id === activeId)) {
@@ -220,23 +286,58 @@ function WorkspacePage() {
   }, [filteredQueue, activeId]);
 
   const activeChange = filteredQueue.find((item) => item.id === activeId) || filteredQueue[0];
+  const activeChildren = activeChange?.children || [];
+  const sourceComment = sourceComments[activeChange?.id] || '';
+  const classificationAliases = activeChange?.aliases || [];
+  const classificationKeywords = activeChange?.keywords || [];
+  const classificationSourceRefs = activeChange?.sourceRefs || [];
+  const activeDaisyReports = useMemo(
+    () => daisyState.items.filter((item) => item.reviewCaseId === activeChange?.id),
+    [activeChange?.id, daisyState.items]
+  );
+
+  function updateSourceComment(changeId, value) {
+    setSourceComments((current) => ({ ...current, [changeId]: value }));
+  }
+
+  function updateChildReview(childId, updates) {
+    setChildReviewState((current) => ({
+      ...current,
+      [childId]: {
+        action: current[childId]?.action || 'pending',
+        note: current[childId]?.note || '',
+        requestDetails: current[childId]?.requestDetails || '',
+        ...updates
+      }
+    }));
+  }
+
+  function getChildReview(childId) {
+    return childReviewState[childId] || { action: 'pending', note: '', requestDetails: '' };
+  }
 
   return (
     <section className="experience-shell">
       <div className="hero-panel glass-panel workspace-hero">
         <div>
           <p className="eyebrow">Queue-first Governance Workspace</p>
-          <h2>Review high-impact changes with compare context, pack impact, and Standards-linked clarifications in one surface.</h2>
+          <h2>Review split symbols with traceable source context, visual inspection, and draft review notes before deciding what each extracted record should do next.</h2>
         </div>
-        <label className="field search-field">
-          <span>Search queue</span>
-          <input
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search change id, symbol, owner, or summary"
-          />
-        </label>
+        <div className="action-stack">
+          <label className="field search-field">
+            <span>Search queue</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search change id, symbol, owner, summary, or source file"
+            />
+          </label>
+          <div className={`health-chip health-${workspaceState.mode}`}>
+            <span>{workspaceState.loading ? 'Loading Workspace…' : workspaceState.message}</span>
+            <small>{workspaceState.mode === 'live' ? 'Live review cases' : 'Seeded fallback queue'}</small>
+          </div>
+        </div>
       </div>
 
       <div className="workspace-grid">
@@ -256,7 +357,7 @@ function WorkspacePage() {
                 </div>
                 <p>{item.symbolId} · {item.title}</p>
                 <small>
-                  Owner {item.owner} · {item.pages} pages · {item.packs} packs
+                  Owner {item.owner} · {item.childCount || item.children?.length || 0} child symbols · {item.sourceFileName || 'Source file pending'}
                 </small>
               </button>
             ))}
@@ -264,7 +365,7 @@ function WorkspacePage() {
         </section>
 
         <section className="glass-panel pane compare-pane">
-          <SectionHeading title="Active Compare" subtitle="Baseline versus proposed review context" />
+          <SectionHeading title="Split Review" subtitle="Scrollable visual review for extracted child symbols" />
           {activeChange ? (
             <>
               <div className="detail-heading">
@@ -274,22 +375,49 @@ function WorkspacePage() {
                 </div>
                 <span className="status-pill">{activeChange.status}</span>
               </div>
-              <div className="compare-stage">
-                <div className="symbol-stage comparison">
-                  <p className="context-label">Baseline</p>
-                  <SymbolGlyph symbolId={activeChange.symbolId} large />
-                </div>
-                <div className="symbol-stage comparison">
-                  <p className="context-label">Proposed</p>
-                  <SymbolGlyph symbolId={activeChange.symbolId} large variant />
-                </div>
+              <div className="fact-grid">
+                <Fact label="Parent file" value={activeChange.sourceFileName || 'Not recorded'} />
+                <Fact label="Intake record" value={activeChange.intakeRecordId || 'Pending'} />
+                <Fact label="Open review by" value={activeChange.due} />
+                <Fact label="Child symbols" value={String(activeChange.childCount || activeChildren.length)} />
               </div>
               <div className="fact-grid">
-                <Fact label="Owner" value={activeChange.owner} />
-                <Fact label="Due" value={activeChange.due} />
-                <Fact label="Impacted Pages" value={String(activeChange.pages)} />
-                <Fact label="Impacted Packs" value={String(activeChange.packs)} />
+                <Fact label="Classification status" value={activeChange.classificationStatus || 'Not classified'} />
+                <Fact
+                  label="Libby confidence"
+                  value={typeof activeChange.classificationConfidence === 'number' ? `${Math.round(activeChange.classificationConfidence * 100)}%` : 'Pending'}
+                />
+                <Fact label="Libby approved" value={activeChange.libbyApproved ? 'Yes' : 'No'} />
+                <Fact label="Source classification" value={activeChange.sourceClassification || 'Unknown'} />
               </div>
+              <div className="copy-block">
+                <h4>Review intent</h4>
+                <p>Each extracted child can be reviewed independently while keeping all notes tied back to the source raster file for traceability.</p>
+              </div>
+              {activeChange.classificationSummary ? (
+                <div className="copy-block">
+                  <h4>Libby summary</h4>
+                  <p>{activeChange.classificationSummary}</p>
+                </div>
+              ) : null}
+              {activeChildren.length ? (
+                <div className="split-review-list" role="list" aria-label="Extracted symbols awaiting review">
+                  {activeChildren.map((child, index) => {
+                    const reviewState = getChildReview(child.id);
+                    return (
+                      <SplitReviewCard
+                        key={child.id}
+                        child={child}
+                        index={index}
+                        reviewState={reviewState}
+                        onUpdate={updateChildReview}
+                      />
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyState title="No extracted child symbols" body="This queue item does not yet include split children for review." />
+              )}
             </>
           ) : (
             <EmptyState title="No queued records" body="The queue is clear." />
@@ -297,7 +425,7 @@ function WorkspacePage() {
         </section>
 
         <section className="glass-panel pane">
-          <SectionHeading title="Approval Rail" subtitle="Risk, impact, and next actions" />
+          <SectionHeading title="Source Review Rail" subtitle="Case-level traceability and notes" />
           {activeChange ? (
             <>
               <div className="metric-column">
@@ -305,26 +433,293 @@ function WorkspacePage() {
                 <Metric title="Priority" value={activeChange.priority} />
                 <Metric title="Status" value={activeChange.status} />
               </div>
-              <div className="action-stack">
-                <button type="button" className="action-button primary">Approve</button>
-                <button type="button" className="action-button secondary">Request changes</button>
-                <button type="button" className="action-button secondary">Reassign owner</button>
+              <div className="context-card">
+                <p className="context-label">Parent source file</p>
+                <strong>{activeChange.sourceFileName || 'Not recorded'}</strong>
+                <p>{activeChildren.length} extracted records currently linked to this file.</p>
               </div>
+              <div className="fact-grid">
+                <Fact label="Discipline" value={activeChange.engineeringDiscipline || 'Pending'} />
+                <Fact label="Format" value={activeChange.format || 'Pending'} />
+                <Fact label="Industry" value={activeChange.industry || 'Pending'} />
+                <Fact label="Symbol family" value={activeChange.symbolFamily || 'Pending'} />
+                <Fact label="Process category" value={activeChange.processCategory || 'Pending'} />
+                <Fact label="Equipment class" value={activeChange.parentEquipmentClass || 'Pending'} />
+                <Fact label="Standards source" value={activeChange.standardsSource || 'Pending'} />
+                <Fact label="Provenance class" value={activeChange.libraryProvenanceClass || 'Pending'} />
+              </div>
+              {classificationAliases.length ? (
+                <div className="copy-block">
+                  <h4>Aliases</h4>
+                  <div className="tag-row">
+                    {classificationAliases.map((value) => (
+                      <span key={`alias-${value}`} className="tag-chip">
+                        {value}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {classificationKeywords.length ? (
+                <div className="copy-block">
+                  <h4>Keywords</h4>
+                  <div className="tag-row">
+                    {classificationKeywords.map((value) => (
+                      <span key={`keyword-${value}`} className="tag-chip">
+                        {value}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {classificationSourceRefs.length ? (
+                <div className="copy-block">
+                  <h4>Source references</h4>
+                  <ul className="clean-list">
+                    {classificationSourceRefs.map((value) => (
+                      <li key={value}>{value}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+              <label className="field">
+                <span>Source file review comment</span>
+                <textarea
+                  rows="6"
+                  value={sourceComment}
+                  onChange={(event) => updateSourceComment(activeChange.id, event.target.value)}
+                  placeholder="Capture context that applies to the whole source file, such as sheet-level quality issues, missing labels, or review guidance for the extracted set."
+                />
+              </label>
               <div className="copy-block">
-                <h4>Linked clarifications</h4>
+                <h4>{workspaceState.mode === 'live' ? 'Review notes' : 'Linked clarifications'}</h4>
                 <ul className="clean-list">
                   {activeChange.clarifications.map((note) => (
                     <li key={note}>{note}</li>
                   ))}
                 </ul>
               </div>
+              <div className="copy-block daisy-block">
+                <div className="daisy-heading">
+                  <div>
+                    <h4>Daisy coordination</h4>
+                    <p>{daisyState.loading ? 'Loading coordination state…' : daisyState.message}</p>
+                  </div>
+                  <span className={`review-status review-${daisyState.mode === 'live' ? 'approved' : 'pending'}`}>
+                    {daisyState.mode === 'live' ? 'Live feed' : 'Seeded feed'}
+                  </span>
+                </div>
+                {activeDaisyReports.length ? (
+                  <div className="daisy-report-list">
+                    {activeDaisyReports.map((report) => (
+                      <DaisyReportCard key={report.id} report={report} />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="No Daisy coordination yet"
+                    body="This review case does not yet have a coordination report. Daisy will appear here once an escalated review flow produces one."
+                  />
+                )}
+              </div>
             </>
           ) : (
-            <EmptyState title="No active review" body="Select a change record to open the approval rail." />
+            <EmptyState title="No active review" body="Select a change record to open the source review rail." />
           )}
         </section>
       </div>
     </section>
+  );
+}
+
+function DaisyReportCard({ report }) {
+  const confidenceLabel = typeof report.confidence === 'number' ? `${Math.round(report.confidence * 100)}%` : 'Pending';
+
+  return (
+    <article className="daisy-report-card">
+      <div className="split-card-header">
+        <div>
+          <p className="context-label">Coordination report</p>
+          <h4>{report.coordinationSummary}</h4>
+        </div>
+        <span className={`review-status review-${report.coordinationStatus === 'completed' ? 'approved' : 'request_changes'}`}>
+          {report.coordinationStatus.replaceAll('_', ' ')}
+        </span>
+      </div>
+      <div className="fact-grid daisy-fact-grid">
+        <Fact label="Stage" value={report.currentStage || 'Not recorded'} />
+        <Fact label="Escalation" value={report.escalationLevel || 'Not recorded'} />
+        <Fact label="Decision" value={report.decision || 'Pending'} />
+        <Fact label="Confidence" value={confidenceLabel} />
+      </div>
+      <div className="daisy-lane-grid">
+        <DaisyLane
+          title="Assignment proposals"
+          items={report.assignmentProposals}
+          renderItem={(item) => (
+            <>
+              <strong>
+                #{item.proposalRank} · {item.reviewer}
+              </strong>
+              <p>{item.role}</p>
+              <small>{item.reason}</small>
+            </>
+          )}
+          emptyText="No assignment proposals."
+        />
+        <DaisyLane
+          title="Stage movement"
+          items={report.stageTransitionProposals}
+          renderItem={(item) => (
+            <>
+              <strong>
+                {item.fromStage} → {item.toStage}
+              </strong>
+              <p>{item.action}</p>
+              <small>{item.reason}</small>
+            </>
+          )}
+          emptyText="No stage movement proposals."
+        />
+      </div>
+      <DaisyLane
+        title="Evidence requests"
+        items={report.contributorEvidenceRequests}
+        renderItem={(item) => (
+          <>
+            <strong>{item.requestType}</strong>
+            <small>{item.detail}</small>
+          </>
+        )}
+        emptyText="No contributor evidence requests."
+      />
+    </article>
+  );
+}
+
+function DaisyLane({ title, items, renderItem, emptyText }) {
+  return (
+    <div className="daisy-lane">
+      <p className="context-label">{title}</p>
+      {items.length ? (
+        <div className="daisy-lane-list">
+          {items.map((item, index) => (
+            <div key={`${title}-${index}`} className="daisy-lane-item">
+              {renderItem(item)}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="daisy-empty-text">{emptyText}</p>
+      )}
+    </div>
+  );
+}
+
+function SplitReviewCard({ child, index, reviewState, onUpdate }) {
+  const isRequestChanges = reviewState.action === 'request_changes';
+  const statusLabel =
+    reviewState.action === 'approved'
+      ? 'Approve selected'
+      : reviewState.action === 'request_changes'
+        ? 'Changes requested'
+        : reviewState.action === 'deleted'
+          ? 'Delete selected'
+          : 'Awaiting decision';
+
+  return (
+    <article className={`split-review-card action-${reviewState.action}`} role="listitem">
+      <div className="split-card-preview">
+        <SplitSymbolPreview child={child} variant={index % 2 === 1} />
+      </div>
+      <div className="split-card-body">
+        <div className="split-card-header">
+          <div>
+            <p className="context-label">Proposed child record</p>
+            <h4>{child.proposedSymbolName}</h4>
+          </div>
+          <span className={`review-status review-${reviewState.action}`}>{statusLabel}</span>
+        </div>
+        <div className="split-meta-grid">
+          <Fact label="Proposed id" value={child.proposedSymbolId} />
+          <Fact label="Child file" value={child.fileName} />
+          <Fact label="Parent file" value={child.parentFileName || 'Not recorded'} />
+          <Fact label="Name source" value={child.nameSource || 'Not recorded'} />
+        </div>
+        <label className="field">
+          <span>Review note for this symbol</span>
+          <textarea
+            rows="3"
+            value={reviewState.note}
+            onChange={(event) => onUpdate(child.id, { note: event.target.value })}
+            placeholder="Add a note to this extracted symbol record for traceability or downstream review."
+          />
+        </label>
+        <div className="action-stack horizontal split-actions">
+          <button
+            type="button"
+            className={`action-button primary ${reviewState.action === 'approved' ? 'selected' : ''}`}
+            onClick={() => onUpdate(child.id, { action: 'approved' })}
+          >
+            Approve
+          </button>
+          <button
+            type="button"
+            className={`action-button secondary ${isRequestChanges ? 'selected' : ''}`}
+            onClick={() => onUpdate(child.id, { action: isRequestChanges ? 'pending' : 'request_changes' })}
+          >
+            Request Changes
+          </button>
+          <button
+            type="button"
+            className={`action-button secondary danger ${reviewState.action === 'deleted' ? 'selected' : ''}`}
+            onClick={() => onUpdate(child.id, { action: 'deleted' })}
+          >
+            Delete
+          </button>
+        </div>
+        {isRequestChanges ? (
+          <label className="field request-field">
+            <span>Requested changes</span>
+            <textarea
+              rows="4"
+              value={reviewState.requestDetails}
+              onChange={(event) => onUpdate(child.id, { requestDetails: event.target.value })}
+              placeholder="Describe what needs to change before this extracted symbol can be approved."
+            />
+          </label>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function SplitSymbolPreview({ child, variant = false }) {
+  const resolvedPreviewUrl = child.previewUrl
+    ? new URL(child.previewUrl, appConfig.apiRoot || window.location.origin).toString()
+    : null;
+  const [imageUnavailable, setImageUnavailable] = useState(!resolvedPreviewUrl);
+
+  useEffect(() => {
+    setImageUnavailable(!resolvedPreviewUrl);
+  }, [resolvedPreviewUrl]);
+
+  if (!imageUnavailable && resolvedPreviewUrl) {
+    return (
+      <img
+        className="split-symbol-image"
+        src={resolvedPreviewUrl}
+        alt={`Preview of ${child.proposedSymbolName}`}
+        onError={() => setImageUnavailable(true)}
+      />
+    );
+  }
+
+  return (
+    <div className="split-symbol-fallback" aria-label={`Preview unavailable for ${child.proposedSymbolName}`}>
+      <SymbolGlyph symbolId={child.proposedSymbolId} large variant={variant} />
+      <small>Preview unavailable</small>
+    </div>
   );
 }
 
@@ -435,7 +830,7 @@ function SubmissionPage() {
             <input
               required
               type="file"
-              accept=".svg,.png,.json"
+              accept=".svg,.png,.jpg,.jpeg,.json"
               multiple
               onChange={(event) => updateField('files', Array.from(event.target.files || []))}
             />

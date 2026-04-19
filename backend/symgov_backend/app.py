@@ -12,6 +12,8 @@ from .routes.admin import legacy_router as legacy_admin_router
 from .routes.admin import router as admin_router
 from .routes.public import legacy_router as legacy_public_router
 from .routes.public import router as public_router
+from .routes.workspace import legacy_router as legacy_workspace_router
+from .routes.workspace import router as workspace_router
 from .settings import get_settings
 
 
@@ -39,8 +41,10 @@ def create_app() -> FastAPI:
 
     app.include_router(admin_router, prefix=settings.api_prefix)
     app.include_router(public_router, prefix=settings.api_prefix)
+    app.include_router(workspace_router, prefix=settings.api_prefix)
     app.include_router(legacy_admin_router, prefix="/api")
     app.include_router(legacy_public_router, prefix="/api")
+    app.include_router(legacy_workspace_router, prefix="/api")
     return app
 
 

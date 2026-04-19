@@ -74,6 +74,9 @@ Current VPS deployment notes:
   `ghcr.io/openclaw/openclaw:2026.4.2`
   rather than the older Hostinger sidecar image, because the verified Symgov
   backend dependency set is aligned to Python `3.11`
+- Operational reminder:
+  - backend code changes under `/data/.openclaw/workspace/symgov/backend` do not affect the public API until the live `openclaw-hz0t-symgov-api-1` service is restarted or redeployed
+  - if public submissions still show older intake behavior after a local code change, treat that as a deployment/runtime refresh issue first
 
 Current external submission API:
 
@@ -85,9 +88,9 @@ Current external submission API:
   - `submitter_email`
   - `overall_description`
   - `files[]` where each file includes `name`, `note`, `content_type`, and `content_base64`
-- validates the PIN, persists the external submitter identity and attachment metadata, writes uploaded files into the Scott runtime, runs `Scott` immediately, and enqueues downstream `Vlad` and `Tracy` queue items for accepted and eligible intake
-- the current intake path now supports `.svg`, `.png`, and `.json` uploads
-- accepted PNG intake can now reach `Vlad` for `raster_sheet_analysis`
+- validates the PIN, persists the external submitter identity and attachment metadata, writes uploaded files into the Scott runtime, runs `Scott` immediately, and continues into the downstream `Vlad`, `Tracy`, `Libby`, and `Daisy` paths when the routing and review outputs require them
+- the current intake path now supports `.svg`, `.png`, `.jpg`, `.jpeg`, and `.json` uploads
+- accepted raster intake can now reach `Vlad` for `raster_sheet_analysis`, including JPEG inputs normalized through Pillow in the live Python runtime
 - versioned health route: `GET /api/v1/health`
 - compatibility alias: `GET /api/health`
 

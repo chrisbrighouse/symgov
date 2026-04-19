@@ -41,6 +41,7 @@ def create_external_submission(
         bridge=bridge,
         pin=settings.submission_pin,
         db_env_file=settings.db_env_file,
+        storage_env_file=settings.storage_env_file,
     )
     try:
         result = service.submit(request.model_dump())

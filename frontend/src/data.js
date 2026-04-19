@@ -97,6 +97,86 @@ export const changeQueue = [
   }
 ];
 
+export const daisyCoordinationReports = [
+  {
+    id: 'DCR-182A',
+    queueItemId: 'AQI-DAISY-182A',
+    reviewCaseId: 'CR-182',
+    sourceType: 'review_case',
+    sourceId: 'CR-182',
+    coordinationStatus: 'escalated',
+    coordinationSummary: 'Daisy prepared reviewer assignments and requested a coordinated follow-up before case movement.',
+    createdAt: '2026-04-18T16:20:00Z',
+    currentStage: 'raster_split_review',
+    escalationLevel: 'medium',
+    decision: 'escalate',
+    confidence: 0.82,
+    escalationTarget: 'human_reviewer',
+    defectCount: 1,
+    assignmentProposals: [
+      {
+        proposalRank: 1,
+        reviewer: 'methods_lead',
+        role: 'primary_reviewer',
+        reason: 'Primary reviewer for raster extraction quality and symbol naming decisions.'
+      },
+      {
+        proposalRank: 2,
+        reviewer: 'qa_admin',
+        role: 'secondary_reviewer',
+        reason: 'Secondary reviewer for queue follow-through and final case packaging.'
+      }
+    ],
+    stageTransitionProposals: [
+      {
+        fromStage: 'raster_split_review',
+        toStage: 'review_pending_assignment',
+        action: 'request_assignment',
+        reason: 'Split review needs explicit reviewer ownership before final child-symbol decisions.'
+      }
+    ],
+    contributorEvidenceRequests: [
+      {
+        requestType: 'technical_clarification',
+        detail: 'Confirm the intended symbol names for the extracted records that still have OCR uncertainty.'
+      }
+    ]
+  },
+  {
+    id: 'DCR-177A',
+    queueItemId: 'AQI-DAISY-177A',
+    reviewCaseId: 'CR-177',
+    sourceType: 'review_case',
+    sourceId: 'CR-177',
+    coordinationStatus: 'completed',
+    coordinationSummary: 'Daisy prepared an approver-ready handoff for the fail-close notation review.',
+    createdAt: '2026-04-17T14:05:00Z',
+    currentStage: 'approval_review',
+    escalationLevel: 'low',
+    decision: 'pass',
+    confidence: 0.9,
+    escalationTarget: 'none',
+    defectCount: 0,
+    assignmentProposals: [
+      {
+        proposalRank: 1,
+        reviewer: 'approvals_lead',
+        role: 'primary_reviewer',
+        reason: 'Approver review is the next gating step for this case.'
+      }
+    ],
+    stageTransitionProposals: [
+      {
+        fromStage: 'approval_review',
+        toStage: 'ready_for_human_decision',
+        action: 'prepare_human_decision',
+        reason: 'The case is stable enough for final human sign-off.'
+      }
+    ],
+    contributorEvidenceRequests: []
+  }
+];
+
 export const submissionPresets = [
   'Contractor-originated company variant',
   'Imported standards package cleanup',

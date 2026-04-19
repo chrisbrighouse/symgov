@@ -108,6 +108,66 @@
         "run_vlad_validation.py",
         "runtime/agent_definitions/vlad.json"
       ]
+    },
+    {
+      "id": "daisy",
+      "name": "Daisy",
+      "workspace": "/data/.openclaw/workspaces/daisy",
+      "agent_dir": "/data/.openclaw/agents/daisy/agent",
+      "model": "openai/gpt-5-mini",
+      "identity_name": "Daisy",
+      "tools": {
+        "profile": "full",
+        "allow": [
+          "group:runtime",
+          "group:sessions"
+        ],
+        "elevated": {
+          "enabled": true,
+          "allowFrom": {
+            "telegram": [
+              7643191699
+            ]
+          }
+        }
+      },
+      "agent_to_agent": true,
+      "required_workspace_files": [
+        "AGENTS.md",
+        "IDENTITY.md",
+        "run_daisy_coordination.py",
+        "runtime/agent_definitions/daisy.json"
+      ]
+    },
+    {
+      "id": "libby",
+      "name": "Libby",
+      "workspace": "/data/.openclaw/workspaces/libby",
+      "agent_dir": "/data/.openclaw/agents/libby/agent",
+      "model": "openai/gpt-5-mini",
+      "identity_name": "Libby",
+      "tools": {
+        "profile": "full",
+        "allow": [
+          "group:runtime",
+          "group:sessions"
+        ],
+        "elevated": {
+          "enabled": true,
+          "allowFrom": {
+            "telegram": [
+              7643191699
+            ]
+          }
+        }
+      },
+      "agent_to_agent": true,
+      "required_workspace_files": [
+        "AGENTS.md",
+        "IDENTITY.md",
+        "run_libby_classification.py",
+        "runtime/agent_definitions/libby.json"
+      ]
     }
   ]
 }

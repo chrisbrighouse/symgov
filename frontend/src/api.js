@@ -84,6 +84,76 @@ export async function fetchHealth() {
   }
 }
 
+export async function fetchWorkspaceReviewCases() {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
+  }
+
+  try {
+    const response = await fetch(`${appConfig.apiRoot}/workspace/review-cases`);
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Workspace review load failed.',
+        items: []
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: 'Live Workspace review loaded.',
+      items: Array.isArray(payload?.items) ? payload.items : []
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'offline',
+      message: error instanceof Error ? error.message : 'Workspace review load failed.',
+      items: []
+    };
+  }
+}
+
+export async function fetchWorkspaceDaisyReports(reviewCaseId) {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
+  }
+
+  const query = reviewCaseId ? `?review_case_id=${encodeURIComponent(reviewCaseId)}` : '';
+
+  try {
+    const response = await fetch(`${appConfig.apiRoot}/workspace/daisy/reports${query}`);
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Daisy coordination load failed.',
+        items: []
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: 'Live Daisy coordination loaded.',
+      items: Array.isArray(payload?.items) ? payload.items : []
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'offline',
+      message: error instanceof Error ? error.message : 'Daisy coordination load failed.',
+      items: []
+    };
+  }
+}
+
 async function fileToBase64(file) {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);

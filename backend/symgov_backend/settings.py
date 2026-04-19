@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .db import DEFAULT_ENV_FILE
+from .runtime import DEFAULT_STORAGE_ENV_FILE
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,7 @@ class SymgovAPISettings:
     port: int = 8010
     submission_pin: str = os.environ.get("SYMGOV_API_PIN", "4590")
     db_env_file: Path = DEFAULT_ENV_FILE
+    storage_env_file: Path = DEFAULT_STORAGE_ENV_FILE
 
 
 def get_settings() -> SymgovAPISettings:

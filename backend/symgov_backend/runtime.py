@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import socket
 import struct
@@ -29,6 +31,7 @@ from .models import (
     AgentRun,
     Attachment,
     AuditEvent,
+    ClassificationRecord,
     ExternalIdentity,
     IntakeRecord,
     ProvenanceAssessment,
@@ -64,6 +67,22 @@ AGENT_DEFINITION_SEEDS = (
         "model": "ollama/gemma4:e4b",
         "status": "active",
         "queue_family": "provenance",
+    },
+    {
+        "slug": "daisy",
+        "display_name": "Daisy",
+        "role": "review coordination agent",
+        "model": "ollama/gemma4:e4b",
+        "status": "active",
+        "queue_family": "review_coordination",
+    },
+    {
+        "slug": "libby",
+        "display_name": "Libby",
+        "role": "classification and research librarian",
+        "model": "ollama/gemma4:e4b",
+        "status": "active",
+        "queue_family": "classification",
     },
 )
 
@@ -101,6 +120,145 @@ def env_flag(name: str, default: bool = False) -> bool:
 def read_storage_env_file(env_file: str | os.PathLike[str] | None = None) -> tuple[Path, dict[str, str]]:
     path = Path(env_file) if env_file else DEFAULT_STORAGE_ENV_FILE
     return path, read_env_file(path)
+
+
+def _storage_connection_settings(env: dict[str, str]) -> dict[str, str]:
+    endpoint = env.get("SYMGOV_S3_ENDPOINT")
+    bucket = env.get("SYMGOV_S3_BUCKET")
+    region = env.get("SYMGOV_S3_REGION") or "us-east-1"
+    access_key_id = env.get("SYMGOV_S3_ACCESS_KEY_ID")
+    secret_access_key = env.get("SYMGOV_S3_SECRET_ACCESS_KEY")
+    if not endpoint:
+        raise RuntimeError("Missing required storage setting: SYMGOV_S3_ENDPOINT")
+    if not bucket:
+        raise RuntimeError("Missing required storage setting: SYMGOV_S3_BUCKET")
+    if not access_key_id:
+        raise RuntimeError("Missing required storage setting: SYMGOV_S3_ACCESS_KEY_ID")
+    if not secret_access_key:
+        raise RuntimeError("Missing required storage setting: SYMGOV_S3_SECRET_ACCESS_KEY")
+    return {
+        "endpoint": endpoint,
+        "bucket": bucket,
+        "region": region,
+        "access_key_id": access_key_id,
+        "secret_access_key": secret_access_key,
+    }
+
+
+def _canonical_object_path(endpoint: str, bucket: str, object_key: str) -> str:
+    parsed = urllib.parse.urlparse(endpoint)
+    if not parsed.scheme or not parsed.hostname:
+        raise RuntimeError("SYMGOV_S3_ENDPOINT must be a full URL with scheme and hostname.")
+
+    prefix = parsed.path.rstrip("/")
+    key_path = urllib.parse.quote(object_key.lstrip("/"), safe="/-_.~")
+    return f"{prefix}/{bucket}/{key_path}" if prefix else f"/{bucket}/{key_path}"
+
+
+def _aws_v4_sign(key: bytes, message: str) -> bytes:
+    return hmac.new(key, message.encode("utf-8"), hashlib.sha256).digest()
+
+
+def _aws_v4_signing_key(secret_key: str, date_stamp: str, region: str, service: str = "s3") -> bytes:
+    date_key = _aws_v4_sign(("AWS4" + secret_key).encode("utf-8"), date_stamp)
+    region_key = hmac.new(date_key, region.encode("utf-8"), hashlib.sha256).digest()
+    service_key = hmac.new(region_key, service.encode("utf-8"), hashlib.sha256).digest()
+    return hmac.new(service_key, b"aws4_request", hashlib.sha256).digest()
+
+
+def download_object_bytes(
+    *,
+    object_key: str,
+    env_file: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
+    resolved_env_path, env = read_storage_env_file(env_file)
+    settings = _storage_connection_settings(env)
+    endpoint = settings["endpoint"]
+    bucket = settings["bucket"]
+    region = settings["region"]
+    access_key_id = settings["access_key_id"]
+    secret_access_key = settings["secret_access_key"]
+
+    parsed = urllib.parse.urlparse(endpoint)
+    host = parsed.netloc
+    canonical_uri = _canonical_object_path(endpoint, bucket, object_key)
+    payload_hash = hashlib.sha256(b"").hexdigest()
+    request_time = datetime.now(timezone.utc)
+    amz_date = request_time.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = request_time.strftime("%Y%m%d")
+
+    canonical_headers = (
+        f"host:{host}\n"
+        f"x-amz-content-sha256:{payload_hash}\n"
+        f"x-amz-date:{amz_date}\n"
+    )
+    signed_headers = "host;x-amz-content-sha256;x-amz-date"
+    canonical_request = "\n".join(
+        [
+            "GET",
+            canonical_uri,
+            "",
+            canonical_headers,
+            signed_headers,
+            payload_hash,
+        ]
+    )
+    credential_scope = f"{date_stamp}/{region}/s3/aws4_request"
+    string_to_sign = "\n".join(
+        [
+            "AWS4-HMAC-SHA256",
+            amz_date,
+            credential_scope,
+            hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+        ]
+    )
+    signing_key = _aws_v4_signing_key(secret_access_key, date_stamp, region)
+    signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    authorization = (
+        "AWS4-HMAC-SHA256 "
+        f"Credential={access_key_id}/{credential_scope}, "
+        f"SignedHeaders={signed_headers}, "
+        f"Signature={signature}"
+    )
+
+    request_url = urllib.parse.urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            canonical_uri,
+            "",
+            "",
+            "",
+        )
+    )
+    request = urllib.request.Request(
+        request_url,
+        method="GET",
+        headers={
+            "Authorization": authorization,
+            "Host": host,
+            "x-amz-content-sha256": payload_hash,
+            "x-amz-date": amz_date,
+        },
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        if not (200 <= response.status < 300):
+            raise RuntimeError(f"Storage download failed with HTTP {response.status} for {object_key}")
+        payload = response.read()
+        content_type = response.headers.get("Content-Type") or "application/octet-stream"
+        etag = response.headers.get("ETag")
+
+    return {
+        "bucket": bucket,
+        "endpoint": endpoint,
+        "env_path": str(resolved_env_path),
+        "object_key": object_key,
+        "payload": payload,
+        "content_type": content_type,
+        "size_bytes": len(payload),
+        "etag": etag,
+        "status_code": response.status,
+    }
 
 
 def check_storage_health(env_file: str | os.PathLike[str] | None = None) -> dict[str, Any]:
@@ -326,6 +484,119 @@ class RuntimePersistenceBridge:
             "filename": filename,
         }
 
+    def upload_object_bytes(
+        self,
+        *,
+        object_key: str,
+        payload: bytes,
+        content_type: str,
+        env_file: str | os.PathLike[str] | None = None,
+    ) -> dict[str, Any]:
+        resolved_env_path, env = read_storage_env_file(env_file)
+        settings = _storage_connection_settings(env)
+        endpoint = settings["endpoint"]
+        bucket = settings["bucket"]
+        region = settings["region"]
+        access_key_id = settings["access_key_id"]
+        secret_access_key = settings["secret_access_key"]
+
+        parsed = urllib.parse.urlparse(endpoint)
+        host = parsed.netloc
+        canonical_uri = _canonical_object_path(endpoint, bucket, object_key)
+        payload_hash = hashlib.sha256(payload).hexdigest()
+        request_time = datetime.now(timezone.utc)
+        amz_date = request_time.strftime("%Y%m%dT%H%M%SZ")
+        date_stamp = request_time.strftime("%Y%m%d")
+
+        canonical_headers = (
+            f"host:{host}\n"
+            f"x-amz-content-sha256:{payload_hash}\n"
+            f"x-amz-date:{amz_date}\n"
+        )
+        signed_headers = "host;x-amz-content-sha256;x-amz-date"
+        canonical_request = "\n".join(
+            [
+                "PUT",
+                canonical_uri,
+                "",
+                canonical_headers,
+                signed_headers,
+                payload_hash,
+            ]
+        )
+        credential_scope = f"{date_stamp}/{region}/s3/aws4_request"
+        string_to_sign = "\n".join(
+            [
+                "AWS4-HMAC-SHA256",
+                amz_date,
+                credential_scope,
+                hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+            ]
+        )
+        signing_key = _aws_v4_signing_key(secret_access_key, date_stamp, region)
+        signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+        authorization = (
+            "AWS4-HMAC-SHA256 "
+            f"Credential={access_key_id}/{credential_scope}, "
+            f"SignedHeaders={signed_headers}, "
+            f"Signature={signature}"
+        )
+
+        request_url = urllib.parse.urlunparse(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                canonical_uri,
+                "",
+                "",
+                "",
+            )
+        )
+        request = urllib.request.Request(
+            request_url,
+            data=payload,
+            method="PUT",
+            headers={
+                "Authorization": authorization,
+                "Content-Length": str(len(payload)),
+                "Content-Type": content_type,
+                "Host": host,
+                "x-amz-content-sha256": payload_hash,
+                "x-amz-date": amz_date,
+            },
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            if not (200 <= response.status < 300):
+                raise RuntimeError(f"Storage upload failed with HTTP {response.status} for {object_key}")
+            etag = response.headers.get("ETag")
+
+        return {
+            "bucket": bucket,
+            "endpoint": endpoint,
+            "env_path": str(resolved_env_path),
+            "object_key": object_key,
+            "content_type": content_type,
+            "size_bytes": len(payload),
+            "etag": etag,
+            "status_code": response.status,
+        }
+
+    def upload_file(
+        self,
+        *,
+        object_key: str,
+        path: str | os.PathLike[str],
+        content_type: str,
+        env_file: str | os.PathLike[str] | None = None,
+    ) -> dict[str, Any]:
+        file_path = Path(path)
+        return self.upload_object_bytes(
+            object_key=object_key,
+            payload=file_path.read_bytes(),
+            content_type=content_type,
+            env_file=env_file,
+        )
+
     def create_audit_event(
         self,
         *,
@@ -397,7 +668,43 @@ class RuntimePersistenceBridge:
                 closed_at=None,
             )
             session.add(row)
-        return {"id": str(review_case_id), "current_stage": current_stage}
+        return {
+            "id": str(review_case_id),
+            "source_entity_type": source_entity_type,
+            "source_entity_id": str(coerce_uuid(source_entity_id)),
+            "current_stage": current_stage,
+            "escalation_level": escalation_level,
+        }
+
+    def update_review_case(
+        self,
+        *,
+        review_case_id: str | uuid.UUID,
+        current_stage: str | None = None,
+        escalation_level: str | None = None,
+        source_entity_type: str | None = None,
+        source_entity_id: str | uuid.UUID | None = None,
+    ) -> dict[str, str]:
+        with self.session_scope() as session:
+            row = session.get(ReviewCase, coerce_uuid(review_case_id))
+            if row is None:
+                raise RuntimeError(f"Missing review_cases row for id {review_case_id}.")
+            if current_stage is not None:
+                row.current_stage = current_stage
+            if escalation_level is not None:
+                row.escalation_level = escalation_level
+            if source_entity_type is not None:
+                row.source_entity_type = source_entity_type
+            if source_entity_id is not None:
+                row.source_entity_id = coerce_uuid(source_entity_id)
+            session.flush()
+            return {
+                "id": str(row.id),
+                "source_entity_type": row.source_entity_type,
+                "source_entity_id": str(row.source_entity_id),
+                "current_stage": row.current_stage,
+                "escalation_level": row.escalation_level,
+            }
 
     def create_control_exception(
         self,
@@ -526,6 +833,75 @@ class RuntimePersistenceBridge:
                 record.evidence_json = durable_record["evidence_json"]
                 record.report_json = durable_record["report_json"]
                 record.assessed_at = parse_timestamp(durable_record["assessed_at"])
+            elif durable_kind == "classification_record":
+                record_id = coerce_uuid(durable_record["id"])
+                record = session.get(ClassificationRecord, record_id)
+                symbol_key = durable_record.get("symbol_key")
+                if record is None:
+                    record = ClassificationRecord(id=record_id)
+                    session.add(record)
+
+                if durable_record.get("status") == "current":
+                    prior_query = session.query(ClassificationRecord).filter(
+                        ClassificationRecord.id != record_id,
+                        ClassificationRecord.status == "current",
+                    )
+                    if symbol_key:
+                        prior_query = prior_query.filter(ClassificationRecord.symbol_key == symbol_key)
+                    else:
+                        prior_query = prior_query.filter(
+                            ClassificationRecord.source_type == durable_record["source_type"],
+                            ClassificationRecord.source_id == coerce_uuid(durable_record["source_id"]),
+                        )
+
+                    prior_records = prior_query.all()
+                    supersedes_id = durable_record.get("supersedes_classification_id")
+                    if supersedes_id is None and prior_records:
+                        supersedes_id = str(prior_records[0].id)
+
+                    for prior in prior_records:
+                        prior.status = "obsolete"
+                        prior.updated_at = parse_timestamp(durable_record.get("updated_at") or durable_record["created_at"])
+
+                    durable_record["supersedes_classification_id"] = supersedes_id
+
+                record.queue_item_id = queue_item_id
+                record.intake_record_id = coerce_uuid(durable_record.get("intake_record_id"))
+                record.validation_report_id = coerce_uuid(durable_record.get("validation_report_id"))
+                record.provenance_assessment_id = coerce_uuid(durable_record.get("provenance_assessment_id"))
+                record.review_case_id = coerce_uuid(durable_record.get("review_case_id"))
+                record.origin_attachment_id = coerce_uuid(durable_record.get("origin_attachment_id"))
+                record.origin_object_key = durable_record.get("origin_object_key")
+                record.origin_file_name = durable_record.get("origin_file_name")
+                record.origin_batch_id = durable_record.get("origin_batch_id")
+                record.parent_review_case_id = coerce_uuid(durable_record.get("parent_review_case_id"))
+                record.symbol_key = symbol_key
+                record.symbol_region_index = durable_record.get("symbol_region_index")
+                record.status = durable_record.get("status") or "current"
+                record.classification_status = durable_record.get("classification_status") or "provisional"
+                record.supersedes_classification_id = coerce_uuid(durable_record.get("supersedes_classification_id"))
+                record.source_id = coerce_uuid(durable_record["source_id"])
+                record.source_type = durable_record["source_type"]
+                record.category = durable_record["category"]
+                record.discipline = durable_record["discipline"]
+                record.format = durable_record.get("format")
+                record.industry = durable_record.get("industry")
+                record.symbol_family = durable_record.get("symbol_family")
+                record.process_category = durable_record.get("process_category")
+                record.parent_equipment_class = durable_record.get("parent_equipment_class")
+                record.standards_source = durable_record.get("standards_source")
+                record.library_provenance_class = durable_record.get("library_provenance_class")
+                record.source_classification = durable_record.get("source_classification")
+                record.aliases_json = durable_record.get("aliases_json") or []
+                record.search_terms_json = durable_record.get("search_terms_json") or []
+                record.source_refs_json = durable_record.get("source_refs_json") or []
+                record.evidence_json = durable_record.get("evidence_json") or {}
+                record.taxonomy_terms_created_json = durable_record.get("taxonomy_terms_created_json") or []
+                record.review_summary = durable_record.get("review_summary")
+                record.confidence = coerce_numeric(durable_record["confidence"]) or Decimal("0")
+                record.libby_approved = bool(durable_record.get("libby_approved"))
+                record.created_at = parse_timestamp(durable_record["created_at"])
+                record.updated_at = parse_timestamp(durable_record.get("updated_at") or durable_record["created_at"])
             else:
                 raise ValueError(f"Unsupported durable_kind: {durable_kind}")
 

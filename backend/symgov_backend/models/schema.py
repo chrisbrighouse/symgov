@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, Text, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -424,17 +424,55 @@ class ValidationReport(Base):
 
 class ClassificationRecord(Base):
     __tablename__ = "classification_records"
+    __table_args__ = (
+        Index("ix_classification_records_symbol_status_created_at", "symbol_key", "status", "created_at"),
+        Index("ix_classification_records_review_case_created_at", "review_case_id", "created_at"),
+        Index("ix_classification_records_validation_report_created_at", "validation_report_id", "created_at"),
+        Index("ix_classification_records_provenance_assessment_created_at", "provenance_assessment_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     queue_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_queue_items.id"), nullable=True)
+    intake_record_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("intake_records.id"), nullable=True)
+    validation_report_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("validation_reports.id"), nullable=True)
+    provenance_assessment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("provenance_assessments.id"), nullable=True)
+    review_case_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("review_cases.id"), nullable=True)
+    origin_attachment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("attachments.id"), nullable=True)
+    origin_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    origin_file_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    origin_batch_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parent_review_case_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("review_cases.id"), nullable=True)
+    symbol_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    symbol_region_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'current'"))
+    classification_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'provisional'"))
+    supersedes_classification_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("classification_records.id"),
+        nullable=True,
+    )
     source_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     source_type: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(Text, nullable=False)
     discipline: Mapped[str] = mapped_column(Text, nullable=False)
+    format: Mapped[str | None] = mapped_column(Text, nullable=True)
+    industry: Mapped[str | None] = mapped_column(Text, nullable=True)
+    symbol_family: Mapped[str | None] = mapped_column(Text, nullable=True)
+    process_category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parent_equipment_class: Mapped[str | None] = mapped_column(Text, nullable=True)
+    standards_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    library_provenance_class: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_classification: Mapped[str | None] = mapped_column(Text, nullable=True)
     aliases_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     search_terms_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    source_refs_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    taxonomy_terms_created_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    review_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence: Mapped[float] = mapped_column(Numeric(5, 4), nullable=False)
+    libby_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 
 class ReviewCase(Base):

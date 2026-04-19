@@ -1,6 +1,6 @@
 # symgov Agent Architecture
 
-Last updated: 2026-04-09
+Last updated: 2026-04-19
 
 ## Purpose
 
@@ -57,7 +57,12 @@ The spreadsheet under `Documentation/Symgov` describes a future operating model 
 - `Whitney` market intelligence
 - `Ed` documentation and policy
 
-None of these exist yet in the current prototype or backend architecture.
+Current implementation status is now mixed rather than empty:
+
+- `Scott`, `Vlad`, and `Tracy` exist as live local/file-backed runners with PostgreSQL write-through support
+- `Daisy` now exists as the first review-coordination scaffold and can be created automatically from persisted `review_cases`
+- `Libby` is now the next agreed implementation target with a concrete design direction
+- the remaining named agents still exist only as planning targets
 
 The implementation direction should be:
 
@@ -100,8 +105,8 @@ Examples:
 - `Scott` writes intake records, extracted metadata, routing flags
 - `Tracy` writes provenance reports, rights status, evidence notes
 - `Vlad` writes validation reports, defect lists, normalized technical metadata
-- `Libby` writes taxonomy assignments, aliases, search terms
-- `Daisy` writes review cases, reviewer assignments, stage transitions
+- `Libby` writes taxonomy assignments, aliases, search terms, source classifications, and source-reference evidence
+- `Daisy` writes reviewer assignment proposals, stage-transition proposals, and contributor evidence requests against existing `review_cases`
 - `Rupert` writes release packages, publication logs, withdrawal actions
 - `Reggie` writes anomaly alerts, control exceptions, audit summaries
 
@@ -178,7 +183,7 @@ Current status:
 - `validation_reports`
   - id, intake_record_id or symbol_revision_id, validation_status, defect_count, normalized_payload_json, report_json, created_at
 - `classification_records`
-  - id, symbol_id or intake_record_id, category, discipline, aliases_json, search_terms_json, confidence, created_at
+  - id, symbol_id or intake_record_id, classification_status, discipline, format, industry, symbol_family, process_category, parent_equipment_class, standards_source, library_provenance_class, source_classification, aliases_json, search_terms_json, source_refs_json, evidence_json, libby_approved, confidence, supersedes_classification_id, created_at
 
 ### Coordination records
 
@@ -279,6 +284,52 @@ Why in wave 1:
 
 - highly important before publication
 
+### `Libby` - classification and research librarian
+
+Owns:
+
+- classification queue
+- taxonomy assignment
+- discoverability metadata
+- alias and keyword generation
+- source-reference repair when provenance/source metadata is missing or weak
+- taxonomy term creation when an existing controlled term is insufficient
+
+Inputs:
+
+- accepted intake records
+- validation reports and raster split child metadata
+- provenance assessments
+- active review cases when classification needs a retry or upgrade
+
+Outputs:
+
+- `classification_records`
+- engineering discipline, format, industry, symbol family, process category, and parent equipment class
+- standards source and library provenance class
+- aliases and search terms
+- source classification and supporting reference evidence
+- `libby_approved` readiness signal
+- escalation into classification-focused review follow-up when confidence remains low
+
+Agreed operating rules:
+
+- Libby runs after `Tracy` and before `Daisy`
+- Libby classifies at both file and symbol level, but symbol-level cases are the main review unit
+- each symbol-level output must retain lineage back to the originating source file and batch
+- Libby may browse externally whenever needed to resolve classification uncertainty
+- Libby may create new taxonomy terms and use them immediately
+- Libby may supersede existing classifications, but earlier records must remain durable and be marked obsolete
+- Libby does not override `Tracy` rights decisions or `Vlad` technical findings
+
+Review-flow implication:
+
+- the intended case progression becomes:
+  - technical validation / raster split
+  - provenance review
+  - classification review
+  - Daisy-managed human review coordination
+
 ## Current bootstrap and usage notes
 
 - Seed baseline agent rows with:
@@ -294,14 +345,19 @@ Why in wave 1:
 
 ## Current verified live state
 
-- `agent_definitions` contains seeded rows for `scott`, `vlad`, and `tracy`
+- `agent_definitions` contains seeded rows for `scott`, `vlad`, `tracy`, and `daisy`
 - `Scott` has been verified writing `agent_queue_items`, `agent_runs`, `agent_output_artifacts`, and `intake_records`
 - `Vlad` has been verified writing `agent_queue_items`, `agent_runs`, `agent_output_artifacts`, and `validation_reports`
 - `Vlad` Phase 1 raster split persistence has now also been verified for:
   - additional `agent_output_artifacts`
   - derivative child `attachments`
   - `review_cases`
-- `Tracy` is wired for the same bridge path, but a live DB-backed provenance smoke write has not yet been verified in this pass
+- `Tracy` is wired for the same bridge path and now creates persisted `review_cases` when provenance follow-up is required
+- `Daisy` now:
+  - accepts `review_case` coordination queue items
+  - writes local `review_coordination_reports`
+  - can be auto-created from `Vlad` or `Tracy` review-case outputs on the live external submission path
+  - is queryable through the backend Workspace API and visible in the Workspace UI as a read-only coordination lane
 - independent output contract
 - manageable even before advanced orchestration exists
 
@@ -323,12 +379,11 @@ Inputs:
 
 Outputs:
 
-- `review_cases`
 - reviewer assignment proposals
 - stage movement recommendations
 - contributor evidence requests
 
-Why not first:
+Why after wave 1:
 
 - depends on upstream outputs
 - better once intake, validation, and provenance contracts exist
@@ -777,11 +832,11 @@ For the first local implementation:
 - only `Scott` outputs with `intake_status = accepted` and `eligibility_status = eligible` can enqueue `Vlad` and `Tracy`
 - `Vlad` and `Tracy` may run in parallel once `Scott` has produced a stable accepted intake record
 - `Scott` outputs with `needs_review`, `rejected`, or malformed contracts do not auto-enqueue downstream agents
-- `Tracy` escalations and `Vlad` escalations remain human-routed until `Daisy` exists
+- `Tracy` escalations and `Vlad` escalations can now create a `Daisy` coordination queue item once a persisted `review_case` exists
 
 This preserves a clean operating boundary:
 
 - `Scott` decides intake normalization and downstream eligibility
 - `Vlad` decides technical validation outcome
 - `Tracy` decides provenance and rights outcome
-- `Daisy` is deferred until these outputs exist as stable records
+- `Daisy` consumes stable `review_cases` and proposes coordination actions without taking final approval authority

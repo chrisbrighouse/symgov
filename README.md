@@ -38,9 +38,67 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 
 - Standards and Workspace surface data is currently seeded in the frontend and shaped to match the intended API model
 - The Standards submission route now calls the live Symgov backend instead of using demo-only local submission behavior
+- The live submission picker now accepts `.svg`, `.png`, `.jpg`, `.jpeg`, and `.json`
 - Guided lookup is intentionally constrained to published approved records
 - Workspace approval and Standards clarification loops are still frontend-seeded until the corresponding backend routes land
+- Workspace now also has a live Daisy coordination read path:
+  - `GET /api/v1/workspace/daisy/reports`
+  - the Workspace right rail renders Daisy coordination output for the active review case when present
+  - if no Daisy report exists yet for a case, the UI shows an explicit empty state instead of silently omitting coordination status
 - Focused routes remain available for audit, per-symbol reading, downloads, and guided lookup
+
+## Split review workflow
+
+The current raster split review flow now sits between `Scott` intake and any future publication or normalization step:
+
+- external `.png` submission enters `Scott`
+- accepted intake can trigger immediate `Vlad` raster split processing
+- `Vlad` persists a `raster_split_review` case with proposed child crops and naming metadata
+- Governance Workspace now presents those extracted children in a scrollable symbol-review interface
+
+Current split-review UI behavior:
+
+- each extracted child symbol renders as a review card rather than a plain text list item
+- each review card includes:
+  - visual preview slot for the proposed crop
+  - proposed symbol name
+  - child filename
+  - parent source filename for traceability
+  - per-symbol review note textarea
+  - action buttons for `Approve`, `Request Changes`, and `Delete`
+- `Request Changes` reveals a dedicated change-request textarea for that child symbol
+- the source-file rail now includes a file-level review comment field so sheet-wide notes stay separate from per-symbol notes
+
+Current backend support for split review:
+
+- `GET /api/v1/workspace/review-cases`
+  - returns open raster split review cases with child records
+- each child payload now includes:
+  - stable child id
+  - parent file name
+  - preview URL metadata
+- `GET /api/v1/workspace/review-cases/{review_case_id}/children/preview`
+  - streams child crop previews from Symgov storage for Workspace review
+
+Current boundary:
+
+- the new review interface is intentionally UI-first
+- review notes, source-file comments, and action-button choices are not yet persisted
+- approval lifecycle semantics will be defined in the next implementation slice before these controls mutate state
+
+## Symgov skill workflow
+
+When working on Symgov through Codex, use the `symgov` skill first to reload project context before making changes.
+
+Current expected skill workflow:
+
+- read `references/context.md` for the stable project map
+- read `references/task-list.md` for the current backlog and latest handoff notes
+- treat `/data/.openclaw/workspace/symgov` as the active implementation workspace
+- treat `/data/symgov` as the standalone GitHub-facing publishable repo
+- after a meaningful review, planning pass, or code change, update `references/task-list.md`
+
+This keeps product framing, active implementation state, and publishable repository changes aligned across sessions.
 
 ## Frontend deployment notes
 
@@ -73,6 +131,11 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - The published submission gate must not expose the secret PIN in helper text or placeholder copy.
 - Static frontend changes only become visible on the public site after the built files under `dist/` are published into the workspace root static target.
 - When forcing a visible frontend refresh on the published site, bump the build marker and republish the generated asset filenames from `dist/assets/`.
+- Live deployment nuance:
+  - the publicly served SymGov static root is `/data/.openclaw/workspace/symgov`
+  - publishing only `/data/symgov` is not sufficient to update `https://apps.chrisbrighouse.com/apps/workspace/symgov/`
+  - for live frontend changes, publish from the served workspace itself:
+    - `cd /data/.openclaw/workspace/symgov && npm run build:publish`
 
 ## Agent implementation status
 
@@ -83,18 +146,32 @@ The product docs now also include the first agentization slice for Symgov:
 - the first runnable `Vlad` queue is intentionally local file-backed while the Symgov backend queue is still being introduced
 - the local `Vlad` workspace writes queue items, run records, output artifacts, and validation reports in a queue-shaped contract that mirrors the intended backend model
 
-`Scott` and `Tracy` now also exist as local Symgov scaffolds, and the current runners now support a first verified write-through path into the live Symgov database while retaining the local JSON runtime records.
+`Scott`, `Tracy`, `Daisy`, and `Libby` now also exist as local Symgov scaffolds, and the current runners now support live write-through paths into the Symgov database while retaining the local JSON runtime records.
+
+Current downstream agent additions:
+
+- `Daisy` now reads persisted `review_cases` and produces read-only coordination reports for Workspace review
+- `Libby` now writes classification records with source lineage, aliases, keywords, source references, and approval readiness metadata before Daisy-managed coordination
 
 Current intake/validation baseline:
 
-- `Scott` now accepts `.png` submissions as supported intake alongside `.svg` and `.json`
-- accepted and eligible PNG intake can now enqueue `Vlad`
+- `Scott` now accepts `.png`, `.jpg`, and `.jpeg` submissions alongside `.svg` and `.json`
+- accepted and eligible raster intake can now enqueue `Vlad`
 - `Vlad` now has a Phase 1 deterministic PNG raster split path that:
   - estimates symbol count, candidate regions, sheet type, and `split_recommended`
   - emits `split_plan` and `derivative_manifest` artifacts
   - creates proposed child crop PNG files in a runtime `derivative_assets/` root
   - escalates multi-symbol and ambiguous sheets into `raster_split_review`
+- JPEG inputs are now normalized into that raster-analysis path for the live public submission flow
 - the current Scott -> Vlad handoff now also carries intake and attachment references needed for Phase 1 split persistence
+- the live external submission path can now continue through:
+  - `Tracy` for provenance and rights review
+  - `Libby` for classification and source-reference enrichment
+  - `Daisy` for review coordination when downstream review follow-up exists
+- the `symbols2.png` submission batch `subext-20260416T182301Z` has now been replayed successfully after repairing Vlad runtime ownership on `runtime/derivative_assets`
+- that replay verified the current Vlad environment can see both `tesseract` and Pillow, generate OCR label candidates for the sheet, persist derivative child crops to storage, and create a live `raster_split_review` case for Workspace review
+- the remaining downstream status for that submission is provenance follow-up:
+  - Tracy's queue item was still `queued` at the end of the 2026-04-17 repair pass
 
 ## OpenClaw resilience
 
@@ -109,6 +186,7 @@ That manifest is now the local source of truth for:
 - managed OpenClaw `bindings[]` entries for deterministic channel/account/peer routing
 - expected OpenClaw `agent.json` metadata paths
 - required workspace files that prove each SymGov agent is still runnable
+- the current manifest now includes `daisy` and `libby` alongside the earlier Wave 1 agents
 
 Use the backend CLI to audit or repair OpenClaw registration after upgrades:
 
