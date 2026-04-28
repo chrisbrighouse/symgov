@@ -69,6 +69,18 @@ class WorkspaceReviewChildResponse(BaseModel):
     previewUrl: str | None = None
 
 
+class WorkspaceHumanReviewDecisionSummary(BaseModel):
+    id: str
+    decisionCode: str
+    decisionSummary: str | None = None
+    decisionNote: str | None = None
+    deciderName: str
+    deciderRole: str
+    fromStage: str
+    toStage: str | None = None
+    createdAt: str
+
+
 class WorkspaceReviewCaseResponse(BaseModel):
     id: str
     symbolId: str
@@ -106,6 +118,7 @@ class WorkspaceReviewCaseResponse(BaseModel):
     keywords: list[str] = []
     sourceRefs: list[str] = []
     classificationSummary: str | None = None
+    latestDecision: WorkspaceHumanReviewDecisionSummary | None = None
     children: list[WorkspaceReviewChildResponse]
 
 
@@ -154,3 +167,38 @@ class WorkspaceDaisyReportResponse(BaseModel):
 
 class WorkspaceDaisyReportListResponse(BaseModel):
     items: list[WorkspaceDaisyReportResponse]
+
+
+class WorkspaceReviewChildDecisionInput(BaseModel):
+    childId: str = Field(min_length=1)
+    action: str = Field(min_length=1)
+    note: str = ""
+    details: str = ""
+    proposedSymbolName: str | None = None
+    proposedSymbolId: str | None = None
+
+
+class WorkspaceReviewDecisionRequest(BaseModel):
+    decisionCode: str = Field(min_length=1)
+    decisionNote: str = ""
+    deciderName: str = "SME reviewer"
+    deciderRole: str = "sme_reviewer"
+    childDecisions: list[WorkspaceReviewChildDecisionInput] = Field(default_factory=list)
+    caseComment: str = ""
+
+
+class WorkspaceReviewActionResponse(BaseModel):
+    id: str
+    actionCode: str
+    actionStatus: str
+    targetAgentSlug: str | None = None
+    targetStage: str | None = None
+    createdAt: str
+
+
+class WorkspaceReviewDecisionResponse(BaseModel):
+    reviewCaseId: str
+    decision: WorkspaceHumanReviewDecisionSummary
+    actions: list[WorkspaceReviewActionResponse]
+    currentStage: str
+    closedAt: str | None = None

@@ -95,6 +95,13 @@ This model keeps published page membership, pack membership, clarification captu
 - `POST /api/v1/published/clarifications`
   - log a clarification or issue tied to a symbol/page context
 
+Phase-1 published API rule:
+
+- public Standards endpoints must only return `publication_packs.status = 'published'`
+- public Standards endpoints must only return `publication_packs.audience = 'public'`
+- `internal_preview` content remains a Workspace-only concern
+- published page codes are generated from durable symbol and pack metadata rather than accepted from frontend input
+
 ### Governance Workspace
 
 - `GET /api/v1/workspace/queue`
@@ -400,6 +407,8 @@ Recommended notes:
 - in phase 1, a `published_page` is the canonical published detail record for one symbol revision in one publication context
 - Standards search, browse, navigation, and listing surfaces should be implemented from read models and API composition around published records rather than by treating navigation pages as `published_pages` rows
 - if a future release needs curated landing pages or multi-symbol documents as first-class managed content, model them separately instead of overloading `published_pages`
+- phase-1 generated page code format is:
+  - `<symbol_slug>-<revision_label>-<pack_code>`
 
 #### `impacted_page_links`
 
@@ -435,6 +444,10 @@ Decision for phase 1:
 
 - start `published_symbol_views` as a materialized view refreshed by publication events
 - revisit a write-through table only if refresh timing or browse scale proves it necessary
+- current implementation note:
+  - Rupert `--persist-db` writes the authoritative publication tables first
+  - `refresh_published_symbol_views()` is a migration-owned security-definer function that lets the app role refresh the materialized view without owning it
+  - public published APIs compose directly from `publication_packs`, `published_pages`, `pack_entries`, `symbol_revisions`, and `governed_symbols`; the refreshed materialized view remains available for future browse optimization
 
 ### Clarification and linkage tables
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -10,7 +11,17 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db_session
-from ..models import Attachment, ClassificationRecord, IntakeRecord, ProvenanceAssessment, ReviewCase, ValidationReport
+from ..models import (
+    Attachment,
+    AuditEvent,
+    ClassificationRecord,
+    HumanReviewDecision,
+    IntakeRecord,
+    ProvenanceAssessment,
+    ReviewCase,
+    ReviewCaseAction,
+    ValidationReport,
+)
 from ..runtime import download_object_bytes
 from ..schemas import (
     WorkspaceDaisyAssignmentProposalResponse,
@@ -18,9 +29,13 @@ from ..schemas import (
     WorkspaceDaisyReportListResponse,
     WorkspaceDaisyReportResponse,
     WorkspaceDaisyStageTransitionResponse,
+    WorkspaceHumanReviewDecisionSummary,
+    WorkspaceReviewActionResponse,
     WorkspaceReviewCaseListResponse,
     WorkspaceReviewCaseResponse,
     WorkspaceReviewChildResponse,
+    WorkspaceReviewDecisionRequest,
+    WorkspaceReviewDecisionResponse,
 )
 from ..settings import get_settings
 
@@ -28,10 +43,83 @@ from ..settings import get_settings
 router = APIRouter(prefix="/workspace", tags=["workspace"])
 legacy_router = APIRouter(tags=["workspace"])
 DAISY_RUNTIME_REPORT_ROOT = Path("/data/.openclaw/workspaces/daisy/runtime/review_coordination_reports")
+DECISION_TRANSITIONS = {
+    "approve": {
+        "to_stage": "ready_for_publication_handoff",
+        "action_code": "prepare_publication_handoff",
+        "target_agent_slug": "rupert",
+        "target_stage": "publication_staging",
+        "close": False,
+    },
+    "reject": {
+        "to_stage": "rejected",
+        "action_code": "close_as_rejected",
+        "target_agent_slug": None,
+        "target_stage": None,
+        "close": True,
+    },
+    "request_changes": {
+        "to_stage": "changes_requested",
+        "action_code": "request_changes",
+        "target_agent_slug": None,
+        "target_stage": "review_follow_up",
+        "close": False,
+    },
+    "more_evidence": {
+        "to_stage": "waiting_for_evidence",
+        "action_code": "request_contributor_evidence",
+        "target_agent_slug": None,
+        "target_stage": "evidence_collection",
+        "close": False,
+    },
+    "rename_classify": {
+        "to_stage": "classification_change_requested",
+        "action_code": "request_classification_update",
+        "target_agent_slug": "libby",
+        "target_stage": "classification_review",
+        "close": False,
+    },
+    "duplicate": {
+        "to_stage": "duplicate_closed",
+        "action_code": "close_as_duplicate",
+        "target_agent_slug": None,
+        "target_stage": None,
+        "close": True,
+    },
+    "deleted": {
+        "to_stage": "deleted_closed",
+        "action_code": "delete_proposed_child",
+        "target_agent_slug": None,
+        "target_stage": None,
+        "close": True,
+    },
+    "defer": {
+        "to_stage": "deferred",
+        "action_code": "defer_review_case",
+        "target_agent_slug": None,
+        "target_stage": "deferred",
+        "close": False,
+    },
+    "child_actions_submitted": {
+        "to_stage": "review_actions_recorded",
+        "action_code": "record_child_review_actions",
+        "target_agent_slug": None,
+        "target_stage": "review_follow_up",
+        "close": False,
+    },
+}
+CHILD_ACTION_CODES = set(DECISION_TRANSITIONS)
 
 
 def isoformat_utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def parse_review_case_id(value: str) -> uuid.UUID:
+    try:
+        return uuid.UUID(value)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Review case not found.") from exc
 
 
 def build_review_summary(validation_report: ValidationReport, child_count: int, source_file_name: str) -> str:
@@ -156,6 +244,37 @@ def apply_classification_fields(payload: dict, classification_record: Classifica
             }
         )
     return WorkspaceReviewCaseResponse(**payload)
+
+
+def build_decision_summary(decision: HumanReviewDecision | None) -> WorkspaceHumanReviewDecisionSummary | None:
+    if decision is None:
+        return None
+    return WorkspaceHumanReviewDecisionSummary(
+        id=str(decision.id),
+        decisionCode=decision.decision_code,
+        decisionSummary=decision.decision_summary,
+        decisionNote=decision.decision_note,
+        deciderName=decision.decider_name,
+        deciderRole=decision.decider_role,
+        fromStage=decision.from_stage,
+        toStage=decision.to_stage,
+        createdAt=isoformat_utc(decision.created_at),
+    )
+
+
+def load_latest_decision(session: Session, review_case_id: str) -> HumanReviewDecision | None:
+    return (
+        session.query(HumanReviewDecision)
+        .filter(HumanReviewDecision.review_case_id == parse_review_case_id(review_case_id))
+        .filter(HumanReviewDecision.superseded_at.is_(None))
+        .order_by(HumanReviewDecision.created_at.desc())
+        .first()
+    )
+
+
+def attach_latest_decision(session: Session, payload: WorkspaceReviewCaseResponse) -> WorkspaceReviewCaseResponse:
+    latest_decision = load_latest_decision(session, payload.id)
+    return payload.model_copy(update={"latestDecision": build_decision_summary(latest_decision)})
 
 
 def load_daisy_report_payloads(review_case_id: str | None = None) -> list[dict]:
@@ -313,7 +432,6 @@ def list_workspace_review_cases(
     review_cases = session.execute(
         select(ReviewCase)
         .where(ReviewCase.closed_at.is_(None))
-        .where(ReviewCase.current_stage.in_(["raster_split_review", "provenance_review", "classification_review"]))
         .order_by(ReviewCase.opened_at.desc())
     ).scalars().all()
 
@@ -327,7 +445,12 @@ def list_workspace_review_cases(
             if intake_record is None:
                 continue
             classification_record = load_current_classification(session, review_case_id=str(review_case.id))
-            items.append(build_validation_workspace_item(review_case, validation_report, intake_record, classification_record))
+            items.append(
+                attach_latest_decision(
+                    session,
+                    build_validation_workspace_item(review_case, validation_report, intake_record, classification_record),
+                )
+            )
             continue
 
         if review_case.source_entity_type == "provenance_assessment":
@@ -342,9 +465,176 @@ def list_workspace_review_cases(
                 review_case_id=str(review_case.id),
                 provenance_assessment_id=str(provenance_assessment.id),
             )
-            items.append(build_provenance_workspace_item(review_case, provenance_assessment, intake_record, classification_record))
+            items.append(
+                attach_latest_decision(
+                    session,
+                    build_provenance_workspace_item(review_case, provenance_assessment, intake_record, classification_record),
+                )
+            )
 
     return WorkspaceReviewCaseListResponse(items=items)
+
+
+def create_review_action(
+    *,
+    review_case: ReviewCase,
+    decision: HumanReviewDecision,
+    action_code: str,
+    action_status: str,
+    payload: dict,
+    target_agent_slug: str | None = None,
+    target_stage: str | None = None,
+) -> ReviewCaseAction:
+    return ReviewCaseAction(
+        review_case_id=review_case.id,
+        decision_id=decision.id,
+        action_code=action_code,
+        action_status=action_status,
+        target_agent_slug=target_agent_slug,
+        target_stage=target_stage,
+        action_payload_json=payload,
+        created_by_type="human",
+        created_by_id=decision.decided_by,
+        created_at=decision.created_at,
+    )
+
+
+@router.post(
+    "/review-cases/{review_case_id}/decisions",
+    response_model=WorkspaceReviewDecisionResponse,
+    responses={404: {"description": "Review case not found"}, 422: {"description": "Invalid decision"}},
+)
+def create_workspace_review_decision(
+    review_case_id: str,
+    request: WorkspaceReviewDecisionRequest,
+    session: Session = Depends(get_db_session),
+) -> WorkspaceReviewDecisionResponse:
+    parsed_case_id = parse_review_case_id(review_case_id)
+    review_case = session.get(ReviewCase, parsed_case_id)
+    if review_case is None:
+        raise HTTPException(status_code=404, detail="Review case not found.")
+
+    decision_code = request.decisionCode.strip()
+    if decision_code not in DECISION_TRANSITIONS:
+        raise HTTPException(status_code=422, detail=f"Unsupported review decision: {decision_code}.")
+
+    invalid_child_actions = sorted(
+        {
+            child.action.strip()
+            for child in request.childDecisions
+            if child.action.strip() and child.action.strip() not in CHILD_ACTION_CODES
+        }
+    )
+    if invalid_child_actions:
+        raise HTTPException(status_code=422, detail=f"Unsupported child action(s): {', '.join(invalid_child_actions)}.")
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    previous_decisions = (
+        session.query(HumanReviewDecision)
+        .filter(HumanReviewDecision.review_case_id == review_case.id)
+        .filter(HumanReviewDecision.superseded_at.is_(None))
+        .all()
+    )
+    for previous in previous_decisions:
+        previous.superseded_at = now
+
+    transition = DECISION_TRANSITIONS[decision_code]
+    from_stage = review_case.current_stage
+    to_stage = transition["to_stage"]
+    child_decisions = [
+        child.model_dump()
+        for child in request.childDecisions
+        if child.action.strip() and child.action.strip() != "pending"
+    ]
+    decision_payload = {
+        "child_decisions": child_decisions,
+        "case_comment": request.caseComment,
+        "review_case_id": str(review_case.id),
+    }
+    decision = HumanReviewDecision(
+        review_case_id=review_case.id,
+        decision_code=decision_code,
+        decision_summary=f"{request.deciderName} recorded {decision_code.replace('_', ' ')}.",
+        decision_note=request.decisionNote or None,
+        decided_by=None,
+        decider_name=request.deciderName,
+        decider_role=request.deciderRole,
+        from_stage=from_stage,
+        to_stage=to_stage,
+        decision_payload_json=decision_payload,
+        created_at=now,
+    )
+    session.add(decision)
+    session.flush()
+
+    actions = [
+        create_review_action(
+            review_case=review_case,
+            decision=decision,
+            action_code=transition["action_code"],
+            action_status="pending",
+            payload={"decision_code": decision_code, "decision_note": request.decisionNote},
+            target_agent_slug=transition["target_agent_slug"],
+            target_stage=transition["target_stage"],
+        )
+    ]
+
+    for child in child_decisions:
+        child_transition = DECISION_TRANSITIONS[child["action"]]
+        actions.append(
+            create_review_action(
+                review_case=review_case,
+                decision=decision,
+                action_code=f"child_{child_transition['action_code']}",
+                action_status="pending",
+                payload=child,
+                target_agent_slug=child_transition["target_agent_slug"],
+                target_stage=child_transition["target_stage"],
+            )
+        )
+
+    for action in actions:
+        session.add(action)
+
+    review_case.current_stage = to_stage
+    if transition["close"]:
+        review_case.closed_at = now
+
+    session.add(
+        AuditEvent(
+            entity_type="review_case",
+            entity_id=review_case.id,
+            action="human_review_decision_recorded",
+            actor_id=None,
+            payload_json={
+                "decision_id": str(decision.id),
+                "decision_code": decision_code,
+                "from_stage": from_stage,
+                "to_stage": to_stage,
+                "child_decision_count": len(child_decisions),
+            },
+            created_at=now,
+        )
+    )
+    session.commit()
+
+    return WorkspaceReviewDecisionResponse(
+        reviewCaseId=str(review_case.id),
+        decision=build_decision_summary(decision),
+        actions=[
+            WorkspaceReviewActionResponse(
+                id=str(action.id),
+                actionCode=action.action_code,
+                actionStatus=action.action_status,
+                targetAgentSlug=action.target_agent_slug,
+                targetStage=action.target_stage,
+                createdAt=isoformat_utc(action.created_at),
+            )
+            for action in actions
+        ],
+        currentStage=review_case.current_stage,
+        closedAt=isoformat_utc(review_case.closed_at) if review_case.closed_at else None,
+    )
 
 
 @router.get(

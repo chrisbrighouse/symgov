@@ -42,7 +42,7 @@ def _resolve_target(agent_id: str, config: dict[str, Any]) -> dict[str, Any]:
     agent_entry = agents.get(agent_id) or {}
     if not agent_entry.get("enabled", True):
         return {"enabled": False, "reason": "agent_disabled"}
-    target_name = agent_entry.get("target")
+    target_name = agent_entry.get("target") or config.get("default_target")
     target = targets.get(target_name) if target_name else None
     if not target:
         return {"enabled": False, "reason": "missing_target", "target_name": target_name}
@@ -224,6 +224,40 @@ def _build_finish_message(
         if verbosity == "detailed":
             common.append(
                 f"aliases: {', '.join(artifact.get('aliases') or ['none'])}"
+            )
+    elif agent_id == "rupert":
+        standards = artifact.get("standards_availability_summary") or {}
+        common.extend(
+            [
+                f"release_target: {_normalize_text(artifact.get('release_target')) or 'n/a'}",
+                f"publication_state: {_normalize_text(standards.get('publication_state')) or 'n/a'}",
+                f"symbol_count: {standards.get('symbol_count', 'n/a')}",
+            ]
+        )
+        if verbosity in {"normal", "detailed"}:
+            common.append(f"summary: {_normalize_text(artifact.get('publication_summary')) or 'n/a'}")
+        if verbosity == "detailed":
+            common.extend(
+                [
+                    f"pack_code: {_normalize_text(standards.get('pack_code')) or 'n/a'}",
+                    f"release_manifest: {_normalize_text(artifact.get('release_manifest_path')) or 'n/a'}",
+                ]
+            )
+    elif agent_id == "ed":
+        findings = artifact.get("interface_findings") or []
+        recommendations = artifact.get("recommendations") or []
+        common.extend(
+            [
+                f"findings: {len(findings)}",
+                f"recommendations: {len(recommendations)}",
+            ]
+        )
+        if verbosity in {"normal", "detailed"}:
+            common.append(f"summary: {_normalize_text(artifact.get('feedback_summary')) or 'n/a'}")
+        if verbosity == "detailed" and findings:
+            top = findings[0]
+            common.append(
+                f"top_finding: {top.get('interface', 'general')} / {top.get('severity', 'unknown')}"
             )
 
     defects = artifact.get("defects") or []

@@ -3,6 +3,7 @@
 ## Shared components
 
 - `AppShell` for top-level frame, experience switch, and responsive gutters
+- `TopBanner` for the full-width light header with engineering-symbol logo, primary `Submissions`/`Reviews`/`Standards` area buttons, version/date pill, and cog link to Workspace
 - `GlobalSearch` for symbol, pack, page, and queue lookup
 - `StatusBadge` for published, in review, ready, blocked, and impact states
 - `SymbolCard` with inline SVG thumbnail, symbol ID, title, revision, and compact metadata
@@ -37,33 +38,31 @@
 
 ## Workspace View components
 
-- `QueueToolbar` with saved views, filters, and bulk-selection controls
-- `QueueList` with dense, scan-friendly records
-- `QueueSelectCard` with owner, due date, impact count, and status
-- `CompareWorkspace` for baseline versus proposed review
-- `DeltaSummaryPanel` for changed attributes, notes, and impacted pages/packs
-- `ApprovalRail` for direct reviewer actions and visible risk context
-- `LinkedClarificationsPanel` for Standards-originated questions attached to the active record
-- `ImpactedPagesPanel` for downstream published-page visibility
+- `WorkspaceTitlebar` with `ADMIN WORKSPACE` / `Activity Monitors`, search, and live/seeded feed status
+- `MonitorSummaryRow` with compact counts for visible, active, escalated, and published activity
+- `QueueMonitorBoard` with eight vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed
+- `MonitorColumn` with count, stage label, scrollable card stack, and compact footer status
+- `MonitorCard` with label, truncated title, source metadata, status, and priority dot
 - `GovernedRecordRoute`, `AuditRoute`, and `PublishRoute` for focused follow-through
 
 ### Workspace desktop grid
 
-- 12-column grid
-- Queue and bulk tools: columns 1-4
-- Compare and change details: columns 5-9
-- Approval rail: columns 10-12
-- Secondary full-width strip below for clarifications and impacted published pages
+- Full-width admin canvas
+- Summary metrics above the monitor board
+- Eight monitor lanes across HD desktop screens
+- Horizontal board overflow on narrower desktop screens
+- Single-column stacking on small screens
 
 ### Workspace interaction priority
 
-- Triage many records first
-- Review active compare second
+- Monitor processing activity first
+- Search by batch, file, agent, status, or case second
 - Approve or request changes third
 - Use focused routes for audit or full record inspection when needed
 
 ## Minimal layout guidance
 
+- The top banner spans the viewport width and keeps Workspace as an icon-only administrative entry point so the primary text navigation stays focused on Submissions, Reviews, and Standards.
 - Desktop outer gutters: 24 to 32px
 - Pane gap: 16 to 20px
 - Surface radius: 14 to 20px

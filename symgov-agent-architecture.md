@@ -1,6 +1,6 @@
 # symgov Agent Architecture
 
-Last updated: 2026-04-19
+Last updated: 2026-04-26
 
 ## Purpose
 
@@ -55,13 +55,14 @@ The spreadsheet under `Documentation/Symgov` describes a future operating model 
 - `David` curation
 - `Reggie` audit and compliance
 - `Whitney` market intelligence
-- `Ed` documentation and policy
+- `Ed` documentation and policy (also oversees UI changes to provide the best user experience)
 
 Current implementation status is now mixed rather than empty:
 
 - `Scott`, `Vlad`, and `Tracy` exist as live local/file-backed runners with PostgreSQL write-through support
 - `Daisy` now exists as the first review-coordination scaffold and can be created automatically from persisted `review_cases`
-- `Libby` is now the next agreed implementation target with a concrete design direction
+- `Libby` now exists as the classification-and-research scaffold between `Tracy` and `Daisy`
+- `Rupert` now exists as the first publishing and release-management scaffold after human approval
 - the remaining named agents still exist only as planning targets
 
 The implementation direction should be:
@@ -247,8 +248,9 @@ Outputs:
 - `validation_reports`
 - normalized technical metadata
 - pass or fail recommendation
-- for PNG multi-symbol sheets in Phase 1:
+- for raster files in Phase 1:
   - `split_plan` artifacts
+  - `single_symbol_raster_candidate` artifacts for one-symbol files
   - `derivative_manifest` artifacts
   - proposed child crop assets
   - review escalation into `raster_split_review`
@@ -329,6 +331,42 @@ Review-flow implication:
   - provenance review
   - classification review
   - Daisy-managed human review coordination
+  - Rupert-managed publication staging after explicit human approval
+
+### `Rupert` - publication and release management agent
+
+Owns:
+
+- publication queue
+- release-area staging
+- publication pack proposals
+- published page proposals
+- pack entry proposals
+- Standards availability summaries
+
+Inputs:
+
+- explicit human approval handoff from a Daisy-coordinated review
+- approved symbol revision IDs
+- release target
+- effective date and Standards visibility
+- optional publication pack metadata
+
+Outputs:
+
+- `publication_reports`
+- release-area manifest records
+- publication pack metadata
+- published page proposals
+- pack entry proposals
+- Standards availability summary
+
+Agreed operating rules:
+
+- Rupert runs only after explicit human approval
+- Rupert must not publish or stage items with missing approval evidence, missing symbol revisions, or unresolved release target ambiguity
+- Rupert must not override rights, classification, technical, policy, or review blocks
+- the first implementation stages release intent into a local release area and report artifact; durable database publication mutations can follow once final release authority is defined
 
 ## Current bootstrap and usage notes
 
@@ -342,10 +380,13 @@ Review-flow implication:
   - `python /data/.openclaw/workspaces/scott/run_scott_intake.py --queue-item ... --runtime-root ... --persist-db`
   - `python /data/.openclaw/workspaces/vlad/run_vlad_validation.py --queue-item ... --runtime-root ... --persist-db`
   - `python /data/.openclaw/workspaces/tracy/run_tracy_provenance.py --queue-item ... --runtime-root ... --persist-db`
+- Run local scaffold-only agents with:
+  - `python /data/.openclaw/workspaces/daisy/run_daisy_coordination.py --queue-item ... --runtime-root ...`
+  - `python /data/.openclaw/workspaces/rupert/run_rupert_publication.py --queue-item ... --runtime-root ...`
 
 ## Current verified live state
 
-- `agent_definitions` contains seeded rows for `scott`, `vlad`, `tracy`, and `daisy`
+- `agent_definitions` contains seed definitions for `scott`, `vlad`, `tracy`, `daisy`, `libby`, and `rupert`
 - `Scott` has been verified writing `agent_queue_items`, `agent_runs`, `agent_output_artifacts`, and `intake_records`
 - `Vlad` has been verified writing `agent_queue_items`, `agent_runs`, `agent_output_artifacts`, and `validation_reports`
 - `Vlad` Phase 1 raster split persistence has now also been verified for:
@@ -358,8 +399,45 @@ Review-flow implication:
   - writes local `review_coordination_reports`
   - can be auto-created from `Vlad` or `Tracy` review-case outputs on the live external submission path
   - is queryable through the backend Workspace API and visible in the Workspace UI as a read-only coordination lane
+- `Rupert` now:
+  - accepts publication handoff queue items after human approval
+  - writes local `publication_reports`
+  - writes release-area manifests for staged symbol revisions
+  - can persist durable publication records with `--persist-db`, writing publication jobs, packs, published pages, pack entries, audit events, and published symbol lifecycle updates
+  - is registered in the SymGov-owned OpenClaw manifest and backend agent seed list
 - independent output contract
 - manageable even before advanced orchestration exists
+
+### `Ed` - visual experience and help agent (also oversees UI changes to provide the best user experience)
+
+Owns:
+
+- Standards View visual experience
+- admin Workspace visual experience for processing visibility
+- SME Reviews visual experience for Daisy-coordinated review cases
+- public help and in-product guidance
+- empty, loading, error, and not-found states
+- user-facing copy, layout, navigation, and frontend verification
+- API response-shape feedback from a visual/user-experience perspective
+- overseeing UI changes to provide the best user experience
+- collecting and summarizing interface feedback sent to the existing SymGov Ops Telegram group
+
+Does not own:
+
+- publication table writes
+- human approval authority
+- provenance, rights, classification, or publication policy decisions
+- Rupert release-management actions
+- active feedback prompting; Ed currently only summarizes feedback that users send
+
+Current implementation status:
+
+- Ed has a local OpenClaw workspace at `/data/.openclaw/workspaces/ed`
+- Ed is registered in the SymGov-owned OpenClaw manifest and backend agent seed list with queue family `ux_feedback`
+- Ed writes local `ux_feedback_reports`, `interface_review_reports`, and `design_recommendations` artifacts
+- Ed feedback remains artifact-backed in phase 1; no durable Symgov feedback table is required yet
+
+Rupert should produce structured publication summaries, page metadata, and pack context that Ed can render. Ed (also oversees UI changes to provide the best user experience) may propose UI grouping such as source-file pack grouping, discipline grouping, or search facets, but those should consume published APIs rather than mutate publication data.
 
 ### `Daisy` - review coordination agent
 
@@ -398,7 +476,7 @@ Why after wave 1:
 
 - `David` for catalogue curation
 - `Whitney` for market intelligence
-- `Ed` for documentation and policy maintenance
+- `Ed` for documentation and policy maintenance (also oversees UI changes to provide the best user experience)
 
 ## Recommended first implementation slice
 
@@ -418,6 +496,7 @@ Practical sequence:
 3. Add `Scott` intake queue and routing outputs.
 4. Add `Tracy` provenance queue and evidence outputs.
 5. Add `Daisy` to coordinate exceptions and stage movement across those outputs.
+6. Add `Rupert` to stage approved symbols for release and Standards publication.
 
 ## Gemma usage policy
 
@@ -448,6 +527,7 @@ To make Symgov agents real in the current environment, add:
 
 - new OpenClaw agent entries for each Symgov agent
 - workspaces such as `/data/.openclaw/workspaces/scott`, `/data/.openclaw/workspaces/vlad`, `/data/.openclaw/workspaces/tracy`, `/data/.openclaw/workspaces/daisy`
+- the current SymGov agent workspace set also includes `/data/.openclaw/workspaces/libby` and `/data/.openclaw/workspaces/rupert`
 - `AGENTS.md` instructions per workspace
 - helper scripts for structured task execution where deterministic tools exist
 - agent-to-agent allow-list updates for the new agent IDs
@@ -463,12 +543,13 @@ For the next implementation pass, the recommended committed direction is:
 - `Vlad` as the first implemented Symgov agent
 - `Scott` and `Tracy` immediately after
 - `Daisy` as the first coordination agent after those outputs exist
+- `Rupert` as the first publication staging agent after Daisy-managed human approval
 
 ## Deferred decisions
 
 - whether agent queues live inside the main Symgov database only or also map to OpenClaw session state
 - whether `Daisy` should be a true orchestrator agent or a workflow service plus human UI affordance
-- whether `Rupert` publication should ever auto-run below a risk threshold
+- whether `Rupert` should perform final durable publication automatically after human approval, or only stage for operator release
 - whether higher-cost external models should be allowed for policy ambiguity, rights ambiguity, or only for offline review
 
 ## Shared runtime contract for the first local implementation
@@ -533,6 +614,12 @@ Recommended payload fields:
 - `submitted_by`
 - `submission_context`
 - `intake_record_id`
+- `candidate_symbol_id`
+- `candidate_title`
+- `origin_file_name`
+- `source_notes`
+- `file_note`
+- `submission_batch_summary`
 - `attachment_id`
 - `attachment_ids`
 - `raw_object_key`
@@ -553,16 +640,19 @@ Allowed `expected_checks` values in the first slice:
 - `agent_output_artifacts` with `artifact_type = validation_report`
 - additional Phase 1 raster artifact types:
   - `split_plan`
+  - `single_symbol_raster_candidate`
   - `derivative_manifest`
 - `validation_reports`
 
-Phase 1 PNG split extension:
+Phase 1 raster analysis extension:
 
-- when `asset_format == png`, `Vlad` may now:
+- when `asset_format == png`, or `asset_format == jpeg` with Pillow available for normalization, `Vlad` may now:
   - infer candidate symbol regions deterministically
   - build a `split_plan` artifact with padded bounding boxes
-  - create proposed child crop PNGs and a `derivative_manifest`
+  - create a `single_symbol_raster_candidate` artifact for one-symbol raster files
+  - create proposed child crop PNGs and a `derivative_manifest` for multi-symbol raster sheets
   - escalate to human review instead of silently finalizing a split
+- single-symbol raster candidates preserve original filename, candidate title, aliases, keywords, description hints from file notes/batch notes, attachment IDs, object-storage key, image dimensions, candidate region, and recommended next agents
 - multi-symbol raster sheets should currently escalate into Workspace review with proposed child crops preserved as candidate derivatives
 - ambiguous raster sheets should currently create review-first artifacts rather than child crops only
 - derivative child crops can now be mirrored into `attachments` linked to the `validation_report`
@@ -833,6 +923,7 @@ For the first local implementation:
 - `Vlad` and `Tracy` may run in parallel once `Scott` has produced a stable accepted intake record
 - `Scott` outputs with `needs_review`, `rejected`, or malformed contracts do not auto-enqueue downstream agents
 - `Tracy` escalations and `Vlad` escalations can now create a `Daisy` coordination queue item once a persisted `review_case` exists
+- Daisy-coordinated human approvals with no required changes can create a `Rupert` publication queue item for release staging
 
 This preserves a clean operating boundary:
 
@@ -840,3 +931,4 @@ This preserves a clean operating boundary:
 - `Vlad` decides technical validation outcome
 - `Tracy` decides provenance and rights outcome
 - `Daisy` consumes stable `review_cases` and proposes coordination actions without taking final approval authority
+- `Rupert` consumes explicit approval handoffs and stages approved symbol revisions for publication without overriding release authority

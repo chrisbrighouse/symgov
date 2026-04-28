@@ -177,6 +177,168 @@ export const daisyCoordinationReports = [
   }
 ];
 
+export const processingActivity = [
+  {
+    id: 'PIPE-001',
+    batchId: 'subext-20260419T135250Z',
+    title: 'Single-symbol JPG intake completed downstream processing',
+    submittedAt: '2026-04-19T13:52:50Z',
+    sourceFileName: 'pressure-control-valve.jpg',
+    operatorStatus: 'Ready for review',
+    priority: 'Medium',
+    owner: 'SymGov Ops',
+    reviewCaseId: 'CR-182',
+    agents: [
+      {
+        id: 'scott',
+        name: 'Scott',
+        stage: 'Intake',
+        status: 'completed',
+        summary: 'Accepted contributor submission and routed raster input downstream.',
+        artifactCount: 1
+      },
+      {
+        id: 'vlad',
+        name: 'Vlad',
+        stage: 'Technical validation',
+        status: 'completed',
+        summary: 'Detected a single-symbol raster candidate with no split required.',
+        artifactCount: 2
+      },
+      {
+        id: 'tracy',
+        name: 'Tracy',
+        stage: 'Provenance',
+        status: 'completed',
+        summary: 'Preserved source metadata and passed filename context to Libby.',
+        artifactCount: 1
+      },
+      {
+        id: 'libby',
+        name: 'Libby',
+        stage: 'Classification',
+        status: 'completed',
+        summary: 'Prepared provisional valve classification evidence for review.',
+        artifactCount: 1
+      },
+      {
+        id: 'daisy',
+        name: 'Daisy',
+        stage: 'Review coordination',
+        status: 'completed',
+        summary: 'Created reviewer assignment and stage movement proposals.',
+        artifactCount: 1
+      }
+    ]
+  },
+  {
+    id: 'PIPE-002',
+    batchId: 'subext-20260416T182301Z',
+    title: 'Multi-symbol raster sheet split review',
+    submittedAt: '2026-04-16T18:23:01Z',
+    sourceFileName: '01-symbols2.png',
+    operatorStatus: 'Review coordination active',
+    priority: 'High',
+    owner: 'SymGov Ops',
+    reviewCaseId: '89746140-bb29-4197-bd9c-a4c89743a219',
+    agents: [
+      {
+        id: 'scott',
+        name: 'Scott',
+        stage: 'Intake',
+        status: 'completed',
+        summary: 'Accepted PNG intake and routed to Vlad and Tracy.',
+        artifactCount: 1
+      },
+      {
+        id: 'vlad',
+        name: 'Vlad',
+        stage: 'Technical validation',
+        status: 'escalated',
+        summary: 'Detected 29 candidate regions and created a raster split review case.',
+        artifactCount: 4
+      },
+      {
+        id: 'tracy',
+        name: 'Tracy',
+        stage: 'Provenance',
+        status: 'queued',
+        summary: 'Awaiting provenance replay or current queue processing.',
+        artifactCount: 0
+      },
+      {
+        id: 'libby',
+        name: 'Libby',
+        stage: 'Classification',
+        status: 'waiting',
+        summary: 'Waiting for upstream provenance/classification handoff context.',
+        artifactCount: 0
+      },
+      {
+        id: 'daisy',
+        name: 'Daisy',
+        stage: 'Review coordination',
+        status: 'completed',
+        summary: 'Prepared reviewer routing for the split-review case.',
+        artifactCount: 1
+      }
+    ]
+  },
+  {
+    id: 'PIPE-003',
+    batchId: 'internal-seed-demo',
+    title: 'Seeded operator activity example',
+    submittedAt: '2026-04-26T09:00:00Z',
+    sourceFileName: 'instrument-overlay-import.json',
+    operatorStatus: 'Processing',
+    priority: 'Low',
+    owner: 'Methods Lead',
+    reviewCaseId: '',
+    agents: [
+      {
+        id: 'scott',
+        name: 'Scott',
+        stage: 'Intake',
+        status: 'completed',
+        summary: 'Normalized imported metadata and accepted package for downstream checks.',
+        artifactCount: 1
+      },
+      {
+        id: 'vlad',
+        name: 'Vlad',
+        stage: 'Technical validation',
+        status: 'completed',
+        summary: 'No raster split work required for structured input.',
+        artifactCount: 1
+      },
+      {
+        id: 'tracy',
+        name: 'Tracy',
+        stage: 'Provenance',
+        status: 'running',
+        summary: 'Checking rights and source-package declarations.',
+        artifactCount: 0
+      },
+      {
+        id: 'libby',
+        name: 'Libby',
+        stage: 'Classification',
+        status: 'waiting',
+        summary: 'Waiting for Tracy provenance output.',
+        artifactCount: 0
+      },
+      {
+        id: 'daisy',
+        name: 'Daisy',
+        stage: 'Review coordination',
+        status: 'waiting',
+        summary: 'No review case created yet.',
+        artifactCount: 0
+      }
+    ]
+  }
+];
+
 export const submissionPresets = [
   'Contractor-originated company variant',
   'Imported standards package cleanup',

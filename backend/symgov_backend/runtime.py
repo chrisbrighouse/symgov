@@ -33,10 +33,17 @@ from .models import (
     AuditEvent,
     ClassificationRecord,
     ExternalIdentity,
+    GovernedSymbol,
     IntakeRecord,
+    PackEntry,
     ProvenanceAssessment,
+    PublicationJob,
+    PublicationPack,
+    PublishedPage,
     ReviewCase,
     ControlException,
+    SymbolRevision,
+    User,
     ValidationReport,
 )
 
@@ -84,6 +91,22 @@ AGENT_DEFINITION_SEEDS = (
         "status": "active",
         "queue_family": "classification",
     },
+    {
+        "slug": "rupert",
+        "display_name": "Rupert",
+        "role": "publishing and release management agent",
+        "model": "ollama/gemma4:e4b",
+        "status": "active",
+        "queue_family": "publication",
+    },
+    {
+        "slug": "ed",
+        "display_name": "Ed",
+        "role": "visual experience and feedback agent",
+        "model": "ollama/gemma4:e4b",
+        "status": "active",
+        "queue_family": "ux_feedback",
+    },
 )
 
 
@@ -115,6 +138,21 @@ def env_flag(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def slugify_public_code(value: Any) -> str:
+    text_value = str(value or "").strip().lower()
+    chars = []
+    last_dash = False
+    for char in text_value:
+        if char.isalnum():
+            chars.append(char)
+            last_dash = False
+        elif not last_dash:
+            chars.append("-")
+            last_dash = True
+    slug = "".join(chars).strip("-")
+    return slug or "published"
 
 
 def read_storage_env_file(env_file: str | os.PathLike[str] | None = None) -> tuple[Path, dict[str, str]]:
@@ -733,6 +771,301 @@ class RuntimePersistenceBridge:
             )
             session.add(row)
         return {"id": str(exception_id), "rule_code": rule_code}
+
+    def ensure_publication_service_user(self, session) -> User:
+        service_email = "symgov-publication-service@symgov.local"
+        row = (
+            session.query(User)
+            .filter(text("lower(email) = :email"))
+            .params(email=service_email)
+            .one_or_none()
+        )
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        if row is None:
+            row = User(
+                id=coerce_uuid("user:symgov-publication-service"),
+                email=service_email,
+                display_name="SymGov Publication Service",
+                role="standards_owner",
+                created_at=now,
+            )
+            session.add(row)
+            session.flush()
+        return row
+
+    def generate_published_page_code(
+        self,
+        *,
+        symbol_slug: str,
+        revision_label: str,
+        pack_code: str,
+    ) -> str:
+        return "-".join(
+            [
+                slugify_public_code(symbol_slug),
+                slugify_public_code(revision_label),
+                slugify_public_code(pack_code),
+            ]
+        )
+
+    def _publication_pack_from_artifact(self, artifact: dict[str, Any]) -> dict[str, Any]:
+        publication_pack = artifact.get("publication_pack") or {}
+        return {
+            "pack_code": publication_pack.get("pack_code") or f"pack-{slugify_public_code(artifact.get('release_target'))}",
+            "title": publication_pack.get("title") or f"Publication pack {artifact.get('release_target') or 'current'}",
+            "audience": publication_pack.get("audience") or "public",
+            "effective_date": publication_pack.get("effective_date") or datetime.now(timezone.utc).date().isoformat(),
+            "status": publication_pack.get("status") or "published",
+        }
+
+    def persist_publication_execution(
+        self,
+        queue_item: dict[str, Any],
+        run_record: dict[str, Any],
+        output_artifact_record: dict[str, Any],
+        publication_report: dict[str, Any],
+    ) -> dict[str, Any]:
+        artifact = output_artifact_record["payload_json"]
+        if queue_item.get("agent_id") != "rupert":
+            raise RuntimeError("Publication persistence only supports Rupert queue items.")
+        if queue_item.get("status") != "completed" or artifact.get("decision") != "stage":
+            raise RuntimeError("Only successfully staged Rupert publication handoffs can be persisted.")
+
+        payload = queue_item.get("payload_json") or {}
+        if payload.get("simulation"):
+            raise RuntimeError("Refusing to persist simulated Rupert publication handoff.")
+        if payload.get("human_decision") != "approve" or not payload.get("human_approved"):
+            raise RuntimeError("Publication persistence requires explicit human approval.")
+
+        revision_ids = [coerce_uuid(item) for item in artifact.get("staged_symbol_revisions") or []]
+        if not revision_ids:
+            raise RuntimeError("Publication persistence requires at least one symbol revision.")
+
+        pack_spec = self._publication_pack_from_artifact(artifact)
+        effective_date = parse_timestamp(str(pack_spec["effective_date"]) + "T00:00:00Z").date()
+        completed_at = parse_timestamp(queue_item.get("completed_at")) if queue_item.get("completed_at") else datetime.now(timezone.utc).replace(microsecond=0)
+        started_at = parse_timestamp(queue_item.get("started_at")) if queue_item.get("started_at") else completed_at
+        created_at = parse_timestamp(queue_item.get("created_at")) if queue_item.get("created_at") else started_at
+
+        with self.session_scope() as session:
+            service_user = self.ensure_publication_service_user(session)
+            agent_definition = session.query(AgentDefinition).filter_by(slug="rupert").one_or_none()
+            if agent_definition is None:
+                raise RuntimeError("Missing agent_definitions row for Rupert.")
+
+            queue_item_id = coerce_uuid(queue_item["id"])
+            agent_queue_item = session.get(AgentQueueItem, queue_item_id)
+            if agent_queue_item is None:
+                agent_queue_item = AgentQueueItem(id=queue_item_id)
+                session.add(agent_queue_item)
+            agent_queue_item.agent_id = agent_definition.id
+            agent_queue_item.source_type = queue_item["source_type"]
+            agent_queue_item.source_id = coerce_uuid(queue_item["source_id"])
+            agent_queue_item.status = queue_item["status"]
+            agent_queue_item.priority = queue_item["priority"]
+            agent_queue_item.payload_json = queue_item["payload_json"]
+            agent_queue_item.confidence = coerce_numeric(queue_item.get("confidence"))
+            agent_queue_item.escalation_reason = queue_item.get("escalation_reason")
+            agent_queue_item.created_at = created_at
+            agent_queue_item.started_at = started_at
+            agent_queue_item.completed_at = completed_at
+            session.flush()
+
+            agent_run = session.get(AgentRun, coerce_uuid(run_record["id"]))
+            if agent_run is None:
+                agent_run = AgentRun(id=coerce_uuid(run_record["id"]))
+                session.add(agent_run)
+            agent_run.queue_item_id = queue_item_id
+            agent_run.model = run_record["model"]
+            agent_run.prompt_version = run_record["prompt_version"]
+            agent_run.tool_trace_json = run_record["tool_trace_json"]
+            agent_run.result_status = run_record["result_status"]
+            agent_run.started_at = parse_timestamp(run_record["started_at"])
+            agent_run.completed_at = parse_timestamp(run_record["completed_at"])
+
+            output_artifact = session.get(AgentOutputArtifact, coerce_uuid(output_artifact_record["id"]))
+            if output_artifact is None:
+                output_artifact = AgentOutputArtifact(id=coerce_uuid(output_artifact_record["id"]))
+                session.add(output_artifact)
+            output_artifact.queue_item_id = queue_item_id
+            output_artifact.artifact_type = output_artifact_record["artifact_type"]
+            output_artifact.schema_version = output_artifact_record["schema_version"]
+            output_artifact.payload_json = artifact
+            output_artifact.created_at = parse_timestamp(output_artifact_record["created_at"])
+
+            publication_pack = session.query(PublicationPack).filter_by(pack_code=pack_spec["pack_code"]).one_or_none()
+            if publication_pack is None:
+                publication_pack = PublicationPack(
+                    id=uuid.uuid4(),
+                    pack_code=pack_spec["pack_code"],
+                    title=pack_spec["title"],
+                    audience=pack_spec["audience"],
+                    effective_date=effective_date,
+                    status="published",
+                    created_at=completed_at,
+                    updated_at=completed_at,
+                )
+                session.add(publication_pack)
+            else:
+                publication_pack.title = pack_spec["title"]
+                publication_pack.audience = pack_spec["audience"]
+                publication_pack.effective_date = effective_date
+                publication_pack.status = "published"
+                publication_pack.updated_at = completed_at
+            session.flush()
+
+            publication_job_id = coerce_uuid(f"publication-job:{queue_item['id']}")
+            publication_job = session.get(PublicationJob, publication_job_id)
+            if publication_job is None:
+                publication_job = PublicationJob(id=publication_job_id)
+                session.add(publication_job)
+            publication_job.pack_id = publication_pack.id
+            publication_job.status = "completed"
+            publication_job.requested_by = service_user.id
+            publication_job.approved_by = service_user.id
+            publication_job.artifact_manifest_json = {
+                "queue_item_id": queue_item["id"],
+                "run_id": run_record["id"],
+                "artifact_id": output_artifact_record["id"],
+                "publication_report_id": publication_report["id"],
+                "release_manifest_path": artifact.get("release_manifest_path"),
+                "release_target": artifact.get("release_target"),
+                "standards_availability_summary": artifact.get("standards_availability_summary") or {},
+                "simulation": False,
+            }
+            publication_job.created_at = created_at
+            publication_job.completed_at = completed_at
+
+            published_pages: list[dict[str, str]] = []
+            pack_entries: list[dict[str, str]] = []
+            for sort_order, revision_id in enumerate(revision_ids, start=1):
+                revision = session.get(SymbolRevision, revision_id)
+                if revision is None:
+                    raise RuntimeError(f"Missing symbol_revisions row for id {revision_id}.")
+                if revision.lifecycle_state not in {"approved", "published"}:
+                    raise RuntimeError(
+                        f"Symbol revision {revision_id} must be approved before publication; found {revision.lifecycle_state}."
+                    )
+                symbol = session.get(GovernedSymbol, revision.symbol_id)
+                if symbol is None:
+                    raise RuntimeError(f"Missing governed_symbols row for revision {revision_id}.")
+
+                page_code = self.generate_published_page_code(
+                    symbol_slug=symbol.slug,
+                    revision_label=revision.revision_label,
+                    pack_code=publication_pack.pack_code,
+                )
+                page_title = f"{symbol.canonical_name} ({revision.revision_label})"
+                published_page = session.query(PublishedPage).filter_by(page_code=page_code).one_or_none()
+                if published_page is None:
+                    published_page = PublishedPage(
+                        id=uuid.uuid4(),
+                        page_code=page_code,
+                        title=page_title,
+                        pack_id=publication_pack.id,
+                        current_symbol_revision_id=revision.id,
+                        effective_date=effective_date,
+                        created_at=completed_at,
+                        updated_at=completed_at,
+                    )
+                    session.add(published_page)
+                else:
+                    published_page.title = page_title
+                    published_page.pack_id = publication_pack.id
+                    published_page.current_symbol_revision_id = revision.id
+                    published_page.effective_date = effective_date
+                    published_page.updated_at = completed_at
+                session.flush()
+
+                pack_entry = (
+                    session.query(PackEntry)
+                    .filter_by(
+                        pack_id=publication_pack.id,
+                        symbol_revision_id=revision.id,
+                        published_page_id=published_page.id,
+                    )
+                    .one_or_none()
+                )
+                if pack_entry is None:
+                    pack_entry = PackEntry(
+                        id=uuid.uuid4(),
+                        pack_id=publication_pack.id,
+                        symbol_revision_id=revision.id,
+                        published_page_id=published_page.id,
+                        sort_order=sort_order,
+                        created_at=completed_at,
+                    )
+                    session.add(pack_entry)
+                else:
+                    pack_entry.sort_order = sort_order
+
+                revision.lifecycle_state = "published"
+                symbol.current_revision_id = revision.id
+                symbol.updated_at = completed_at
+                published_pages.append(
+                    {
+                        "id": str(published_page.id),
+                        "page_code": page_code,
+                        "symbol_revision_id": str(revision.id),
+                    }
+                )
+                pack_entries.append(
+                    {
+                        "id": str(pack_entry.id),
+                        "symbol_revision_id": str(revision.id),
+                        "published_page_id": str(published_page.id),
+                    }
+                )
+
+            audit_payload = {
+                "queue_item_id": queue_item["id"],
+                "publication_job_id": str(publication_job.id),
+                "pack_code": publication_pack.pack_code,
+                "published_pages": published_pages,
+                "pack_entries": pack_entries,
+            }
+            for entity_type, entity_id, action in (
+                ("publication_pack", publication_pack.id, "publication_pack_published"),
+                ("publication_job", publication_job.id, "publication_job_completed"),
+            ):
+                session.add(
+                    AuditEvent(
+                        id=uuid.uuid4(),
+                        entity_type=entity_type,
+                        entity_id=entity_id,
+                        action=action,
+                        actor_id=service_user.id,
+                        payload_json=audit_payload,
+                        created_at=completed_at,
+                    )
+                )
+            for page in published_pages:
+                session.add(
+                    AuditEvent(
+                        id=uuid.uuid4(),
+                        entity_type="published_page",
+                        entity_id=coerce_uuid(page["id"]),
+                        action="published_page_upserted",
+                        actor_id=service_user.id,
+                        payload_json=audit_payload,
+                        created_at=completed_at,
+                    )
+                )
+
+            session.flush()
+            session.execute(text("SELECT refresh_published_symbol_views()"))
+
+            return {
+                "agent_slug": "rupert",
+                "queue_item_id": str(queue_item_id),
+                "durable_kind": "publication",
+                "publication_job_id": str(publication_job.id),
+                "publication_pack_id": str(publication_pack.id),
+                "publication_pack_code": publication_pack.pack_code,
+                "published_pages": published_pages,
+                "pack_entries": pack_entries,
+                "published_symbol_views_refreshed": True,
+            }
 
     def persist_agent_execution(
         self,

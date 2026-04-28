@@ -168,6 +168,66 @@
         "run_libby_classification.py",
         "runtime/agent_definitions/libby.json"
       ]
+    },
+    {
+      "id": "rupert",
+      "name": "Rupert",
+      "workspace": "/data/.openclaw/workspaces/rupert",
+      "agent_dir": "/data/.openclaw/agents/rupert/agent",
+      "model": "openai/gpt-5-mini",
+      "identity_name": "Rupert",
+      "tools": {
+        "profile": "full",
+        "allow": [
+          "group:runtime",
+          "group:sessions"
+        ],
+        "elevated": {
+          "enabled": true,
+          "allowFrom": {
+            "telegram": [
+              7643191699
+            ]
+          }
+        }
+      },
+      "agent_to_agent": true,
+      "required_workspace_files": [
+        "AGENTS.md",
+        "IDENTITY.md",
+        "run_rupert_publication.py",
+        "runtime/agent_definitions/rupert.json"
+      ]
+    },
+    {
+      "id": "ed",
+      "name": "Ed",
+      "workspace": "/data/.openclaw/workspaces/ed",
+      "agent_dir": "/data/.openclaw/agents/ed/agent",
+      "model": "openai/gpt-5-mini",
+      "identity_name": "Ed",
+      "tools": {
+        "profile": "full",
+        "allow": [
+          "group:runtime",
+          "group:sessions"
+        ],
+        "elevated": {
+          "enabled": true,
+          "allowFrom": {
+            "telegram": [
+              7643191699
+            ]
+          }
+        }
+      },
+      "agent_to_agent": true,
+      "required_workspace_files": [
+        "AGENTS.md",
+        "IDENTITY.md",
+        "run_ed_feedback.py",
+        "runtime/agent_definitions/ed.json"
+      ]
     }
   ]
 }

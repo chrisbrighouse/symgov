@@ -88,6 +88,12 @@ def candidate_symbol_id(filename: str) -> str:
     return (normalized or "UNSPECIFIED").upper()
 
 
+def candidate_title(filename: str) -> str:
+    stem = Path(filename).stem
+    normalized = " ".join(part for part in stem.replace("_", " ").replace("-", " ").split() if part)
+    return normalized.title() if normalized else ""
+
+
 def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -150,6 +156,26 @@ def _sanitize_processing_result(value: Any) -> Any:
             }
         if db_summary:
             sanitized["additional_db_records"] = db_summary
+
+    notifications = value.get("notifications") or {}
+    if isinstance(notifications, dict):
+        notification_summary: dict[str, Any] = {}
+        for phase, entry in notifications.items():
+            if not isinstance(entry, dict):
+                continue
+            target = entry.get("target") or {}
+            notification_summary[phase] = {
+                "ok": entry.get("ok"),
+                "skipped": entry.get("skipped"),
+                "reason": entry.get("reason"),
+                "phase": entry.get("phase"),
+                "returncode": entry.get("returncode"),
+                "targetLabel": target.get("label"),
+                "targetChannel": target.get("channel"),
+                "targetName": target.get("name"),
+            }
+        if notification_summary:
+            sanitized["notifications"] = notification_summary
 
     return sanitized
 
@@ -296,9 +322,10 @@ class ExternalSubmissionService:
                 "submitter_name": submitter_name,
                 "submitter_email": submitter_email,
                 "raw_input_path": str(stored_path),
+                "original_filename": file_name,
                 "declared_format": guess_declared_format(file_name),
                 "candidate_symbol_id": candidate_symbol_id(file_name),
-                "candidate_title": "",
+                "candidate_title": candidate_title(file_name),
                 "contributor_name": submitter_name,
                 "contributor_org": "",
                 "contributor_declaration": overall_description,

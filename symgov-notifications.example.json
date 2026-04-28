@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "default_target": "symgov_ops",
+  "targets": {
+    "symgov_ops": {
+      "enabled": true,
+      "label": "SymGov Ops",
+      "channel": "telegram",
+      "target": "-5248268054"
+    }
+  },
+  "agents": {
+    "scott": {
+      "enabled": true,
+      "target": "symgov_ops",
+      "verbosity": {
+        "started": "terse",
+        "completed": "normal"
+      },
+      "phases": {
+        "started": true,
+        "completed": true
+      }
+    },
+    "vlad": {
+      "enabled": true,
+      "target": "symgov_ops",
+      "verbosity": {
+        "started": "terse",
+        "completed": "normal"
+      },
+      "phases": {
+        "started": true,
+        "completed": true
+      }
+    },
+    "tracy": {
+      "enabled": true,
+      "target": "symgov_ops",
+      "verbosity": {
+        "started": "terse",
+        "completed": "detailed"
+      },
+      "phases": {
+        "started": true,
+        "completed": true
+      }
+    },
+    "libby": {
+      "enabled": true,
+      "target": "symgov_ops",
+      "verbosity": {
+        "started": "terse",
+        "completed": "normal"
+      },
+      "phases": {
+        "started": true,
+        "completed": true
+      }
+    },
+    "daisy": {
+      "enabled": true,
+      "target": "symgov_ops",
+      "verbosity": {
+        "started": "terse",
+        "completed": "normal"
+      },
+      "phases": {
+        "started": true,
+        "completed": true
+      }
+    },
+    "rupert": {
+      "enabled": true,
+      "target": "symgov_ops",
+      "verbosity": {
+        "started": "terse",
+        "completed": "normal"
+      },
+      "phases": {
+        "started": true,
+        "completed": true
+      }
+    },
+    "ed": {
+      "enabled": true,
+      "target": "symgov_ops",
+      "verbosity": {
+        "started": "terse",
+        "completed": "normal"
+      },
+      "phases": {
+        "started": false,
+        "completed": true
+      }
+    }
+  }
+}

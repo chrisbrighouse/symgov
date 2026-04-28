@@ -91,6 +91,7 @@ Current external submission API:
 - validates the PIN, persists the external submitter identity and attachment metadata, writes uploaded files into the Scott runtime, runs `Scott` immediately, and continues into the downstream `Vlad`, `Tracy`, `Libby`, and `Daisy` paths when the routing and review outputs require them
 - the current intake path now supports `.svg`, `.png`, `.jpg`, `.jpeg`, and `.json` uploads
 - accepted raster intake can now reach `Vlad` for `raster_sheet_analysis`, including JPEG inputs normalized through Pillow in the live Python runtime
+- one-symbol raster files now produce a `single_symbol_raster_candidate` artifact with filename-derived title, aliases, keywords, note-derived description hints, and attachment/object-key lineage; multi-symbol sheets still produce proposed child crops and `raster_split_review` follow-up
 - versioned health route: `GET /api/v1/health`
 - compatibility alias: `GET /api/health`
 
@@ -147,5 +148,6 @@ Current runner bridge notes:
 - `manage_symgov.py serve-api` now runs the FastAPI/Uvicorn server shell for Symgov APIs
 - the current `Scott`, `Vlad`, and `Tracy` file-backed runners now support `--persist-db` to mirror queue execution into PostgreSQL while keeping the local JSON runtime records
 - the current verified smoke path is `Scott` intake -> downstream enqueue -> `Vlad` validation + `Tracy` provenance, with successful PostgreSQL persistence and successful MinIO/database health checks
-- the external submission API now uses that same live path for uploaded symbol files, starting with `Scott` intake and preserving submitter, batch-summary, and per-file-note context in the normalized submission payload
+- the external submission API now uses that same live path for uploaded symbol files, starting with `Scott` intake and preserving submitter, original filename, candidate title, batch-summary, per-file-note, attachment, and object-key context in the normalized submission payload
+- current host-level dependencies installed outside `/data/.openclaw` for upgrade resilience include Debian `ripgrep` at `/usr/bin/rg` and Debian `python3-pil` at `/usr/lib/python3/dist-packages/PIL`
 - the current frontend submission route is expected to target this live API using a deploy-configured API root and a visible frontend build marker so VPS-served assets can be verified after deploys

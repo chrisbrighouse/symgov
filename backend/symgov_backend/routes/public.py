@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 
 from ..dependencies import get_runtime_bridge
 from ..runtime import RuntimePersistenceBridge
@@ -33,7 +35,7 @@ legacy_router = APIRouter(tags=["public"])
     include_in_schema=False,
 )
 def create_external_submission(
-    request: ExternalSubmissionRequest,
+    request: dict[str, Any] = Body(...),
     bridge: RuntimePersistenceBridge = Depends(get_runtime_bridge),
 ) -> ExternalSubmissionResponse:
     settings = get_settings()
@@ -44,7 +46,9 @@ def create_external_submission(
         storage_env_file=settings.storage_env_file,
     )
     try:
-        result = service.submit(request.model_dump())
+        payload = request.get("request") if isinstance(request.get("request"), dict) else request
+        validated_request = ExternalSubmissionRequest.model_validate(payload)
+        result = service.submit(validated_request.model_dump())
     except SubmissionError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except HTTPException:

@@ -154,6 +154,94 @@ export async function fetchWorkspaceDaisyReports(reviewCaseId) {
   }
 }
 
+export async function submitWorkspaceReviewDecision(reviewCaseId, decisionPayload) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+
+  const response = await fetch(`${appConfig.apiRoot}/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/decisions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(decisionPayload)
+  });
+  const payload = await parseJson(response);
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Review decision failed.');
+  }
+
+  return payload;
+}
+
+export async function fetchPublishedSymbols() {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
+  }
+
+  try {
+    const response = await fetch(`${appConfig.apiRoot}/published/symbols`);
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Published symbols load failed.',
+        items: []
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: 'Live published symbols loaded.',
+      items: Array.isArray(payload?.items) ? payload.items : []
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'offline',
+      message: error instanceof Error ? error.message : 'Published symbols load failed.',
+      items: []
+    };
+  }
+}
+
+export async function fetchPublishedPacks() {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
+  }
+
+  try {
+    const response = await fetch(`${appConfig.apiRoot}/published/packs`);
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Published packs load failed.',
+        items: []
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: 'Live published packs loaded.',
+      items: Array.isArray(payload?.items) ? payload.items : []
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'offline',
+      message: error instanceof Error ? error.message : 'Published packs load failed.',
+      items: []
+    };
+  }
+}
+
 async function fileToBase64(file) {
   const buffer = await file.arrayBuffer();
   const bytes = new Uint8Array(buffer);

@@ -488,6 +488,48 @@ class ReviewCase(Base):
     closed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class HumanReviewDecision(Base):
+    __tablename__ = "human_review_decisions"
+    __table_args__ = (Index("ix_human_review_decisions_case_created_at", "review_case_id", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    review_case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("review_cases.id"), nullable=False)
+    decision_code: Mapped[str] = mapped_column(Text, nullable=False)
+    decision_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    decider_name: Mapped[str] = mapped_column(Text, nullable=False)
+    decider_role: Mapped[str] = mapped_column(Text, nullable=False)
+    from_stage: Mapped[str] = mapped_column(Text, nullable=False)
+    to_stage: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decision_payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    superseded_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ReviewCaseAction(Base):
+    __tablename__ = "review_case_actions"
+    __table_args__ = (
+        Index("ix_review_case_actions_case_status_created_at", "review_case_id", "action_status", "created_at"),
+        Index("ix_review_case_actions_decision_created_at", "decision_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    review_case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("review_cases.id"), nullable=False)
+    decision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("human_review_decisions.id"), nullable=True)
+    action_code: Mapped[str] = mapped_column(Text, nullable=False)
+    action_status: Mapped[str] = mapped_column(Text, nullable=False)
+    assigned_to: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    target_agent_slug: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_stage: Mapped[str | None] = mapped_column(Text, nullable=True)
+    action_payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_by_type: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    started_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class PublicationJob(Base):
     __tablename__ = "publication_jobs"
 
