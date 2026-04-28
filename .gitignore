@@ -1,6 +1,7 @@
 node_modules/
 dist/
 assets/
+/index.html
 
 .env.backend.database
 .env.backend.storage

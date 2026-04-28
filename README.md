@@ -65,10 +65,11 @@ Supporting routes still exist for focused tasks, but the product intent is now e
   - `frontend/index.html`
   - `frontend/src/`
   - `frontend/public/`
-- The workspace root now acts as the published static target and receives:
+- In the active served workspace, the workspace root acts as the published static target and receives:
   - `index.html`
   - `assets/`
   - `submit/index.html`
+- The standalone GitHub-facing repo keeps source and support files only; generated root static output such as `/index.html` and `/assets/` is excluded.
 - Production assets are emitted into `dist/` with `npm run build`.
 - Use `npm run build:publish` to build and sync the current `dist/` output into the published workspace root.
 - Until that build output is intentionally published on the VPS, the public site may still reflect an older bundle than the local workspace source.
