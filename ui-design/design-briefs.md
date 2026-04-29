@@ -92,9 +92,9 @@ Provide a user-friendly SME review surface for Daisy-coordinated review cases.
 
 Make Reviews queue-first for SMEs:
 
-- Left: Daisy-visible review cases
-- Center: guided child-symbol review
-- Right: source context, Libby metadata, Daisy coordination, and case notes
+- Left: Daisy-visible review queue with previous/next movement through filtered items
+- Center: visual evidence, source context, classification facts, and guided child-symbol review
+- Right: case decision rail with every available action, reviewer identity, comments, decision note, latest decision, and Daisy coordination
 
 Focused routes remain available for:
 
@@ -105,15 +105,15 @@ Focused routes remain available for:
 ### UX rules
 
 - Workspace uses denser admin language; Reviews uses reviewer-friendly language and support.
-- Queue cards expose symbol ID, change type, owner, due date, impacted page count, impacted pack count, and review status.
-- Review tools show proposed child symbols, source context, and Daisy recommendations.
-- Review controls are direct SME draft actions for this phase.
+- Queue cards expose symbol ID, title, current stage, child-symbol count, source file, and priority.
+- Review tools show source imagery where available, proposed child symbols, classification/source context, and Daisy recommendations.
+- Review controls are direct SME actions for this phase and remain visible as buttons, not buried in a dropdown.
 - Standards-originated clarifications should be visible in the same review context as the affected queue item.
 
 ### Success criteria
 
 - A reviewer can sort and triage many records quickly from one queue surface.
-- A reviewer can compare baseline and proposed content without leaving queue context.
+- A reviewer can inspect source imagery and child-symbol previews without leaving queue context.
 - Approval decisions are supported by visible downstream impact and linked clarification context.
 
 ## Shared design direction

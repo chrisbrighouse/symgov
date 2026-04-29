@@ -14,6 +14,11 @@ async function parseJson(response) {
   }
 }
 
+function workspaceUrl(path) {
+  const separator = path.includes('?') ? '&' : '?';
+  return `${appConfig.apiRoot}${path}${separator}refresh=${Date.now()}`;
+}
+
 function formatValidationIssues(issues) {
   if (!Array.isArray(issues) || issues.length === 0) {
     return '';
@@ -90,7 +95,7 @@ export async function fetchWorkspaceReviewCases() {
   }
 
   try {
-    const response = await fetch(`${appConfig.apiRoot}/workspace/review-cases`);
+    const response = await fetch(workspaceUrl('/workspace/review-cases'), { cache: 'no-store' });
     const payload = await parseJson(response);
 
     if (!response.ok) {
@@ -118,6 +123,40 @@ export async function fetchWorkspaceReviewCases() {
   }
 }
 
+export async function fetchWorkspaceQueueItems() {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
+  }
+
+  try {
+    const response = await fetch(workspaceUrl('/workspace/agent-queue-items'), { cache: 'no-store' });
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Workspace queue load failed.',
+        items: []
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: 'Live Workspace queues loaded.',
+      items: Array.isArray(payload?.items) ? payload.items : []
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'offline',
+      message: error instanceof Error ? error.message : 'Workspace queue load failed.',
+      items: []
+    };
+  }
+}
+
 export async function fetchWorkspaceDaisyReports(reviewCaseId) {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
@@ -126,7 +165,7 @@ export async function fetchWorkspaceDaisyReports(reviewCaseId) {
   const query = reviewCaseId ? `?review_case_id=${encodeURIComponent(reviewCaseId)}` : '';
 
   try {
-    const response = await fetch(`${appConfig.apiRoot}/workspace/daisy/reports${query}`);
+    const response = await fetch(workspaceUrl(`/workspace/daisy/reports${query}`), { cache: 'no-store' });
     const payload = await parseJson(response);
 
     if (!response.ok) {

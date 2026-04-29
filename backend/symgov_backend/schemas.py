@@ -100,6 +100,8 @@ class WorkspaceReviewCaseResponse(BaseModel):
     validationStatus: str
     defectCount: int
     sourceFileName: str
+    sourceObjectKey: str | None = None
+    sourcePreviewUrl: str | None = None
     intakeRecordId: str
     childCount: int
     classificationStatus: str | None = None
@@ -124,6 +126,27 @@ class WorkspaceReviewCaseResponse(BaseModel):
 
 class WorkspaceReviewCaseListResponse(BaseModel):
     items: list[WorkspaceReviewCaseResponse]
+
+
+class WorkspaceAgentQueueItemResponse(BaseModel):
+    id: str
+    agentId: str
+    agentName: str
+    queueFamily: str
+    sourceType: str
+    sourceId: str
+    status: str
+    priority: str
+    payload: dict[str, Any]
+    confidence: float | None = None
+    escalationReason: str | None = None
+    createdAt: str
+    startedAt: str | None = None
+    completedAt: str | None = None
+
+
+class WorkspaceAgentQueueItemListResponse(BaseModel):
+    items: list[WorkspaceAgentQueueItemResponse]
 
 
 class WorkspaceDaisyAssignmentProposalResponse(BaseModel):

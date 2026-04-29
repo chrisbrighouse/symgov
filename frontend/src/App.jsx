@@ -4,6 +4,7 @@ import {
   fetchHealth,
   fetchPublishedSymbols,
   fetchWorkspaceDaisyReports,
+  fetchWorkspaceQueueItems,
   fetchWorkspaceReviewCases,
   submitWorkspaceReviewDecision,
   submitExternalSubmission
@@ -80,6 +81,9 @@ const WORKSPACE_QUEUE_COLUMNS = [
     tone: 'feedback'
   }
 ];
+
+const WORKSPACE_REFRESH_INTERVAL_MS = 5000;
+const DEFAULT_HIDDEN_WORKSPACE_STATUSES = new Set(['completed']);
 
 function App() {
   const location = useLocation();
@@ -353,6 +357,7 @@ function StandardsPage() {
 
 function WorkspacePage() {
   const [query, setQuery] = useState('');
+  const [columnStatusFilters, setColumnStatusFilters] = useState({});
   const [reviewState, setReviewState] = useState({
     loading: true,
     mode: appConfig.apiRoot ? 'loading' : 'seeded',
@@ -365,51 +370,172 @@ function WorkspacePage() {
     message: appConfig.apiRoot ? 'Loading Daisy coordination...' : 'No API root configured. Showing seeded coordination.',
     items: appConfig.apiRoot ? [] : daisyCoordinationReports
   });
+  const [queueState, setQueueState] = useState({
+    loading: true,
+    mode: appConfig.apiRoot ? 'loading' : 'seeded',
+    message: appConfig.apiRoot ? 'Loading live queue items...' : 'No API root configured. Showing seeded queue activity.',
+    items: appConfig.apiRoot ? [] : processingActivity
+  });
+  const [lastWorkspaceRefresh, setLastWorkspaceRefresh] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
+    let refreshTimer = null;
 
-    Promise.all([fetchWorkspaceReviewCases(), fetchWorkspaceDaisyReports()]).then(([reviewResult, daisyResult]) => {
-      if (cancelled) {
+    const stopRefreshTimer = () => {
+      if (refreshTimer !== null) {
+        window.clearInterval(refreshTimer);
+        refreshTimer = null;
+      }
+    };
+
+    const refreshWorkspaceMonitor = () => {
+      if (document.hidden) {
         return;
       }
 
-      setReviewState({
-        loading: false,
-        mode: reviewResult.ok ? 'live' : 'seeded',
-        message: reviewResult.ok
-          ? reviewResult.items.length
-            ? reviewResult.message
-            : 'No live review cases are currently open.'
-          : `${reviewResult.message} Showing seeded processing activity.`,
-        items: reviewResult.ok ? reviewResult.items : changeQueue
-      });
+      Promise.all([fetchWorkspaceQueueItems(), fetchWorkspaceReviewCases(), fetchWorkspaceDaisyReports()]).then(([queueResult, reviewResult, daisyResult]) => {
+        if (cancelled) {
+          return;
+        }
 
-      setDaisyState({
-        loading: false,
-        mode: daisyResult.ok ? 'live' : 'seeded',
-        message: daisyResult.ok
-          ? daisyResult.items.length
-            ? daisyResult.message
-            : 'No live Daisy coordination reports are available yet.'
-          : `${daisyResult.message} Showing seeded coordination.`,
-        items: daisyResult.ok ? daisyResult.items : daisyCoordinationReports
+        setQueueState({
+          loading: false,
+          mode: queueResult.ok ? 'live' : 'seeded',
+          message: queueResult.ok
+            ? queueResult.items.length
+              ? queueResult.message
+              : 'No live agent queue items are currently open.'
+            : `${queueResult.message} Showing seeded queue activity.`,
+          items: queueResult.ok ? queueResult.items : processingActivity
+        });
+
+        setReviewState({
+          loading: false,
+          mode: reviewResult.ok ? 'live' : 'seeded',
+          message: reviewResult.ok
+            ? reviewResult.items.length
+              ? reviewResult.message
+              : 'No live review cases are currently open.'
+            : `${reviewResult.message} Showing seeded processing activity.`,
+          items: reviewResult.ok ? reviewResult.items : changeQueue
+        });
+
+        setDaisyState({
+          loading: false,
+          mode: daisyResult.ok ? 'live' : 'seeded',
+          message: daisyResult.ok
+            ? daisyResult.items.length
+              ? daisyResult.message
+              : 'No live Daisy coordination reports are available yet.'
+            : `${daisyResult.message} Showing seeded coordination.`,
+          items: daisyResult.ok ? daisyResult.items : daisyCoordinationReports
+        });
+
+        setLastWorkspaceRefresh(new Date());
       });
-    });
+    };
+
+    const startRefreshTimer = () => {
+      if (!appConfig.apiRoot || document.hidden || refreshTimer !== null) {
+        return;
+      }
+
+      refreshTimer = window.setInterval(refreshWorkspaceMonitor, WORKSPACE_REFRESH_INTERVAL_MS);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopRefreshTimer();
+        return;
+      }
+
+      refreshWorkspaceMonitor();
+      startRefreshTimer();
+    };
+
+    refreshWorkspaceMonitor();
+
+    if (!appConfig.apiRoot) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    startRefreshTimer();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       cancelled = true;
+      stopRefreshTimer();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
 
+  useEffect(() => {
+    const closeOpenStatusFilters = (event) => {
+      if (event.target instanceof Element && event.target.closest('.monitor-status-filter')) {
+        return;
+      }
+
+      document.querySelectorAll('.monitor-status-filter[open]').forEach((filter) => {
+        filter.removeAttribute('open');
+      });
+    };
+
+    document.addEventListener('pointerdown', closeOpenStatusFilters);
+
+    return () => {
+      document.removeEventListener('pointerdown', closeOpenStatusFilters);
+    };
+  }, []);
+
+  const refreshSummary = useMemo(() => {
+    if (queueState.loading || reviewState.loading) {
+      return 'Loading...';
+    }
+
+    const refreshLabel = lastWorkspaceRefresh
+      ? `Updated ${lastWorkspaceRefresh.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+      : 'Awaiting first refresh';
+
+    if (queueState.mode === 'live' || reviewState.mode === 'live') {
+      return `${refreshLabel} · Auto-refresh 5s · ${queueState.message} · ${reviewState.message}`;
+    }
+
+    return `${refreshLabel} · ${queueState.message} · ${reviewState.message}`;
+  }, [
+    lastWorkspaceRefresh,
+    queueState.loading,
+    queueState.message,
+    queueState.mode,
+    reviewState.loading,
+    reviewState.message,
+    reviewState.mode
+  ]);
+
   const monitorItems = useMemo(
-    () => buildWorkspaceMonitorItems(processingActivity, reviewState.items, daisyState.items),
-    [reviewState.items, daisyState.items]
+    () => buildWorkspaceMonitorItems(queueState.items, queueState.mode, reviewState.items, daisyState.items),
+    [queueState.items, queueState.mode, reviewState.items, daisyState.items]
   );
+  const statusOptionsByColumn = useMemo(() => buildWorkspaceStatusOptions(monitorItems), [monitorItems]);
   const filteredColumns = useMemo(
-    () => filterWorkspaceMonitorColumns(monitorItems, query),
-    [monitorItems, query]
+    () => filterWorkspaceMonitorColumns(monitorItems, query, columnStatusFilters),
+    [monitorItems, query, columnStatusFilters]
   );
+  const handleColumnStatusToggle = (columnId, statusKey) => {
+    setColumnStatusFilters((current) => {
+      const nextColumn = {
+        ...(current[columnId] || {}),
+        [statusKey]: !isWorkspaceStatusVisible(statusKey, current[columnId])
+      };
+
+      return {
+        ...current,
+        [columnId]: nextColumn
+      };
+    });
+  };
   const totalVisibleItems = filteredColumns.reduce((total, column) => total + column.items.length, 0);
   const activeCount = filteredColumns.reduce(
     (total, column) =>
@@ -439,9 +565,8 @@ function WorkspacePage() {
               placeholder="Batch, file, agent, status, case"
             />
           </label>
-          <div className={`health-chip health-${reviewState.mode}`}>
-            <span>{reviewState.loading ? 'Loading...' : reviewState.message}</span>
-            <small>{reviewState.mode === 'live' ? 'Live review feed' : 'Seeded monitor'}</small>
+          <div className={`health-chip health-${reviewState.mode}`} aria-live="polite">
+            <span>{refreshSummary}</span>
           </div>
         </div>
       </div>
@@ -455,49 +580,91 @@ function WorkspacePage() {
 
       <div className="queue-monitor-board">
         {filteredColumns.map((column) => (
-          <WorkspaceQueueColumn key={column.id} column={column} />
+          <WorkspaceQueueColumn
+            key={column.id}
+            column={column}
+            statusOptions={statusOptionsByColumn[column.id] || []}
+            statusFilter={columnStatusFilters[column.id] || {}}
+            onStatusToggle={handleColumnStatusToggle}
+          />
         ))}
       </div>
     </section>
   );
 }
 
-function buildWorkspaceMonitorItems(activityItems, reviewItems, daisyItems) {
+function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyItems) {
   const columns = WORKSPACE_QUEUE_COLUMNS.map((column) => ({ ...column, items: [] }));
   const byId = Object.fromEntries(columns.map((column) => [column.id, column]));
 
-  activityItems.forEach((activity) => {
-    (activity.agents || []).forEach((agent) => {
-      const column = columns.find((candidate) => candidate.agentId === agent.id);
+  if (queueMode === 'live') {
+    (queueItems || []).forEach((queueItem) => {
+      const column =
+        columns.find((candidate) => candidate.agentId === queueItem.agentId) ||
+        columns.find((candidate) => candidate.id === queueItem.queueFamily);
 
       if (!column) {
         return;
       }
 
       column.items.push({
-        id: `${activity.id}-${agent.id}`,
-        label: activity.batchId || activity.id,
-        title: compactTitle(activity.sourceFileName || activity.title),
-        meta: agent.stage,
-        status: agent.status,
-        priority: activity.priority,
+        id: queueItem.id,
+        label: resolveQueueItemLabel(queueItem),
+        title: compactTitle(resolveQueueItemDisplayTitle(queueItem)),
+        meta: queueItem.payload?.stage || queueItem.sourceType || queueItem.queueFamily,
+        status: queueItem.status,
+        priority: queueItem.priority,
         searchText: [
-          activity.id,
-          activity.batchId,
-          activity.title,
-          activity.sourceFileName,
-          activity.operatorStatus,
-          activity.owner,
-          activity.reviewCaseId,
-          agent.name,
-          agent.stage,
-          agent.status,
-          agent.summary
+          queueItem.id,
+          queueItem.agentId,
+          queueItem.agentName,
+          queueItem.queueFamily,
+          queueItem.sourceType,
+          queueItem.sourceId,
+          queueItem.status,
+          queueItem.priority,
+          queueItem.escalationReason,
+          JSON.stringify(queueItem.payload || {})
         ].join(' '),
-        detail: agent.summary
+        detail: queueItem.escalationReason || resolveQueueItemTitle(queueItem)
       });
     });
-  });
+  } else {
+    (queueItems || []).forEach((activity) => {
+      (activity.agents || []).forEach((agent) => {
+        const column = columns.find((candidate) => candidate.agentId === agent.id);
+
+        if (!column) {
+          return;
+        }
+
+        column.items.push({
+          id: `${activity.id}-${agent.id}`,
+          label: isExternalSubmissionId(activity.batchId)
+            ? formatWorkspaceDisplayDate(activity.batchId, { createdAt: activity.submittedAt })
+            : activity.batchId || activity.id,
+          title: compactTitle(activity.sourceFileName || activity.title),
+          meta: agent.stage,
+          status: agent.status,
+          priority: activity.priority,
+          searchText: [
+            activity.id,
+            activity.batchId,
+            activity.title,
+            activity.sourceFileName,
+            activity.operatorStatus,
+            activity.owner,
+            activity.reviewCaseId,
+            agent.name,
+            agent.stage,
+            agent.status,
+            agent.summary
+          ].join(' '),
+          detail: agent.summary
+        });
+      });
+    });
+  }
 
   (reviewItems || []).forEach((review) => {
     byId.human_review.items.push({
@@ -549,17 +716,154 @@ function buildWorkspaceMonitorItems(activityItems, reviewItems, daisyItems) {
   return columns;
 }
 
-function filterWorkspaceMonitorColumns(columns, query) {
-  const normalizedQuery = query.trim().toLowerCase();
+function resolveQueueItemTitle(queueItem) {
+  const payload = queueItem.payload || {};
 
-  if (!normalizedQuery) {
-    return columns;
+  return (
+    payload.candidate_title ||
+    payload.original_filename ||
+    payload.file_name ||
+    payload.source_file_name ||
+    payload.candidate_symbol_id ||
+    payload.review_case_id ||
+    payload.submission_batch_id ||
+    queueItem.escalationReason ||
+    `${queueItem.agentName || queueItem.agentId} ${queueItem.sourceType}`
+  );
+}
+
+function resolveQueueItemLabel(queueItem) {
+  const payload = queueItem.payload || {};
+  const submissionBatchId = payload.submission_batch_id;
+
+  if (isExternalSubmissionId(submissionBatchId)) {
+    return formatWorkspaceDisplayDate(submissionBatchId, queueItem);
   }
+
+  if (isLibbyQueueItem(queueItem)) {
+    return formatWorkspaceDisplayDate(null, queueItem);
+  }
+
+  return submissionBatchId || queueItem.sourceId || queueItem.id;
+}
+
+function resolveQueueItemDisplayTitle(queueItem) {
+  const title = resolveQueueItemTitle(queueItem);
+
+  if (isExternalSubmissionId(title)) {
+    return formatWorkspaceDisplayDate(title, queueItem);
+  }
+
+  return title;
+}
+
+function isLibbyQueueItem(queueItem) {
+  return queueItem?.agentId === 'libby' || queueItem?.queueFamily === 'classification';
+}
+
+function isExternalSubmissionId(value) {
+  return /^subext-\d{8}T\d{6}Z$/i.test(String(value || '').trim());
+}
+
+function formatWorkspaceDisplayDate(value, queueItem) {
+  const date = extractWorkspaceDisplayDate(value) || extractWorkspaceDisplayDate(queueItem?.createdAt);
+
+  if (!date) {
+    return String(value || queueItem?.id || 'Pending').trim();
+  }
+
+  const hours = String(date.getUTCHours()).padStart(2, '0');
+  const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const month = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][date.getUTCMonth()];
+  const year = String(date.getUTCFullYear()).slice(-2);
+
+  return `${hours}:${minutes} ${day}${month}${year}`;
+}
+
+function extractWorkspaceDisplayDate(value) {
+  if (!value) {
+    return null;
+  }
+
+  const candidate = String(value).trim();
+  const externalSubmissionMatch = candidate.match(/^subext-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/i);
+
+  if (externalSubmissionMatch) {
+    const [, year, month, day, hours, minutes, seconds] = externalSubmissionMatch;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hours), Number(minutes), Number(seconds)));
+  }
+
+  const parsed = new Date(candidate);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function buildWorkspaceStatusOptions(columns) {
+  return Object.fromEntries(
+    columns.map((column) => {
+      const optionMap = new Map();
+
+      column.items.forEach((item) => {
+        const key = getWorkspaceStatusKey(item.status);
+        const existing = optionMap.get(key);
+
+        if (existing) {
+          existing.count += 1;
+          return;
+        }
+
+        optionMap.set(key, {
+          key,
+          label: formatWorkspaceStatusLabel(item.status),
+          count: 1
+        });
+      });
+
+      return [
+        column.id,
+        Array.from(optionMap.values()).sort((first, second) => {
+          const firstHidden = DEFAULT_HIDDEN_WORKSPACE_STATUSES.has(first.key);
+          const secondHidden = DEFAULT_HIDDEN_WORKSPACE_STATUSES.has(second.key);
+
+          if (firstHidden !== secondHidden) {
+            return firstHidden ? 1 : -1;
+          }
+
+          return first.label.localeCompare(second.label);
+        })
+      ];
+    })
+  );
+}
+
+function filterWorkspaceMonitorColumns(columns, query, columnStatusFilters) {
+  const normalizedQuery = query.trim().toLowerCase();
 
   return columns.map((column) => ({
     ...column,
-    items: column.items.filter((item) => item.searchText.toLowerCase().includes(normalizedQuery))
+    items: column.items.filter((item) => {
+      const matchesQuery = !normalizedQuery || item.searchText.toLowerCase().includes(normalizedQuery);
+      const matchesStatus = isWorkspaceStatusVisible(getWorkspaceStatusKey(item.status), columnStatusFilters[column.id]);
+
+      return matchesQuery && matchesStatus;
+    })
   }));
+}
+
+function getWorkspaceStatusKey(status) {
+  return String(status || 'pending').trim().toLowerCase().replaceAll('_', ' ');
+}
+
+function formatWorkspaceStatusLabel(status) {
+  return getWorkspaceStatusKey(status).replaceAll(' ', '_').toUpperCase();
+}
+
+function isWorkspaceStatusVisible(statusKey, columnFilter = {}) {
+  if (Object.prototype.hasOwnProperty.call(columnFilter, statusKey)) {
+    return Boolean(columnFilter[statusKey]);
+  }
+
+  return !DEFAULT_HIDDEN_WORKSPACE_STATUSES.has(statusKey);
 }
 
 function compactTitle(value) {
@@ -572,7 +876,7 @@ function compactTitle(value) {
   return `${text.slice(0, 39)}...`;
 }
 
-function WorkspaceQueueColumn({ column }) {
+function WorkspaceQueueColumn({ column, statusOptions, statusFilter, onStatusToggle }) {
   const attentionCount = column.items.filter((item) =>
     ['queued', 'running', 'waiting', 'escalated', 'review', 'request_changes'].includes(String(item.status).toLowerCase())
   ).length;
@@ -584,7 +888,27 @@ function WorkspaceQueueColumn({ column }) {
           <h3>{column.title}</h3>
           <p>{column.subtitle}</p>
         </div>
-        <span>{column.items.length}</span>
+        <div className="monitor-column-tools">
+          {statusOptions.length ? (
+            <details className="monitor-status-filter">
+              <summary>Status</summary>
+              <div className="monitor-status-filter-menu">
+                {statusOptions.map((option) => (
+                  <label key={option.key}>
+                    <input
+                      type="checkbox"
+                      checked={isWorkspaceStatusVisible(option.key, statusFilter)}
+                      onChange={() => onStatusToggle(column.id, option.key)}
+                    />
+                    <span>{option.label}</span>
+                    <b>{option.count}</b>
+                  </label>
+                ))}
+              </div>
+            </details>
+          ) : null}
+          <span>{column.items.length}</span>
+        </div>
       </header>
       <div className="monitor-column-body">
         {column.items.length ? (
@@ -616,6 +940,60 @@ function WorkspaceMonitorCard({ item }) {
         <b>{String(item.status || 'pending').replaceAll('_', ' ')}</b>
       </div>
     </article>
+  );
+}
+
+function resolveWorkspaceAssetUrl(assetUrl) {
+  if (!assetUrl) {
+    return null;
+  }
+  return new URL(assetUrl, appConfig.apiRoot || window.location.origin).toString();
+}
+
+function ReviewSourceVisual({ activeChange, activeChildren }) {
+  const primaryChild = activeChildren[0];
+  const resolvedPreviewUrl = resolveWorkspaceAssetUrl(activeChange?.sourcePreviewUrl || primaryChild?.previewUrl);
+  const [imageUnavailable, setImageUnavailable] = useState(!resolvedPreviewUrl);
+
+  useEffect(() => {
+    setImageUnavailable(!resolvedPreviewUrl);
+  }, [resolvedPreviewUrl]);
+
+  return (
+    <section className="review-visual-panel">
+      <div className="review-visual-header">
+        <div>
+          <p className="context-label">Visual evidence</p>
+          <h3>{activeChange?.sourceFileName || activeChange?.symbolId || 'Review item'}</h3>
+        </div>
+        <span className="status-pill">{activeChildren.length ? `${activeChildren.length} proposed children` : activeChange?.status}</span>
+      </div>
+      <div className="review-visual-frame">
+        {!imageUnavailable && resolvedPreviewUrl ? (
+          <img
+            className="review-source-image"
+            src={resolvedPreviewUrl}
+            alt={`Visual preview for ${activeChange?.sourceFileName || activeChange?.symbolId || 'review item'}`}
+            onError={() => setImageUnavailable(true)}
+          />
+        ) : (
+          <div className="review-source-fallback">
+            <SymbolGlyph symbolId={activeChange?.symbolId || 'SYMBOL'} large />
+            <small>Preview unavailable</small>
+          </div>
+        )}
+      </div>
+      {activeChildren.length ? (
+        <div className="review-thumbnail-strip" aria-label="Extracted child symbol previews">
+          {activeChildren.slice(0, 8).map((child, index) => (
+            <div key={child.id} className="review-thumbnail-card">
+              <SplitSymbolPreview child={child} variant={index % 2 === 1} />
+              <span>{child.proposedSymbolId}</span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -784,6 +1162,8 @@ function ReviewsPage() {
 
   const activeChange = filteredQueue.find((item) => item.id === activeId) || filteredQueue[0];
   const activeChildren = activeChange?.children || [];
+  const activeIndex = activeChange ? filteredQueue.findIndex((item) => item.id === activeChange.id) : -1;
+  const reviewedChildCount = activeChildren.filter((child) => getChildReview(child.id).action !== 'pending').length;
   const sourceComment = sourceComments[activeChange?.id] || '';
   const classificationAliases = activeChange?.aliases || [];
   const classificationKeywords = activeChange?.keywords || [];
@@ -835,6 +1215,14 @@ function ReviewsPage() {
         decisionNote: ''
       }
     );
+  }
+
+  function selectAdjacentReview(direction) {
+    if (!filteredQueue.length || activeIndex < 0) {
+      return;
+    }
+    const nextIndex = Math.min(Math.max(activeIndex + direction, 0), filteredQueue.length - 1);
+    setActiveId(filteredQueue[nextIndex].id);
   }
 
   async function refreshReviewData() {
@@ -907,7 +1295,7 @@ function ReviewsPage() {
       <div className="hero-panel glass-panel workspace-hero">
         <div>
           <p className="eyebrow">SME Reviews</p>
-          <h2>Work through Daisy-coordinated review cases with traceable source context, reviewer support, and clear draft decisions.</h2>
+          <h2>Daisy-coordinated Reviews</h2>
         </div>
         <div className="action-stack">
           <label className="field search-field">
@@ -972,32 +1360,48 @@ function ReviewsPage() {
         </label>
       </div>
 
-      <div className="workspace-grid">
-        <section className="glass-panel pane">
-          <SectionHeading title="Review Cases" subtitle={`${filteredQueue.length} Daisy-visible records`} />
+      <div className="review-workbench-grid">
+        <section className="glass-panel pane review-queue-pane">
+          <div className="review-pane-heading">
+            <SectionHeading title="Review Queue" subtitle={`${filteredQueue.length} Daisy-visible records`} />
+            <div className="review-navigation">
+              <button type="button" className="action-button secondary compact" disabled={activeIndex <= 0} onClick={() => selectAdjacentReview(-1)}>
+                Previous
+              </button>
+              <button
+                type="button"
+                className="action-button secondary compact"
+                disabled={activeIndex < 0 || activeIndex >= filteredQueue.length - 1}
+                onClick={() => selectAdjacentReview(1)}
+              >
+                Next
+              </button>
+            </div>
+          </div>
           <div className="stack-list">
             {filteredQueue.map((item) => (
               <button
                 key={item.id}
                 type="button"
-                className={`queue-card ${item.id === activeId ? 'active' : ''}`}
+                className={`queue-card review-list-card ${item.id === activeId ? 'active' : ''}`}
                 onClick={() => setActiveId(item.id)}
               >
                 <div className="queue-card-topline">
-                  <strong>{item.id}</strong>
+                  <strong>{item.symbolId}</strong>
                   <span className={`priority-chip priority-${item.priority.toLowerCase()}`}>{item.priority}</span>
                 </div>
-                <p>{item.symbolId} · {item.title}</p>
+                <p>{item.title}</p>
                 <small>
-                  Owner {item.owner} · {item.childCount || item.children?.length || 0} child symbols · {item.sourceFileName || 'Source file pending'}
+                  {item.currentStage || item.status} · {item.childCount || item.children?.length || 0} child symbols
                 </small>
+                <small>{item.sourceFileName || 'Source file pending'}</small>
               </button>
             ))}
           </div>
         </section>
 
-        <section className="glass-panel pane compare-pane">
-          <SectionHeading title="Guided Review" subtitle="Scrollable SME review for extracted child symbols" />
+        <section className="glass-panel pane compare-pane review-focus-pane">
+          <SectionHeading title="Review Item" subtitle={activeChange ? `${activeIndex + 1} of ${filteredQueue.length}` : 'No active item'} />
           {activeChange ? (
             <>
               <div className="detail-heading">
@@ -1007,11 +1411,12 @@ function ReviewsPage() {
                 </div>
                 <span className="status-pill">{activeChange.status}</span>
               </div>
+              <ReviewSourceVisual activeChange={activeChange} activeChildren={activeChildren} />
               <div className="fact-grid">
                 <Fact label="Parent file" value={activeChange.sourceFileName || 'Not recorded'} />
                 <Fact label="Intake record" value={activeChange.intakeRecordId || 'Pending'} />
                 <Fact label="Open review by" value={activeChange.due} />
-                <Fact label="Child symbols" value={String(activeChange.childCount || activeChildren.length)} />
+                <Fact label="Child decisions" value={`${reviewedChildCount} / ${activeChildren.length || activeChange.childCount || 0}`} />
               </div>
               <div className="fact-grid">
                 <Fact label="Classification status" value={activeChange.classificationStatus || 'Not classified'} />
@@ -1032,7 +1437,19 @@ function ReviewsPage() {
                   <p>{activeChange.classificationSummary}</p>
                 </div>
               ) : null}
+              <div className="review-support-facts">
+                <Fact label="Discipline" value={activeChange.engineeringDiscipline || 'Pending'} />
+                <Fact label="Format" value={activeChange.format || 'Pending'} />
+                <Fact label="Industry" value={activeChange.industry || 'Pending'} />
+                <Fact label="Symbol family" value={activeChange.symbolFamily || 'Pending'} />
+                <Fact label="Process category" value={activeChange.processCategory || 'Pending'} />
+                <Fact label="Equipment class" value={activeChange.parentEquipmentClass || 'Pending'} />
+                <Fact label="Standards source" value={activeChange.standardsSource || 'Pending'} />
+                <Fact label="Provenance class" value={activeChange.libraryProvenanceClass || 'Pending'} />
+              </div>
               {activeChildren.length ? (
+                <>
+                <SectionHeading title="Child Symbol Decisions" subtitle="Per-symbol actions and notes" />
                 <div className="split-review-list" role="list" aria-label="Extracted symbols awaiting review">
                   {activeChildren.map((child, index) => {
                     const reviewState = getChildReview(child.id);
@@ -1047,6 +1464,7 @@ function ReviewsPage() {
                     );
                   })}
                 </div>
+                </>
               ) : (
                 <EmptyState title="No extracted child symbols" body="This queue item does not yet include split children for review." />
               )}
@@ -1056,29 +1474,77 @@ function ReviewsPage() {
           )}
         </section>
 
-        <section className="glass-panel pane">
-          <SectionHeading title="Review Support Rail" subtitle="Daisy coordination, source context, and notes" />
+        <section className="glass-panel pane review-decision-pane">
+          <SectionHeading title="Record Decision" subtitle="Case action, reviewer notes, and Daisy context" />
           {activeChange ? (
             <>
-              <div className="metric-column">
+              <div className="review-summary-strip">
                 <Metric title="Risk" value={activeChange.risk} />
                 <Metric title="Priority" value={activeChange.priority} />
                 <Metric title="Status" value={activeChange.status} />
               </div>
-              <div className="context-card">
-                <p className="context-label">Parent source file</p>
-                <strong>{activeChange.sourceFileName || 'Not recorded'}</strong>
-                <p>{activeChildren.length} extracted records currently linked to this file.</p>
-              </div>
-              <div className="fact-grid">
-                <Fact label="Discipline" value={activeChange.engineeringDiscipline || 'Pending'} />
-                <Fact label="Format" value={activeChange.format || 'Pending'} />
-                <Fact label="Industry" value={activeChange.industry || 'Pending'} />
-                <Fact label="Symbol family" value={activeChange.symbolFamily || 'Pending'} />
-                <Fact label="Process category" value={activeChange.processCategory || 'Pending'} />
-                <Fact label="Equipment class" value={activeChange.parentEquipmentClass || 'Pending'} />
-                <Fact label="Standards source" value={activeChange.standardsSource || 'Pending'} />
-                <Fact label="Provenance class" value={activeChange.libraryProvenanceClass || 'Pending'} />
+              <div className="copy-block decision-block">
+                <h4>Case decision</h4>
+                {activeChange.latestDecision ? (
+                  <div className="context-card">
+                    <p className="context-label">Latest recorded decision</p>
+                    <strong>{activeChange.latestDecision.decisionCode.replaceAll('_', ' ')}</strong>
+                    <p>
+                      {activeChange.latestDecision.deciderName} · {activeChange.latestDecision.createdAt}
+                    </p>
+                  </div>
+                ) : null}
+                <div className="review-decision-actions" role="group" aria-label="Case decision options">
+                  {REVIEW_DECISION_OPTIONS.map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={`action-button secondary compact ${getCaseReview(activeChange.id).decisionCode === value ? 'selected' : ''}`}
+                      onClick={() => updateCaseReview(activeChange.id, { decisionCode: value })}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <label className="field">
+                  <span>Reviewer name</span>
+                  <input
+                    value={getCaseReview(activeChange.id).deciderName}
+                    onChange={(event) => updateCaseReview(activeChange.id, { deciderName: event.target.value })}
+                    placeholder="SME reviewer"
+                  />
+                </label>
+                <label className="field">
+                  <span>Case review comment</span>
+                  <textarea
+                    rows="4"
+                    value={sourceComment}
+                    onChange={(event) => updateSourceComment(activeChange.id, event.target.value)}
+                    placeholder="Capture context that applies to the whole source file."
+                  />
+                </label>
+                <label className="field">
+                  <span>Decision note</span>
+                  <textarea
+                    rows="4"
+                    value={getCaseReview(activeChange.id).decisionNote}
+                    onChange={(event) => updateCaseReview(activeChange.id, { decisionNote: event.target.value })}
+                    placeholder="Summarize the SME decision and any follow-up instructions."
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="action-button primary"
+                  disabled={submitState.pending || workspaceState.mode !== 'live'}
+                  onClick={submitReviewDecision}
+                >
+                  {submitState.pending ? 'Recording…' : 'Record Review Decision'}
+                </button>
+                {submitState.message ? <p className="success-text">{submitState.message}</p> : null}
+                {submitState.error ? <p className="error-text">{submitState.error}</p> : null}
+                {workspaceState.mode !== 'live' ? (
+                  <p className="daisy-empty-text">Decision persistence requires the live Symgov API.</p>
+                ) : null}
               </div>
               {classificationAliases.length ? (
                 <div className="copy-block">
@@ -1114,70 +1580,6 @@ function ReviewsPage() {
                   </ul>
                 </div>
               ) : null}
-              <label className="field">
-                <span>Case review comment</span>
-                <textarea
-                  rows="6"
-                  value={sourceComment}
-                  onChange={(event) => updateSourceComment(activeChange.id, event.target.value)}
-                  placeholder="Capture context that applies to the whole source file, such as sheet-level quality issues, missing labels, or review guidance for the extracted set."
-                />
-              </label>
-              <div className="copy-block decision-block">
-                <h4>Decision</h4>
-                {activeChange.latestDecision ? (
-                  <div className="context-card">
-                    <p className="context-label">Latest recorded decision</p>
-                    <strong>{activeChange.latestDecision.decisionCode.replaceAll('_', ' ')}</strong>
-                    <p>
-                      {activeChange.latestDecision.deciderName} · {activeChange.latestDecision.createdAt}
-                    </p>
-                  </div>
-                ) : null}
-                <label className="field">
-                  <span>Case decision</span>
-                  <select
-                    value={getCaseReview(activeChange.id).decisionCode}
-                    onChange={(event) => updateCaseReview(activeChange.id, { decisionCode: event.target.value })}
-                  >
-                    {REVIEW_DECISION_OPTIONS.map(([value, label]) => (
-                      <option key={value} value={value}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span>Reviewer name</span>
-                  <input
-                    value={getCaseReview(activeChange.id).deciderName}
-                    onChange={(event) => updateCaseReview(activeChange.id, { deciderName: event.target.value })}
-                    placeholder="SME reviewer"
-                  />
-                </label>
-                <label className="field">
-                  <span>Decision note</span>
-                  <textarea
-                    rows="4"
-                    value={getCaseReview(activeChange.id).decisionNote}
-                    onChange={(event) => updateCaseReview(activeChange.id, { decisionNote: event.target.value })}
-                    placeholder="Summarize the SME decision and any follow-up instructions."
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="action-button primary"
-                  disabled={submitState.pending || workspaceState.mode !== 'live'}
-                  onClick={submitReviewDecision}
-                >
-                  {submitState.pending ? 'Recording…' : 'Record Review Decision'}
-                </button>
-                {submitState.message ? <p className="success-text">{submitState.message}</p> : null}
-                {submitState.error ? <p className="error-text">{submitState.error}</p> : null}
-                {workspaceState.mode !== 'live' ? (
-                  <p className="daisy-empty-text">Decision persistence requires the live Symgov API.</p>
-                ) : null}
-              </div>
               <div className="copy-block">
                 <h4>{workspaceState.mode === 'live' ? 'Review notes' : 'Linked clarifications'}</h4>
                 <ul className="clean-list">

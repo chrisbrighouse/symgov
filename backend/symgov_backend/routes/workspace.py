@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 
 from ..dependencies import get_db_session
 from ..models import (
+    AgentDefinition,
+    AgentQueueItem,
     Attachment,
     AuditEvent,
     ClassificationRecord,
@@ -22,8 +24,11 @@ from ..models import (
     ReviewCaseAction,
     ValidationReport,
 )
+from ..publication_handoff import execute_publication_handoff
 from ..runtime import download_object_bytes
 from ..schemas import (
+    WorkspaceAgentQueueItemListResponse,
+    WorkspaceAgentQueueItemResponse,
     WorkspaceDaisyAssignmentProposalResponse,
     WorkspaceDaisyEvidenceRequestResponse,
     WorkspaceDaisyReportListResponse,
@@ -159,6 +164,29 @@ def build_preview_url(review_case_id: str, object_key: str | None) -> str | None
     if not object_key:
         return None
     return f"/api/v1/workspace/review-cases/{review_case_id}/children/preview?object_key={quote(object_key, safe='')}"
+
+
+def build_source_preview_url(review_case_id: str, object_key: str | None) -> str | None:
+    if not object_key:
+        return None
+    return f"/api/v1/workspace/review-cases/{review_case_id}/source/preview"
+
+
+def resolve_source_object_key(validation_report: ValidationReport) -> str | None:
+    normalized = validation_report.normalized_payload_json or {}
+    return (
+        normalized.get("raw_object_key")
+        or normalized.get("origin_object_key")
+        or normalized.get("object_key")
+        or (normalized.get("single_symbol_candidate") or {}).get("raw_object_key")
+        or (validation_report.report_json or {}).get("raw_object_key")
+        or (validation_report.report_json or {}).get("origin_object_key")
+    )
+
+
+def resolve_source_object_key_from_intake(intake_record: IntakeRecord) -> str | None:
+    normalized = intake_record.normalized_submission_json or {}
+    return intake_record.raw_object_key or normalized.get("raw_object_key") or normalized.get("origin_object_key")
 
 
 def build_children(validation_report: ValidationReport, review_case_id: str, source_file_name: str) -> list[WorkspaceReviewChildResponse]:
@@ -347,6 +375,7 @@ def build_validation_workspace_item(
     classification_record: ClassificationRecord | None = None,
 ) -> WorkspaceReviewCaseResponse:
     source_file_name = resolve_source_file_name(validation_report)
+    source_object_key = resolve_source_object_key(validation_report)
     children = build_children(validation_report, str(review_case.id), source_file_name)
     primary_symbol_id = children[0].proposedSymbolId if children else str(
         (intake_record.normalized_submission_json or {}).get("candidate_symbol_id") or "PNG-REVIEW"
@@ -372,6 +401,8 @@ def build_validation_workspace_item(
         "validationStatus": validation_report.validation_status,
         "defectCount": validation_report.defect_count,
         "sourceFileName": source_file_name,
+        "sourceObjectKey": source_object_key,
+        "sourcePreviewUrl": build_source_preview_url(str(review_case.id), source_object_key),
         "intakeRecordId": str(intake_record.id),
         "childCount": len(children),
         "children": children,
@@ -386,6 +417,7 @@ def build_provenance_workspace_item(
     classification_record: ClassificationRecord | None = None,
 ) -> WorkspaceReviewCaseResponse:
     source_file_name = resolve_source_file_name_from_intake(intake_record)
+    source_object_key = resolve_source_object_key_from_intake(intake_record)
     normalized = intake_record.normalized_submission_json or {}
     opened_at = review_case.opened_at if isinstance(review_case.opened_at, datetime) else datetime.now(timezone.utc)
     due = opened_at + timedelta(days=2)
@@ -409,11 +441,57 @@ def build_provenance_workspace_item(
         "validationStatus": "classification_pending",
         "defectCount": len(((provenance_assessment.report_json or {}).get("defects") or [])),
         "sourceFileName": source_file_name,
+        "sourceObjectKey": source_object_key,
+        "sourcePreviewUrl": build_source_preview_url(str(review_case.id), source_object_key),
         "intakeRecordId": str(intake_record.id),
         "childCount": 0,
         "children": [],
     }
     return apply_classification_fields(payload, classification_record)
+
+
+@router.get(
+    "/agent-queue-items",
+    response_model=WorkspaceAgentQueueItemListResponse,
+    responses={500: {"description": "Server error"}},
+)
+@legacy_router.get(
+    "/workspace/agent-queue-items",
+    response_model=WorkspaceAgentQueueItemListResponse,
+    include_in_schema=False,
+)
+def list_workspace_agent_queue_items(
+    limit: int = Query(default=200, ge=1, le=500),
+    session: Session = Depends(get_db_session),
+) -> WorkspaceAgentQueueItemListResponse:
+    rows = session.execute(
+        select(AgentQueueItem, AgentDefinition)
+        .join(AgentDefinition, AgentDefinition.id == AgentQueueItem.agent_id)
+        .order_by(AgentQueueItem.created_at.desc())
+        .limit(limit)
+    ).all()
+
+    items = [
+        WorkspaceAgentQueueItemResponse(
+            id=str(queue_item.id),
+            agentId=definition.slug,
+            agentName=definition.display_name,
+            queueFamily=definition.queue_family,
+            sourceType=queue_item.source_type,
+            sourceId=str(queue_item.source_id),
+            status=queue_item.status,
+            priority=queue_item.priority,
+            payload=queue_item.payload_json or {},
+            confidence=float(queue_item.confidence) if queue_item.confidence is not None else None,
+            escalationReason=queue_item.escalation_reason,
+            createdAt=isoformat_utc(queue_item.created_at),
+            startedAt=isoformat_utc(queue_item.started_at) if queue_item.started_at else None,
+            completedAt=isoformat_utc(queue_item.completed_at) if queue_item.completed_at else None,
+        )
+        for queue_item, definition in rows
+    ]
+
+    return WorkspaceAgentQueueItemListResponse(items=items)
 
 
 @router.get(
@@ -618,6 +696,22 @@ def create_workspace_review_decision(
     )
     session.commit()
 
+    if decision_code == "approve":
+        execute_publication_handoff(
+            session,
+            review_case_id=review_case.id,
+            decision_id=decision.id,
+        )
+        refreshed_actions = (
+            session.query(ReviewCaseAction)
+            .filter(ReviewCaseAction.decision_id == decision.id)
+            .order_by(ReviewCaseAction.created_at.asc())
+            .all()
+        )
+        if refreshed_actions:
+            actions = refreshed_actions
+        session.refresh(review_case)
+
     return WorkspaceReviewDecisionResponse(
         reviewCaseId=str(review_case.id),
         decision=build_decision_summary(decision),
@@ -691,6 +785,34 @@ def get_workspace_review_child_preview(
     matching_child = next((child for child in children if child.attachmentObjectKey == object_key), None)
     if matching_child is None:
         raise HTTPException(status_code=404, detail="Review child preview not found.")
+
+    attachment = session.execute(select(Attachment).where(Attachment.object_key == object_key)).scalar_one_or_none()
+    payload = download_object_bytes(object_key=object_key, env_file=str(get_settings().storage_env_file))
+    media_type = attachment.content_type if attachment is not None else payload["content_type"]
+    return Response(content=payload["payload"], media_type=media_type)
+
+
+@router.get("/review-cases/{review_case_id}/source/preview")
+def get_workspace_review_source_preview(
+    review_case_id: str,
+    session: Session = Depends(get_db_session),
+) -> Response:
+    parsed_case_id = parse_review_case_id(review_case_id)
+    review_case = session.get(ReviewCase, parsed_case_id)
+    if review_case is None:
+        raise HTTPException(status_code=404, detail="Review case not found.")
+
+    object_key = None
+    if review_case.source_entity_type == "validation_report":
+        validation_report = session.get(ValidationReport, review_case.source_entity_id)
+        object_key = resolve_source_object_key(validation_report) if validation_report is not None else None
+    elif review_case.source_entity_type == "provenance_assessment":
+        provenance_assessment = session.get(ProvenanceAssessment, review_case.source_entity_id)
+        intake_record = session.get(IntakeRecord, provenance_assessment.intake_record_id) if provenance_assessment is not None else None
+        object_key = resolve_source_object_key_from_intake(intake_record) if intake_record is not None else None
+
+    if not object_key:
+        raise HTTPException(status_code=404, detail="Review source preview not found.")
 
     attachment = session.execute(select(Attachment).where(Attachment.object_key == object_key)).scalar_one_or_none()
     payload = download_object_bytes(object_key=object_key, env_file=str(get_settings().storage_env_file))

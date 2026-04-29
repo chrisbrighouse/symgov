@@ -95,6 +95,12 @@ Current external submission API:
 - versioned health route: `GET /api/v1/health`
 - compatibility alias: `GET /api/health`
 
+Current Workspace APIs:
+
+- versioned agent queue route: `GET /api/v1/workspace/agent-queue-items`
+- compatibility alias: `GET /api/workspace/agent-queue-items`
+- review cases and Daisy reports remain the other live Workspace dashboard inputs
+
 Planned API growth boundaries:
 
 - `/api/v1/public`

@@ -38,7 +38,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - a glass-morphism app shell with a full-width light top banner, simple engineering-symbol logo mark, and version/date stamping
 - primary banner navigation for `Submissions`, `Reviews`, and `Standards`, with the cog icon linking to the internal Workspace view
 - an admin Workspace processing dashboard headed `ADMIN WORKSPACE` / `Activity Monitors`, with eight compact vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed
-- an SME Reviews surface with Daisy coordination, source context, filters, latest decision state, and per-child review actions
+- an SME Reviews workbench headed `Daisy-coordinated Reviews`, with queue navigation, visual source evidence, classification/source context, visible case actions, comments, latest decision state, Daisy coordination, and per-child review actions
 - a Standards home that keeps browse, latest approved detail, and clarification context together
 - a live submission route that probes the backend and submits through the current public Symgov API
 - route-safe SPA navigation using hash routes so static hosting remains simple
@@ -47,16 +47,18 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 
 ## Frontend notes
 
-- Standards, Workspace, and Reviews surface data is currently seeded in the frontend where live APIs are still pending, with Reviews now also using live review-case and Daisy coordination data when the API is configured
-- The Workspace monitor currently combines seeded `processingActivity` with existing live/fallback Review and Daisy APIs; a future generic `agent_queue_items` endpoint should make every agent lane fully live.
+- Standards and Reviews retain seeded fallback data for local/static development where live APIs are still pending or unavailable.
+- The Workspace monitor now polls live agent queue items, review cases, and Daisy coordination reports every five seconds while the Workspace route is mounted and the browser tab is visible, using `GET /api/v1/workspace/agent-queue-items` plus the existing review and Daisy endpoints.
+- Workspace polling uses no-store timestamped requests, stops when the tab is hidden, and refreshes immediately when the tab becomes visible again.
+- The Workspace monitor retains seeded `processingActivity` fallback when no API root is configured or the live queue endpoint is unavailable.
 - The Standards submission route now calls the live Symgov backend instead of using demo-only local submission behavior
 - Guided lookup is intentionally constrained to published approved records
-- Review decisions now have source-level backend support through durable `human_review_decisions` and `review_case_actions` records plus `POST /api/v1/workspace/review-cases/{id}/decisions`. The public API process must be restarted or redeployed before this endpoint is available on the live VPS route.
+- Review decisions now have source-level backend support through durable `human_review_decisions` and `review_case_actions` records plus `POST /api/v1/workspace/review-cases/{id}/decisions`. Review-case source previews are exposed through `sourcePreviewUrl` and `GET /api/v1/workspace/review-cases/{review_case_id}/source/preview`, and these routes are available through the live public API.
 - Reviews now has a live Daisy coordination read path:
   - `GET /api/v1/workspace/daisy/reports`
-  - the Reviews support rail now renders Daisy coordination output for the active review case when present
+  - the Reviews decision rail now renders Daisy coordination output for the active review case when present
   - if no Daisy report exists yet for a case, the UI shows an explicit empty state instead of silently omitting coordination status
-- Reviews now includes SME filters for stage, reviewer, priority, and action type, and the support rail can record approve, reject, request changes, request more evidence, rename/classify, duplicate, delete, and defer outcomes when the live decision endpoint is available.
+- Reviews now includes SME filters for stage, reviewer, priority, and action type, and the decision rail can record approve, reject, request changes, request more evidence, rename/classify, duplicate, delete, and defer outcomes when the live decision endpoint is available.
 - Focused routes remain available for audit, per-symbol reading, downloads, and guided lookup
 
 ## Frontend deployment notes
@@ -65,11 +67,10 @@ Supporting routes still exist for focused tasks, but the product intent is now e
   - `frontend/index.html`
   - `frontend/src/`
   - `frontend/public/`
-- In the active served workspace, the workspace root acts as the published static target and receives:
+- The workspace root now acts as the published static target and receives:
   - `index.html`
   - `assets/`
   - `submit/index.html`
-- The standalone GitHub-facing repo keeps source and support files only; generated root static output such as `/index.html` and `/assets/` is excluded.
 - Production assets are emitted into `dist/` with `npm run build`.
 - Use `npm run build:publish` to build and sync the current `dist/` output into the published workspace root.
 - Until that build output is intentionally published on the VPS, the public site may still reflect an older bundle than the local workspace source.
@@ -79,7 +80,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - A direct static submission entrypoint is also available at:
   - `https://apps.chrisbrighouse.com/apps/workspace/symgov/submit/`
 - The submission route now includes a frontend build stamp exposed through `meta[name="symgov-build"]` so the served asset version can be confirmed quickly after deploys.
-- The current frontend build/version display is `v0.1.4 · 2026-04-28.01`; the visible version pill intentionally omits the word `Build`.
+- The current frontend build/version display is `v0.1.5 · 2026-04-29.01`; the visible version pill intentionally omits the word `Build`.
 - Frontend API targeting now supports:
   - `window.SYMGOV_API_ROOT`
   - `window.SYMGOV_API_BASE_URL`
@@ -93,7 +94,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - Static frontend changes only become visible on the public site after the built files under `dist/` are published into the workspace root static target.
 - When forcing a visible frontend refresh on the published site, bump the build marker and republish the generated asset filenames from `dist/assets/`.
 - The Phase 3 Reviews frontend has been built and published to the static root used by `https://apps.chrisbrighouse.com/apps/workspace/symgov/`.
-- The Phase 3 database migration has been applied, but the live public API still needs a backend process restart/redeploy to load the new review-decision route.
+- The live public API currently exposes the Workspace queue, review-case, Daisy report, and review-decision routes used by the static frontend.
 
 ## Agent implementation status
 
@@ -111,7 +112,7 @@ The product docs now also include the first agentization slice for Symgov:
 - Daisy can be created automatically from persisted `review_cases` emitted by `Vlad` or `Tracy`
 - Daisy writes local `review_coordination_reports` artifacts under `/data/.openclaw/workspaces/daisy/runtime`
 - the backend exposes those reports through `/api/v1/workspace/daisy/reports`
-- the Reviews UI now shows Daisy coordination status, reviewer assignment proposals, stage-transition proposals, contributor evidence requests, latest recorded decision state, and a reviewer decision panel for the active case
+- the Reviews UI now shows Daisy coordination status, reviewer assignment proposals, stage-transition proposals, contributor evidence requests, visual source evidence, latest recorded decision state, and a reviewer decision panel for the active case
 - durable post-review decisions and follow-on action records have a first backend implementation:
   - migration `20260426_0004_human_review_decisions.py`
   - ORM models `HumanReviewDecision` and `ReviewCaseAction`

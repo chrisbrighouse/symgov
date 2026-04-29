@@ -38,7 +38,7 @@
 
 ## Workspace View components
 
-- `WorkspaceTitlebar` with `ADMIN WORKSPACE` / `Activity Monitors`, search, and live/seeded feed status
+- `WorkspaceTitlebar` with `ADMIN WORKSPACE` / `Activity Monitors`, search, visible last refresh time, and `Auto-refresh 5s` status that only polls while the Workspace page is mounted and the tab is visible
 - `MonitorSummaryRow` with compact counts for visible, active, escalated, and published activity
 - `QueueMonitorBoard` with eight vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed
 - `MonitorColumn` with count, stage label, scrollable card stack, and compact footer status
@@ -59,6 +59,30 @@
 - Search by batch, file, agent, status, or case second
 - Approve or request changes third
 - Use focused routes for audit or full record inspection when needed
+
+## Reviews View components
+
+- `ReviewFilterGrid` for stage, reviewer, priority, action, and search-based triage
+- `ReviewQueuePane` for Daisy-visible cases, compact queue cards, and previous/next movement through filtered items
+- `ReviewSourceVisual` for source-image evidence, child-preview fallback, and glyph fallback
+- `ReviewFocusPane` for source facts, classification facts, Libby summary, and child-symbol decision cards
+- `SplitReviewCard` for per-child preview, metadata, action buttons, reviewer note, and requested detail
+- `ReviewDecisionPane` for case-level action buttons, reviewer identity, case comment, decision note, latest decision, submit state, review notes, and Daisy coordination
+
+### Reviews desktop grid
+
+- Three-column reviewer workbench
+- Left: review queue
+- Center: visual evidence, facts, and child-symbol decisions
+- Right: sticky decision rail
+- Collapse to a single column on tablet and mobile with queue, review item, then decision order
+
+### Reviews interaction priority
+
+- Pick or advance to a review case first
+- Inspect the visual evidence and classification/source facts second
+- Record child-symbol actions and notes third
+- Record the case decision and Daisy-aware comments without leaving the workbench
 
 ## Minimal layout guidance
 
