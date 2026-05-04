@@ -17,7 +17,16 @@
       "slack"
     ]
   },
-  "bindings": [],
+  "bindings": [
+    {
+      "type": "route",
+      "agentId": "libby",
+      "match": {
+        "channel": "telegram",
+        "accountId": "7643191699"
+      }
+    }
+  ],
   "agents": [
     {
       "id": "scott",

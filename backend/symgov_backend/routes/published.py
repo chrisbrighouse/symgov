@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db_session
+from ..models import Attachment
+from ..runtime import download_object_bytes
+from ..settings import get_settings
 
 
 router = APIRouter(prefix="/published", tags=["published"])
@@ -75,6 +78,9 @@ def published_symbol_row(row) -> dict:
         "keywords": keywords,
         "downloads": downloads,
         "sortOrder": row.sort_order,
+        "previewUrl": f"/api/v1/published/symbols/{row.slug}/preview"
+        if payload.get("source_object_key")
+        else None,
         "payload": payload,
     }
 
@@ -148,6 +154,34 @@ def get_published_symbol(symbol_id: str, session: Session = Depends(get_db_sessi
     if not rows:
         raise HTTPException(status_code=404, detail="Published symbol was not found.")
     return {"item": published_symbol_row(rows[0])}
+
+
+@router.get("/symbols/{symbol_id}/preview")
+@legacy_router.get("/published/symbols/{symbol_id}/preview", include_in_schema=False)
+def get_published_symbol_preview(symbol_id: str, session: Session = Depends(get_db_session)) -> Response:
+    rows = session.execute(
+        text(
+            PUBLISHED_SYMBOLS_SQL
+            + """
+            AND (gs.slug = :symbol_id OR gs.id::text = :symbol_id)
+            ORDER BY pp.effective_date DESC, pk.effective_date DESC
+            LIMIT 1
+            """
+        ),
+        {"symbol_id": symbol_id},
+    ).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Published symbol was not found.")
+
+    payload_json = rows[0].payload_json or {}
+    object_key = payload_json.get("source_object_key")
+    if not object_key:
+        raise HTTPException(status_code=404, detail="Published symbol preview was not found.")
+
+    attachment = session.query(Attachment).filter(Attachment.object_key == object_key).one_or_none()
+    payload = download_object_bytes(object_key=object_key, env_file=str(get_settings().storage_env_file))
+    media_type = attachment.content_type if attachment is not None else payload["content_type"]
+    return Response(content=payload["payload"], media_type=media_type)
 
 
 @router.get("/pages/{page_code}")

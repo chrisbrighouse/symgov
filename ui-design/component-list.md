@@ -42,7 +42,7 @@
 - `MonitorSummaryRow` with compact counts for visible, active, escalated, and published activity
 - `QueueMonitorBoard` with eight vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed
 - `MonitorColumn` with count, stage label, scrollable card stack, and compact footer status
-- `MonitorCard` with label, truncated title, source metadata, status, and priority dot
+- `MonitorCard` with London-local `HH:MM DDMMMYY` time/date label where live timestamps are available, truncated title, source metadata, status, and priority dot. Agent queue cards use `createdAt`; Human Review cards use review `openedAt`, including individual split-item review records.
 - `GovernedRecordRoute`, `AuditRoute`, and `PublishRoute` for focused follow-through
 
 ### Workspace desktop grid
@@ -66,8 +66,10 @@
 - `ReviewQueuePane` for Daisy-visible cases, compact queue cards, and previous/next movement through filtered items
 - `ReviewSourceVisual` for source-image evidence, child-preview fallback, and glyph fallback
 - `ReviewFocusPane` for source facts, classification facts, Libby summary, and child-symbol decision cards
-- `SplitReviewCard` for per-child preview, metadata, action buttons, reviewer note, and requested detail
-- `ReviewDecisionPane` for case-level action buttons, reviewer identity, case comment, decision note, latest decision, submit state, review notes, and Daisy coordination
+- `SplitReviewCard` for per-child preview, metadata, open review status, action buttons, reviewer note, and requested detail
+- `ReviewDecisionPane` for case-level action buttons, reviewer identity, case comment, decision note, latest decision, submit state, review notes, and Daisy coordination on non-split cases.
+- For raster split cases, `ReviewDecisionPane` becomes a simpler `Process Symbols` panel with Ready / Waiting / Total counts, selected child-action counts, and a `Process Selected Symbols` button that stays disabled until at least one child has a non-pending decision. It does not show whole-file case action controls because split batches can contain mixed outcomes.
+- `ReviewDecisionPane` should surface the recorded downstream action after submit: Rupert handoff for approval, Libby follow-up for non-approval, and later Vlad graphic-change routing only when Libby requests it
 
 ### Reviews desktop grid
 
@@ -82,7 +84,8 @@
 - Pick or advance to a review case first
 - Inspect the visual evidence and classification/source facts second
 - Record child-symbol actions and notes third
-- Record the case decision and Daisy-aware comments without leaving the workbench
+- For raster split cases, process any decided child-symbol subset without deciding the whole parent sheet.
+- For non-split cases, record the case decision and Daisy-aware comments without leaving the workbench.
 
 ## Minimal layout guidance
 

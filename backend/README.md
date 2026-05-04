@@ -100,6 +100,12 @@ Current Workspace APIs:
 - versioned agent queue route: `GET /api/v1/workspace/agent-queue-items`
 - compatibility alias: `GET /api/workspace/agent-queue-items`
 - review cases and Daisy reports remain the other live Workspace dashboard inputs
+- review decisions are recorded through `POST /api/v1/workspace/review-cases/{id}/decisions`
+- review-decision routing now uses:
+  - `approve` -> Rupert publication handoff
+  - every non-approval decision -> Libby review follow-up handoff
+  - Libby -> Vlad -> Libby for physical symbol graphic changes
+  - Libby -> Daisy for re-review after follow-up is consolidated
 
 Planned API growth boundaries:
 
@@ -153,6 +159,10 @@ Current runner bridge notes:
 - the same audit/reconcile flow now also owns top-level OpenClaw `bindings[]` so future routing rules can survive upgrades
 - `manage_symgov.py serve-api` now runs the FastAPI/Uvicorn server shell for Symgov APIs
 - the current `Scott`, `Vlad`, and `Tracy` file-backed runners now support `--persist-db` to mirror queue execution into PostgreSQL while keeping the local JSON runtime records
+- Libby now supports `review_decision_follow_up` queue items for non-approval review outcomes and `vlad_graphic_update_completed` queue items for Vlad returns
+- Vlad now supports `symbol_graphic_change_request` queue items and returns graphic-change results to Libby before Daisy re-review
+- raster split child review state now persists in `review_split_items` via Alembic revision `20260503_0005`; split items are materialized from Vlad `derivative_manifest` children, exposed by `GET /api/v1/workspace/review-cases` as first-class `split_item` human-review records while open, and processed through `POST /api/v1/workspace/review-cases/{id}/split-items/process-decisions`
+- split processing currently routes approved children to Rupert and every non-approval child to Libby, while pending or returned children stay open as individual split-item review records
 - the current verified smoke path is `Scott` intake -> downstream enqueue -> `Vlad` validation + `Tracy` provenance, with successful PostgreSQL persistence and successful MinIO/database health checks
 - the external submission API now uses that same live path for uploaded symbol files, starting with `Scott` intake and preserving submitter, original filename, candidate title, batch-summary, per-file-note, attachment, and object-key context in the normalized submission payload
 - current host-level dependencies installed outside `/data/.openclaw` for upgrade resilience include Debian `ripgrep` at `/usr/bin/rg` and Debian `python3-pil` at `/usr/lib/python3/dist-packages/PIL`

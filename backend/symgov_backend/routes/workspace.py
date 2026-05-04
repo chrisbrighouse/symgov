@@ -22,10 +22,12 @@ from ..models import (
     ProvenanceAssessment,
     ReviewCase,
     ReviewCaseAction,
+    ReviewSplitItem,
     ValidationReport,
 )
 from ..publication_handoff import execute_publication_handoff
-from ..runtime import download_object_bytes
+from ..review_followup_handoff import execute_review_followup_handoff
+from ..runtime import coerce_uuid, download_object_bytes
 from ..schemas import (
     WorkspaceAgentQueueItemListResponse,
     WorkspaceAgentQueueItemResponse,
@@ -41,6 +43,9 @@ from ..schemas import (
     WorkspaceReviewChildResponse,
     WorkspaceReviewDecisionRequest,
     WorkspaceReviewDecisionResponse,
+    WorkspaceSplitReviewProcessItemResponse,
+    WorkspaceSplitReviewProcessRequest,
+    WorkspaceSplitReviewProcessResponse,
 )
 from ..settings import get_settings
 
@@ -48,6 +53,7 @@ from ..settings import get_settings
 router = APIRouter(prefix="/workspace", tags=["workspace"])
 legacy_router = APIRouter(tags=["workspace"])
 DAISY_RUNTIME_REPORT_ROOT = Path("/data/.openclaw/workspaces/daisy/runtime/review_coordination_reports")
+OPEN_SPLIT_ITEM_STATUSES = ("awaiting_decision", "returned_for_review")
 DECISION_TRANSITIONS = {
     "approve": {
         "to_stage": "ready_for_publication_handoff",
@@ -57,63 +63,67 @@ DECISION_TRANSITIONS = {
         "close": False,
     },
     "reject": {
-        "to_stage": "rejected",
-        "action_code": "close_as_rejected",
-        "target_agent_slug": None,
-        "target_stage": None,
-        "close": True,
+        "to_stage": "libby_disposition_review",
+        "action_code": "route_review_follow_up_to_libby",
+        "target_agent_slug": "libby",
+        "target_stage": "disposition_review",
+        "close": False,
     },
     "request_changes": {
         "to_stage": "changes_requested",
-        "action_code": "request_changes",
-        "target_agent_slug": None,
+        "action_code": "route_review_follow_up_to_libby",
+        "target_agent_slug": "libby",
         "target_stage": "review_follow_up",
         "close": False,
     },
     "more_evidence": {
         "to_stage": "waiting_for_evidence",
-        "action_code": "request_contributor_evidence",
-        "target_agent_slug": None,
+        "action_code": "route_review_follow_up_to_libby",
+        "target_agent_slug": "libby",
         "target_stage": "evidence_collection",
         "close": False,
     },
     "rename_classify": {
         "to_stage": "classification_change_requested",
-        "action_code": "request_classification_update",
+        "action_code": "route_review_follow_up_to_libby",
         "target_agent_slug": "libby",
         "target_stage": "classification_review",
         "close": False,
     },
     "duplicate": {
-        "to_stage": "duplicate_closed",
-        "action_code": "close_as_duplicate",
-        "target_agent_slug": None,
-        "target_stage": None,
-        "close": True,
+        "to_stage": "libby_duplicate_review",
+        "action_code": "route_review_follow_up_to_libby",
+        "target_agent_slug": "libby",
+        "target_stage": "duplicate_resolution",
+        "close": False,
     },
     "deleted": {
-        "to_stage": "deleted_closed",
-        "action_code": "delete_proposed_child",
-        "target_agent_slug": None,
-        "target_stage": None,
-        "close": True,
+        "to_stage": "libby_deletion_review",
+        "action_code": "route_review_follow_up_to_libby",
+        "target_agent_slug": "libby",
+        "target_stage": "deletion_review",
+        "close": False,
     },
     "defer": {
         "to_stage": "deferred",
-        "action_code": "defer_review_case",
-        "target_agent_slug": None,
+        "action_code": "route_review_follow_up_to_libby",
+        "target_agent_slug": "libby",
         "target_stage": "deferred",
         "close": False,
     },
     "child_actions_submitted": {
         "to_stage": "review_actions_recorded",
-        "action_code": "record_child_review_actions",
-        "target_agent_slug": None,
+        "action_code": "route_review_follow_up_to_libby",
+        "target_agent_slug": "libby",
         "target_stage": "review_follow_up",
         "close": False,
     },
 }
-CHILD_ACTION_CODES = set(DECISION_TRANSITIONS)
+CHILD_ACTION_ALIASES = {
+    "approved": "approve",
+    "rejected": "reject",
+}
+CHILD_ACTION_CODES = set(DECISION_TRANSITIONS) | set(CHILD_ACTION_ALIASES)
 
 
 def isoformat_utc(value: datetime) -> str:
@@ -125,6 +135,86 @@ def parse_review_case_id(value: str) -> uuid.UUID:
         return uuid.UUID(value)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Review case not found.") from exc
+
+
+def normalize_child_action(action: str) -> str:
+    value = action.strip()
+    return CHILD_ACTION_ALIASES.get(value, value)
+
+
+def intake_id_for_review_case(
+    session: Session,
+    review_case: ReviewCase,
+) -> uuid.UUID | None:
+    if review_case.source_entity_type == "validation_report":
+        validation_report = session.get(ValidationReport, review_case.source_entity_id)
+        if validation_report is not None and validation_report.source_type == "intake_record":
+            return validation_report.source_id
+        return None
+    if review_case.source_entity_type == "provenance_assessment":
+        provenance_assessment = session.get(ProvenanceAssessment, review_case.source_entity_id)
+        return provenance_assessment.intake_record_id if provenance_assessment is not None else None
+    return None
+
+
+def open_split_review_intake_ids(session: Session) -> set[uuid.UUID]:
+    rows = session.execute(
+        select(ReviewCase, ValidationReport)
+        .join(
+            ValidationReport,
+            and_(
+                ReviewCase.source_entity_type == "validation_report",
+                ReviewCase.source_entity_id == ValidationReport.id,
+            ),
+        )
+        .where(ReviewCase.closed_at.is_(None))
+        .where(ReviewCase.current_stage == "raster_split_review")
+        .where(ValidationReport.source_type == "intake_record")
+    ).all()
+    return {validation_report.source_id for _, validation_report in rows}
+
+
+def suppress_parent_sheet_review(
+    review_case: ReviewCase,
+    intake_record_id: uuid.UUID | None,
+    split_intake_ids: set[uuid.UUID],
+) -> bool:
+    return (
+        review_case.source_entity_type == "provenance_assessment"
+        and review_case.current_stage == "classification_review"
+        and intake_record_id in split_intake_ids
+    )
+
+
+def close_parent_sheet_reviews_for_split(
+    session: Session,
+    *,
+    split_review_case: ReviewCase,
+    closed_at: datetime,
+) -> list[str]:
+    intake_record_id = intake_id_for_review_case(session, split_review_case)
+    if intake_record_id is None:
+        return []
+
+    closed_ids = []
+    rows = session.execute(
+        select(ReviewCase, ProvenanceAssessment)
+        .join(
+            ProvenanceAssessment,
+            and_(
+                ReviewCase.source_entity_type == "provenance_assessment",
+                ReviewCase.source_entity_id == ProvenanceAssessment.id,
+            ),
+        )
+        .where(ReviewCase.closed_at.is_(None))
+        .where(ReviewCase.current_stage == "classification_review")
+        .where(ProvenanceAssessment.intake_record_id == intake_record_id)
+    ).all()
+    for review_case, _ in rows:
+        review_case.current_stage = "superseded_by_raster_split"
+        review_case.closed_at = closed_at
+        closed_ids.append(str(review_case.id))
+    return closed_ids
 
 
 def build_review_summary(validation_report: ValidationReport, child_count: int, source_file_name: str) -> str:
@@ -189,7 +279,111 @@ def resolve_source_object_key_from_intake(intake_record: IntakeRecord) -> str | 
     return intake_record.raw_object_key or normalized.get("raw_object_key") or normalized.get("origin_object_key")
 
 
-def build_children(validation_report: ValidationReport, review_case_id: str, source_file_name: str) -> list[WorkspaceReviewChildResponse]:
+def split_child_key(child: dict, proposed_symbol_id: str, file_name: str) -> str:
+    return str(child.get("attachment_object_key") or proposed_symbol_id or file_name)
+
+
+def ensure_split_items(
+    session: Session,
+    *,
+    review_case: ReviewCase,
+    validation_report: ValidationReport,
+    source_file_name: str,
+) -> list[ReviewSplitItem]:
+    normalized = validation_report.normalized_payload_json or {}
+    manifest = normalized.get("derivative_manifest") or {}
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    items = []
+    for child in manifest.get("children") or []:
+        object_key = child.get("attachment_object_key")
+        proposed_symbol_id = str(child.get("proposed_symbol_id") or child.get("file_name") or "UNSPECIFIED")
+        file_name = str(child.get("file_name") or "child.png")
+        child_key = split_child_key(child, proposed_symbol_id, file_name)
+        item_id = coerce_uuid(f"review-split-item:{review_case.id}:{child_key}")
+        item = session.get(ReviewSplitItem, item_id)
+        if item is None:
+            item = ReviewSplitItem(
+                id=item_id,
+                review_case_id=review_case.id,
+                child_key=child_key,
+                proposed_symbol_id=proposed_symbol_id,
+                proposed_symbol_name=str(child.get("proposed_symbol_name") or file_name or "Unnamed child"),
+                file_name=file_name,
+                parent_file_name=source_file_name,
+                name_source=child.get("name_source"),
+                attachment_object_key=object_key,
+                status="awaiting_decision",
+                payload_json=child,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(item)
+        else:
+            existing_payload = item.payload_json or {}
+            item.proposed_symbol_id = proposed_symbol_id
+            item.proposed_symbol_name = str(child.get("proposed_symbol_name") or file_name or "Unnamed child")
+            item.parent_file_name = source_file_name
+            item.name_source = child.get("name_source")
+            edited_asset = existing_payload.get("vlad_edited_asset") if isinstance(existing_payload, dict) else None
+            if isinstance(edited_asset, dict) and edited_asset.get("attachment_object_key"):
+                item.file_name = edited_asset.get("file_name") or Path(edited_asset["attachment_object_key"]).name
+                item.attachment_object_key = edited_asset["attachment_object_key"]
+            elif isinstance(edited_asset, dict) and edited_asset.get("object_key"):
+                item.file_name = edited_asset.get("file_name") or Path(edited_asset["object_key"]).name
+                item.attachment_object_key = edited_asset["object_key"]
+            elif item.status == "awaiting_decision":
+                item.file_name = file_name
+                item.attachment_object_key = object_key
+            elif not item.attachment_object_key:
+                item.attachment_object_key = object_key
+            item.payload_json = {**child, **existing_payload}
+            item.updated_at = now
+        items.append(item)
+    if items:
+        session.flush()
+    return items
+
+
+def build_children(
+    session: Session,
+    review_case: ReviewCase,
+    validation_report: ValidationReport,
+    review_case_id: str,
+    source_file_name: str,
+) -> list[WorkspaceReviewChildResponse]:
+    split_items = ensure_split_items(
+        session,
+        review_case=review_case,
+        validation_report=validation_report,
+        source_file_name=source_file_name,
+    )
+    open_statuses = {"awaiting_decision", "returned_for_review"}
+    if split_items:
+        children = []
+        for item in split_items:
+            if item.status not in open_statuses:
+                continue
+            children.append(
+                WorkspaceReviewChildResponse(
+                    id=item.child_key,
+                    proposedSymbolId=item.proposed_symbol_id,
+                    proposedSymbolName=item.proposed_symbol_name,
+                    fileName=item.file_name,
+                    parentFileName=item.parent_file_name,
+                    nameSource=item.name_source,
+                    attachmentObjectKey=item.attachment_object_key,
+                    previewUrl=build_preview_url(review_case_id, item.attachment_object_key),
+                    reviewStatus=item.status,
+                    latestAction=item.latest_action,
+                    latestNote=item.latest_note,
+                    latestDetails=item.latest_details,
+                    processedAt=isoformat_utc(item.processed_at) if item.processed_at else None,
+                    downstreamAgentSlug=item.downstream_agent_slug,
+                    downstreamQueueItemId=item.downstream_queue_item_id,
+                )
+            )
+        return children
+
     normalized = validation_report.normalized_payload_json or {}
     manifest = normalized.get("derivative_manifest") or {}
     children = []
@@ -197,9 +391,10 @@ def build_children(validation_report: ValidationReport, review_case_id: str, sou
         object_key = child.get("attachment_object_key")
         proposed_symbol_id = str(child.get("proposed_symbol_id") or child.get("file_name") or "UNSPECIFIED")
         file_name = str(child.get("file_name") or "child.png")
+        child_key = split_child_key(child, proposed_symbol_id, file_name)
         children.append(
             WorkspaceReviewChildResponse(
-                id=str(object_key or f"{proposed_symbol_id}:{file_name}"),
+                id=child_key,
                 proposedSymbolId=proposed_symbol_id,
                 proposedSymbolName=str(child.get("proposed_symbol_name") or file_name or "Unnamed child"),
                 fileName=file_name,
@@ -369,6 +564,7 @@ def build_daisy_report_item(report_payload: dict, review_case: ReviewCase | None
 
 
 def build_validation_workspace_item(
+    session: Session,
     review_case: ReviewCase,
     validation_report: ValidationReport,
     intake_record: IntakeRecord,
@@ -376,7 +572,7 @@ def build_validation_workspace_item(
 ) -> WorkspaceReviewCaseResponse:
     source_file_name = resolve_source_file_name(validation_report)
     source_object_key = resolve_source_object_key(validation_report)
-    children = build_children(validation_report, str(review_case.id), source_file_name)
+    children = build_children(session, review_case, validation_report, str(review_case.id), source_file_name)
     primary_symbol_id = children[0].proposedSymbolId if children else str(
         (intake_record.normalized_submission_json or {}).get("candidate_symbol_id") or "PNG-REVIEW"
     )
@@ -406,6 +602,69 @@ def build_validation_workspace_item(
         "intakeRecordId": str(intake_record.id),
         "childCount": len(children),
         "children": children,
+    }
+    return apply_classification_fields(payload, classification_record)
+
+
+def build_split_item_workspace_item(
+    session: Session,
+    review_case: ReviewCase,
+    validation_report: ValidationReport,
+    intake_record: IntakeRecord,
+    split_item: ReviewSplitItem,
+    classification_record: ClassificationRecord | None = None,
+) -> WorkspaceReviewCaseResponse:
+    source_file_name = resolve_source_file_name(validation_report)
+    source_object_key = resolve_source_object_key(validation_report)
+    opened_at = split_item.updated_at if isinstance(split_item.updated_at, datetime) else review_case.opened_at
+    due = opened_at + timedelta(days=2)
+    preview_url = build_preview_url(str(review_case.id), split_item.attachment_object_key)
+    child = WorkspaceReviewChildResponse(
+        id=split_item.child_key,
+        proposedSymbolId=split_item.proposed_symbol_id,
+        proposedSymbolName=split_item.proposed_symbol_name,
+        fileName=split_item.file_name,
+        parentFileName=split_item.parent_file_name,
+        nameSource=split_item.name_source,
+        attachmentObjectKey=split_item.attachment_object_key,
+        previewUrl=preview_url,
+        reviewStatus=split_item.status,
+        latestAction=split_item.latest_action,
+        latestNote=split_item.latest_note,
+        latestDetails=split_item.latest_details,
+        processedAt=isoformat_utc(split_item.processed_at) if split_item.processed_at else None,
+        downstreamAgentSlug=split_item.downstream_agent_slug,
+        downstreamQueueItemId=split_item.downstream_queue_item_id,
+    )
+    payload = {
+        "id": str(split_item.id),
+        "reviewItemType": "split_item",
+        "parentReviewCaseId": str(review_case.id),
+        "splitItemId": str(split_item.id),
+        "splitChildKey": split_item.child_key,
+        "splitChildStatus": split_item.status,
+        "symbolId": split_item.proposed_symbol_id,
+        "title": f"Review split symbol {split_item.proposed_symbol_id}",
+        "owner": "Unassigned",
+        "due": due.date().isoformat(),
+        "priority": review_case.escalation_level.title(),
+        "risk": "Medium" if review_case.escalation_level.lower() == "medium" else review_case.escalation_level.title(),
+        "pages": 1,
+        "packs": 0,
+        "status": split_item.status.replace("_", " ").title(),
+        "summary": f"{split_item.proposed_symbol_name} from {source_file_name} is awaiting its own human review decision.",
+        "clarifications": build_review_notes(validation_report, 1),
+        "currentStage": split_item.status,
+        "escalationLevel": review_case.escalation_level,
+        "openedAt": isoformat_utc(opened_at),
+        "validationStatus": validation_report.validation_status,
+        "defectCount": validation_report.defect_count,
+        "sourceFileName": source_file_name,
+        "sourceObjectKey": source_object_key,
+        "sourcePreviewUrl": preview_url,
+        "intakeRecordId": str(intake_record.id),
+        "childCount": 1,
+        "children": [child],
     }
     return apply_classification_fields(payload, classification_record)
 
@@ -512,8 +771,10 @@ def list_workspace_review_cases(
         .where(ReviewCase.closed_at.is_(None))
         .order_by(ReviewCase.opened_at.desc())
     ).scalars().all()
+    split_intake_ids = open_split_review_intake_ids(session)
 
     items = []
+    emitted_split_item_ids: set[str] = set()
     for review_case in review_cases:
         if review_case.source_entity_type == "validation_report":
             validation_report = session.get(ValidationReport, review_case.source_entity_id)
@@ -523,10 +784,35 @@ def list_workspace_review_cases(
             if intake_record is None:
                 continue
             classification_record = load_current_classification(session, review_case_id=str(review_case.id))
+            source_file_name = resolve_source_file_name(validation_report)
+            split_items = ensure_split_items(
+                session,
+                review_case=review_case,
+                validation_report=validation_report,
+                source_file_name=source_file_name,
+            )
+            open_split_items = [item for item in split_items if item.status in OPEN_SPLIT_ITEM_STATUSES]
+            if open_split_items:
+                for split_item in open_split_items:
+                    emitted_split_item_ids.add(str(split_item.id))
+                    items.append(
+                        attach_latest_decision(
+                            session,
+                            build_split_item_workspace_item(
+                                session,
+                                review_case,
+                                validation_report,
+                                intake_record,
+                                split_item,
+                                classification_record,
+                            ),
+                        )
+                    )
+                continue
             items.append(
                 attach_latest_decision(
                     session,
-                    build_validation_workspace_item(review_case, validation_report, intake_record, classification_record),
+                    build_validation_workspace_item(session, review_case, validation_report, intake_record, classification_record),
                 )
             )
             continue
@@ -537,6 +823,8 @@ def list_workspace_review_cases(
                 continue
             intake_record = session.get(IntakeRecord, provenance_assessment.intake_record_id)
             if intake_record is None:
+                continue
+            if suppress_parent_sheet_review(review_case, intake_record.id, split_intake_ids):
                 continue
             classification_record = load_current_classification(
                 session,
@@ -550,6 +838,42 @@ def list_workspace_review_cases(
                 )
             )
 
+    split_rows = session.execute(
+        select(ReviewSplitItem, ReviewCase, ValidationReport)
+        .join(ReviewCase, ReviewCase.id == ReviewSplitItem.review_case_id)
+        .join(
+            ValidationReport,
+            and_(
+                ReviewCase.source_entity_type == "validation_report",
+                ReviewCase.source_entity_id == ValidationReport.id,
+            ),
+        )
+        .where(ReviewSplitItem.status.in_(OPEN_SPLIT_ITEM_STATUSES))
+        .order_by(ReviewSplitItem.updated_at.desc())
+    ).all()
+    for split_item, review_case, validation_report in split_rows:
+        if str(split_item.id) in emitted_split_item_ids or validation_report.source_type != "intake_record":
+            continue
+        intake_record = session.get(IntakeRecord, validation_report.source_id)
+        if intake_record is None:
+            continue
+        classification_record = load_current_classification(session, review_case_id=str(review_case.id))
+        emitted_split_item_ids.add(str(split_item.id))
+        items.append(
+            attach_latest_decision(
+                session,
+                build_split_item_workspace_item(
+                    session,
+                    review_case,
+                    validation_report,
+                    intake_record,
+                    split_item,
+                    classification_record,
+                ),
+            )
+        )
+
+    session.commit()
     return WorkspaceReviewCaseListResponse(items=items)
 
 
@@ -597,11 +921,7 @@ def create_workspace_review_decision(
         raise HTTPException(status_code=422, detail=f"Unsupported review decision: {decision_code}.")
 
     invalid_child_actions = sorted(
-        {
-            child.action.strip()
-            for child in request.childDecisions
-            if child.action.strip() and child.action.strip() not in CHILD_ACTION_CODES
-        }
+        {child.action.strip() for child in request.childDecisions if child.action.strip() and child.action.strip() not in CHILD_ACTION_CODES}
     )
     if invalid_child_actions:
         raise HTTPException(status_code=422, detail=f"Unsupported child action(s): {', '.join(invalid_child_actions)}.")
@@ -619,11 +939,14 @@ def create_workspace_review_decision(
     transition = DECISION_TRANSITIONS[decision_code]
     from_stage = review_case.current_stage
     to_stage = transition["to_stage"]
-    child_decisions = [
-        child.model_dump()
-        for child in request.childDecisions
-        if child.action.strip() and child.action.strip() != "pending"
-    ]
+    child_decisions = []
+    for child in request.childDecisions:
+        if not child.action.strip() or child.action.strip() == "pending":
+            continue
+        child_payload = child.model_dump()
+        child_payload["originalAction"] = child_payload["action"]
+        child_payload["action"] = normalize_child_action(child.action)
+        child_decisions.append(child_payload)
     decision_payload = {
         "child_decisions": child_decisions,
         "case_comment": request.caseComment,
@@ -659,15 +982,22 @@ def create_workspace_review_decision(
 
     for child in child_decisions:
         child_transition = DECISION_TRANSITIONS[child["action"]]
+        child_target_agent_slug = child_transition["target_agent_slug"]
+        child_target_stage = child_transition["target_stage"]
+        child_action_code = f"child_{child_transition['action_code']}"
+        if decision_code != "approve":
+            child_target_agent_slug = "libby"
+            child_target_stage = "review_follow_up"
+            child_action_code = f"child_review_feedback_{child['action']}"
         actions.append(
             create_review_action(
                 review_case=review_case,
                 decision=decision,
-                action_code=f"child_{child_transition['action_code']}",
+                action_code=child_action_code,
                 action_status="pending",
                 payload=child,
-                target_agent_slug=child_transition["target_agent_slug"],
-                target_stage=child_transition["target_stage"],
+                target_agent_slug=child_target_agent_slug,
+                target_stage=child_target_stage,
             )
         )
 
@@ -677,6 +1007,13 @@ def create_workspace_review_decision(
     review_case.current_stage = to_stage
     if transition["close"]:
         review_case.closed_at = now
+    suppressed_parent_review_ids = []
+    if decision_code == "approve" and from_stage == "raster_split_review":
+        suppressed_parent_review_ids = close_parent_sheet_reviews_for_split(
+            session,
+            split_review_case=review_case,
+            closed_at=now,
+        )
 
     session.add(
         AuditEvent(
@@ -690,6 +1027,7 @@ def create_workspace_review_decision(
                 "from_stage": from_stage,
                 "to_stage": to_stage,
                 "child_decision_count": len(child_decisions),
+                "suppressed_parent_review_ids": suppressed_parent_review_ids,
             },
             created_at=now,
         )
@@ -702,6 +1040,13 @@ def create_workspace_review_decision(
             review_case_id=review_case.id,
             decision_id=decision.id,
         )
+    else:
+        execute_review_followup_handoff(
+            session,
+            review_case_id=review_case.id,
+            decision_id=decision.id,
+        )
+    if decision_code == "approve" or transition["target_agent_slug"] == "libby":
         refreshed_actions = (
             session.query(ReviewCaseAction)
             .filter(ReviewCaseAction.decision_id == decision.id)
@@ -728,6 +1073,226 @@ def create_workspace_review_decision(
         ],
         currentStage=review_case.current_stage,
         closedAt=isoformat_utc(review_case.closed_at) if review_case.closed_at else None,
+    )
+
+
+@router.post(
+    "/review-cases/{review_case_id}/split-items/process-decisions",
+    response_model=WorkspaceSplitReviewProcessResponse,
+    responses={404: {"description": "Review case not found"}, 422: {"description": "Invalid split decision"}},
+)
+def process_workspace_split_review_decisions(
+    review_case_id: str,
+    request: WorkspaceSplitReviewProcessRequest,
+    session: Session = Depends(get_db_session),
+) -> WorkspaceSplitReviewProcessResponse:
+    parsed_case_id = parse_review_case_id(review_case_id)
+    row = session.execute(
+        select(ReviewCase, ValidationReport)
+        .join(
+            ValidationReport,
+            and_(
+                ReviewCase.source_entity_type == "validation_report",
+                ReviewCase.source_entity_id == ValidationReport.id,
+            ),
+        )
+        .where(ReviewCase.id == parsed_case_id)
+    ).one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Raster split review case not found.")
+
+    review_case, validation_report = row
+    normalized = validation_report.normalized_payload_json or {}
+    if review_case.current_stage != "raster_split_review" and not ((normalized.get("derivative_manifest") or {}).get("children")):
+        raise HTTPException(status_code=422, detail="Review case does not contain split child items.")
+
+    source_file_name = resolve_source_file_name(validation_report)
+    split_items = ensure_split_items(
+        session,
+        review_case=review_case,
+        validation_report=validation_report,
+        source_file_name=source_file_name,
+    )
+    item_lookup = {}
+    for item in split_items:
+        item_lookup[item.child_key] = item
+        item_lookup[item.proposed_symbol_id] = item
+        item_lookup[item.file_name] = item
+
+    child_decisions = []
+    for child in request.childDecisions:
+        raw_action = child.action.strip()
+        if not raw_action or raw_action == "pending":
+            continue
+        normalized_action = normalize_child_action(raw_action)
+        if normalized_action not in DECISION_TRANSITIONS:
+            raise HTTPException(status_code=422, detail=f"Unsupported child action: {raw_action}.")
+        item = item_lookup.get(child.childId) or item_lookup.get(child.proposedSymbolId or "")
+        if item is None:
+            raise HTTPException(status_code=422, detail=f"Unknown split child item: {child.childId}.")
+        if item.status not in {"awaiting_decision", "returned_for_review"}:
+            continue
+        payload = child.model_dump()
+        payload["originalAction"] = payload["action"]
+        payload["action"] = normalized_action
+        payload["childId"] = item.child_key
+        payload["proposedSymbolId"] = payload.get("proposedSymbolId") or item.proposed_symbol_id
+        payload["proposedSymbolName"] = payload.get("proposedSymbolName") or item.proposed_symbol_name
+        child_decisions.append((item, payload))
+
+    if not child_decisions:
+        raise HTTPException(status_code=422, detail="No pending split child decisions were provided.")
+
+    total_open_before = len([item for item in split_items if item.status in {"awaiting_decision", "returned_for_review"}])
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    processed_items: list[WorkspaceSplitReviewProcessItemResponse] = []
+
+    for item, child_payload in child_decisions:
+        action_code = child_payload["action"]
+        transition = DECISION_TRANSITIONS[action_code]
+        is_approval = action_code == "approve"
+        target_agent_slug = "rupert" if is_approval else "libby"
+        target_stage = "publication_staging" if is_approval else transition["target_stage"]
+        followup_action_code = "prepare_publication_handoff" if is_approval else "route_review_follow_up_to_libby"
+        decision = HumanReviewDecision(
+            review_case_id=review_case.id,
+            decision_code=action_code,
+            decision_summary=f"{request.deciderName} processed {action_code.replace('_', ' ')} for {item.proposed_symbol_id}.",
+            decision_note=child_payload.get("note") or child_payload.get("details") or None,
+            decided_by=None,
+            decider_name=request.deciderName,
+            decider_role=request.deciderRole,
+            from_stage=review_case.current_stage,
+            to_stage="ready_for_publication_handoff" if is_approval else transition["to_stage"],
+            decision_payload_json={
+                "child_decisions": [child_payload],
+                "case_comment": request.caseComment,
+                "review_case_id": str(review_case.id),
+                "split_child_key": item.child_key,
+                "split_child_item_id": str(item.id),
+            },
+            created_at=now,
+        )
+        session.add(decision)
+        session.flush()
+        action = create_review_action(
+            review_case=review_case,
+            decision=decision,
+            action_code=followup_action_code,
+            action_status="pending",
+            payload={
+                "decision_code": action_code,
+                "decision_note": decision.decision_note,
+                "split_child_key": item.child_key,
+                "split_child_item_id": str(item.id),
+                "child_decision": child_payload,
+            },
+            target_agent_slug=target_agent_slug,
+            target_stage=target_stage,
+        )
+        session.add(action)
+        session.add(
+            AuditEvent(
+                entity_type="review_split_item",
+                entity_id=item.id,
+                action="split_child_review_decision_recorded",
+                actor_id=None,
+                payload_json={
+                    "review_case_id": str(review_case.id),
+                    "decision_id": str(decision.id),
+                    "decision_code": action_code,
+                    "target_agent_slug": target_agent_slug,
+                },
+                created_at=now,
+            )
+        )
+        item.latest_action = action_code
+        item.latest_note = child_payload.get("note") or ""
+        item.latest_details = child_payload.get("details") or ""
+        item.latest_decision_id = decision.id
+        item.latest_action_id = action.id
+        item.downstream_agent_slug = target_agent_slug
+        item.updated_at = now
+        session.flush()
+        session.commit()
+
+        if is_approval:
+            execute_publication_handoff(
+                session,
+                review_case_id=review_case.id,
+                decision_id=decision.id,
+                close_review_case=False,
+            )
+        else:
+            execute_review_followup_handoff(
+                session,
+                review_case_id=review_case.id,
+                decision_id=decision.id,
+            )
+
+        refreshed_action = (
+            session.query(ReviewCaseAction)
+            .filter(ReviewCaseAction.decision_id == decision.id)
+            .order_by(ReviewCaseAction.created_at.asc())
+            .first()
+        )
+        item = session.get(ReviewSplitItem, item.id)
+        downstream_queue_item_id = None
+        if refreshed_action is not None:
+            action_payload = refreshed_action.action_payload_json or {}
+            downstream_queue_item_id = action_payload.get("rupert_queue_item_id") or action_payload.get("libby_queue_item_id")
+        if item is not None:
+            item.status = "queued_rupert" if is_approval else "queued_libby"
+            item.downstream_queue_item_id = downstream_queue_item_id
+            item.processed_at = datetime.now(timezone.utc).replace(microsecond=0)
+            item.updated_at = item.processed_at
+            session.add(item)
+        session.commit()
+
+        processed_items.append(
+            WorkspaceSplitReviewProcessItemResponse(
+                childId=child_payload["childId"],
+                action=action_code,
+                status=item.status if item is not None else ("queued_rupert" if is_approval else "queued_libby"),
+                targetAgentSlug=target_agent_slug,
+                downstreamQueueItemId=downstream_queue_item_id,
+                decisionId=str(decision.id),
+            )
+        )
+
+    remaining_open_count = (
+        session.query(ReviewSplitItem)
+        .filter(ReviewSplitItem.review_case_id == review_case.id)
+        .filter(ReviewSplitItem.status.in_(("awaiting_decision", "returned_for_review")))
+        .count()
+    )
+    if remaining_open_count == 0:
+        review_case = session.get(ReviewCase, review_case.id)
+        if review_case is not None:
+            closed_at = datetime.now(timezone.utc).replace(microsecond=0)
+            review_case.current_stage = "split_children_processed"
+            review_case.closed_at = closed_at
+            session.add(
+                AuditEvent(
+                    entity_type="review_case",
+                    entity_id=review_case.id,
+                    action="split_children_processed",
+                    actor_id=None,
+                    payload_json={"processed_count": len(processed_items)},
+                    created_at=closed_at,
+                )
+            )
+            session.commit()
+
+    review_case = session.get(ReviewCase, parsed_case_id)
+    return WorkspaceSplitReviewProcessResponse(
+        reviewCaseId=str(parsed_case_id),
+        processedCount=len(processed_items),
+        skippedPendingCount=max(total_open_before - len(processed_items), 0),
+        remainingOpenCount=remaining_open_count,
+        items=processed_items,
+        currentStage=review_case.current_stage if review_case is not None else "unknown",
+        closedAt=isoformat_utc(review_case.closed_at) if review_case is not None and review_case.closed_at else None,
     )
 
 
@@ -781,7 +1346,7 @@ def get_workspace_review_child_preview(
 
     review_case, validation_report = row
     source_file_name = resolve_source_file_name(validation_report)
-    children = build_children(validation_report, str(review_case.id), source_file_name)
+    children = build_children(session, review_case, validation_report, str(review_case.id), source_file_name)
     matching_child = next((child for child in children if child.attachmentObjectKey == object_key), None)
     if matching_child is None:
         raise HTTPException(status_code=404, detail="Review child preview not found.")

@@ -37,7 +37,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 
 - a glass-morphism app shell with a full-width light top banner, simple engineering-symbol logo mark, and version/date stamping
 - primary banner navigation for `Submissions`, `Reviews`, and `Standards`, with the cog icon linking to the internal Workspace view
-- an admin Workspace processing dashboard headed `ADMIN WORKSPACE` / `Activity Monitors`, with eight compact vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed
+- an admin Workspace processing dashboard headed `ADMIN WORKSPACE` / `Activity Monitors`, with eight compact vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed; live queue/review cards use a `HH:MM DDMMMYY` top label rendered in the `Europe/London` timezone so GMT/BST changes are automatic
 - an SME Reviews workbench headed `Daisy-coordinated Reviews`, with queue navigation, visual source evidence, classification/source context, visible case actions, comments, latest decision state, Daisy coordination, and per-child review actions
 - a Standards home that keeps browse, latest approved detail, and clarification context together
 - a live submission route that probes the backend and submits through the current public Symgov API
@@ -50,10 +50,16 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - Standards and Reviews retain seeded fallback data for local/static development where live APIs are still pending or unavailable.
 - The Workspace monitor now polls live agent queue items, review cases, and Daisy coordination reports every five seconds while the Workspace route is mounted and the browser tab is visible, using `GET /api/v1/workspace/agent-queue-items` plus the existing review and Daisy endpoints.
 - Workspace polling uses no-store timestamped requests, stops when the tab is hidden, and refreshes immediately when the tab becomes visible again.
+- Workspace monitor card labels should prefer operator-readable times over queue UUIDs where possible. Libby, Daisy, Human Review, Rupert, classification, review, and publication cards use `createdAt` or review `openedAt` rendered as London local time, preserving the existing card title/details underneath.
 - The Workspace monitor retains seeded `processingActivity` fallback when no API root is configured or the live queue endpoint is unavailable.
 - The Standards submission route now calls the live Symgov backend instead of using demo-only local submission behavior
 - Guided lookup is intentionally constrained to published approved records
 - Review decisions now have source-level backend support through durable `human_review_decisions` and `review_case_actions` records plus `POST /api/v1/workspace/review-cases/{id}/decisions`. Review-case source previews are exposed through `sourcePreviewUrl` and `GET /api/v1/workspace/review-cases/{review_case_id}/source/preview`, and these routes are available through the live public API.
+- Review-decision routing now preserves the Daisy-managed review loop:
+  - `approve` is the only path to Rupert publication staging
+  - every non-approval outcome routes to Libby with the full SME response, case comment, decision note, and child-symbol decisions
+  - Libby handles metadata, classification, source, evidence, duplicate, deletion, rejection, and deferral follow-up before sending the item back to Daisy for review
+  - physical symbol graphic changes route Libby -> Vlad -> Libby, then back to Daisy for re-review
 - Reviews now has a live Daisy coordination read path:
   - `GET /api/v1/workspace/daisy/reports`
   - the Reviews decision rail now renders Daisy coordination output for the active review case when present
@@ -113,6 +119,7 @@ The product docs now also include the first agentization slice for Symgov:
 - Daisy writes local `review_coordination_reports` artifacts under `/data/.openclaw/workspaces/daisy/runtime`
 - the backend exposes those reports through `/api/v1/workspace/daisy/reports`
 - the Reviews UI now shows Daisy coordination status, reviewer assignment proposals, stage-transition proposals, contributor evidence requests, visual source evidence, latest recorded decision state, and a reviewer decision panel for the active case
+- the current implemented post-review loop is Daisy review -> Libby follow-up for every non-approval outcome -> optional Vlad graphic change -> Libby consolidation -> Daisy re-review; only explicit approval routes to Rupert
 - durable post-review decisions and follow-on action records have a first backend implementation:
   - migration `20260426_0004_human_review_decisions.py`
   - ORM models `HumanReviewDecision` and `ReviewCaseAction`
@@ -151,9 +158,9 @@ Current intake/validation baseline:
   - `Libby` classification and source-reference enrichment
   - `Daisy` coordination when downstream review follow-up exists
 
-## Next agent direction: Libby
+## Libby review follow-up direction
 
-The next planned Wave 1 SymGov specialist agent is `Libby`, the classification and research librarian.
+`Libby` is now the classification, research, and non-approval review follow-up owner.
 
 Agreed Libby boundary:
 
@@ -163,14 +170,23 @@ Agreed Libby boundary:
 - may create new taxonomy terms and use them immediately
 - may supersede earlier classifications, but prior records should remain durable and be marked obsolete for auditability
 - does not replace `Tracy` rights judgment or `Vlad` technical validation
+- owns every non-approval response from Daisy-organized human review
+- sends physical symbol graphic changes to `Vlad`, then checks Vlad's result and combines it with other updates before Daisy re-review
+- never sends symbols to Rupert directly
+- may prepare audited metadata/source/classification/disposition instructions, but durable write/delete mutations must go through Symgov-controlled backend helpers
+- accepts both single-case queue items and multi-item `payload_json.items` / `payload_json.cases` batches
 
 Agreed Libby workflow:
 
-- `Libby` should run after `Tracy` and before `Daisy`
+- `Libby` should run after `Tracy` and before the first Daisy review
+- after Daisy review, any non-approval outcome returns to Libby
 - classification should exist at both file level and symbol level
 - the main actionable review unit should be the symbol, not only the source file
 - each symbol-level classification and review case must retain lineage back to the originating file, attachment/object key, and batch
 - Daisy-managed human review should start only after Libby has completed its classification pass
+- items may cycle between Daisy review and Libby follow-up several times before final approval
+- multi-item queue work produces a parent `libby_batch_report` and per-item downstream Daisy or Vlad queue items
+- Libby's OpenClaw Telegram route is bound for `telegram:7643191699`; first chat commands should remain read-only, such as queue status and case explanation
 
 Agreed Libby persistence direction:
 
@@ -201,6 +217,12 @@ Agreed target routing after Libby implementation:
 - `Tracy` provenance and rights review
 - `Libby` classification and source-repair pass
 - `Daisy` review coordination for human follow-up
+- raster split reviews are processed at child-symbol level; decided children leave the parent split workbench while undecided children remain open
+- approved split children route individually to `Rupert`; every non-approval child outcome routes individually to `Libby`
+- non-approval non-split review outcomes return to `Libby`
+- graphic-change requests route `Libby` -> `Vlad` -> `Libby`
+- `Libby` sends revised items back to `Daisy` for re-review
+- only approved review decisions route to `Rupert`
 
 ## OpenClaw resilience
 
@@ -332,6 +354,9 @@ Current verified runtime baseline:
   - persisted derivative child `attachments`
   - persisted `raster_split_review` review cases
   - the temporary test rows were cleaned up after verification
+- raster split child review persistence now uses `review_split_items`, materialized from Vlad `derivative_manifest` children, so each proposed child can carry its own lifecycle, open/processed status, latest review action, reviewer note/details, downstream agent, and downstream queue item
+- `GET /api/v1/workspace/review-cases` projects open `review_split_items` with `awaiting_decision` or `returned_for_review` as first-class human-review items with `reviewItemType: "split_item"`, parent review-case lineage, a one-child review payload, and the child preview as the primary review visual
+- split-review processing is handled through `POST /api/v1/workspace/review-cases/{id}/split-items/process-decisions`; it processes only non-pending child decisions, routes approved children to Rupert and non-approval children to Libby, and closes the parent split case only when no child items remain open
 
 The current MinIO bootstrap assets live outside this workspace in:
 

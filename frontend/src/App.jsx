@@ -6,6 +6,7 @@ import {
   fetchWorkspaceDaisyReports,
   fetchWorkspaceQueueItems,
   fetchWorkspaceReviewCases,
+  processWorkspaceSplitReviewDecisions,
   submitWorkspaceReviewDecision,
   submitExternalSubmission
 } from './api.js';
@@ -269,7 +270,7 @@ function StandardsPage() {
                 className={`symbol-card ${symbol.id === activeId ? 'active' : ''}`}
                 onClick={() => setActiveId(symbol.id)}
               >
-                <SymbolGlyph symbolId={symbol.id} />
+                <PublishedSymbolPreview symbol={symbol} />
                 <div>
                   <strong>
                     {symbol.id} · {symbol.name}
@@ -298,7 +299,7 @@ function StandardsPage() {
                 <span className="status-pill">{activeSymbol.status}</span>
               </div>
               <div className="symbol-stage">
-                <SymbolGlyph symbolId={activeSymbol.id} large />
+                <PublishedSymbolPreview symbol={activeSymbol} large />
               </div>
               <div className="fact-grid">
                 <Fact label="Revision" value={activeSymbol.revision} />
@@ -667,16 +668,24 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
   }
 
   (reviewItems || []).forEach((review) => {
+    const reviewIdentifier = review.symbolId || review.id;
+    const isSplitItem = review.reviewItemType === 'split_item';
+
     byId.human_review.items.push({
       id: `review-${review.id}`,
-      label: review.symbolId || review.id,
-      title: compactTitle(review.title || review.summary || review.id),
-      meta: review.currentStage || review.status || review.owner || 'Review case',
+      label: formatWorkspaceDisplayDate(review.openedAt || review.createdAt, { id: reviewIdentifier }),
+      title: compactTitle(review.title || review.summary || reviewIdentifier),
+      meta: isSplitItem ? 'Split item review' : review.currentStage || review.status || review.owner || 'Review case',
       status: review.latestDecision?.decisionCode || review.status || 'review',
       priority: review.priority || review.escalationLevel || 'Medium',
       searchText: [
         review.id,
+        review.parentReviewCaseId,
+        review.splitChildKey,
+        review.reviewItemType,
         review.symbolId,
+        review.openedAt,
+        review.createdAt,
         review.title,
         review.summary,
         review.currentStage,
@@ -740,7 +749,7 @@ function resolveQueueItemLabel(queueItem) {
     return formatWorkspaceDisplayDate(submissionBatchId, queueItem);
   }
 
-  if (isLibbyQueueItem(queueItem)) {
+  if (usesCreatedAtQueueLabel(queueItem)) {
     return formatWorkspaceDisplayDate(null, queueItem);
   }
 
@@ -757,13 +766,30 @@ function resolveQueueItemDisplayTitle(queueItem) {
   return title;
 }
 
-function isLibbyQueueItem(queueItem) {
-  return queueItem?.agentId === 'libby' || queueItem?.queueFamily === 'classification';
+function usesCreatedAtQueueLabel(queueItem) {
+  return (
+    queueItem?.agentId === 'libby' ||
+    queueItem?.queueFamily === 'classification' ||
+    queueItem?.agentId === 'daisy' ||
+    queueItem?.queueFamily === 'review' ||
+    queueItem?.agentId === 'rupert' ||
+    queueItem?.queueFamily === 'publication'
+  );
 }
 
 function isExternalSubmissionId(value) {
   return /^subext-\d{8}T\d{6}Z$/i.test(String(value || '').trim());
 }
+
+const WORKSPACE_DISPLAY_DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/London',
+  hour: '2-digit',
+  minute: '2-digit',
+  day: '2-digit',
+  month: 'short',
+  year: '2-digit',
+  hourCycle: 'h23'
+});
 
 function formatWorkspaceDisplayDate(value, queueItem) {
   const date = extractWorkspaceDisplayDate(value) || extractWorkspaceDisplayDate(queueItem?.createdAt);
@@ -772,13 +798,14 @@ function formatWorkspaceDisplayDate(value, queueItem) {
     return String(value || queueItem?.id || 'Pending').trim();
   }
 
-  const hours = String(date.getUTCHours()).padStart(2, '0');
-  const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-  const day = String(date.getUTCDate()).padStart(2, '0');
-  const month = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][date.getUTCMonth()];
-  const year = String(date.getUTCFullYear()).slice(-2);
+  const parts = Object.fromEntries(
+    WORKSPACE_DISPLAY_DATE_FORMATTER.formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value])
+  );
+  const month = String(parts.month || '').replace('.', '').toUpperCase();
 
-  return `${hours}:${minutes} ${day}${month}${year}`;
+  return `${parts.hour}:${parts.minute} ${parts.day}${month}${parts.year}`;
 }
 
 function extractWorkspaceDisplayDate(value) {
@@ -950,6 +977,59 @@ function resolveWorkspaceAssetUrl(assetUrl) {
   return new URL(assetUrl, appConfig.apiRoot || window.location.origin).toString();
 }
 
+function isTerminalReviewStage(stage) {
+  return ['approved', 'closed', 'published', 'rejected', 'superseded_by_raster_split'].includes(
+    String(stage || '').trim().toLowerCase()
+  );
+}
+
+function buildPublishedPreviewCandidates(symbol) {
+  const candidates = [];
+  const symbolReference = symbol?.slug || symbol?.id || symbol?.symbolId;
+
+  if (symbol?.previewUrl) {
+    candidates.push(resolveWorkspaceAssetUrl(symbol.previewUrl));
+  }
+  if (symbolReference) {
+    candidates.push(resolveWorkspaceAssetUrl(`/api/v1/published/symbols/${encodeURIComponent(symbolReference)}/preview`));
+  }
+
+  const reviewCaseId = symbol?.payload?.review_case_id || symbol?.payload?.lineage?.parent_sheet_review_case_id;
+  const objectKey = symbol?.payload?.source_object_key;
+  if (reviewCaseId && objectKey) {
+    candidates.push(
+      resolveWorkspaceAssetUrl(
+        `/api/v1/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/children/preview?object_key=${encodeURIComponent(objectKey)}`
+      )
+    );
+  }
+
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+function PublishedSymbolPreview({ symbol, large = false }) {
+  const previewCandidates = useMemo(() => buildPublishedPreviewCandidates(symbol), [symbol]);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const previewUrl = previewCandidates[previewIndex];
+
+  useEffect(() => {
+    setPreviewIndex(0);
+  }, [previewCandidates.join('|')]);
+
+  if (previewUrl) {
+    return (
+      <img
+        className={`published-symbol-preview ${large ? 'large' : ''}`.trim()}
+        src={previewUrl}
+        alt={`Published preview of ${symbol?.name || symbol?.id || 'symbol'}`}
+        onError={() => setPreviewIndex((current) => current + 1)}
+      />
+    );
+  }
+
+  return <SymbolGlyph symbolId={symbol?.id || symbol?.symbolId || 'SYMBOL'} large={large} />;
+}
+
 function ReviewSourceVisual({ activeChange, activeChildren }) {
   const primaryChild = activeChildren[0];
   const resolvedPreviewUrl = resolveWorkspaceAssetUrl(activeChange?.sourcePreviewUrl || primaryChild?.previewUrl);
@@ -1026,6 +1106,9 @@ function ReviewsPage() {
 
     daisyState.items.forEach((report) => {
       if (!report.reviewCaseId || knownIds.has(report.reviewCaseId)) {
+        return;
+      }
+      if (isTerminalReviewStage(report.currentStage || report.coordinationStatus)) {
         return;
       }
 
@@ -1128,7 +1211,8 @@ function ReviewsPage() {
       }
       if (actionFilter !== 'all') {
         const latestCode = item.latestDecision?.decisionCode || 'none';
-        const hasPendingDaisy = daisyState.items.some((report) => report.reviewCaseId === item.id);
+        const reviewCaseId = item.parentReviewCaseId || item.id;
+        const hasPendingDaisy = daisyState.items.some((report) => report.reviewCaseId === reviewCaseId);
         if (actionFilter === 'needs_decision' && latestCode !== 'none') {
           return false;
         }
@@ -1144,6 +1228,9 @@ function ReviewsPage() {
       }
       return [
         item.id,
+        item.parentReviewCaseId,
+        item.splitChildKey,
+        item.reviewItemType,
         item.symbolId,
         item.title,
         item.owner,
@@ -1162,15 +1249,25 @@ function ReviewsPage() {
 
   const activeChange = filteredQueue.find((item) => item.id === activeId) || filteredQueue[0];
   const activeChildren = activeChange?.children || [];
+  const activeReviewCaseId = activeChange?.parentReviewCaseId || activeChange?.id;
   const activeIndex = activeChange ? filteredQueue.findIndex((item) => item.id === activeChange.id) : -1;
   const reviewedChildCount = activeChildren.filter((child) => getChildReview(child.id).action !== 'pending').length;
+  const isSplitReview = (activeChange?.reviewItemType === 'split_item' || activeChange?.currentStage === 'raster_split_review') && activeChildren.length > 0;
+  const pendingChildCount = Math.max(activeChildren.length - reviewedChildCount, 0);
+  const splitDecisionCounts = activeChildren.reduce((counts, child) => {
+    const action = getChildReview(child.id).action;
+    if (action && action !== 'pending') {
+      counts[action] = (counts[action] || 0) + 1;
+    }
+    return counts;
+  }, {});
   const sourceComment = sourceComments[activeChange?.id] || '';
   const classificationAliases = activeChange?.aliases || [];
   const classificationKeywords = activeChange?.keywords || [];
   const classificationSourceRefs = activeChange?.sourceRefs || [];
   const activeDaisyReports = useMemo(
-    () => daisyState.items.filter((item) => item.reviewCaseId === activeChange?.id),
-    [activeChange?.id, daisyState.items]
+    () => daisyState.items.filter((item) => item.reviewCaseId === activeReviewCaseId),
+    [activeReviewCaseId, daisyState.items]
   );
 
   function updateSourceComment(changeId, value) {
@@ -1290,6 +1387,57 @@ function ReviewsPage() {
     }
   }
 
+  async function processSplitReviewDecisions() {
+    if (!activeChange) {
+      return;
+    }
+
+    const childDecisions = activeChildren
+      .map((child) => {
+        const review = getChildReview(child.id);
+        return {
+          childId: child.id,
+          action: review.action,
+          note: review.note,
+          details: review.requestDetails,
+          proposedSymbolName: child.proposedSymbolName,
+          proposedSymbolId: child.proposedSymbolId
+        };
+      })
+      .filter((item) => item.action && item.action !== 'pending');
+
+    if (!childDecisions.length) {
+      setSubmitState({ pending: false, message: '', error: 'Choose at least one child-symbol decision to process.' });
+      return;
+    }
+
+    setSubmitState({ pending: true, message: '', error: '' });
+    try {
+      const result = await processWorkspaceSplitReviewDecisions(activeReviewCaseId, {
+        childDecisions
+      });
+      setSubmitState({
+        pending: false,
+        message: `Processed ${result.processedCount} child decision${result.processedCount === 1 ? '' : 's'}. ${result.remainingOpenCount} remain.`,
+        error: ''
+      });
+      setChildReviewState((current) => {
+        const next = { ...current };
+        childDecisions.forEach((item) => {
+          delete next[item.childId];
+        });
+        return next;
+      });
+      await refreshReviewData();
+    } catch (error) {
+      setSubmitState({
+        pending: false,
+        message: '',
+        error: error instanceof Error ? error.message : 'Split review processing failed.'
+      });
+    }
+  }
+
   return (
     <section className="experience-shell">
       <div className="hero-panel glass-panel workspace-hero">
@@ -1392,7 +1540,7 @@ function ReviewsPage() {
                 </div>
                 <p>{item.title}</p>
                 <small>
-                  {item.currentStage || item.status} · {item.childCount || item.children?.length || 0} child symbols
+                  {item.reviewItemType === 'split_item' ? 'Split item' : item.currentStage || item.status} · {item.childCount || item.children?.length || 0} child symbols
                 </small>
                 <small>{item.sourceFileName || 'Source file pending'}</small>
               </button>
@@ -1415,6 +1563,7 @@ function ReviewsPage() {
               <div className="fact-grid">
                 <Fact label="Parent file" value={activeChange.sourceFileName || 'Not recorded'} />
                 <Fact label="Intake record" value={activeChange.intakeRecordId || 'Pending'} />
+                <Fact label="Review item" value={activeChange.reviewItemType === 'split_item' ? 'Split child' : 'Review case'} />
                 <Fact label="Open review by" value={activeChange.due} />
                 <Fact label="Child decisions" value={`${reviewedChildCount} / ${activeChildren.length || activeChange.childCount || 0}`} />
               </div>
@@ -1429,7 +1578,13 @@ function ReviewsPage() {
               </div>
               <div className="copy-block">
                 <h4>Review intent</h4>
-                <p>Each extracted child can be reviewed independently while keeping notes tied back to the source file for traceability.</p>
+                <p>
+                  {isSplitReview
+                    ? activeChange.reviewItemType === 'split_item'
+                      ? 'This split symbol has its own review lifecycle. Processing the decision moves only this symbol to Rupert or Libby.'
+                      : 'Process decided child symbols when ready. Processed children leave this sheet review and continue independently through Rupert or Libby.'
+                    : 'Each extracted child can be reviewed independently while keeping notes tied back to the source file for traceability.'}
+                </p>
               </div>
               {activeChange.classificationSummary ? (
                 <div className="copy-block">
@@ -1475,7 +1630,10 @@ function ReviewsPage() {
         </section>
 
         <section className="glass-panel pane review-decision-pane">
-          <SectionHeading title="Record Decision" subtitle="Case action, reviewer notes, and Daisy context" />
+          <SectionHeading
+            title={isSplitReview ? 'Process Symbols' : 'Record Decision'}
+            subtitle={isSplitReview ? 'Move selected child symbols to the next queue' : 'Case action, reviewer notes, and Daisy context'}
+          />
           {activeChange ? (
             <>
               <div className="review-summary-strip">
@@ -1483,9 +1641,9 @@ function ReviewsPage() {
                 <Metric title="Priority" value={activeChange.priority} />
                 <Metric title="Status" value={activeChange.status} />
               </div>
-              <div className="copy-block decision-block">
-                <h4>Case decision</h4>
-                {activeChange.latestDecision ? (
+              <div className={`copy-block decision-block ${isSplitReview ? 'split-processing-block' : ''}`}>
+                <h4>{isSplitReview ? 'Selected symbol criteria' : 'Case decision'}</h4>
+                {activeChange.latestDecision && !isSplitReview ? (
                   <div className="context-card">
                     <p className="context-label">Latest recorded decision</p>
                     <strong>{activeChange.latestDecision.decisionCode.replaceAll('_', ' ')}</strong>
@@ -1494,51 +1652,80 @@ function ReviewsPage() {
                     </p>
                   </div>
                 ) : null}
-                <div className="review-decision-actions" role="group" aria-label="Case decision options">
-                  {REVIEW_DECISION_OPTIONS.map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      className={`action-button secondary compact ${getCaseReview(activeChange.id).decisionCode === value ? 'selected' : ''}`}
-                      onClick={() => updateCaseReview(activeChange.id, { decisionCode: value })}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-                <label className="field">
-                  <span>Reviewer name</span>
-                  <input
-                    value={getCaseReview(activeChange.id).deciderName}
-                    onChange={(event) => updateCaseReview(activeChange.id, { deciderName: event.target.value })}
-                    placeholder="SME reviewer"
-                  />
-                </label>
-                <label className="field">
-                  <span>Case review comment</span>
-                  <textarea
-                    rows="4"
-                    value={sourceComment}
-                    onChange={(event) => updateSourceComment(activeChange.id, event.target.value)}
-                    placeholder="Capture context that applies to the whole source file."
-                  />
-                </label>
-                <label className="field">
-                  <span>Decision note</span>
-                  <textarea
-                    rows="4"
-                    value={getCaseReview(activeChange.id).decisionNote}
-                    onChange={(event) => updateCaseReview(activeChange.id, { decisionNote: event.target.value })}
-                    placeholder="Summarize the SME decision and any follow-up instructions."
-                  />
-                </label>
+                {isSplitReview ? (
+                  <>
+                    <div className="split-process-summary-grid">
+                      <Metric title="Ready" value={reviewedChildCount} />
+                      <Metric title="Waiting" value={pendingChildCount} />
+                      <Metric title="Total" value={activeChildren.length} />
+                    </div>
+                    {reviewedChildCount ? (
+                      <div className="split-process-chip-list" aria-label="Selected split decision counts">
+                        {Object.entries(splitDecisionCounts).map(([action, count]) => (
+                          <span key={action} className={`split-process-chip review-${action}`}>
+                            {action.replaceAll('_', ' ')} · {count}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="daisy-empty-text">Choose review criteria on one or more child symbols, then process them together.</p>
+                    )}
+                  </>
+                ) : (
+                  <div className="review-decision-actions" role="group" aria-label="Case decision options">
+                    {REVIEW_DECISION_OPTIONS.map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        className={`action-button case-decision-button case-decision-${value} ${getCaseReview(activeChange.id).decisionCode === value ? 'selected' : ''}`}
+                        onClick={() => updateCaseReview(activeChange.id, { decisionCode: value })}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {!isSplitReview ? (
+                  <>
+                    <label className="field">
+                      <span>Reviewer name</span>
+                      <input
+                        value={getCaseReview(activeChange.id).deciderName}
+                        onChange={(event) => updateCaseReview(activeChange.id, { deciderName: event.target.value })}
+                        placeholder="SME reviewer"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Case review comment</span>
+                      <textarea
+                        rows="4"
+                        value={sourceComment}
+                        onChange={(event) => updateSourceComment(activeChange.id, event.target.value)}
+                        placeholder="Capture context that applies to the whole source file."
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Decision note</span>
+                      <textarea
+                        rows="4"
+                        value={getCaseReview(activeChange.id).decisionNote}
+                        onChange={(event) => updateCaseReview(activeChange.id, { decisionNote: event.target.value })}
+                        placeholder="Summarize the SME decision and any follow-up instructions."
+                      />
+                    </label>
+                  </>
+                ) : null}
                 <button
                   type="button"
-                  className="action-button primary"
-                  disabled={submitState.pending || workspaceState.mode !== 'live'}
-                  onClick={submitReviewDecision}
+                  className={`action-button record-review-button ${submitState.pending ? 'recording' : ''} ${submitState.message ? 'recorded' : ''} ${submitState.error ? 'failed' : ''}`}
+                  disabled={submitState.pending || workspaceState.mode !== 'live' || (isSplitReview && reviewedChildCount === 0)}
+                  onClick={isSplitReview ? processSplitReviewDecisions : submitReviewDecision}
                 >
-                  {submitState.pending ? 'Recording…' : 'Record Review Decision'}
+                  {submitState.pending
+                    ? isSplitReview ? 'Processing symbols...' : 'Recording decision...'
+                    : submitState.message
+                      ? isSplitReview ? 'Symbols Processed' : 'Decision Recorded'
+                      : isSplitReview ? 'Process Selected Symbols' : 'Record Review Decision'}
                 </button>
                 {submitState.message ? <p className="success-text">{submitState.message}</p> : null}
                 {submitState.error ? <p className="error-text">{submitState.error}</p> : null}
@@ -1743,7 +1930,6 @@ function SplitReviewCard({ child, index, reviewState, onUpdate }) {
             <p className="context-label">Proposed child record</p>
             <h4>{child.proposedSymbolName}</h4>
           </div>
-          <span className={`review-status review-${reviewState.action}`}>{statusLabels[reviewState.action] || statusLabels.pending}</span>
         </div>
         <div className="split-meta-grid">
           <Fact label="Proposed id" value={child.proposedSymbolId} />
@@ -1760,17 +1946,22 @@ function SplitReviewCard({ child, index, reviewState, onUpdate }) {
             placeholder="Add a note to this extracted symbol record for traceability or downstream review."
           />
         </label>
-        <div className="action-stack horizontal split-actions">
-          {actionOptions.map(([action, label, tone]) => (
-            <button
-              key={action}
-              type="button"
-              className={`action-button ${tone} ${reviewState.action === action ? 'selected' : ''}`}
-              onClick={() => onUpdate(child.id, { action: reviewState.action === action ? 'pending' : action })}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="split-decision-row">
+          <div className="action-stack horizontal split-actions">
+            {actionOptions.map(([action, label]) => (
+              <button
+                key={action}
+                type="button"
+                className={`action-button split-action-button split-action-${action} ${reviewState.action === action ? 'selected' : ''}`}
+                onClick={() => onUpdate(child.id, { action: reviewState.action === action ? 'pending' : action })}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <span className={`review-status split-decision-status review-${reviewState.action}`}>
+            {statusLabels[reviewState.action] || statusLabels.pending}
+          </span>
         </div>
         {needsDetail ? (
           <label className="field request-field">

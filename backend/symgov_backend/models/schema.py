@@ -530,6 +530,36 @@ class ReviewCaseAction(Base):
     completed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ReviewSplitItem(Base):
+    __tablename__ = "review_split_items"
+    __table_args__ = (
+        Index("uq_review_split_items_case_child", "review_case_id", "child_key", unique=True),
+        Index("ix_review_split_items_case_status", "review_case_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    review_case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("review_cases.id"), nullable=False)
+    child_key: Mapped[str] = mapped_column(Text, nullable=False)
+    proposed_symbol_id: Mapped[str] = mapped_column(Text, nullable=False)
+    proposed_symbol_name: Mapped[str] = mapped_column(Text, nullable=False)
+    file_name: Mapped[str] = mapped_column(Text, nullable=False)
+    parent_file_name: Mapped[str] = mapped_column(Text, nullable=False)
+    name_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attachment_object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'awaiting_decision'"))
+    latest_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    latest_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    latest_details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    latest_decision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("human_review_decisions.id"), nullable=True)
+    latest_action_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("review_case_actions.id"), nullable=True)
+    downstream_agent_slug: Mapped[str | None] = mapped_column(Text, nullable=True)
+    downstream_queue_item_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    processed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class PublicationJob(Base):
     __tablename__ = "publication_jobs"
 

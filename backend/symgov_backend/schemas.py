@@ -67,6 +67,13 @@ class WorkspaceReviewChildResponse(BaseModel):
     nameSource: str | None = None
     attachmentObjectKey: str | None = None
     previewUrl: str | None = None
+    reviewStatus: str = "awaiting_decision"
+    latestAction: str | None = None
+    latestNote: str | None = None
+    latestDetails: str | None = None
+    processedAt: str | None = None
+    downstreamAgentSlug: str | None = None
+    downstreamQueueItemId: str | None = None
 
 
 class WorkspaceHumanReviewDecisionSummary(BaseModel):
@@ -83,6 +90,11 @@ class WorkspaceHumanReviewDecisionSummary(BaseModel):
 
 class WorkspaceReviewCaseResponse(BaseModel):
     id: str
+    reviewItemType: str = "review_case"
+    parentReviewCaseId: str | None = None
+    splitItemId: str | None = None
+    splitChildKey: str | None = None
+    splitChildStatus: str | None = None
     symbolId: str
     title: str
     owner: str
@@ -208,6 +220,32 @@ class WorkspaceReviewDecisionRequest(BaseModel):
     deciderRole: str = "sme_reviewer"
     childDecisions: list[WorkspaceReviewChildDecisionInput] = Field(default_factory=list)
     caseComment: str = ""
+
+
+class WorkspaceSplitReviewProcessRequest(BaseModel):
+    deciderName: str = "SME reviewer"
+    deciderRole: str = "sme_reviewer"
+    caseComment: str = ""
+    childDecisions: list[WorkspaceReviewChildDecisionInput] = Field(default_factory=list)
+
+
+class WorkspaceSplitReviewProcessItemResponse(BaseModel):
+    childId: str
+    action: str
+    status: str
+    targetAgentSlug: str | None = None
+    downstreamQueueItemId: str | None = None
+    decisionId: str | None = None
+
+
+class WorkspaceSplitReviewProcessResponse(BaseModel):
+    reviewCaseId: str
+    processedCount: int
+    skippedPendingCount: int
+    remainingOpenCount: int
+    items: list[WorkspaceSplitReviewProcessItemResponse]
+    currentStage: str
+    closedAt: str | None = None
 
 
 class WorkspaceReviewActionResponse(BaseModel):

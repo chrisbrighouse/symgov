@@ -260,6 +260,189 @@ def ensure_approved_symbol_revision(
     return revision
 
 
+def is_raster_split_review(context: dict[str, Any], review_case: ReviewCase) -> bool:
+    validation = context["validation_report"]
+    if review_case.current_stage == "raster_split_review":
+        return True
+    normalized = validation.normalized_payload_json if validation is not None else {}
+    return bool((normalized or {}).get("derivative_manifest", {}).get("children"))
+
+
+def approved_child_decisions(decision: HumanReviewDecision) -> list[dict[str, Any]]:
+    payload = decision.decision_payload_json or {}
+    children = payload.get("child_decisions") if isinstance(payload, dict) else None
+    if not isinstance(children, list):
+        return []
+    return [
+        child
+        for child in children
+        if isinstance(child, dict) and child.get("action") in {"approve", "approved"}
+    ]
+
+
+def child_lookup_by_id(validation_report: ValidationReport | None) -> dict[str, dict[str, Any]]:
+    normalized = validation_report.normalized_payload_json if validation_report is not None else {}
+    children = ((normalized or {}).get("derivative_manifest") or {}).get("children") or []
+    lookup = {}
+    for child in children:
+        if not isinstance(child, dict):
+            continue
+        keys = [
+            child.get("attachment_object_key"),
+            child.get("proposed_symbol_id"),
+            child.get("file_name"),
+        ]
+        for key in keys:
+            if key:
+                lookup[str(key)] = child
+    return lookup
+
+
+def ensure_approved_child_symbol_revision(
+    session: Session,
+    *,
+    review_case: ReviewCase,
+    decision: HumanReviewDecision,
+    child_decision: dict[str, Any],
+    child_manifest: dict[str, Any] | None,
+    index: int,
+) -> SymbolRevision:
+    context = load_review_context(session, review_case)
+    validation = context["validation_report"]
+    intake = context["intake_record"]
+    service_user = ensure_publication_service_user(session)
+    now = utc_now()
+
+    proposed_id = text_value(
+        child_decision.get("proposedSymbolId"),
+        child_manifest.get("proposed_symbol_id") if child_manifest else None,
+        child_decision.get("childId"),
+        fallback=f"{review_case.id}-child-{index + 1}",
+    )
+    slug = slugify_public_code(proposed_id)
+    canonical_name = text_value(
+        child_decision.get("proposedSymbolName"),
+        child_manifest.get("proposed_symbol_name") if child_manifest else None,
+        fallback=slug.replace("-", " ").title(),
+    )
+
+    symbol = session.query(GovernedSymbol).filter_by(slug=slug).one_or_none()
+    if symbol is None:
+        symbol = GovernedSymbol(
+            id=coerce_uuid(f"governed-symbol:{slug}"),
+            slug=slug,
+            canonical_name=canonical_name,
+            category="symbol",
+            discipline="general",
+            owner_id=service_user.id,
+            current_revision_id=None,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(symbol)
+        session.flush()
+    else:
+        symbol.canonical_name = canonical_name
+        symbol.updated_at = now
+
+    revision_label = f"review-{decision.created_at.date().isoformat()}-{str(decision.id)[:8]}-{index + 1:02d}"
+    revision = session.query(SymbolRevision).filter_by(symbol_id=symbol.id, revision_label=revision_label).one_or_none()
+    if revision is None:
+        revision = SymbolRevision(
+            id=coerce_uuid(f"symbol-revision:{decision.id}:{proposed_id}"),
+            symbol_id=symbol.id,
+            revision_label=revision_label,
+            lifecycle_state="approved",
+            payload_json={},
+            rationale=None,
+            author_id=service_user.id,
+            created_at=now,
+        )
+        session.add(revision)
+
+    source_file = source_file_from_intake(intake)
+    child_object_key = text_value(
+        child_manifest.get("attachment_object_key") if child_manifest else None,
+        child_decision.get("childId"),
+    )
+    revision.lifecycle_state = "approved"
+    revision.payload_json = {
+        "summary": text_value(child_decision.get("note"), fallback=canonical_name),
+        "description": text_value(decision.decision_note, child_decision.get("note"), fallback=canonical_name),
+        "aliases": [canonical_name] if canonical_name != proposed_id else [],
+        "keywords": [proposed_id, "raster split child"],
+        "source_refs": [],
+        "source_file": source_file,
+        "source_object_key": child_object_key,
+        "review_case_id": str(review_case.id),
+        "review_decision_id": str(decision.id),
+        "classification_record_id": None,
+        "classification": {
+            "status": "human_approved_split_child",
+            "confidence": None,
+            "libby_approved": None,
+            "discipline": "general",
+            "category": "symbol",
+            "symbol_family": None,
+            "process_category": None,
+            "parent_equipment_class": None,
+            "source_classification": "raster_split_review",
+        },
+        "lineage": {
+            "intake_record_id": str(intake.id) if intake else None,
+            "validation_report_id": str(validation.id) if validation else None,
+            "provenance_assessment_id": None,
+            "parent_sheet_review_case_id": str(review_case.id),
+            "child_id": child_decision.get("childId"),
+            "child_file_name": child_manifest.get("file_name") if child_manifest else None,
+            "child_bbox": child_manifest.get("bbox") if child_manifest else None,
+        },
+    }
+    revision.rationale = text_value(
+        decision.decision_note,
+        child_decision.get("note"),
+        fallback="Approved as an extracted child symbol during raster split review.",
+    )
+    session.flush()
+    symbol.current_revision_id = revision.id
+    symbol.updated_at = now
+    session.flush()
+    return revision
+
+
+def approved_revisions_for_decision(
+    session: Session,
+    *,
+    review_case: ReviewCase,
+    decision: HumanReviewDecision,
+    context: dict[str, Any],
+) -> list[SymbolRevision]:
+    if not is_raster_split_review(context, review_case):
+        return [ensure_approved_symbol_revision(session, review_case=review_case, decision=decision)]
+
+    child_decisions = approved_child_decisions(decision)
+    if not child_decisions:
+        raise RuntimeError("Raster split publication requires at least one approved child symbol.")
+
+    child_lookup = child_lookup_by_id(context["validation_report"])
+    revisions = []
+    for index, child_decision in enumerate(child_decisions):
+        child_manifest = child_lookup.get(str(child_decision.get("childId"))) or child_lookup.get(
+            str(child_decision.get("proposedSymbolId"))
+        )
+        revisions.append(
+            ensure_approved_child_symbol_revision(
+                session,
+                review_case=review_case,
+                decision=decision,
+                child_decision=child_decision,
+                child_manifest=child_manifest,
+                index=index,
+            )
+        )
+    return revisions
+
+
 def build_pack_metadata(context: dict[str, Any], review_case: ReviewCase) -> tuple[str, str]:
     source_file = source_file_from_intake(context["intake_record"])
     source_stem = slugify_public_code(Path(source_file).stem) if source_file else str(review_case.id)[:8]
@@ -304,6 +487,7 @@ def execute_publication_handoff(
     *,
     review_case_id: uuid.UUID,
     decision_id: uuid.UUID,
+    close_review_case: bool = True,
 ) -> dict[str, Any]:
     action = (
         session.query(ReviewCaseAction)
@@ -339,7 +523,13 @@ def execute_publication_handoff(
 
     try:
         context = load_review_context(session, review_case)
-        revision = ensure_approved_symbol_revision(session, review_case=review_case, decision=decision)
+        revisions = approved_revisions_for_decision(
+            session,
+            review_case=review_case,
+            decision=decision,
+            context=context,
+        )
+        revision_ids = [str(revision.id) for revision in revisions]
         pack_code, pack_title = build_pack_metadata(context, review_case)
         queue_id = f"aqi-rupert-review-{str(decision.id)[:8]}-{now.strftime('%Y%m%dT%H%M%SZ')}"
         queue_item = {
@@ -354,7 +544,7 @@ def execute_publication_handoff(
                 "review_decision_id": str(decision.id),
                 "human_decision": "approve",
                 "human_approved": True,
-                "symbol_revision_ids": [str(revision.id)],
+                "symbol_revision_ids": revision_ids,
                 "release_target": "standards-current",
                 "publication_pack_code": pack_code,
                 "publication_pack_title": pack_title,
@@ -371,7 +561,7 @@ def execute_publication_handoff(
         }
         action.action_payload_json = {
             **(action.action_payload_json or {}),
-            "symbol_revision_ids": [str(revision.id)],
+            "symbol_revision_ids": revision_ids,
             "rupert_queue_item_id": queue_id,
             "publication_pack_code": pack_code,
         }
@@ -385,10 +575,11 @@ def execute_publication_handoff(
         action.action_payload_json = {
             **(action.action_payload_json or {}),
             "rupert_result": result,
-            "published_symbol_revision_ids": [str(revision.id)],
+            "published_symbol_revision_ids": revision_ids,
         }
-        review_case.current_stage = "published"
-        review_case.closed_at = completed_at
+        if close_review_case:
+            review_case.current_stage = "published"
+            review_case.closed_at = completed_at
         session.add(
             AuditEvent(
                 id=uuid.uuid4(),
@@ -399,7 +590,7 @@ def execute_publication_handoff(
                 payload_json={
                     "decision_id": str(decision.id),
                     "review_case_action_id": str(action.id),
-                    "symbol_revision_ids": [str(revision.id)],
+                    "symbol_revision_ids": revision_ids,
                     "rupert_queue_item_id": queue_id,
                     "publication_pack_code": pack_code,
                 },
@@ -407,7 +598,7 @@ def execute_publication_handoff(
             )
         )
         session.commit()
-        return {"status": "completed", "rupert_queue_item_id": queue_id, "symbol_revision_ids": [str(revision.id)]}
+        return {"status": "completed", "rupert_queue_item_id": queue_id, "symbol_revision_ids": revision_ids}
     except Exception as exc:
         failed_at = utc_now()
         session.rollback()

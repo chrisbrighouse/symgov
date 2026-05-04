@@ -110,6 +110,13 @@ Phase-1 published API rule:
   - active compare context, linked clarifications, and review metadata
 - `POST /api/v1/workspace/change-requests/{id}/decision`
   - approve, request changes, mark ready, or reassign
+- `GET /api/v1/workspace/review-cases`
+  - Daisy-visible review cases with source preview context and latest decision summary
+  - open split children are projected as first-class human-review items with `reviewItemType: "split_item"`, `parentReviewCaseId`, one child payload, and the child preview as the primary visual while their `review_split_items.status` is `awaiting_decision` or `returned_for_review`
+- `POST /api/v1/workspace/review-cases/{id}/decisions`
+  - record a whole-case human decision for non-split review cases, route approval to Rupert, and route non-approval outcomes to Libby
+- `POST /api/v1/workspace/review-cases/{id}/split-items/process-decisions`
+  - process only decided raster split child items, route approved children to Rupert and non-approved children to Libby, leave undecided children open, and close the parent split case only after all child items are processed
 - `GET /api/v1/workspace/symbols/{symbol_id}`
   - governed record detail across lifecycle states
 - `GET /api/v1/workspace/symbols/{symbol_id}/audit`
@@ -641,6 +648,32 @@ Recommended notes:
 - `escalation_level text not null`
 - `opened_at timestamptz not null`
 - `closed_at timestamptz null`
+
+#### `review_split_items`
+
+- `id uuid primary key`
+- `review_case_id uuid not null references review_cases(id)`
+- `child_key text not null`
+- `proposed_symbol_id text not null`
+- `proposed_symbol_name text not null`
+- `file_name text not null`
+- `parent_file_name text not null`
+- `name_source text null`
+- `attachment_object_key text null`
+- `status text not null default 'awaiting_decision'`
+- `latest_action text null`
+- `latest_note text null`
+- `latest_details text null`
+- `latest_decision_id uuid null references human_review_decisions(id)`
+- `latest_action_id uuid null references review_case_actions(id)`
+- `downstream_agent_slug text null`
+- `downstream_queue_item_id text null`
+- `payload_json jsonb not null default '{}'::jsonb`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+- `processed_at timestamptz null`
+
+`review_split_items` materializes Vlad `derivative_manifest.children` for raster split review cases. Once materialized, each split child has its own human-review lifecycle. The open review list exposes child items with `awaiting_decision` or `returned_for_review` as individual split-item review records, including parent review-case lineage and a one-child decision payload. Processed children leave the human-review queue after routing to Rupert or Libby, while remaining or returned children stay available for later SME decisions even if the original parent sheet review has already closed.
 
 #### `publication_jobs`
 

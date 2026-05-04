@@ -41,6 +41,7 @@ from .models import (
     PublicationPack,
     PublishedPage,
     ReviewCase,
+    ReviewSplitItem,
     ControlException,
     SymbolRevision,
     User,
@@ -682,6 +683,32 @@ class RuntimePersistenceBridge:
             session.add(row)
         return {"id": str(artifact_id), "artifact_type": artifact_type}
 
+    def upsert_agent_queue_item(self, queue_item: dict[str, Any]) -> dict[str, str]:
+        with self.session_scope() as session:
+            agent_definition = session.query(AgentDefinition).filter_by(slug=queue_item["agent_id"]).one_or_none()
+            if agent_definition is None:
+                raise RuntimeError(f"Missing agent_definitions row for slug {queue_item['agent_id']}.")
+
+            queue_item_id = coerce_uuid(queue_item["id"])
+            row = session.get(AgentQueueItem, queue_item_id)
+            if row is None:
+                row = AgentQueueItem(id=queue_item_id)
+                session.add(row)
+
+            row.agent_id = agent_definition.id
+            row.source_type = queue_item["source_type"]
+            row.source_id = coerce_uuid(queue_item["source_id"])
+            row.status = queue_item["status"]
+            row.priority = queue_item["priority"]
+            row.payload_json = queue_item["payload_json"]
+            row.confidence = coerce_numeric(queue_item.get("confidence"))
+            row.escalation_reason = queue_item.get("escalation_reason")
+            row.created_at = parse_timestamp(queue_item.get("created_at"))
+            row.started_at = parse_timestamp(queue_item["started_at"]) if queue_item.get("started_at") else None
+            row.completed_at = parse_timestamp(queue_item["completed_at"]) if queue_item.get("completed_at") else None
+
+        return {"id": str(queue_item_id), "agent_slug": queue_item["agent_id"], "status": queue_item["status"]}
+
     def create_review_case(
         self,
         *,
@@ -742,6 +769,45 @@ class RuntimePersistenceBridge:
                 "source_entity_id": str(row.source_entity_id),
                 "current_stage": row.current_stage,
                 "escalation_level": row.escalation_level,
+            }
+
+    def return_review_split_item_for_review(
+        self,
+        *,
+        review_case_id: str | uuid.UUID,
+        child_key: str,
+        attachment_object_key: str,
+        payload_updates: dict[str, Any] | None = None,
+    ) -> dict[str, str]:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        with self.session_scope() as session:
+            row = (
+                session.query(ReviewSplitItem)
+                .filter(
+                    ReviewSplitItem.review_case_id == coerce_uuid(review_case_id),
+                    ReviewSplitItem.child_key == child_key,
+                )
+                .one_or_none()
+            )
+            if row is None:
+                raise RuntimeError(f"Missing review_split_items row for case {review_case_id} child {child_key}.")
+            row.attachment_object_key = attachment_object_key
+            row.file_name = Path(attachment_object_key).name
+            row.status = "returned_for_review"
+            row.latest_action = None
+            row.latest_note = None
+            row.latest_details = None
+            row.downstream_agent_slug = None
+            row.downstream_queue_item_id = None
+            row.processed_at = None
+            row.updated_at = now
+            row.payload_json = {**(row.payload_json or {}), **(payload_updates or {})}
+            return {
+                "id": str(row.id),
+                "review_case_id": str(row.review_case_id),
+                "child_key": row.child_key,
+                "attachment_object_key": row.attachment_object_key,
+                "status": row.status,
             }
 
     def create_control_exception(
@@ -1235,6 +1301,8 @@ class RuntimePersistenceBridge:
                 record.libby_approved = bool(durable_record.get("libby_approved"))
                 record.created_at = parse_timestamp(durable_record["created_at"])
                 record.updated_at = parse_timestamp(durable_record.get("updated_at") or durable_record["created_at"])
+            elif durable_kind == "review_followup_report":
+                pass
             else:
                 raise ValueError(f"Unsupported durable_kind: {durable_kind}")
 

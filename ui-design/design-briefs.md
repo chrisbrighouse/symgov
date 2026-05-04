@@ -83,10 +83,12 @@ Provide a user-friendly SME review surface for Daisy-coordinated review cases.
 
 ### Core user jobs
 
-- See all Daisy-coordinated cases, not only cases ready for final decision.
-- Review extracted child symbols with source lineage and Daisy support.
+- See all Daisy-coordinated cases and open split-item reviews, not only cases ready for final decision.
+- Review extracted child symbols as individual human-review items with source lineage and Daisy support.
+- For raster split reviews, process only the child symbols that have a decision and leave pending children in the source-sheet workbench.
 - Draft review actions: approve, reject, request changes, request more evidence, rename/classify, mark duplicate, delete proposed child, or defer.
 - Keep review notes tied to the case and source file.
+- Understand routing after submit: approval goes to Rupert; every other outcome goes to Libby, with graphic-change work handled through Vlad and returned for Daisy re-review.
 
 ### Current layout decision
 
@@ -94,7 +96,7 @@ Make Reviews queue-first for SMEs:
 
 - Left: Daisy-visible review queue with previous/next movement through filtered items
 - Center: visual evidence, source context, classification facts, and guided child-symbol review
-- Right: case decision rail with every available action, reviewer identity, comments, decision note, latest decision, and Daisy coordination
+- Right: decision rail with case actions, reviewer identity, comments, decision note, latest decision, and Daisy coordination for non-split reviews; raster split reviews instead show child-symbol processing counts and a single process button for selected children.
 
 Focused routes remain available for:
 
@@ -108,6 +110,8 @@ Focused routes remain available for:
 - Queue cards expose symbol ID, title, current stage, child-symbol count, source file, and priority.
 - Review tools show source imagery where available, proposed child symbols, classification/source context, and Daisy recommendations.
 - Review controls are direct SME actions for this phase and remain visible as buttons, not buried in a dropdown.
+- Raster split reviews use `Process Selected Symbols` instead of a whole-case submit button or case action panel; the control is disabled until at least one child has a decision, and processed children should disappear from the open child list after refresh.
+- The decision rail should make the downstream handoff visible after submission: Rupert for approval, Libby for non-approval, Vlad only as a Libby-routed graphic-change step.
 - Standards-originated clarifications should be visible in the same review context as the affected queue item.
 
 ### Success criteria

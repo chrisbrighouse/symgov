@@ -198,16 +198,58 @@ export async function submitWorkspaceReviewDecision(reviewCaseId, decisionPayloa
     throw new Error('API root is not configured.');
   }
 
-  const response = await fetch(`${appConfig.apiRoot}/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/decisions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(decisionPayload)
-  });
-  const payload = await parseJson(response);
+  const endpoint = `${appConfig.apiRoot}/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/decisions`;
+  const postDecision = async (payload, wrapped = false) => {
+    const requestBody = wrapped ? { request: payload } : payload;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await postDecision(decisionPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await postDecision(decisionPayload, true));
+  }
 
   if (!response.ok) {
     const validationDetails = formatValidationIssues(payload?.issues);
     throw new Error(validationDetails || payload?.detail || 'Review decision failed.');
+  }
+
+  return payload;
+}
+
+export async function processWorkspaceSplitReviewDecisions(reviewCaseId, decisionPayload) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+
+  const endpoint = `${appConfig.apiRoot}/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/split-items/process-decisions`;
+  const postDecision = async (payload, wrapped = false) => {
+    const requestBody = wrapped ? { request: payload } : payload;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await postDecision(decisionPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await postDecision(decisionPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Split review processing failed.');
   }
 
   return payload;

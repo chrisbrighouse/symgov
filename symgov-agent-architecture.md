@@ -291,11 +291,14 @@ Why in wave 1:
 Owns:
 
 - classification queue
+- non-approval review follow-up queue
 - taxonomy assignment
 - discoverability metadata
 - alias and keyword generation
 - source-reference repair when provenance/source metadata is missing or weak
 - taxonomy term creation when an existing controlled term is insufficient
+- consolidation of reviewer comments, child-symbol decisions, metadata updates, and Vlad graphic-change results before Daisy re-review
+- flexible queue-item handling for either one case or a batch of child/case follow-up items
 
 Inputs:
 
@@ -303,16 +306,24 @@ Inputs:
 - validation reports and raster split child metadata
 - provenance assessments
 - active review cases when classification needs a retry or upgrade
+- Daisy-organized human review decisions that are not approvals
+- Vlad graphic-change results returning for consolidation
+- multi-item queue payloads using `payload_json.items` or `payload_json.cases`
 
 Outputs:
 
 - `classification_records`
+- `review_followup_reports`
+- parent `libby_batch_report` output artifacts for multi-item queue work
 - engineering discipline, format, industry, symbol family, process category, and parent equipment class
 - standards source and library provenance class
 - aliases and search terms
 - source classification and supporting reference evidence
 - `libby_approved` readiness signal
 - escalation into classification-focused review follow-up when confidence remains low
+- downstream Daisy queue items for re-review
+- downstream Vlad queue items when a physical symbol graphic change is requested
+- queue status summaries for read-only chat/status checks
 
 Agreed operating rules:
 
@@ -323,6 +334,13 @@ Agreed operating rules:
 - Libby may create new taxonomy terms and use them immediately
 - Libby may supersede existing classifications, but earlier records must remain durable and be marked obsolete
 - Libby does not override `Tracy` rights decisions or `Vlad` technical findings
+- Libby owns all non-approval outcomes from Daisy-organized review
+- Libby must send physical symbol graphic changes to `Vlad`
+- Libby must check Vlad graphic-change results and combine them with any metadata/source/classification updates before Daisy re-review
+- Libby never sends items to `Rupert`
+- Libby may prepare audited metadata/source/classification/disposition instructions, but durable write/delete mutations must go through Symgov-controlled backend helpers
+- explicit non-graphic follow-up types route back to Daisy even if the reviewer text mentions graphics in a negative or contextual phrase
+- Telegram chat with Libby starts read-only through the OpenClaw binding for `telegram:7643191699`; mutation commands require explicit authorization and audit
 
 Review-flow implication:
 
@@ -331,7 +349,12 @@ Review-flow implication:
   - provenance review
   - classification review
   - Daisy-managed human review coordination
-  - Rupert-managed publication staging after explicit human approval
+  - if approved, Rupert-managed publication staging after explicit human approval
+  - if not approved, Libby follow-up
+  - optional Vlad graphic-change work
+  - Libby consolidation
+  - Daisy re-review
+  - repeat until approval or explicit human disposition
 
 ### `Rupert` - publication and release management agent
 
@@ -366,6 +389,7 @@ Agreed operating rules:
 - Rupert runs only after explicit human approval
 - Rupert must not publish or stage items with missing approval evidence, missing symbol revisions, or unresolved release target ambiguity
 - Rupert must not override rights, classification, technical, policy, or review blocks
+- Rupert is reached only from an explicit approved human review decision, never from Libby or Vlad directly
 - the first implementation stages release intent into a local release area and report artifact; durable database publication mutations can follow once final release authority is defined
 
 ## Current bootstrap and usage notes
@@ -399,6 +423,15 @@ Agreed operating rules:
   - writes local `review_coordination_reports`
   - can be auto-created from `Vlad` or `Tracy` review-case outputs on the live external submission path
   - is queryable through the backend Workspace API and visible in the Workspace UI as a read-only coordination lane
+- `Libby` now:
+  - accepts DB-backed and local runtime queue items for non-approval human review follow-up
+  - writes local `review_followup_reports`
+  - routes non-graphic follow-up back to Daisy for re-review
+  - routes graphic-change follow-up to Vlad
+- `Vlad` now:
+  - accepts Libby-routed `symbol_graphic_change_request` queue items
+  - writes graphic-change result artifacts
+  - returns graphic-change results to Libby for consolidation before Daisy re-review
 - `Rupert` now:
   - accepts publication handoff queue items after human approval
   - writes local `publication_reports`
@@ -923,7 +956,10 @@ For the first local implementation:
 - `Vlad` and `Tracy` may run in parallel once `Scott` has produced a stable accepted intake record
 - `Scott` outputs with `needs_review`, `rejected`, or malformed contracts do not auto-enqueue downstream agents
 - `Tracy` escalations and `Vlad` escalations can now create a `Daisy` coordination queue item once a persisted `review_case` exists
-- Daisy-coordinated human approvals with no required changes can create a `Rupert` publication queue item for release staging
+- Daisy-coordinated human approvals can create a `Rupert` publication queue item for release staging
+- every Daisy-coordinated non-approval outcome routes to `Libby`
+- Libby may route graphic changes to `Vlad`, but Vlad returns results to Libby rather than Daisy or Rupert
+- Libby sends revised items back to `Daisy` for another review pass
 
 This preserves a clean operating boundary:
 
@@ -931,4 +967,6 @@ This preserves a clean operating boundary:
 - `Vlad` decides technical validation outcome
 - `Tracy` decides provenance and rights outcome
 - `Daisy` consumes stable `review_cases` and proposes coordination actions without taking final approval authority
+- `Libby` consumes non-approval review decisions, performs or coordinates follow-up, and returns revised items for Daisy review
+- `Vlad` consumes Libby-routed graphic-change requests and returns results to Libby
 - `Rupert` consumes explicit approval handoffs and stages approved symbol revisions for publication without overriding release authority
