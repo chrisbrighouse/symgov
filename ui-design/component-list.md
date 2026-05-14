@@ -39,10 +39,10 @@
 ## Workspace View components
 
 - `WorkspaceTitlebar` with `ADMIN WORKSPACE` / `Activity Monitors` and the queue search control
-- `WorkspaceMonitorStatusRow` as a full-width live status row above the monitor lanes, including last refresh time and `Auto-refresh 5s` state while polling is active
+- `WorkspaceMonitorStatusRow` as a full-width single-line live status row above the monitor lanes, including last refresh time and `Auto-refresh 5s` state while polling is active
 - `QueueMonitorBoard` with eight vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed
 - `MonitorColumn` with count, stage label, and an internally scrollable card stack; duplicate footer counts are omitted
-- `MonitorCard` with London-local `HH:MM DDMMMYY` time/date label as the first visible row where live timestamps are available, short package/symbol display name as the second visible row, source metadata, status on its own line under the activity string, and priority dot. Agent queue cards use `createdAt`; Human Review cards use review `openedAt`, including individual split-item review records.
+- `MonitorCard` with London-local `HH:MM DDMMMYY` time/date label as the first visible row where live timestamps are available, short package/symbol display name as the second visible row, source metadata, optional Vlad `Process` line, status on its own line under the activity string, and priority dot. Agent queue cards use `createdAt`; Human Review cards use review `openedAt`, including individual split-item review records.
 - Workspace display names use backend-provided `displayName`: submitted sheets and single-symbol packages show the 4-character uppercase hex package ID such as `0001`, while extracted symbols show `{packageId}-{sequence}` such as `0001-1` or `0001-999`. Long filenames and proposed symbol names stay in detail/search context rather than the compact card title.
 - `GovernedRecordRoute`, `AuditRoute`, and `PublishRoute` for focused follow-through
 

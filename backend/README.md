@@ -101,6 +101,7 @@ Current Workspace APIs:
 - compatibility alias: `GET /api/workspace/agent-queue-items`
 - review cases and Daisy reports remain the other live Workspace dashboard inputs
 - Workspace agent-queue, review-case, and review-child responses can include `displayName`, `packageDisplayId`, and `packageSymbolSequence` for compact monitor-card naming. The visible convention is `0001` for a submitted sheet or single-symbol package and `0001-1`, `0001-2`, ... for extracted split symbols.
+- Workspace agent-queue responses can include `toolSummary` for Vlad queue items. The field is derived from the latest `agent_runs.tool_trace_json` plus queue payload hints and currently supports compact labels such as `Tess`, `Nano`, `DXF to SVG`, `Format conversion`, `Raster split`, and `Raster candidate`.
 - review-case responses can include `symbolProperties` for reviewer-editable per-symbol `Name`, `Description`, `Category`, and `Discipline` values
 - reviewer-editable symbol properties are updated through `PATCH /api/v1/workspace/review-cases/{id}/symbol-properties`; the API enforces the current review rules for name length/characters and description length
 - review decisions are recorded through `POST /api/v1/workspace/review-cases/{id}/decisions`

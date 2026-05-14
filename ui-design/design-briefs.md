@@ -72,9 +72,9 @@ Provide an admin-only processing surface for seeing what Scott, Vlad, Tracy, Lib
 
 Make the main Workspace route processing-first:
 
-- Top: title, queue search, and a full-width live status row so refresh and processing text does not compete with the search control
+- Top: title, queue search, and a full-width single-line live status row so refresh and processing text does not compete with the search control
 - Main: eight equal-height compact monitor lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed, each with its own scrollable card stack
-- Cards: activity and source context first, then queue status on its own line for scanability
+- Cards: activity and source context first, optional Vlad process/tool summary where available, then queue status on its own line for scanability
 
 ## Reviews View
 

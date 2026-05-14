@@ -97,6 +97,7 @@ Current bridge note:
 
 - the local runner bridge currently maps legacy string queue IDs and source IDs into deterministic UUIDs so the existing file-backed queue payloads can be mirrored into the live UUID-based schema without changing local runtime fixtures first
 - queue status should describe the agent's responsibility, not the whole downstream lifecycle. For example, Vlad completes a Libby-routed graphic-change queue item once the changed image result has been returned to Libby, and Daisy completes human-review escalation work once the review request has been created/escalated.
+- agent runs should keep useful `tool_trace_json` because Workspace monitor cards can summarize Vlad's process/tool usage from that trace. Current UI labels include `Tess` for Tesseract/OCR, `Nano` for Nano Banana/Gemini image-edit fallback, and conversion/split labels such as `DXF to SVG`, `Format conversion`, `Raster split`, and `Raster candidate`.
 
 ### 2. Durable outputs
 
@@ -238,6 +239,7 @@ Owns:
 - format checks
 - geometry and rule checks
 - duplicate detection
+- process/tool trace reporting for Workspace visibility, including OCR, image-edit fallback, raster analysis, and future format-conversion tools such as DXF-to-SVG conversion
 
 Inputs:
 
