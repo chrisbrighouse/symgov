@@ -14,6 +14,7 @@ from ..dependencies import get_db_session
 from ..models import (
     AgentDefinition,
     AgentQueueItem,
+    AgentRun,
     Attachment,
     AuditEvent,
     ClassificationRecord,
@@ -401,6 +402,60 @@ def queue_item_display_parts(session: Session, queue_item: AgentQueueItem) -> tu
 
     package_id = package_display_id(session, intake_record)
     return package_id, None, package_id
+
+
+def iter_tool_summary_text(value):
+    if value is None:
+        return
+    if isinstance(value, str):
+        yield value
+        return
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            yield str(key)
+            yield from iter_tool_summary_text(nested)
+        return
+    if isinstance(value, list):
+        for nested in value:
+            yield from iter_tool_summary_text(nested)
+        return
+    yield str(value)
+
+
+def append_tool_label(labels: list[str], seen: set[str], label: str) -> None:
+    key = label.lower()
+    if key not in seen:
+        labels.append(label)
+        seen.add(key)
+
+
+def vlad_tool_summary(queue_item: AgentQueueItem, latest_run: AgentRun | None) -> list[str]:
+    payload = queue_item.payload_json or {}
+    trace = latest_run.tool_trace_json if latest_run is not None else []
+    haystack = " ".join(iter_tool_summary_text({"payload": payload, "trace": trace})).lower()
+    labels: list[str] = []
+    seen: set[str] = set()
+
+    if "tesseract" in haystack or "ocr" in haystack:
+        append_tool_label(labels, seen, "Tess")
+    if "nano banana" in haystack or "nano_banana" in haystack or "gemini" in haystack or "image_edit" in haystack:
+        append_tool_label(labels, seen, "Nano")
+    if "dxf" in haystack and "svg" in haystack:
+        append_tool_label(labels, seen, "DXF to SVG")
+    elif "dxf" in haystack:
+        append_tool_label(labels, seen, "Format conversion")
+    if "raster_sheet_analysis" in haystack or ("raster" in haystack and "split" in haystack):
+        append_tool_label(labels, seen, "Raster split")
+    elif "single_symbol_raster_candidate" in haystack or ("single" in haystack and "raster" in haystack):
+        append_tool_label(labels, seen, "Raster candidate")
+
+    return labels[:4]
+
+
+def queue_item_tool_summary(agent_slug: str, queue_item: AgentQueueItem, latest_run: AgentRun | None) -> list[str]:
+    if agent_slug != "vlad":
+        return []
+    return vlad_tool_summary(queue_item, latest_run)
 
 
 def split_child_key(child: dict, proposed_symbol_id: str, file_name: str) -> str:
@@ -994,10 +1049,21 @@ def list_workspace_agent_queue_items(
         .order_by(AgentQueueItem.created_at.desc())
         .limit(limit)
     ).all()
+    queue_item_ids = [queue_item.id for queue_item, _definition in rows]
+    latest_runs_by_queue_item = {}
+    if queue_item_ids:
+        run_rows = session.execute(
+            select(AgentRun)
+            .where(AgentRun.queue_item_id.in_(queue_item_ids))
+            .order_by(AgentRun.queue_item_id, AgentRun.completed_at.desc())
+        ).scalars().all()
+        for run in run_rows:
+            latest_runs_by_queue_item.setdefault(run.queue_item_id, run)
 
     items = []
     for queue_item, definition in rows:
         package_id, package_sequence, display_name = queue_item_display_parts(session, queue_item)
+        latest_run = latest_runs_by_queue_item.get(queue_item.id)
         items.append(WorkspaceAgentQueueItemResponse(
             id=str(queue_item.id),
             agentId=definition.slug,
@@ -1011,6 +1077,7 @@ def list_workspace_agent_queue_items(
             status=queue_item.status,
             priority=queue_item.priority,
             payload=queue_item.payload_json or {},
+            toolSummary=queue_item_tool_summary(definition.slug, queue_item, latest_run),
             confidence=float(queue_item.confidence) if queue_item.confidence is not None else None,
             escalationReason=queue_item.escalation_reason,
             createdAt=isoformat_utc(queue_item.created_at),

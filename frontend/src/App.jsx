@@ -831,6 +831,7 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
         meta: queueItem.payload?.stage || queueItem.sourceType || queueItem.queueFamily,
         status: queueItem.status,
         priority: queueItem.priority,
+        toolSummary: Array.isArray(queueItem.toolSummary) ? queueItem.toolSummary : [],
         searchText: [
           queueItem.id,
           queueItem.agentId,
@@ -841,6 +842,7 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
           queueItem.status,
           queueItem.priority,
           queueItem.escalationReason,
+          (queueItem.toolSummary || []).join(' '),
           JSON.stringify(queueItem.payload || {})
         ].join(' '),
         detail: queueItem.escalationReason || resolveQueueItemTitle(queueItem)
@@ -1222,6 +1224,12 @@ function WorkspaceMonitorCard({ item, onOpen }) {
       <div className="monitor-card-meta">
         <span>{item.meta}</span>
       </div>
+      {item.toolSummary?.length ? (
+        <div className="monitor-card-tools">
+          <span>Process</span>
+          <b>{item.toolSummary.join(' · ')}</b>
+        </div>
+      ) : null}
       <b className="monitor-card-status">{String(item.status || 'pending').replaceAll('_', ' ')}</b>
     </CardElement>
   );

@@ -458,13 +458,14 @@ a {
   min-height: 2.65rem;
   align-items: center;
   justify-content: flex-start;
-  white-space: normal;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
 }
 
 .workspace-monitor-status-row span {
   min-width: 0;
-  overflow: visible;
-  text-overflow: unset;
+  flex: 0 0 auto;
 }
 
 .queue-monitor-board {
@@ -675,6 +676,31 @@ a {
 .monitor-card-line strong {
   font-size: 0.76rem;
   color: var(--blue);
+}
+
+.monitor-card-tools {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  line-height: 1.1;
+}
+
+.monitor-card-tools span {
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.monitor-card-tools b {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-main);
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .monitor-card-status {

@@ -180,6 +180,7 @@ class WorkspaceAgentQueueItemResponse(BaseModel):
     status: str
     priority: str
     payload: dict[str, Any]
+    toolSummary: list[str] = Field(default_factory=list)
     confidence: float | None = None
     escalationReason: str | None = None
     createdAt: str
