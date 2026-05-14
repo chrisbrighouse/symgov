@@ -37,10 +37,10 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 
 - a glass-morphism app shell with a full-width light top banner, simple engineering-symbol logo mark, and version/date stamping
 - primary banner navigation for `Submissions`, `Reviews`, and `Standards`, with the cog icon linking to the internal Workspace view
-- an admin Workspace processing dashboard headed `ADMIN WORKSPACE` / `Activity Monitors`, with eight compact vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed; live queue/review cards use a `HH:MM DDMMMYY` top label rendered in the `Europe/London` timezone so GMT/BST changes are automatic
-- an SME Reviews workbench headed `Daisy-coordinated Reviews`, with queue navigation, visual source evidence, classification/source context, visible case actions, comments, latest decision state, Daisy coordination, and per-child review actions
-- a Standards home that keeps browse, latest approved detail, and clarification context together
-- a live submission route that probes the backend and submits through the current public Symgov API
+- an admin Workspace processing dashboard headed `ADMIN WORKSPACE` / `Activity Monitors`, with eight equal-height compact vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed; live queue/review cards use a `HH:MM DDMMMYY` top label rendered in the `Europe/London` timezone so GMT/BST changes are automatic, the second visible card line uses a short package display name, and status sits on its own line under the activity string
+- an SME Reviews workbench headed `Daisy-coordinated Reviews`, with queue navigation, visual source evidence, reviewer-editable symbol properties, classification/source context, visible case actions, comments, latest decision state, Daisy coordination, and per-child review actions
+- a Standards home that keeps browse, latest approved detail, and clarification context together; published tables use `ID` for symbol identifiers and the `Name` column uses the published payload name when present
+- a live submission route that probes the backend and submits through the current public Symgov API, showing `Submission accepted` on successful submit instead of rendering the raw backend JSON
 - route-safe SPA navigation using hash routes so static hosting remains simple
 - accessible detail and compare SVG rendering for non-decorative symbol views
 - explicit published page and pack context in the seeded UI data
@@ -50,7 +50,10 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - Standards and Reviews retain seeded fallback data for local/static development where live APIs are still pending or unavailable.
 - The Workspace monitor now polls live agent queue items, review cases, and Daisy coordination reports every five seconds while the Workspace route is mounted and the browser tab is visible, using `GET /api/v1/workspace/agent-queue-items` plus the existing review and Daisy endpoints.
 - Workspace polling uses no-store timestamped requests, stops when the tab is hidden, and refreshes immediately when the tab becomes visible again.
-- Workspace monitor card labels should prefer operator-readable times over queue UUIDs where possible. Libby, Daisy, Human Review, Rupert, classification, review, and publication cards use `createdAt` or review `openedAt` rendered as London local time, preserving the existing card title/details underneath.
+- Workspace monitor cards use operator-readable times as the first visible row, never queue UUIDs where a timestamp exists. Libby, Daisy, Human Review, Rupert, classification, review, and publication cards use `createdAt` or review `openedAt` rendered as London local time.
+- Workspace monitor cards use backend-provided `displayName` as the second visible row when available. Submitted sheets/packages receive global uppercase 4-character hex display IDs starting at `0001`; extracted split symbols display as `{packageId}-{sequence}` with an unpadded per-package sequence such as `0001-1`, `0001-13`, or `0001-999`. Single-symbol submissions display as the package ID only, such as `0001`.
+- Workspace queue panels now stretch evenly to the bottom of the visible monitor area. The summary counters above the lanes and duplicate footer counts inside lanes have been removed, while the live refresh/status text has moved to a full-width row above the lanes. The Scott lane shows completed items by default.
+- Full filenames, proposed symbol names, queue IDs, and longer review details remain available to search/detail/tooltips rather than being used as the compact card title.
 - The Workspace monitor retains seeded `processingActivity` fallback when no API root is configured or the live queue endpoint is unavailable.
 - The Standards submission route now calls the live Symgov backend instead of using demo-only local submission behavior
 - Guided lookup is intentionally constrained to published approved records
@@ -65,6 +68,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
   - the Reviews decision rail now renders Daisy coordination output for the active review case when present
   - if no Daisy report exists yet for a case, the UI shows an explicit empty state instead of silently omitting coordination status
 - Reviews now includes SME filters for stage, reviewer, priority, and action type, and the decision rail can record approve, reject, request changes, request more evidence, rename/classify, duplicate, delete, and defer outcomes when the live decision endpoint is available.
+- Reviews now exposes reviewer-editable symbol properties alongside the source graphic. The symbol record identifier is labelled `ID`; `Name` is limited to 50 characters and allows letters, numbers, spaces, `-`, `/`, and `$`; `Description` is limited to 256 characters and allows any characters; `Category` and `Discipline` follow the existing classification values. These values are seeded from agent output when available, can be changed by reviewers, and are preferred by the publication handoff.
 - Focused routes remain available for audit, per-symbol reading, downloads, and guided lookup
 
 ## Frontend deployment notes
@@ -120,6 +124,7 @@ The product docs now also include the first agentization slice for Symgov:
 - the backend exposes those reports through `/api/v1/workspace/daisy/reports`
 - the Reviews UI now shows Daisy coordination status, reviewer assignment proposals, stage-transition proposals, contributor evidence requests, visual source evidence, latest recorded decision state, and a reviewer decision panel for the active case
 - the current implemented post-review loop is Daisy review -> Libby follow-up for every non-approval outcome -> optional Vlad graphic change -> Libby consolidation -> Daisy re-review; only explicit approval routes to Rupert
+- queue status tracks each agent's completed work rather than the full downstream governance state: Vlad marks Libby-routed `symbol_graphic_change_request` items completed after returning the changed image result to Libby, and Daisy marks Libby follow-up/human-review escalation work completed once the human review request has been created/escalated
 - durable post-review decisions and follow-on action records have a first backend implementation:
   - migration `20260426_0004_human_review_decisions.py`
   - ORM models `HumanReviewDecision` and `ReviewCaseAction`
@@ -357,6 +362,8 @@ Current verified runtime baseline:
 - raster split child review persistence now uses `review_split_items`, materialized from Vlad `derivative_manifest` children, so each proposed child can carry its own lifecycle, open/processed status, latest review action, reviewer note/details, downstream agent, and downstream queue item
 - `GET /api/v1/workspace/review-cases` projects open `review_split_items` with `awaiting_decision` or `returned_for_review` as first-class human-review items with `reviewItemType: "split_item"`, parent review-case lineage, a one-child review payload, and the child preview as the primary review visual
 - split-review processing is handled through `POST /api/v1/workspace/review-cases/{id}/split-items/process-decisions`; it processes only non-pending child decisions, routes approved children to Rupert and non-approval children to Libby, and closes the parent split case only when no child items remain open
+- reviewer-editable symbol properties now persist in `review_symbol_properties` via Alembic revision `20260512_0006`; review-case responses include `symbolProperties`, reviewers update them through the Workspace API, and publication staging prefers the reviewed `name`, `description`, `category`, and `discipline` values
+- clean test resets should use `/data/.codex/skills/clean-symgov/scripts/clean_symgov.py --apply`; this clears operational/review/publication/source-package records and generated runtime artifacts while preserving source code and agent definitions. Because `source_packages` are cleared by that explicit reset, the next submitted sheet/package display ID starts again at `0001`.
 
 The current MinIO bootstrap assets live outside this workspace in:
 

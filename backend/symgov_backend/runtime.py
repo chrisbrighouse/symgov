@@ -43,6 +43,7 @@ from .models import (
     ReviewCase,
     ReviewSplitItem,
     ControlException,
+    SourcePackage,
     SymbolRevision,
     User,
     ValidationReport,
@@ -154,6 +155,62 @@ def slugify_public_code(value: Any) -> str:
             last_dash = True
     slug = "".join(chars).strip("-")
     return slug or "published"
+
+
+def next_source_package_code(session) -> str:
+    session.execute(text("LOCK TABLE source_packages IN EXCLUSIVE MODE"))
+    codes = session.execute(text("select package_code from source_packages")).scalars().all()
+    current_max = 0
+    for code in codes:
+        candidate = str(code or "").strip().upper()
+        if len(candidate) == 4 and all(char in "0123456789ABCDEF" for char in candidate):
+            current_max = max(current_max, int(candidate, 16))
+    next_value = current_max + 1
+    if next_value > 0xFFFF:
+        raise RuntimeError("Source package code space exhausted.")
+    return f"{next_value:04X}"
+
+
+def ensure_source_package_for_intake(session, durable_record: dict[str, Any], created_at: datetime) -> SourcePackage:
+    package_id = coerce_uuid(durable_record.get("source_package_id"))
+    normalized = dict(durable_record.get("normalized_submission_json") or {})
+    source_file = (
+        normalized.get("original_filename")
+        or normalized.get("origin_file_name")
+        or normalized.get("file_name")
+        or durable_record.get("raw_object_key")
+        or durable_record.get("source_ref")
+        or "Submitted sheet"
+    )
+
+    if package_id is not None:
+        package = session.get(SourcePackage, package_id)
+        if package is not None:
+            return package
+
+    package_code = str(normalized.get("source_package_code") or "").strip().upper()
+    if not (len(package_code) == 4 and all(char in "0123456789ABCDEF" for char in package_code)):
+        package_code = next_source_package_code(session)
+
+    package = session.query(SourcePackage).filter_by(package_code=package_code).one_or_none()
+    if package is None:
+        package = SourcePackage(
+            id=package_id or uuid.uuid4(),
+            package_code=package_code,
+            title=Path(str(source_file)).name,
+            provider=durable_record.get("submitter"),
+            package_type="submission_sheet",
+            status="active",
+            created_at=created_at,
+            updated_at=created_at,
+        )
+        session.add(package)
+    else:
+        package.title = package.title or Path(str(source_file)).name
+        package.provider = package.provider or durable_record.get("submitter")
+        package.updated_at = created_at
+    session.flush()
+    return package
 
 
 def read_storage_env_file(env_file: str | os.PathLike[str] | None = None) -> tuple[Path, dict[str, str]]:
@@ -778,6 +835,8 @@ class RuntimePersistenceBridge:
         child_key: str,
         attachment_object_key: str,
         payload_updates: dict[str, Any] | None = None,
+        latest_note: str | None = None,
+        latest_details: str | None = None,
     ) -> dict[str, str]:
         now = datetime.now(timezone.utc).replace(microsecond=0)
         with self.session_scope() as session:
@@ -795,8 +854,8 @@ class RuntimePersistenceBridge:
             row.file_name = Path(attachment_object_key).name
             row.status = "returned_for_review"
             row.latest_action = None
-            row.latest_note = None
-            row.latest_details = None
+            row.latest_note = latest_note
+            row.latest_details = latest_details
             row.downstream_agent_slug = None
             row.downstream_queue_item_id = None
             row.processed_at = None
@@ -807,6 +866,69 @@ class RuntimePersistenceBridge:
                 "review_case_id": str(row.review_case_id),
                 "child_key": row.child_key,
                 "attachment_object_key": row.attachment_object_key,
+                "status": row.status,
+            }
+
+    def dispose_review_split_item(
+        self,
+        *,
+        review_case_id: str | uuid.UUID,
+        child_key: str,
+        disposition: str,
+        latest_note: str | None = None,
+        latest_details: str | None = None,
+        payload_updates: dict[str, Any] | None = None,
+    ) -> dict[str, str]:
+        normalized_disposition = "deleted" if disposition == "deleted" else "rejected"
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        with self.session_scope() as session:
+            row = (
+                session.query(ReviewSplitItem)
+                .filter(
+                    ReviewSplitItem.review_case_id == coerce_uuid(review_case_id),
+                    ReviewSplitItem.child_key == child_key,
+                )
+                .one_or_none()
+            )
+            if row is None:
+                raise RuntimeError(f"Missing review_split_items row for case {review_case_id} child {child_key}.")
+            row.status = normalized_disposition
+            row.latest_action = normalized_disposition
+            row.latest_note = latest_note
+            row.latest_details = latest_details
+            row.downstream_agent_slug = None
+            row.downstream_queue_item_id = None
+            row.processed_at = now
+            row.updated_at = now
+            row.payload_json = {
+                **(row.payload_json or {}),
+                "libby_disposition": {
+                    "disposition": normalized_disposition,
+                    "note": latest_note,
+                    "details": latest_details,
+                    "recorded_at": now.isoformat().replace("+00:00", "Z"),
+                },
+                **(payload_updates or {}),
+            }
+            session.add(
+                AuditEvent(
+                    entity_type="review_split_item",
+                    entity_id=row.id,
+                    action=f"libby_split_item_{normalized_disposition}",
+                    actor_id=None,
+                    payload_json={
+                        "review_case_id": str(row.review_case_id),
+                        "child_key": row.child_key,
+                        "note": latest_note,
+                        "details": latest_details,
+                    },
+                    created_at=now,
+                )
+            )
+            return {
+                "id": str(row.id),
+                "review_case_id": str(row.review_case_id),
+                "child_key": row.child_key,
                 "status": row.status,
             }
 
@@ -1188,6 +1310,14 @@ class RuntimePersistenceBridge:
             output_artifact.created_at = parse_timestamp(output_artifact_record["created_at"])
 
             if durable_kind == "intake_record":
+                created_at = parse_timestamp(durable_record["created_at"])
+                source_package = ensure_source_package_for_intake(session, durable_record, created_at)
+                normalized_submission = dict(durable_record["normalized_submission_json"])
+                normalized_submission["source_package_code"] = source_package.package_code
+                normalized_submission["workspace_display_name"] = source_package.package_code
+                durable_record["source_package_id"] = str(source_package.id)
+                durable_record["normalized_submission_json"] = normalized_submission
+
                 record = session.get(IntakeRecord, coerce_uuid(durable_record["id"]))
                 if record is None:
                     record = IntakeRecord(id=coerce_uuid(durable_record["id"]))
@@ -1201,10 +1331,10 @@ class RuntimePersistenceBridge:
                 record.eligibility_status = durable_record["eligibility_status"]
                 record.source_package_id = coerce_uuid(durable_record.get("source_package_id"))
                 record.raw_object_key = durable_record.get("raw_object_key")
-                record.normalized_submission_json = durable_record["normalized_submission_json"]
+                record.normalized_submission_json = normalized_submission
                 record.routing_recommendation_json = durable_record["routing_recommendation_json"]
                 record.report_json = durable_record["report_json"]
-                record.created_at = parse_timestamp(durable_record["created_at"])
+                record.created_at = created_at
             elif durable_kind == "validation_report":
                 record = session.get(ValidationReport, coerce_uuid(durable_record["id"]))
                 if record is None:

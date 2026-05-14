@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+REVIEW_SYMBOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9 \-/$]*$")
 
 
 class APIHealthResponse(BaseModel):
@@ -38,13 +42,15 @@ class ExternalSubmissionQueueItemResponse(BaseModel):
     fileName: str
     fileNote: str
     batchSummary: str
+    status: str = "queued"
     routes: list[str]
     payload: dict[str, Any]
     attachmentId: str
     attachmentObjectKey: str
-    intakeRecordId: str
-    intakeStatus: str
-    eligibilityStatus: str
+    scottQueueItemPath: str | None = None
+    intakeRecordId: str | None = None
+    intakeStatus: str = "pending"
+    eligibilityStatus: str = "pending"
     dbPersistence: dict[str, Any] | None = None
     downstreamCreated: dict[str, Any]
 
@@ -62,6 +68,9 @@ class WorkspaceReviewChildResponse(BaseModel):
     id: str
     proposedSymbolId: str
     proposedSymbolName: str
+    displayName: str | None = None
+    packageDisplayId: str | None = None
+    packageSymbolSequence: int | None = None
     fileName: str
     parentFileName: str
     nameSource: str | None = None
@@ -74,6 +83,20 @@ class WorkspaceReviewChildResponse(BaseModel):
     processedAt: str | None = None
     downstreamAgentSlug: str | None = None
     downstreamQueueItemId: str | None = None
+
+
+class WorkspaceReviewSymbolPropertiesResponse(BaseModel):
+    id: str
+    reviewCaseId: str
+    splitItemId: str | None = None
+    symbolRecordKey: str
+    name: str
+    description: str = ""
+    category: str | None = None
+    discipline: str | None = None
+    source: str
+    updatedBy: str | None = None
+    updatedAt: str
 
 
 class WorkspaceHumanReviewDecisionSummary(BaseModel):
@@ -96,6 +119,9 @@ class WorkspaceReviewCaseResponse(BaseModel):
     splitChildKey: str | None = None
     splitChildStatus: str | None = None
     symbolId: str
+    displayName: str | None = None
+    packageDisplayId: str | None = None
+    packageSymbolSequence: int | None = None
     title: str
     owner: str
     due: str
@@ -133,6 +159,7 @@ class WorkspaceReviewCaseResponse(BaseModel):
     sourceRefs: list[str] = []
     classificationSummary: str | None = None
     latestDecision: WorkspaceHumanReviewDecisionSummary | None = None
+    symbolProperties: WorkspaceReviewSymbolPropertiesResponse | None = None
     children: list[WorkspaceReviewChildResponse]
 
 
@@ -147,6 +174,9 @@ class WorkspaceAgentQueueItemResponse(BaseModel):
     queueFamily: str
     sourceType: str
     sourceId: str
+    displayName: str | None = None
+    packageDisplayId: str | None = None
+    packageSymbolSequence: int | None = None
     status: str
     priority: str
     payload: dict[str, Any]
@@ -220,6 +250,30 @@ class WorkspaceReviewDecisionRequest(BaseModel):
     deciderRole: str = "sme_reviewer"
     childDecisions: list[WorkspaceReviewChildDecisionInput] = Field(default_factory=list)
     caseComment: str = ""
+
+
+class WorkspaceReviewSymbolPropertiesUpdateRequest(BaseModel):
+    splitItemId: str | None = None
+    name: str = Field(min_length=1, max_length=50)
+    description: str = Field(default="", max_length=256)
+    category: str | None = Field(default=None, max_length=80)
+    discipline: str | None = Field(default=None, max_length=80)
+    updatedBy: str = Field(default="Human", max_length=80)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not REVIEW_SYMBOL_NAME_PATTERN.match(trimmed):
+            raise ValueError("Name may only contain letters, numbers, spaces, hyphens, slashes, and dollar signs.")
+        return trimmed
+
+    @field_validator("description", "category", "discipline", "updatedBy")
+    @classmethod
+    def trim_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip()
 
 
 class WorkspaceSplitReviewProcessRequest(BaseModel):

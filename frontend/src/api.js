@@ -255,6 +255,37 @@ export async function processWorkspaceSplitReviewDecisions(reviewCaseId, decisio
   return payload;
 }
 
+export async function updateWorkspaceReviewSymbolProperties(reviewCaseId, propertiesPayload) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+
+  const endpoint = `${appConfig.apiRoot}/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/symbol-properties`;
+  const patchProperties = async (payload, wrapped = false) => {
+    const requestBody = wrapped ? { request: payload } : payload;
+    const response = await fetch(endpoint, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await patchProperties(propertiesPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await patchProperties(propertiesPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Symbol properties update failed.');
+  }
+
+  return payload;
+}
+
 export async function fetchPublishedSymbols() {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };

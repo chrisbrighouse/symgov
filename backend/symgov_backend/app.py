@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from pathlib import Path
 
@@ -16,6 +18,7 @@ from .routes.published import legacy_router as legacy_published_router
 from .routes.published import router as published_router
 from .routes.workspace import legacy_router as legacy_workspace_router
 from .routes.workspace import router as workspace_router
+from .agent_queue_worker import AgentQueueWorkerConfig, run_agent_queue_worker
 from .settings import get_settings
 
 
@@ -49,6 +52,37 @@ def create_app() -> FastAPI:
     app.include_router(legacy_public_router, prefix="/api")
     app.include_router(legacy_published_router, prefix="/api")
     app.include_router(legacy_workspace_router, prefix="/api")
+
+    @app.on_event("startup")
+    async def start_background_workers() -> None:
+        if not settings.enable_agent_workers and not settings.enable_libby_worker:
+            return
+        agents = settings.agent_workers if settings.enable_agent_workers else ("libby",)
+        stop_event = asyncio.Event()
+        config = AgentQueueWorkerConfig(
+            agents=agents,
+            db_env_file=settings.db_env_file,
+            storage_env_file=settings.storage_env_file,
+            interval_seconds=settings.agent_worker_interval_seconds
+            if settings.enable_agent_workers
+            else settings.libby_worker_interval_seconds,
+            limit=settings.agent_worker_limit if settings.enable_agent_workers else settings.libby_worker_limit,
+            drain=settings.agent_worker_drain,
+        )
+        app.state.agent_worker_stop_event = stop_event
+        app.state.agent_worker_task = asyncio.create_task(run_agent_queue_worker(config, stop_event))
+
+    @app.on_event("shutdown")
+    async def stop_background_workers() -> None:
+        task = getattr(app.state, "agent_worker_task", None)
+        stop_event = getattr(app.state, "agent_worker_stop_event", None)
+        if stop_event is not None:
+            stop_event.set()
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
     return app
 
 

@@ -96,6 +96,7 @@ No agent should consume another agent's internal prompt history as its primary s
 Current bridge note:
 
 - the local runner bridge currently maps legacy string queue IDs and source IDs into deterministic UUIDs so the existing file-backed queue payloads can be mirrored into the live UUID-based schema without changing local runtime fixtures first
+- queue status should describe the agent's responsibility, not the whole downstream lifecycle. For example, Vlad completes a Libby-routed graphic-change queue item once the changed image result has been returned to Libby, and Daisy completes human-review escalation work once the review request has been created/escalated.
 
 ### 2. Durable outputs
 
@@ -423,6 +424,7 @@ Agreed operating rules:
   - writes local `review_coordination_reports`
   - can be auto-created from `Vlad` or `Tracy` review-case outputs on the live external submission path
   - is queryable through the backend Workspace API and visible in the Workspace UI as a read-only coordination lane
+  - marks Libby follow-up/human-review escalation queue items `completed` once the human review request has been created/escalated, with related Daisy queue completions mirrored into PostgreSQL by the backend queue bridge
 - `Libby` now:
   - accepts DB-backed and local runtime queue items for non-approval human review follow-up
   - writes local `review_followup_reports`
@@ -432,6 +434,7 @@ Agreed operating rules:
   - accepts Libby-routed `symbol_graphic_change_request` queue items
   - writes graphic-change result artifacts
   - returns graphic-change results to Libby for consolidation before Daisy re-review
+  - marks `symbol_graphic_change_request` queue items `completed` after returning the graphic-change result to Libby
 - `Rupert` now:
   - accepts publication handoff queue items after human approval
   - writes local `publication_reports`

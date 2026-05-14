@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
-import importlib.util
 import json
 import uuid
 from dataclasses import dataclass
@@ -17,33 +16,6 @@ from ..runtime import RuntimePersistenceBridge
 SCOTT_WORKSPACE_ROOT = Path("/data/.openclaw/workspaces/scott")
 SCOTT_RUNTIME_ROOT = SCOTT_WORKSPACE_ROOT / "runtime"
 SCOTT_UPLOAD_ROOT = SCOTT_RUNTIME_ROOT / "external_uploads"
-VLAD_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/vlad/runtime")
-TRACY_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/tracy/runtime")
-LIBBY_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/libby/runtime")
-DAISY_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/daisy/runtime")
-SCOTT_RUNNER_PATH = SCOTT_WORKSPACE_ROOT / "run_scott_intake.py"
-SCOTT_DOWNSTREAM_PATH = SCOTT_WORKSPACE_ROOT / "enqueue_scott_downstream.py"
-VLAD_RUNNER_PATH = Path("/data/.openclaw/workspaces/vlad/run_vlad_validation.py")
-TRACY_RUNNER_PATH = Path("/data/.openclaw/workspaces/tracy/run_tracy_provenance.py")
-LIBBY_RUNNER_PATH = Path("/data/.openclaw/workspaces/libby/run_libby_classification.py")
-DAISY_RUNNER_PATH = Path("/data/.openclaw/workspaces/daisy/run_daisy_coordination.py")
-
-
-def _load_module(module_name: str, path: Path):
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load module {module_name} from {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-SCOTT_RUNNER = _load_module("symgov_scott_runner", SCOTT_RUNNER_PATH)
-SCOTT_DOWNSTREAM = _load_module("symgov_scott_downstream", SCOTT_DOWNSTREAM_PATH)
-VLAD_RUNNER = _load_module("symgov_vlad_runner", VLAD_RUNNER_PATH)
-TRACY_RUNNER = _load_module("symgov_tracy_runner", TRACY_RUNNER_PATH)
-LIBBY_RUNNER = _load_module("symgov_libby_runner", LIBBY_RUNNER_PATH)
-DAISY_RUNNER = _load_module("symgov_daisy_runner", DAISY_RUNNER_PATH)
 
 
 class SubmissionError(RuntimeError):
@@ -99,125 +71,6 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
-def load_json(path: Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def _sanitize_processing_result(value: Any) -> Any:
-    if not isinstance(value, dict):
-        return value
-
-    sanitized: dict[str, Any] = {}
-    for key in (
-        "queue_item_path",
-        "queue_item_status",
-        "run_record_path",
-        "artifact_record_path",
-        "intake_record_path",
-        "validation_report_path",
-        "provenance_assessment_path",
-        "classification_record_path",
-        "review_coordination_report_path",
-    ):
-        entry = value.get(key)
-        if entry is not None:
-            sanitized[key] = str(entry)
-
-    artifact = value.get("artifact") or {}
-    if isinstance(artifact, dict):
-        artifact_summary: dict[str, Any] = {}
-        for key in (
-            "decision",
-            "confidence",
-            "eligibility_status",
-            "rights_status",
-            "risk_level",
-            "classification_status",
-            "source_classification",
-            "libby_approved",
-            "coordination_status",
-            "coordination_summary",
-            "escalation_target",
-        ):
-            if artifact.get(key) is not None:
-                artifact_summary[key] = artifact.get(key)
-        if artifact_summary:
-            sanitized["artifact"] = artifact_summary
-
-    additional_db_records = value.get("additional_db_records") or {}
-    if isinstance(additional_db_records, dict):
-        db_summary: dict[str, Any] = {}
-        review_case = additional_db_records.get("review_case")
-        if isinstance(review_case, dict):
-            db_summary["review_case"] = {
-                "id": review_case.get("id"),
-                "current_stage": review_case.get("current_stage"),
-                "escalation_level": review_case.get("escalation_level"),
-            }
-        if db_summary:
-            sanitized["additional_db_records"] = db_summary
-
-    notifications = value.get("notifications") or {}
-    if isinstance(notifications, dict):
-        notification_summary: dict[str, Any] = {}
-        for phase, entry in notifications.items():
-            if not isinstance(entry, dict):
-                continue
-            target = entry.get("target") or {}
-            notification_summary[phase] = {
-                "ok": entry.get("ok"),
-                "skipped": entry.get("skipped"),
-                "reason": entry.get("reason"),
-                "phase": entry.get("phase"),
-                "returncode": entry.get("returncode"),
-                "targetLabel": target.get("label"),
-                "targetChannel": target.get("channel"),
-                "targetName": target.get("name"),
-            }
-        if notification_summary:
-            sanitized["notifications"] = notification_summary
-
-    return sanitized
-
-
-def _sanitize_downstream_created(value: Any) -> Any:
-    if not isinstance(value, dict):
-        return value
-
-    sanitized: dict[str, Any] = {}
-    for key, entry in value.items():
-        if key == "daisy" and isinstance(entry, list):
-            sanitized[key] = [
-                {
-                    "source_agent": item.get("source_agent"),
-                    "daisy_queue_item_path": str(item.get("daisy_queue_item_path")) if item.get("daisy_queue_item_path") else None,
-                    "daisy_processing": _sanitize_processing_result(item.get("daisy_processing") or {}),
-                }
-                for item in entry
-                if isinstance(item, dict)
-            ]
-            continue
-
-        if key.endswith("_processing"):
-            sanitized[key] = _sanitize_processing_result(entry)
-            continue
-
-        if key.endswith("_queue_item_path") and entry is not None:
-            sanitized[key] = str(entry)
-            continue
-
-        if key == "libby" and isinstance(entry, dict):
-            sanitized[key] = {
-                "libby_queue_item_path": str(entry.get("libby_queue_item_path")) if entry.get("libby_queue_item_path") else None,
-                "libby_processing": _sanitize_processing_result(entry.get("libby_processing") or {}),
-            }
-            continue
-
-        sanitized[key] = entry
-
-    return sanitized
-
-
 @dataclass
 class ExternalSubmissionService:
     bridge: RuntimePersistenceBridge
@@ -226,10 +79,6 @@ class ExternalSubmissionService:
     storage_env_file: Path | None = None
     scott_runtime_root: Path = SCOTT_RUNTIME_ROOT
     upload_root: Path = SCOTT_UPLOAD_ROOT
-    vlad_runtime_root: Path = VLAD_RUNTIME_ROOT
-    tracy_runtime_root: Path = TRACY_RUNTIME_ROOT
-    libby_runtime_root: Path = LIBBY_RUNTIME_ROOT
-    daisy_runtime_root: Path = DAISY_RUNTIME_ROOT
 
     def submit(self, payload: dict[str, Any]) -> dict[str, Any]:
         pin = str(payload.get("pin") or "").strip()
@@ -356,16 +205,7 @@ class ExternalSubmissionService:
                 "completed_at": None,
             }
             write_json(queue_item_path, queue_item)
-
-            process_result = SCOTT_RUNNER.process_queue_item(
-                queue_item_path=queue_item_path,
-                runtime_root=self.scott_runtime_root,
-                persist_db=True,
-                db_env_file=str(self.db_env_file),
-            )
-            intake_record_path = Path(process_result["intake_record_path"])
-            intake_record = load_json(intake_record_path)
-            downstream = self._create_downstream_queue_items(intake_record_path, intake_record)
+            db_persistence = self.bridge.upsert_agent_queue_item(queue_item)
 
             queue_items.append(
                 {
@@ -373,16 +213,18 @@ class ExternalSubmissionService:
                     "fileName": file_name,
                     "fileNote": file_note,
                     "batchSummary": overall_description,
-                    "routes": (intake_record.get("routing_recommendation_json") or {}).get("route_to_agents") or [],
+                    "status": "queued",
+                    "routes": [],
                     "payload": payload_json,
                     "attachmentId": attachment["id"],
                     "attachmentObjectKey": attachment["object_key"],
                     "attachmentStorage": storage_result,
-                    "intakeRecordId": intake_record["id"],
-                    "intakeStatus": intake_record["intake_status"],
-                    "eligibilityStatus": intake_record["eligibility_status"],
-                    "dbPersistence": process_result.get("db_persistence"),
-                    "downstreamCreated": _sanitize_downstream_created(downstream),
+                    "scottQueueItemPath": str(queue_item_path),
+                    "intakeRecordId": None,
+                    "intakeStatus": "pending",
+                    "eligibilityStatus": "pending",
+                    "dbPersistence": db_persistence,
+                    "downstreamCreated": {},
                 }
             )
 
@@ -408,117 +250,3 @@ class ExternalSubmissionService:
             "sharedSummary": overall_description,
             "queueItems": queue_items,
         }
-
-    def _create_downstream_queue_items(self, intake_record_path: Path, intake_record: dict[str, Any]) -> dict[str, Any]:
-        if intake_record.get("intake_status") != "accepted":
-            return {}
-        if intake_record.get("eligibility_status") != "eligible":
-            return {}
-
-        route_to_agents = (intake_record.get("routing_recommendation_json") or {}).get("route_to_agents") or []
-        if not route_to_agents:
-            return {}
-
-        created: dict[str, Any] = {}
-        timestamp = SCOTT_DOWNSTREAM.utc_stamp()
-
-        if "vlad" in route_to_agents:
-            vlad_item = SCOTT_DOWNSTREAM.build_vlad_queue_item(intake_record, timestamp)
-            vlad_path = self.vlad_runtime_root / "agent_queue_items" / f"{vlad_item['id']}.json"
-            SCOTT_DOWNSTREAM.write_json(vlad_path, vlad_item)
-            created["vlad_queue_item_path"] = str(vlad_path)
-            created["vlad_processing"] = VLAD_RUNNER.process_queue_item(
-                queue_item_path=vlad_path,
-                runtime_root=self.vlad_runtime_root,
-                persist_db=True,
-                db_env_file=str(self.db_env_file),
-                storage_env_file=str(self.storage_env_file) if self.storage_env_file else None,
-            )
-            daisy_created = self._create_daisy_from_processing(
-                source_agent="vlad",
-                processing_result=created["vlad_processing"],
-                timestamp=timestamp,
-            )
-            if daisy_created:
-                created.setdefault("daisy", []).extend(daisy_created)
-
-        if "tracy" in route_to_agents:
-            tracy_item = SCOTT_DOWNSTREAM.build_tracy_queue_item(intake_record, timestamp)
-            tracy_path = self.tracy_runtime_root / "agent_queue_items" / f"{tracy_item['id']}.json"
-            SCOTT_DOWNSTREAM.write_json(tracy_path, tracy_item)
-            created["tracy_queue_item_path"] = str(tracy_path)
-            created["tracy_processing"] = TRACY_RUNNER.process_queue_item(
-                queue_item_path=tracy_path,
-                runtime_root=self.tracy_runtime_root,
-                persist_db=True,
-                db_env_file=str(self.db_env_file),
-            )
-            libby_created = self._create_libby_from_processing(
-                processing_result=created["tracy_processing"],
-            )
-            if libby_created:
-                created["libby"] = libby_created
-                daisy_created = self._create_daisy_from_processing(
-                    source_agent="libby",
-                    processing_result=libby_created["libby_processing"],
-                    timestamp=timestamp,
-                )
-                if daisy_created:
-                    created.setdefault("daisy", []).extend(daisy_created)
-
-        return created
-
-    def _create_libby_from_processing(
-        self,
-        *,
-        processing_result: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        downstream_created = processing_result.get("downstream_created") or {}
-        libby_queue_item_path = downstream_created.get("libby_queue_item_path")
-        if not libby_queue_item_path:
-            return None
-
-        libby_path = Path(libby_queue_item_path)
-        libby_processing = LIBBY_RUNNER.process_queue_item(
-            queue_item_path=libby_path,
-            runtime_root=self.libby_runtime_root,
-            persist_db=True,
-            db_env_file=str(self.db_env_file),
-        )
-        return {
-            "libby_queue_item_path": str(libby_path),
-            "libby_processing": libby_processing,
-        }
-
-    def _create_daisy_from_processing(
-        self,
-        *,
-        source_agent: str,
-        processing_result: dict[str, Any],
-        timestamp: str,
-    ) -> list[dict[str, Any]]:
-        additional_db_records = processing_result.get("additional_db_records") or {}
-        review_case = additional_db_records.get("review_case")
-        artifact = processing_result.get("artifact") or {}
-        if not review_case:
-            return []
-
-        daisy_item = DAISY_RUNNER.build_daisy_queue_item(
-            review_case=review_case,
-            timestamp=timestamp,
-            validation_status=artifact.get("decision") if source_agent == "vlad" else None,
-            rights_status=artifact.get("rights_status") if source_agent in {"tracy", "libby"} else None,
-        )
-        daisy_path = self.daisy_runtime_root / "agent_queue_items" / f"{daisy_item['id']}.json"
-        write_json(daisy_path, daisy_item)
-        daisy_processing = DAISY_RUNNER.process_queue_item(
-            queue_item_path=daisy_path,
-            runtime_root=self.daisy_runtime_root,
-        )
-        return [
-            {
-                "source_agent": source_agent,
-                "daisy_queue_item_path": str(daisy_path),
-                "daisy_processing": daisy_processing,
-            }
-        ]
