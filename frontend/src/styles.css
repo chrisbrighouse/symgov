@@ -458,14 +458,21 @@ a {
   min-height: 2.65rem;
   align-items: center;
   justify-content: flex-start;
-  overflow-x: auto;
+  box-sizing: border-box;
+  overflow-x: hidden;
   overflow-y: hidden;
   white-space: nowrap;
 }
 
 .workspace-monitor-status-row span {
   min-width: 0;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+}
+
+.health-chip.workspace-monitor-status-row {
+  display: flex;
+  width: 100%;
+  max-width: none;
 }
 
 .queue-monitor-board {
