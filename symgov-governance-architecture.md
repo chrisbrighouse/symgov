@@ -118,7 +118,8 @@ Phase-1 published API rule:
 - `POST /api/v1/workspace/review-cases/{id}/split-items/process-decisions`
   - process only decided raster split child items, route approved children to Rupert and non-approved children to Libby, leave undecided children open, and close the parent split case only after all child items are processed
 - `PATCH /api/v1/workspace/review-cases/{id}/symbol-properties`
-  - update reviewer-editable symbol properties for the active review record: `Name`, `Description`, `Category`, and `Discipline`
+  - update reviewer-editable symbol properties for the active review record: `Name`, `Description`, `Category`, and `Discipline`, while showing read-only source `Format` as file-format context
+  - remember reviewer-entered `Category` and `Discipline` values as reusable database-backed options, normalized to capitalized mixed case and deduplicated by canonical/fuzzy matching
 - `GET /api/v1/workspace/symbols/{symbol_id}`
   - governed record detail across lifecycle states
 - `GET /api/v1/workspace/symbols/{symbol_id}/audit`
@@ -403,6 +404,7 @@ Recommended notes:
 - `Description` is limited to 256 characters and may contain any characters
 - publication staging should prefer these reviewed values for `name`, `description`, `category`, and `discipline`
 - Standards should display the reviewed/published `name` in the `Name` column and label the symbol identifier column as `ID`
+- Standards browse should expose latest published records through facets and a central approved-symbol grid. Opening a row displays an in-grid right detail panel with the same height cap as the grid so detail content scrolls internally and the close control remains reachable.
 
 #### `publication_packs`
 
@@ -605,6 +607,21 @@ Recommended constraints:
 Recommended notes:
 
 - use this table for lightweight non-staff identities that can submit clarifications or intake metadata without becoming Workspace application users
+
+### Review symbol property options
+
+`review_symbol_property_options` stores reusable picklist values learned from reviewer-entered symbol properties. It is intentionally scoped first to `Category` and `Discipline`.
+
+Each row stores:
+
+- `field_name` such as `category` or `discipline`
+- `display_value` normalized to capitalized mixed case
+- `normalized_key` for case-insensitive and punctuation-insensitive deduplication
+- `use_count`, `created_at`, `updated_at`, and `last_used_at`
+
+When reviewers save symbol properties, the Workspace API normalizes Category and Discipline, records or updates the corresponding option row, and stores the normalized display value back on `review_symbol_properties`. The Reviews UI fetches the option list through `GET /api/v1/workspace/review-symbol-property-options` and presents saved values as explicit selectors beside editable text fields while preserving free-text entry for new terms.
+
+`review_symbol_properties.format` is read-only in the current Reviews UI. It is populated from Libby classification when available, otherwise from validation/intake metadata, source filename, or object-key extension. It renders as a compact file-format badge under the description and uses labels such as `PNG`, `JPEG`, `SVG`, `SVF`, and `DXF`.
 - these records are contact and provenance references only, not direct login principals for phase 1
 
 #### `intake_records`

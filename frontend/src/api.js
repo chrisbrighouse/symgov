@@ -286,6 +286,42 @@ export async function updateWorkspaceReviewSymbolProperties(reviewCaseId, proper
   return payload;
 }
 
+export async function fetchWorkspaceReviewSymbolPropertyOptions() {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
+  }
+
+  try {
+    const response = await fetch(`${appConfig.apiRoot}/workspace/review-symbol-property-options?_=${Date.now()}`, {
+      cache: 'no-store'
+    });
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Review property options load failed.',
+        items: []
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: payload.items?.length ? 'Review property options loaded.' : 'No review property options are available yet.',
+      items: payload.items || []
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'error',
+      message: error instanceof Error ? error.message : 'Review property options load failed.',
+      items: []
+    };
+  }
+}
+
 export async function fetchPublishedSymbols() {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };

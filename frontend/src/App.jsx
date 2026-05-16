@@ -6,6 +6,7 @@ import {
   fetchWorkspaceDaisyReports,
   fetchWorkspaceQueueItems,
   fetchWorkspaceReviewCases,
+  fetchWorkspaceReviewSymbolPropertyOptions,
   processWorkspaceSplitReviewDecisions,
   submitWorkspaceReviewDecision,
   submitExternalSubmission,
@@ -179,6 +180,7 @@ function CogIcon() {
 }
 
 function StandardsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const [sortState, setSortState] = useState({ key: 'id', direction: 'asc' });
   const [columnFilters, setColumnFilters] = useState({});
@@ -192,6 +194,7 @@ function StandardsPage() {
     items: appConfig.apiRoot ? [] : symbols
   });
   const standardsSymbols = standardsState.items.length ? standardsState.items : symbols;
+  const requestedSymbolId = searchParams.get('symbol') || '';
   const standardsColumns = [
     ['id', 'ID'],
     ['name', 'Name'],
@@ -205,7 +208,6 @@ function StandardsPage() {
     ['category', 'Category'],
     ['discipline', 'Discipline'],
     ['pack', 'Pack'],
-    ['status', 'Status'],
     ['format', 'Format'],
     ['symbolFamily', 'Symbol family']
   ];
@@ -318,6 +320,24 @@ function StandardsPage() {
   }, [filteredSymbols, activeId]);
 
   useEffect(() => {
+    if (!requestedSymbolId || !standardsSymbols.length) {
+      return;
+    }
+    const normalizedRequested = requestedSymbolId.trim().toLowerCase();
+    const requestedSymbol = standardsSymbols.find((symbol) =>
+      [symbol.id, symbol.slug, symbol.symbolId, symbol.pageCode]
+        .map((value) => String(value || '').trim().toLowerCase())
+        .includes(normalizedRequested)
+    );
+    if (requestedSymbol) {
+      setActiveId(requestedSymbol.id);
+      setColumnFilters({});
+      setFacetFilters({});
+      setQuery('');
+    }
+  }, [requestedSymbolId, standardsSymbols]);
+
+  useEffect(() => {
     setDisplayCount(60);
   }, [query, columnFilters, facetFilters, sortState]);
 
@@ -373,7 +393,7 @@ function StandardsPage() {
         {standardsState.loading ? 'Loading published symbols...' : `${standardsState.message} Showing ${filteredSymbols.length} records.`}
       </p>
 
-      <div className="standards-browser-grid">
+      <div className={`standards-browser-grid ${activeId && activeSymbol ? 'has-detail' : ''}`}>
         <section className="glass-panel pane facets-panel">
           <SectionHeading title="Filter symbols" subtitle="Narrow by properties" />
           {facetOptions.map((facet) => (
@@ -425,7 +445,14 @@ function StandardsPage() {
               </thead>
               <tbody>
                 {visibleSymbols.map((symbol) => (
-                  <tr key={symbol.id} className={symbol.id === activeId ? 'active' : ''} onClick={() => setActiveId(symbol.id)}>
+                  <tr
+                    key={symbol.id}
+                    className={symbol.id === activeId ? 'active' : ''}
+                    onClick={() => {
+                      setActiveId(symbol.id);
+                      setSearchParams({ symbol: symbol.id }, { replace: true });
+                    }}
+                  >
                     <td><PublishedSymbolPreview symbol={symbol} /></td>
                     {standardsColumns.map(([key]) => (
                       <td key={`${symbol.id}-${key}`}>{getSymbolField(symbol, key) || 'Pending'}</td>
@@ -439,11 +466,10 @@ function StandardsPage() {
             ) : null}
           </div>
         </section>
-      </div>
 
-      {activeId && activeSymbol ? (
-        <div className="standards-detail-overlay" role="dialog" aria-modal="false" aria-label="Published symbol details">
-          <section className="glass-panel pane standards-detail-drawer">
+        {activeId && activeSymbol ? (
+          <aside className="standards-detail-panel" role="dialog" aria-modal="false" aria-label="Published symbol details">
+            <section className="glass-panel pane standards-detail-drawer">
             <div className="detail-heading">
               <div>
                 <p className="eyebrow">Approved symbol</p>
@@ -480,9 +506,10 @@ function StandardsPage() {
                 </span>
               ))}
             </div>
-          </section>
-        </div>
-      ) : null}
+            </section>
+          </aside>
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -771,6 +798,14 @@ function WorkspacePage() {
 
     navigate(`/reviews?review=${encodeURIComponent(item.reviewCaseId)}`);
   };
+  const openPublishedFromWorkspace = (item) => {
+    const standardsPath = item.publishedStandardsPath || (item.publishedSymbolId ? `/standards?symbol=${encodeURIComponent(item.publishedSymbolId)}` : '');
+    if (!standardsPath) {
+      return;
+    }
+
+    navigate(standardsPath);
+  };
   return (
     <section className="experience-shell queue-monitor-shell">
       <div className="workspace-titlebar glass-panel">
@@ -803,6 +838,7 @@ function WorkspacePage() {
             statusFilter={columnStatusFilters[column.id] || {}}
             onStatusToggle={handleColumnStatusToggle}
             onReviewOpen={openReviewFromWorkspace}
+            onPublishedOpen={openPublishedFromWorkspace}
           />
         ))}
       </div>
@@ -831,6 +867,10 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
         meta: queueItem.payload?.stage || queueItem.sourceType || queueItem.queueFamily,
         status: queueItem.status,
         priority: queueItem.priority,
+        publishedSymbolId: queueItem.publishedSymbolId,
+        publishedPageCode: queueItem.publishedPageCode,
+        publishedPackCode: queueItem.publishedPackCode,
+        publishedStandardsPath: queueItem.publishedStandardsPath,
         toolSummary: Array.isArray(queueItem.toolSummary) ? queueItem.toolSummary : [],
         searchText: [
           queueItem.id,
@@ -841,6 +881,10 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
           queueItem.sourceId,
           queueItem.status,
           queueItem.priority,
+          queueItem.publishedSymbolId,
+          queueItem.publishedPageCode,
+          queueItem.publishedPackCode,
+          queueItem.publishedStandardsPath,
           queueItem.escalationReason,
           (queueItem.toolSummary || []).join(' '),
           JSON.stringify(queueItem.payload || {})
@@ -1156,7 +1200,7 @@ function compactTitle(value) {
   return `${text.slice(0, 39)}...`;
 }
 
-function WorkspaceQueueColumn({ column, statusOptions, statusFilter, onStatusToggle, onReviewOpen }) {
+function WorkspaceQueueColumn({ column, statusOptions, statusFilter, onStatusToggle, onReviewOpen, onPublishedOpen }) {
   return (
     <section className={`monitor-column monitor-${column.tone}`}>
       <header className="monitor-column-header">
@@ -1192,7 +1236,13 @@ function WorkspaceQueueColumn({ column, statusOptions, statusFilter, onStatusTog
             <WorkspaceMonitorCard
               key={item.id}
               item={item}
-              onOpen={column.id === 'human_review' ? onReviewOpen : null}
+              onOpen={
+                column.id === 'human_review'
+                  ? onReviewOpen
+                  : column.id === 'publication'
+                    ? onPublishedOpen
+                    : null
+              }
             />
           ))
         ) : (
@@ -1206,8 +1256,9 @@ function WorkspaceQueueColumn({ column, statusOptions, statusFilter, onStatusTog
 function WorkspaceMonitorCard({ item, onOpen }) {
   const priority = String(item.priority || 'Normal').toLowerCase();
   const status = String(item.status || 'pending').toLowerCase().replaceAll('_', '-');
-  const isClickable = typeof onOpen === 'function' && Boolean(item.reviewCaseId);
+  const isClickable = typeof onOpen === 'function' && (Boolean(item.reviewCaseId) || Boolean(item.publishedSymbolId) || Boolean(item.publishedStandardsPath));
   const CardElement = isClickable ? 'button' : 'article';
+  const statusLabel = getWorkspaceStatusKey(item.status) === 'published' ? 'PUBLISHED' : String(item.status || 'pending').replaceAll('_', ' ');
 
   return (
     <CardElement
@@ -1230,7 +1281,13 @@ function WorkspaceMonitorCard({ item, onOpen }) {
           <b>{item.toolSummary.join(' · ')}</b>
         </div>
       ) : null}
-      <b className="monitor-card-status">{String(item.status || 'pending').replaceAll('_', ' ')}</b>
+      {item.publishedStandardsPath || item.publishedSymbolId ? (
+        <div className="monitor-card-tools">
+          <span>Standards</span>
+          <b>{item.publishedPageCode || item.publishedSymbolId}</b>
+        </div>
+      ) : null}
+      <b className="monitor-card-status">{statusLabel}</b>
     </CardElement>
   );
 }
@@ -1295,13 +1352,14 @@ function PublishedSymbolPreview({ symbol, large = false }) {
   return <SymbolGlyph symbolId={symbol?.id || symbol?.symbolId || 'SYMBOL'} large={large} />;
 }
 
-function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, onSaveProperties, workspaceMode }) {
+function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, onSaveProperties, propertyOptions, workspaceMode }) {
   const primaryChild = activeChildren[0];
   const resolvedPreviewUrl = resolveWorkspaceAssetUrl(activeChange?.sourcePreviewUrl || primaryChild?.previewUrl);
   const [imageUnavailable, setImageUnavailable] = useState(!resolvedPreviewUrl);
   const [propertyDraft, setPropertyDraft] = useState({
     name: '',
     description: '',
+    format: '',
     category: '',
     discipline: ''
   });
@@ -1310,29 +1368,47 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
   const originalFilename = displayReviewOriginalFilename(activeChange) || 'Not recorded';
   const symbolProperties = activeChange?.symbolProperties || {};
   const propertyNamePattern = '^[A-Za-z0-9 \\\\-/$]*$';
+  const categoryOptions = mergePropertyOptions(propertyOptions?.category, propertyDraft.category);
+  const disciplineOptions = mergePropertyOptions(propertyOptions?.discipline, propertyDraft.discipline);
 
   useEffect(() => {
     setImageUnavailable(!resolvedPreviewUrl);
   }, [resolvedPreviewUrl]);
 
   useEffect(() => {
+    const suggestedName = primaryChild?.proposedSymbolName || activeChange?.proposedSymbolName || activeChange?.displayName || itemName;
+    const suggestedDescription = activeChange?.classificationSummary || activeChange?.summary || '';
+    const suggestedCategory = activeChange?.category || activeChange?.processCategory || activeChange?.symbolFamily || activeChange?.parentEquipmentClass || '';
+    const suggestedDiscipline = activeChange?.discipline || activeChange?.engineeringDiscipline || '';
+    const suggestedFormat = activeChange?.format || primaryChild?.format || '';
+
     setPropertyDraft({
-      name: symbolProperties.name || activeChange?.title || itemName,
-      description: symbolProperties.description || activeChange?.summary || '',
-      category: symbolProperties.category || activeChange?.processCategory || activeChange?.symbolFamily || '',
-      discipline: symbolProperties.discipline || activeChange?.engineeringDiscipline || ''
+      name: symbolProperties.name || suggestedName,
+      description: symbolProperties.description || suggestedDescription,
+      format: symbolProperties.format || suggestedFormat,
+      category: symbolProperties.category || suggestedCategory,
+      discipline: symbolProperties.discipline || suggestedDiscipline
     });
     setPropertyState({ pending: false, message: '', error: '' });
   }, [
     activeChange?.id,
-    activeChange?.title,
+    activeChange?.displayName,
+    activeChange?.proposedSymbolName,
+    activeChange?.category,
     activeChange?.summary,
+    activeChange?.classificationSummary,
+    activeChange?.format,
     activeChange?.processCategory,
     activeChange?.symbolFamily,
+    activeChange?.parentEquipmentClass,
+    activeChange?.discipline,
     activeChange?.engineeringDiscipline,
     itemName,
+    primaryChild?.proposedSymbolName,
+    primaryChild?.format,
     symbolProperties.name,
     symbolProperties.description,
+    symbolProperties.format,
     symbolProperties.category,
     symbolProperties.discipline
   ]);
@@ -1354,6 +1430,7 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
       await onSaveProperties({
         name: propertyDraft.name,
         description: propertyDraft.description,
+        format: propertyDraft.format,
         category: propertyDraft.category,
         discipline: propertyDraft.discipline
       });
@@ -1402,45 +1479,78 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
         </div>
       </div>
       <form className="symbol-property-editor" onSubmit={saveProperties}>
-        <label className="field">
-          <span>Name</span>
-          <input
-            type="text"
-            maxLength="50"
-            pattern={propertyNamePattern}
-            value={propertyDraft.name}
-            onChange={(event) => updatePropertyDraft('name', event.target.value)}
-            title="Use letters, numbers, spaces, hyphens, slashes, and dollar signs only."
-            required
-          />
-        </label>
-        <label className="field symbol-description-field">
-          <span>Description</span>
-          <textarea
-            rows="2"
-            maxLength="256"
-            value={propertyDraft.description}
-            onChange={(event) => updatePropertyDraft('description', event.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>Category</span>
-          <input
-            type="text"
-            maxLength="80"
-            value={propertyDraft.category}
-            onChange={(event) => updatePropertyDraft('category', event.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span>Discipline</span>
-          <input
-            type="text"
-            maxLength="80"
-            value={propertyDraft.discipline}
-            onChange={(event) => updatePropertyDraft('discipline', event.target.value)}
-          />
-        </label>
+        <div className="symbol-property-editor-left">
+          <label className="field">
+            <span>Name</span>
+            <input
+              type="text"
+              maxLength="50"
+              pattern={propertyNamePattern}
+              value={propertyDraft.name}
+              onChange={(event) => updatePropertyDraft('name', event.target.value)}
+              title="Use letters, numbers, spaces, hyphens, slashes, and dollar signs only."
+              required
+            />
+          </label>
+          <label className="field symbol-description-field">
+            <span>Description</span>
+            <textarea
+              rows="2"
+              maxLength="256"
+              value={propertyDraft.description}
+              onChange={(event) => updatePropertyDraft('description', event.target.value)}
+            />
+          </label>
+          <FormatIndicator format={propertyDraft.format} />
+        </div>
+        <div className="symbol-property-editor-right">
+          <label className="field">
+            <span>Category</span>
+            <div className="property-combo-field">
+              <input
+                type="text"
+                maxLength="80"
+                placeholder="Type category"
+                autoComplete="off"
+                value={propertyDraft.category}
+                onChange={(event) => updatePropertyDraft('category', event.target.value)}
+              />
+              <select
+                aria-label="Saved category values"
+                value=""
+                onChange={(event) => updatePropertyDraft('category', event.target.value)}
+              >
+                <option value="">Saved</option>
+                {categoryOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </div>
+          </label>
+          <label className="field">
+            <span>Discipline</span>
+            <div className="property-combo-field">
+              <input
+                type="text"
+                maxLength="80"
+                placeholder="Type discipline"
+                autoComplete="off"
+                value={propertyDraft.discipline}
+                onChange={(event) => updatePropertyDraft('discipline', event.target.value)}
+              />
+              <select
+                aria-label="Saved discipline values"
+                value=""
+                onChange={(event) => updatePropertyDraft('discipline', event.target.value)}
+              >
+                <option value="">Saved</option>
+                {disciplineOptions.map((option) => (
+                  <option key={option} value={option}>{option}</option>
+                ))}
+              </select>
+            </div>
+          </label>
+        </div>
         <div className="symbol-property-actions">
           <small>{propertyDraft.name.length}/50 · {propertyDraft.description.length}/256</small>
           <button
@@ -1454,18 +1564,33 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
         {propertyState.message ? <p className="success-text">{propertyState.message}</p> : null}
         {propertyState.error ? <p className="error-text">{propertyState.error}</p> : null}
       </form>
-      {activeChildren.length ? (
-        <div className="review-thumbnail-strip" aria-label="Extracted child symbol previews">
-          {activeChildren.slice(0, 8).map((child, index) => (
-            <div key={child.id} className="review-thumbnail-card">
-              <SplitSymbolPreview child={child} variant={index % 2 === 1} />
-              <span>{displaySymbolId(child)}</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
     </section>
   );
+}
+
+function FormatIndicator({ format }) {
+  const extension = String(format || '').trim().replace(/^\./, '').toUpperCase() || 'Pending';
+  const isPending = extension === 'Pending';
+
+  return (
+    <div className={`property-format-indicator ${isPending ? 'pending' : ''}`} aria-label={`Format ${extension}`}>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M7 3h7l4 4v14H7z" />
+        <path d="M14 3v5h5" />
+      </svg>
+      <span>Format</span>
+      <b>{extension}</b>
+    </div>
+  );
+}
+
+function mergePropertyOptions(options = [], currentValue = '') {
+  const values = [...options];
+  const current = String(currentValue || '').trim();
+  if (current && !values.some((option) => option.toLowerCase() === current.toLowerCase())) {
+    values.unshift(current);
+  }
+  return values;
 }
 
 function ReviewsPage() {
@@ -1489,6 +1614,7 @@ function ReviewsPage() {
   const [childReviewState, setChildReviewState] = useState({});
   const [caseReviewState, setCaseReviewState] = useState({});
   const [submitState, setSubmitState] = useState({ pending: false, message: '', error: '' });
+  const [propertyOptions, setPropertyOptions] = useState({ category: [], discipline: [] });
   const requestedReviewId = searchParams.get('review') || '';
   const reviewQueue = useMemo(() => {
     const items = [...workspaceState.items];
@@ -1571,6 +1697,32 @@ function ReviewsPage() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  async function refreshPropertyOptions() {
+    const result = await fetchWorkspaceReviewSymbolPropertyOptions();
+    if (!result.ok) {
+      return;
+    }
+
+    const nextOptions = { category: [], discipline: [] };
+    result.items.forEach((item) => {
+      const fieldName = item.fieldName || item.field_name;
+      if (!nextOptions[fieldName] || !item.value) {
+        return;
+      }
+      if (!nextOptions[fieldName].includes(item.value)) {
+        nextOptions[fieldName].push(item.value);
+      }
+    });
+    Object.keys(nextOptions).forEach((fieldName) => {
+      nextOptions[fieldName].sort((left, right) => left.localeCompare(right));
+    });
+    setPropertyOptions(nextOptions);
+  }
+
+  useEffect(() => {
+    refreshPropertyOptions();
   }, []);
 
   const reviewQueueCounts = useMemo(() => {
@@ -1769,7 +1921,7 @@ function ReviewsPage() {
       ...properties,
       updatedBy: 'Human'
     });
-    await refreshReviewData();
+    await Promise.all([refreshReviewData(), refreshPropertyOptions()]);
   }
 
   async function submitReviewDecision() {
@@ -1961,6 +2113,7 @@ function ReviewsPage() {
                 activeChildren={activeChildren}
                 reviewedChildCount={reviewedChildCount}
                 onSaveProperties={saveSymbolProperties}
+                propertyOptions={propertyOptions}
                 workspaceMode={workspaceState.mode}
               />
               <div className="copy-block decision-block review-submit-block">

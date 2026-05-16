@@ -575,10 +575,29 @@ class ReviewSymbolProperty(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
     discipline: Mapped[str | None] = mapped_column(Text, nullable=True)
+    format: Mapped[str | None] = mapped_column(Text, nullable=True)
     source: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'agent_initial'"))
     updated_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ReviewSymbolPropertyOption(Base):
+    __tablename__ = "review_symbol_property_options"
+    __table_args__ = (
+        CheckConstraint("field_name in ('category', 'discipline')", name="review_symbol_property_options_field_name"),
+        Index("uq_review_symbol_property_options_field_key", "field_name", "normalized_key", unique=True),
+        Index("ix_review_symbol_property_options_field_value", "field_name", "display_value"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    display_value: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_key: Mapped[str] = mapped_column(Text, nullable=False)
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_used_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class PublicationJob(Base):

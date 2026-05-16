@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import quote
 
@@ -21,11 +23,15 @@ from ..models import (
     HumanReviewDecision,
     IntakeRecord,
     ProvenanceAssessment,
+    PublicationPack,
+    PublishedPage,
     ReviewCase,
     ReviewCaseAction,
     ReviewSplitItem,
     ReviewSymbolProperty,
+    ReviewSymbolPropertyOption,
     SourcePackage,
+    GovernedSymbol,
     SymbolRevision,
     ValidationReport,
 )
@@ -47,6 +53,8 @@ from ..schemas import (
     WorkspaceReviewChildResponse,
     WorkspaceReviewDecisionRequest,
     WorkspaceReviewDecisionResponse,
+    WorkspaceReviewSymbolPropertyOptionListResponse,
+    WorkspaceReviewSymbolPropertyOptionResponse,
     WorkspaceReviewSymbolPropertiesResponse,
     WorkspaceReviewSymbolPropertiesUpdateRequest,
     WorkspaceSplitReviewProcessItemResponse,
@@ -404,6 +412,45 @@ def queue_item_display_parts(session: Session, queue_item: AgentQueueItem) -> tu
     return package_id, None, package_id
 
 
+def rupert_published_metadata(session: Session, queue_item: AgentQueueItem) -> dict[str, str | None]:
+    payload = queue_item.payload_json or {}
+    revision_ids = []
+    if isinstance(payload, dict):
+        for raw_revision_id in payload.get("symbol_revision_ids") or []:
+            try:
+                revision_ids.append(uuid.UUID(str(raw_revision_id)))
+            except (TypeError, ValueError):
+                continue
+    if not revision_ids:
+        return {}
+
+    row = (
+        session.query(
+            GovernedSymbol.slug.label("symbol_slug"),
+            PublishedPage.page_code.label("page_code"),
+            PublicationPack.pack_code.label("pack_code"),
+        )
+        .join(SymbolRevision, SymbolRevision.id == PublishedPage.current_symbol_revision_id)
+        .join(GovernedSymbol, GovernedSymbol.id == SymbolRevision.symbol_id)
+        .join(PublicationPack, PublicationPack.id == PublishedPage.pack_id)
+        .filter(PublishedPage.current_symbol_revision_id.in_(revision_ids))
+        .filter(PublicationPack.status == "published")
+        .filter(PublicationPack.audience == "public")
+        .filter(SymbolRevision.lifecycle_state == "published")
+        .order_by(PublishedPage.updated_at.desc())
+        .first()
+    )
+    if row is None:
+        return {}
+
+    return {
+        "published_symbol_id": row.symbol_slug,
+        "published_page_code": row.page_code,
+        "published_pack_code": row.pack_code,
+        "published_standards_path": f"/standards?symbol={quote(row.symbol_slug)}",
+    }
+
+
 def iter_tool_summary_text(value):
     if value is None:
         return
@@ -658,6 +705,156 @@ def compact_text(value: str | None, limit: int) -> str:
     return text_value[:limit]
 
 
+PROPERTY_OPTION_FIELDS = {"category", "discipline"}
+PROPERTY_OPTION_FUZZY_MATCH_THRESHOLD = 0.92
+FORMAT_LABELS = {
+    "dxf": "DXF",
+    "jpeg": "JPEG",
+    "jpg": "JPEG",
+    "json": "JSON",
+    "png": "PNG",
+    "svf": "SVF",
+    "svg": "SVG",
+}
+CONTENT_TYPE_FORMATS = {
+    "application/json": "JSON",
+    "image/jpeg": "JPEG",
+    "image/jpg": "JPEG",
+    "image/png": "PNG",
+    "image/svg+xml": "SVG",
+}
+
+
+def normalize_property_option_value(value: str | None) -> str | None:
+    text_value = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text_value:
+        return None
+    return " ".join(word.capitalize() for word in text_value.lower().split(" "))
+
+
+def property_option_key(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def normalize_symbol_format(value: str | None) -> str | None:
+    text_value = str(value or "").strip()
+    if not text_value:
+        return None
+    content_type = CONTENT_TYPE_FORMATS.get(text_value.lower())
+    if content_type:
+        return content_type
+    suffix = Path(text_value).suffix.lstrip(".").lower()
+    key = suffix or text_value.lstrip(".").lower()
+    return FORMAT_LABELS.get(key, key.upper() if key else None)
+
+
+def resolve_symbol_format(
+    *,
+    classification_record: ClassificationRecord | None = None,
+    intake_record: IntakeRecord | None = None,
+    validation_report: ValidationReport | None = None,
+    source_file_name: str | None = None,
+    source_object_key: str | None = None,
+) -> str | None:
+    validation_payload = validation_report.normalized_payload_json if validation_report is not None else {}
+    validation_payload = validation_payload or {}
+    intake_payload = intake_record.normalized_submission_json if intake_record is not None else {}
+    intake_payload = intake_payload or {}
+    candidates = [
+        classification_record.format if classification_record is not None else None,
+        validation_payload.get("asset_format"),
+        validation_payload.get("declared_format"),
+        validation_payload.get("guessed_format"),
+        validation_payload.get("file_format"),
+        (validation_payload.get("normalized_submission") or {}).get("declared_format"),
+        (validation_payload.get("normalized_submission") or {}).get("guessed_format"),
+        intake_payload.get("declared_format"),
+        intake_payload.get("guessed_format"),
+        intake_payload.get("file_format"),
+        source_file_name,
+        source_object_key,
+    ]
+    for candidate in candidates:
+        symbol_format = normalize_symbol_format(candidate)
+        if symbol_format:
+            return symbol_format
+    return None
+
+
+def find_similar_property_option(
+    session: Session,
+    *,
+    field_name: str,
+    normalized_key: str,
+) -> ReviewSymbolPropertyOption | None:
+    if len(normalized_key) < 5:
+        return None
+    options = (
+        session.query(ReviewSymbolPropertyOption)
+        .filter(ReviewSymbolPropertyOption.field_name == field_name)
+        .all()
+    )
+    best_option = None
+    best_ratio = 0.0
+    for option in options:
+        ratio = SequenceMatcher(None, normalized_key, option.normalized_key).ratio()
+        if ratio > best_ratio:
+            best_option = option
+            best_ratio = ratio
+    if best_option is not None and best_ratio >= PROPERTY_OPTION_FUZZY_MATCH_THRESHOLD:
+        return best_option
+    return None
+
+
+def remember_property_option(
+    session: Session,
+    *,
+    field_name: str,
+    value: str | None,
+    now: datetime,
+) -> str | None:
+    if field_name not in PROPERTY_OPTION_FIELDS:
+        return normalize_property_option_value(value)
+
+    display_value = normalize_property_option_value(value)
+    if display_value is None:
+        return None
+
+    normalized_key = property_option_key(display_value)
+    if not normalized_key:
+        return None
+
+    option = (
+        session.query(ReviewSymbolPropertyOption)
+        .filter(
+            ReviewSymbolPropertyOption.field_name == field_name,
+            ReviewSymbolPropertyOption.normalized_key == normalized_key,
+        )
+        .one_or_none()
+    )
+    if option is None:
+        option = find_similar_property_option(session, field_name=field_name, normalized_key=normalized_key)
+
+    if option is None:
+        option = ReviewSymbolPropertyOption(
+            id=coerce_uuid(f"review-symbol-property-option:{field_name}:{normalized_key}"),
+            field_name=field_name,
+            display_value=display_value,
+            normalized_key=normalized_key,
+            use_count=1,
+            created_at=now,
+            updated_at=now,
+            last_used_at=now,
+        )
+    else:
+        option.use_count = int(option.use_count or 0) + 1
+        option.updated_at = now
+        option.last_used_at = now
+
+    session.add(option)
+    return option.display_value
+
+
 def build_symbol_properties_response(properties: ReviewSymbolProperty) -> WorkspaceReviewSymbolPropertiesResponse:
     return WorkspaceReviewSymbolPropertiesResponse(
         id=str(properties.id),
@@ -668,6 +865,7 @@ def build_symbol_properties_response(properties: ReviewSymbolProperty) -> Worksp
         description=properties.description or "",
         category=properties.category,
         discipline=properties.discipline,
+        format=properties.format,
         source=properties.source,
         updatedBy=properties.updated_by,
         updatedAt=isoformat_utc(properties.updated_at),
@@ -682,6 +880,7 @@ def get_or_create_symbol_properties(
     classification_record: ClassificationRecord | None = None,
     default_name: str,
     default_description: str,
+    default_format: str | None = None,
 ) -> ReviewSymbolProperty:
     symbol_record_key = split_item.child_key if split_item is not None else str(review_case.id)
     query = session.query(ReviewSymbolProperty).filter(
@@ -700,6 +899,7 @@ def get_or_create_symbol_properties(
             description=compact_text(default_description, 256),
             category=compact_text(classification_record.category if classification_record else None, 80) or None,
             discipline=compact_text(classification_record.discipline if classification_record else None, 80) or None,
+            format=normalize_symbol_format(default_format or (classification_record.format if classification_record else None)),
             source="agent_initial",
             updated_by=None,
             created_at=now,
@@ -716,6 +916,10 @@ def get_or_create_symbol_properties(
             properties.category = compact_text(classification_record.category, 80) or None
         if not properties.discipline:
             properties.discipline = compact_text(classification_record.discipline, 80) or None
+        if not properties.format:
+            properties.format = normalize_symbol_format(default_format or classification_record.format)
+    elif default_format and not properties.format:
+        properties.format = normalize_symbol_format(default_format)
     session.add(properties)
     return properties
 
@@ -848,6 +1052,13 @@ def build_validation_workspace_item(
 ) -> WorkspaceReviewCaseResponse:
     source_file_name = resolve_source_file_name(validation_report)
     source_object_key = resolve_source_object_key(validation_report)
+    symbol_format = resolve_symbol_format(
+        classification_record=classification_record,
+        intake_record=intake_record,
+        validation_report=validation_report,
+        source_file_name=source_file_name,
+        source_object_key=source_object_key,
+    )
     children = build_children(session, review_case, validation_report, str(review_case.id), source_file_name)
     package_id = package_display_id(session, intake_record)
     primary_symbol_id = children[0].proposedSymbolId if children else str(
@@ -888,11 +1099,15 @@ def build_validation_workspace_item(
                 classification_record=classification_record,
                 default_name=package_id or primary_symbol_id,
                 default_description=build_review_summary(validation_report, len(children), source_file_name),
+                default_format=symbol_format,
             )
         ),
         "children": children,
     }
-    return apply_classification_fields(payload, classification_record)
+    response = apply_classification_fields(payload, classification_record)
+    if not response.format:
+        response.format = symbol_format
+    return response
 
 
 def build_split_item_workspace_item(
@@ -905,6 +1120,13 @@ def build_split_item_workspace_item(
 ) -> WorkspaceReviewCaseResponse:
     source_file_name = resolve_source_file_name(validation_report)
     source_object_key = resolve_source_object_key(validation_report)
+    symbol_format = resolve_symbol_format(
+        classification_record=classification_record,
+        intake_record=intake_record,
+        validation_report=validation_report,
+        source_file_name=source_file_name,
+        source_object_key=source_object_key,
+    )
     opened_at = split_item.updated_at if isinstance(split_item.updated_at, datetime) else review_case.opened_at
     due = opened_at + timedelta(days=2)
     preview_url = build_preview_url(str(review_case.id), split_item.attachment_object_key)
@@ -936,6 +1158,7 @@ def build_split_item_workspace_item(
         classification_record=classification_record,
         default_name=split_item.proposed_symbol_name,
         default_description=f"{split_item.proposed_symbol_name} from {source_file_name}.",
+        default_format=symbol_format,
     )
     payload = {
         "id": str(split_item.id),
@@ -971,7 +1194,10 @@ def build_split_item_workspace_item(
         "symbolProperties": build_symbol_properties_response(symbol_properties),
         "children": [child],
     }
-    return apply_classification_fields(payload, classification_record)
+    response = apply_classification_fields(payload, classification_record)
+    if not response.format:
+        response.format = symbol_format
+    return response
 
 
 def build_provenance_workspace_item(
@@ -984,6 +1210,12 @@ def build_provenance_workspace_item(
     source_file_name = resolve_source_file_name_from_intake(intake_record)
     source_object_key = resolve_source_object_key_from_intake(intake_record)
     normalized = intake_record.normalized_submission_json or {}
+    symbol_format = resolve_symbol_format(
+        classification_record=classification_record,
+        intake_record=intake_record,
+        source_file_name=source_file_name,
+        source_object_key=source_object_key,
+    )
     package_id = package_display_id(session, intake_record)
     opened_at = review_case.opened_at if isinstance(review_case.opened_at, datetime) else datetime.now(timezone.utc)
     due = opened_at + timedelta(days=2)
@@ -1022,11 +1254,15 @@ def build_provenance_workspace_item(
                 classification_record=classification_record,
                 default_name=package_id or str(normalized.get("candidate_title") or symbol_id),
                 default_description=summary,
+                default_format=symbol_format,
             )
         ),
         "children": [],
     }
-    return apply_classification_fields(payload, classification_record)
+    response = apply_classification_fields(payload, classification_record)
+    if not response.format:
+        response.format = symbol_format
+    return response
 
 
 @router.get(
@@ -1064,6 +1300,8 @@ def list_workspace_agent_queue_items(
     for queue_item, definition in rows:
         package_id, package_sequence, display_name = queue_item_display_parts(session, queue_item)
         latest_run = latest_runs_by_queue_item.get(queue_item.id)
+        published_metadata = rupert_published_metadata(session, queue_item) if definition.slug == "rupert" else {}
+        queue_status = "published" if published_metadata else queue_item.status
         items.append(WorkspaceAgentQueueItemResponse(
             id=str(queue_item.id),
             agentId=definition.slug,
@@ -1074,10 +1312,14 @@ def list_workspace_agent_queue_items(
             displayName=display_name,
             packageDisplayId=package_id,
             packageSymbolSequence=package_sequence,
-            status=queue_item.status,
+            status=queue_status,
             priority=queue_item.priority,
             payload=queue_item.payload_json or {},
             toolSummary=queue_item_tool_summary(definition.slug, queue_item, latest_run),
+            publishedSymbolId=published_metadata.get("published_symbol_id"),
+            publishedPageCode=published_metadata.get("published_page_code"),
+            publishedPackCode=published_metadata.get("published_pack_code"),
+            publishedStandardsPath=published_metadata.get("published_standards_path"),
             confidence=float(queue_item.confidence) if queue_item.confidence is not None else None,
             escalationReason=queue_item.escalation_reason,
             createdAt=isoformat_utc(queue_item.created_at),
@@ -1268,17 +1510,20 @@ def update_workspace_review_symbol_properties(
         split_item=split_item,
         default_name=request.name,
         default_description=request.description,
+        default_format=request.format,
     )
     previous_payload = {
         "name": properties.name,
         "description": properties.description,
         "category": properties.category,
         "discipline": properties.discipline,
+        "format": properties.format,
     }
     properties.name = request.name
     properties.description = request.description
-    properties.category = request.category or None
-    properties.discipline = request.discipline or None
+    properties.category = remember_property_option(session, field_name="category", value=request.category, now=now)
+    properties.discipline = remember_property_option(session, field_name="discipline", value=request.discipline, now=now)
+    properties.format = normalize_symbol_format(request.format) or properties.format
     properties.source = "reviewer"
     properties.updated_by = request.updatedBy or "Human"
     properties.updated_at = now
@@ -1298,6 +1543,7 @@ def update_workspace_review_symbol_properties(
                     "description": properties.description,
                     "category": properties.category,
                     "discipline": properties.discipline,
+                    "format": properties.format,
                 },
             },
             created_at=now,
@@ -1305,6 +1551,35 @@ def update_workspace_review_symbol_properties(
     )
     session.commit()
     return build_symbol_properties_response(properties)
+
+
+@router.get(
+    "/review-symbol-property-options",
+    response_model=WorkspaceReviewSymbolPropertyOptionListResponse,
+)
+def list_workspace_review_symbol_property_options(
+    field: str | None = Query(default=None, pattern="^(category|discipline)$"),
+    session: Session = Depends(get_db_session),
+) -> WorkspaceReviewSymbolPropertyOptionListResponse:
+    query = session.query(ReviewSymbolPropertyOption)
+    if field:
+        query = query.filter(ReviewSymbolPropertyOption.field_name == field)
+    options = query.order_by(
+        ReviewSymbolPropertyOption.field_name.asc(),
+        ReviewSymbolPropertyOption.use_count.desc(),
+        ReviewSymbolPropertyOption.display_value.asc(),
+    ).all()
+    return WorkspaceReviewSymbolPropertyOptionListResponse(
+        items=[
+            WorkspaceReviewSymbolPropertyOptionResponse(
+                fieldName=option.field_name,
+                value=option.display_value,
+                useCount=option.use_count,
+                lastUsedAt=isoformat_utc(option.last_used_at),
+            )
+            for option in options
+        ]
+    )
 
 
 @router.post(

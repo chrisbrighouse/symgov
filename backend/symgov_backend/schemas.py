@@ -94,9 +94,21 @@ class WorkspaceReviewSymbolPropertiesResponse(BaseModel):
     description: str = ""
     category: str | None = None
     discipline: str | None = None
+    format: str | None = None
     source: str
     updatedBy: str | None = None
     updatedAt: str
+
+
+class WorkspaceReviewSymbolPropertyOptionResponse(BaseModel):
+    fieldName: str
+    value: str
+    useCount: int
+    lastUsedAt: str
+
+
+class WorkspaceReviewSymbolPropertyOptionListResponse(BaseModel):
+    items: list[WorkspaceReviewSymbolPropertyOptionResponse]
 
 
 class WorkspaceHumanReviewDecisionSummary(BaseModel):
@@ -181,6 +193,10 @@ class WorkspaceAgentQueueItemResponse(BaseModel):
     priority: str
     payload: dict[str, Any]
     toolSummary: list[str] = Field(default_factory=list)
+    publishedSymbolId: str | None = None
+    publishedPageCode: str | None = None
+    publishedPackCode: str | None = None
+    publishedStandardsPath: str | None = None
     confidence: float | None = None
     escalationReason: str | None = None
     createdAt: str
@@ -259,6 +275,7 @@ class WorkspaceReviewSymbolPropertiesUpdateRequest(BaseModel):
     description: str = Field(default="", max_length=256)
     category: str | None = Field(default=None, max_length=80)
     discipline: str | None = Field(default=None, max_length=80)
+    format: str | None = Field(default=None, max_length=40)
     updatedBy: str = Field(default="Human", max_length=80)
 
     @field_validator("name")
@@ -269,7 +286,7 @@ class WorkspaceReviewSymbolPropertiesUpdateRequest(BaseModel):
             raise ValueError("Name may only contain letters, numbers, spaces, hyphens, slashes, and dollar signs.")
         return trimmed
 
-    @field_validator("description", "category", "discipline", "updatedBy")
+    @field_validator("description", "category", "discipline", "format", "updatedBy")
     @classmethod
     def trim_text(cls, value: str | None) -> str | None:
         if value is None:

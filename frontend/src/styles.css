@@ -1002,13 +1002,29 @@ a {
 
 .symbol-property-editor {
   display: grid;
-  grid-template-columns: minmax(10rem, 1fr) minmax(12rem, 1.4fr) minmax(8rem, 0.8fr) minmax(8rem, 0.8fr);
+  grid-template-columns: minmax(15rem, 0.85fr) minmax(24rem, 1.35fr);
   gap: 0.65rem;
-  align-items: end;
+  align-items: start;
   padding: 0.75rem;
   border: 1px solid var(--stroke);
   border-radius: 0.65rem;
   background: #ffffff;
+}
+
+.symbol-property-editor-left,
+.symbol-property-editor-right {
+  min-width: 0;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.symbol-property-editor-left {
+  align-content: start;
+}
+
+.symbol-property-editor-right {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
 }
 
 .symbol-property-editor .field {
@@ -1020,13 +1036,76 @@ a {
 }
 
 .symbol-property-editor .field input,
-.symbol-property-editor .field textarea {
+.symbol-property-editor .field textarea,
+.property-combo-field select {
   border-radius: 0.55rem;
   padding: 0.62rem 0.7rem;
 }
 
+.property-combo-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(5.6rem, 0.65fr);
+  gap: 0.35rem;
+}
+
+.property-combo-field input,
+.property-combo-field select {
+  min-width: 0;
+}
+
+.property-combo-field select {
+  border: 1px solid var(--stroke);
+  background: #f8fafc;
+  color: var(--text-main);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .symbol-description-field {
   align-self: stretch;
+}
+
+.symbol-description-field textarea {
+  min-height: 5.15rem;
+}
+
+.property-format-indicator {
+  width: fit-content;
+  max-width: 100%;
+  display: inline-grid;
+  grid-template-columns: auto auto auto;
+  align-items: center;
+  gap: 0.42rem;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--stroke);
+  border-radius: 0.55rem;
+  background: #f8fafc;
+  color: var(--text-main);
+}
+
+.property-format-indicator svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+
+.property-format-indicator span {
+  color: var(--text-soft);
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.property-format-indicator b {
+  font-size: 0.82rem;
+}
+
+.property-format-indicator.pending {
+  color: var(--text-soft);
 }
 
 .symbol-property-actions {
@@ -1047,39 +1126,10 @@ a {
   padding: 0.58rem 0.9rem;
 }
 
-.review-thumbnail-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(5.8rem, 1fr));
-  gap: 0.55rem;
-}
-
-.review-thumbnail-card {
-  min-width: 0;
-  display: grid;
-  gap: 0.3rem;
-  padding: 0.45rem;
-  border: 1px solid var(--stroke);
-  border-radius: 0.55rem;
-  background: #ffffff;
-}
-
-.review-thumbnail-card .split-card-preview,
-.review-thumbnail-card .split-symbol-fallback {
-  min-height: 4.7rem;
-  border-radius: 0.45rem;
-}
-
-.review-thumbnail-card .split-symbol-image {
-  max-height: 5.2rem;
-}
-
-.review-thumbnail-card span {
-  overflow: hidden;
-  color: var(--text-soft);
-  font-size: 0.68rem;
-  font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+@media (max-width: 1320px) and (min-width: 1121px) {
+  .symbol-property-editor-right {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .review-support-facts {
@@ -1242,6 +1292,10 @@ a {
   align-items: start;
 }
 
+.standards-browser-grid.has-detail {
+  grid-template-columns: minmax(12rem, 0.26fr) minmax(0, 1fr) minmax(22rem, 0.52fr);
+}
+
 .facets-panel {
   position: sticky;
   top: 6.1rem;
@@ -1349,18 +1403,13 @@ a {
   font-weight: 900;
 }
 
-.standards-detail-overlay {
-  position: fixed;
-  inset: 0 0 0 auto;
-  z-index: 30;
-  width: min(50vw, 48rem);
-  min-width: min(100%, 34rem);
-  padding: 1rem;
-  background: rgba(29, 43, 54, 0.18);
+.standards-detail-panel {
+  min-width: 0;
+  align-self: start;
 }
 
 .standards-detail-drawer {
-  height: 100%;
+  max-height: calc(100vh - 14rem);
   overflow: auto;
 }
 
@@ -2056,6 +2105,8 @@ a {
 
 @media (max-width: 1120px) {
   .three-pane-grid,
+  .standards-browser-grid,
+  .standards-browser-grid.has-detail,
   .workspace-grid,
   .review-workbench-grid,
   .operator-summary-grid,
@@ -2067,6 +2118,10 @@ a {
   .review-support-facts,
   .symbol-property-editor {
     grid-template-columns: 1fr;
+  }
+
+  .symbol-property-editor-right {
+    grid-template-columns: repeat(2, minmax(8rem, 1fr));
   }
 
   .review-queue-pane,
@@ -2153,6 +2208,7 @@ a {
   .daisy-fact-grid,
   .review-visual-primary-row,
   .review-primary-properties,
+  .symbol-property-editor-right,
   .review-summary-strip,
   .review-decision-actions,
   .review-navigation {
