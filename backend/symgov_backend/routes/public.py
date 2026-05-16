@@ -18,7 +18,7 @@ legacy_router = APIRouter(tags=["public"])
 @router.post(
     "/external-submissions",
     response_model=ExternalSubmissionResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
     responses={
         400: {"model": APIErrorResponse},
         500: {"model": APIErrorResponse},
@@ -27,7 +27,7 @@ legacy_router = APIRouter(tags=["public"])
 @legacy_router.post(
     "/external-submissions",
     response_model=ExternalSubmissionResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_202_ACCEPTED,
     responses={
         400: {"model": APIErrorResponse},
         500: {"model": APIErrorResponse},

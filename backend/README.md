@@ -59,7 +59,7 @@ OpenClaw resilience notes:
   - required SymGov runner and definition files
 - `manage_symgov.py reconcile-openclaw` repairs the OpenClaw-side registration state from that manifest.
 - This is intended as the first post-upgrade recovery path when OpenClaw updates leave SymGov agent registration or plugin state inconsistent.
-- The current managed binding set is intentionally empty until explicit channel/account/peer targets are chosen for `Scott`, `Tracy`, or `Vlad`.
+- The current managed binding set is intentionally empty so `telegram:7643191699` remains handled by Alfi/main. Do not bind Telegram directly to `Libby` unless the orchestrator model is intentionally changed.
 - OpenClaw bindings currently support deterministic match fields such as channel, account, and peer; they do not provide arbitrary keyword-routing rules.
 
 Current VPS deployment notes:
@@ -100,12 +100,21 @@ Current Workspace APIs:
 - versioned agent queue route: `GET /api/v1/workspace/agent-queue-items`
 - compatibility alias: `GET /api/workspace/agent-queue-items`
 - review cases and Daisy reports remain the other live Workspace dashboard inputs
+- Workspace agent-queue, review-case, and review-child responses can include `displayName`, `packageDisplayId`, and `packageSymbolSequence` for compact monitor-card naming. The visible convention is `0001` for a submitted sheet or single-symbol package and `0001-1`, `0001-2`, ... for extracted split symbols.
+- Workspace agent-queue responses can include `toolSummary` for Vlad queue items. The field is derived from the latest `agent_runs.tool_trace_json` plus queue payload hints and currently supports compact labels such as `Tess`, `Nano`, `DXF to SVG`, `Format conversion`, `Raster split`, and `Raster candidate`.
+- Rupert Workspace agent-queue responses expose `publishedSymbolId`, `publishedPageCode`, `publishedPackCode`, and `publishedStandardsPath` after the queued symbol revision has a public published page; those queue rows report `status='published'` so the Workspace can show `PUBLISHED` and link to Standards View.
+- review-case responses can include `symbolProperties` for reviewer-editable per-symbol `Name`, `Description`, `Category`, and `Discipline` values
+- reviewer-editable symbol properties are updated through `PATCH /api/v1/workspace/review-cases/{id}/symbol-properties`; the API enforces the current review rules for name length/characters and description length
+- reviewer-entered `Category` and `Discipline` values are remembered in `review_symbol_property_options`, normalized to capitalized mixed case, deduplicated by canonical key plus conservative fuzzy matching, and exposed through `GET /api/v1/workspace/review-symbol-property-options` for Reviews picklists
+- reviewer symbol properties now also include read-only `Format`, seeded from Libby classification when available and otherwise inferred from validation/intake metadata, source filename, or object key
 - review decisions are recorded through `POST /api/v1/workspace/review-cases/{id}/decisions`
 - review-decision routing now uses:
   - `approve` -> Rupert publication handoff
   - every non-approval decision -> Libby review follow-up handoff
   - Libby -> Vlad -> Libby for physical symbol graphic changes
-  - Libby -> Daisy for re-review after follow-up is consolidated
+  - Libby -> Daisy for first review or re-review when human review is required
+  - Libby -> Rupert when a single-symbol item is classified, Category/Discipline have been added where ascertainable, no upstream block remains, and Libby records that human review is not required
+- published Standards rows prefer `symbol_revisions.payload_json.name` when building the `Name` column, with legacy `canonical_name` retained only as fallback
 
 Planned API growth boundaries:
 
@@ -159,10 +168,16 @@ Current runner bridge notes:
 - the same audit/reconcile flow now also owns top-level OpenClaw `bindings[]` so future routing rules can survive upgrades
 - `manage_symgov.py serve-api` now runs the FastAPI/Uvicorn server shell for Symgov APIs
 - the current `Scott`, `Vlad`, and `Tracy` file-backed runners now support `--persist-db` to mirror queue execution into PostgreSQL while keeping the local JSON runtime records
-- Libby now supports `review_decision_follow_up` queue items for non-approval review outcomes and `vlad_graphic_update_completed` queue items for Vlad returns
-- Vlad now supports `symbol_graphic_change_request` queue items and returns graphic-change results to Libby before Daisy re-review
+- Libby is the required classification and publication-readiness triage step for submitted single symbols and split-sheet child symbols; it supports classification work, `review_decision_follow_up` queue items for non-approval review outcomes, and `vlad_graphic_update_completed` queue items for Vlad returns
+- Vlad now supports `symbol_graphic_change_request` queue items and returns graphic-change results to Libby before Daisy re-review; those graphic-change queue items are marked `completed` after Vlad returns the result to Libby
+- Daisy marks Libby follow-up/human-review escalation work `completed` once the required human review request has been created/escalated, and the backend queue bridge mirrors related Daisy queue-item completions into PostgreSQL
+- intake persistence now creates a `source_packages` row for each submitted sheet/file and assigns the next global uppercase 4-character hex `package_code`, starting at `0001` after an explicit clean reset. The code is copied into intake `normalized_submission_json.source_package_code` and `workspace_display_name` for downstream Workspace display.
 - raster split child review state now persists in `review_split_items` via Alembic revision `20260503_0005`; split items are materialized from Vlad `derivative_manifest` children, exposed by `GET /api/v1/workspace/review-cases` as first-class `split_item` human-review records while open, and processed through `POST /api/v1/workspace/review-cases/{id}/split-items/process-decisions`
-- split processing currently routes approved children to Rupert and every non-approval child to Libby, while pending or returned children stay open as individual split-item review records
+- materialized split items store `package_display_id`, `package_symbol_sequence`, and `workspace_display_name` in `review_split_items.payload_json`, allowing Workspace cards and review responses to show short names like `0001-3` while retaining full filenames and proposed symbol IDs in detail payloads
+- split processing currently routes approved children to Rupert and every non-approval child to Libby, while pending or returned children stay open as individual split-item review records; target intake routing sends all extracted child symbols through Libby classification before Daisy or Rupert
+- reviewer-editable symbol properties now persist in `review_symbol_properties` via Alembic revision `20260512_0006`; review responses seed those values from classification/agent data when available, reviewers can update them, and publication staging prefers the reviewed values
+- reviewer-entered Category and Discipline picklist memory now persists in `review_symbol_property_options` via Alembic revision `20260515_0007`; the runtime API records options as reviewers save properties and returns them for the Reviews autocomplete picklists
+- reviewer symbol property Format now persists in `review_symbol_properties.format` via Alembic revision `20260515_0008`; review responses backfill blank values from known source-format metadata so Reviews does not show an empty Format property for known inputs such as PNG, JPEG, SVG, SVF, or DXF
 - the current verified smoke path is `Scott` intake -> downstream enqueue -> `Vlad` validation + `Tracy` provenance, with successful PostgreSQL persistence and successful MinIO/database health checks
 - the external submission API now uses that same live path for uploaded symbol files, starting with `Scott` intake and preserving submitter, original filename, candidate title, batch-summary, per-file-note, attachment, and object-key context in the normalized submission payload
 - current host-level dependencies installed outside `/data/.openclaw` for upgrade resilience include Debian `ripgrep` at `/usr/bin/rg` and Debian `python3-pil` at `/usr/lib/python3/dist-packages/PIL`

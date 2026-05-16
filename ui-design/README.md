@@ -12,6 +12,6 @@ This folder contains a lightweight update package for the two core experiences:
 Scope for this pass:
 
 - The shared app shell uses a full-width light top banner with an engineering-symbol mark, primary area buttons for Submissions, Reviews, and Standards, and a cog link into the internal Workspace view.
-- Standards View uses a split browse/detail layout with integrated clarification chat tied to the selected symbol or published page.
+- Standards View uses left facets, a central approved-symbol grid, and a right detail panel for the selected row, with clarification flows tied to the selected symbol or published page.
 - Workspace View focuses on bulk triage, change queue handling, compare/approval tools, and fast review throughput.
 - Published pages expose only the latest approved revision.

@@ -26,24 +26,26 @@ Help engineers and contractors find the correct published symbol quickly, confir
 
 ### Current layout decision
 
-Use a browse/detail/clarification home route on desktop:
+Use a browse/grid/detail home route on desktop:
 
-- Left: searchable approved browse list
-- Center: latest-approved detail pane for the active symbol
-- Right: clarification context bound to the active symbol and published page
+- Left: published-record facets, omitting redundant status facets because Standards is published-only
+- Center: approved-symbol grid with search, sortable columns, and column filters
+- Right: latest-approved detail panel when a row is selected; it shares the grid height cap and scrolls internally so the close control stays reachable
 
 Focused routes remain available for:
 
 - full published symbol reading
 - guided lookup conversations
 - download and pack browsing
+- clarification context bound to selected symbol or published page context
 
-On mobile, keep browse first and stack detail then clarification below it.
+On mobile, keep facets and browse first, then stack the selected detail panel below it.
 
 ### UX rules
 
 - The symbol thumbnail is the primary recognition element in browse results.
-- The active detail pane always shows published-state, revision, pack, effective date, and page context.
+- Browse tables and lists label the compact symbol identifier as `ID`, while `Name` displays the published symbol name from the approved payload.
+- The active detail panel always shows published-state, revision, pack, effective date, and page context.
 - Clarification context must clearly state which symbol and published page it is attached to.
 - No draft, pending, or historical revision state is shown on Standards routes.
 - Invalid Standards symbol routes must show a not-found state instead of silently falling back.
@@ -66,14 +68,15 @@ Provide an admin-only processing surface for seeing what Scott, Vlad, Tracy, Lib
 - See which agent is queued, running, completed, waiting, or escalated.
 - Inspect processing summaries, artifact counts, and exception states.
 - Jump from a processing flow to a Daisy-coordinated review case.
+- Jump from a successfully published Rupert item to the published Standards record.
 
 ### Current layout decision
 
 Make the main Workspace route processing-first:
 
-- Left: processing flows and batch/file queue
-- Center: eight compact monitor lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed
-- Right: operator context, status counts, and review handoff
+- Top: title, queue search, and a full-width single-line live status row so refresh and processing text does not compete with the search control
+- Main: eight equal-height compact monitor lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed, each with its own scrollable card stack
+- Cards: activity and source context first, optional Vlad process/tool summary where available, optional Standards target for published Rupert cards, then queue status on its own line for scanability
 
 ## Reviews View
 
@@ -85,6 +88,8 @@ Provide a user-friendly SME review surface for Daisy-coordinated review cases.
 
 - See all Daisy-coordinated cases and open split-item reviews, not only cases ready for final decision.
 - Review extracted child symbols as individual human-review items with source lineage and Daisy support.
+- Edit reviewer-controlled symbol properties beside the source graphic before publication: `Name`, `Description`, `Category`, and `Discipline`, while confirming the read-only source `Format` as a compact file-format badge.
+- Reuse previously entered Category and Discipline values from visible saved-value selectors while retaining free-text entry for new terms.
 - For raster split reviews, process only the child symbols that have a decision and leave pending children in the source-sheet workbench.
 - Draft review actions: approve, reject, request changes, request more evidence, rename/classify, mark duplicate, delete proposed child, or defer.
 - Keep review notes tied to the case and source file.
@@ -109,6 +114,7 @@ Focused routes remain available for:
 - Workspace uses denser admin language; Reviews uses reviewer-friendly language and support.
 - Queue cards expose symbol ID, title, current stage, child-symbol count, source file, and priority.
 - Review tools show source imagery where available, proposed child symbols, classification/source context, and Daisy recommendations.
+- Symbol identifiers are labelled `ID`; symbol properties are kept near the graphic so reviewers can correct agent-seeded `Name`, `Description`, `Category`, and `Discipline` values without leaving the record. Name and description are stacked on the left, Category and Discipline are grouped on the right, and `Format` stays visible as a read-only badge under Description.
 - Review controls are direct SME actions for this phase and remain visible as buttons, not buried in a dropdown.
 - Raster split reviews use `Process Selected Symbols` instead of a whole-case submit button or case action panel; the control is disabled until at least one child has a decision, and processed children should disappear from the open child list after refresh.
 - The decision rail should make the downstream handoff visible after submission: Rupert for approval, Libby for non-approval, Vlad only as a Libby-routed graphic-change step.

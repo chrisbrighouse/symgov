@@ -59,8 +59,11 @@ def published_symbol_row(row) -> dict:
     return {
         "id": row.slug,
         "symbolId": row.symbol_id,
+        "displayName": payload.get("display_name") or payload.get("workspace_display_name"),
+        "packageDisplayId": payload.get("package_display_id"),
+        "packageSymbolSequence": payload.get("package_symbol_sequence"),
         "slug": row.slug,
-        "name": row.canonical_name,
+        "name": payload.get("name") or payload.get("canonical_name") or row.canonical_name,
         "category": row.category,
         "discipline": row.discipline,
         "revisionId": row.symbol_revision_id,

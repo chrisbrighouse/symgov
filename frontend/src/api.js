@@ -255,6 +255,73 @@ export async function processWorkspaceSplitReviewDecisions(reviewCaseId, decisio
   return payload;
 }
 
+export async function updateWorkspaceReviewSymbolProperties(reviewCaseId, propertiesPayload) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+
+  const endpoint = `${appConfig.apiRoot}/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/symbol-properties`;
+  const patchProperties = async (payload, wrapped = false) => {
+    const requestBody = wrapped ? { request: payload } : payload;
+    const response = await fetch(endpoint, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await patchProperties(propertiesPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await patchProperties(propertiesPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Symbol properties update failed.');
+  }
+
+  return payload;
+}
+
+export async function fetchWorkspaceReviewSymbolPropertyOptions() {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
+  }
+
+  try {
+    const response = await fetch(`${appConfig.apiRoot}/workspace/review-symbol-property-options?_=${Date.now()}`, {
+      cache: 'no-store'
+    });
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Review property options load failed.',
+        items: []
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: payload.items?.length ? 'Review property options loaded.' : 'No review property options are available yet.',
+      items: payload.items || []
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'error',
+      message: error instanceof Error ? error.message : 'Review property options load failed.',
+      items: []
+    };
+  }
+}
+
 export async function fetchPublishedSymbols() {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };

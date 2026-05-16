@@ -11,7 +11,7 @@ The design direction for this pass is:
 - Agents should be independent as much as possible.
 - Each agent should own its own queue and produce explicit outputs.
 - The default low-cost model path should use the local Ollama provider with `ollama/gemma4:e4b`.
-- Human review remains the final authority for high-risk governance and publication actions.
+- Human review remains the final authority for high-risk governance and publication actions, but low-risk symbols may bypass human review when Libby explicitly records that review is not required and the validation, provenance, classification, and release evidence is complete.
 
 ## Current fit with OpenClaw
 
@@ -62,7 +62,7 @@ Current implementation status is now mixed rather than empty:
 - `Scott`, `Vlad`, and `Tracy` exist as live local/file-backed runners with PostgreSQL write-through support
 - `Daisy` now exists as the first review-coordination scaffold and can be created automatically from persisted `review_cases`
 - `Libby` now exists as the classification-and-research scaffold between `Tracy` and `Daisy`
-- `Rupert` now exists as the first publishing and release-management scaffold after human approval
+- `Rupert` now exists as the first publishing and release-management scaffold after either human approval or an auditable Libby no-human-review-required handoff
 - the remaining named agents still exist only as planning targets
 
 The implementation direction should be:
@@ -96,6 +96,8 @@ No agent should consume another agent's internal prompt history as its primary s
 Current bridge note:
 
 - the local runner bridge currently maps legacy string queue IDs and source IDs into deterministic UUIDs so the existing file-backed queue payloads can be mirrored into the live UUID-based schema without changing local runtime fixtures first
+- queue status should describe the agent's responsibility, not the whole downstream lifecycle. For example, Vlad completes a Libby-routed graphic-change queue item once the changed image result has been returned to Libby, and Daisy completes human-review escalation work once the review request has been created/escalated.
+- agent runs should keep useful `tool_trace_json` because Workspace monitor cards can summarize Vlad's process/tool usage from that trace. Current UI labels include `Tess` for Tesseract/OCR, `Nano` for Nano Banana/Gemini image-edit fallback, and conversion/split labels such as `DXF to SVG`, `Format conversion`, `Raster split`, and `Raster candidate`.
 
 ### 2. Durable outputs
 
@@ -153,6 +155,8 @@ The following should stay human-authorized initially:
 - rollback or withdrawal
 - policy exceptions
 - licensing conflict overrides
+
+Low-risk publication handoff is allowed only when `Libby` has classified the single-symbol item, recorded Category and Discipline where ascertainable, found no unresolved validation/provenance/classification block, and explicitly marked human review as not required. That handoff is a publication-readiness recommendation, not authority to override Rupert release checks.
 
 ## Recommended Symgov data additions
 
@@ -233,15 +237,18 @@ Why first:
 Owns:
 
 - validation queue
+- split-processing queue for submitted symbol sheets
 - file integrity checks
 - format checks
 - geometry and rule checks
 - duplicate detection
+- process/tool trace reporting for Workspace visibility, including OCR, image-edit fallback, raster analysis, and future format-conversion tools such as DXF-to-SVG conversion
 
 Inputs:
 
 - accepted intake records
 - draft symbol revisions
+- Libby-routed physical symbol graphic change requests
 
 Outputs:
 
@@ -253,7 +260,8 @@ Outputs:
   - `single_symbol_raster_candidate` artifacts for one-symbol files
   - `derivative_manifest` artifacts
   - proposed child crop assets
-  - review escalation into `raster_split_review`
+- technical split output that creates single-symbol child candidates for Libby classification
+- returned graphic-change results for Libby consolidation
 
 Why first:
 
@@ -281,6 +289,7 @@ Outputs:
 - rights status
 - risk notes
 - escalation for unclear ownership
+- provenance evidence for Libby's classification and human-review-required decision
 
 Why in wave 1:
 
@@ -291,6 +300,7 @@ Why in wave 1:
 Owns:
 
 - classification queue
+- publication-readiness triage for classified single-symbol items
 - non-approval review follow-up queue
 - taxonomy assignment
 - discoverability metadata
@@ -303,7 +313,7 @@ Owns:
 Inputs:
 
 - accepted intake records
-- validation reports and raster split child metadata
+- validation reports, single-symbol raster candidates, and raster split child metadata
 - provenance assessments
 - active review cases when classification needs a retry or upgrade
 - Daisy-organized human review decisions that are not approvals
@@ -314,21 +324,24 @@ Outputs:
 
 - `classification_records`
 - `review_followup_reports`
+- publication-readiness handoffs to Rupert when human review is not required
 - parent `libby_batch_report` output artifacts for multi-item queue work
-- engineering discipline, format, industry, symbol family, process category, and parent equipment class
+- Category, Discipline, format, industry, symbol family, process category, and parent equipment class
 - standards source and library provenance class
 - aliases and search terms
 - source classification and supporting reference evidence
 - `libby_approved` readiness signal
-- escalation into classification-focused review follow-up when confidence remains low
-- downstream Daisy queue items for re-review
+- explicit `human_review_required` and review rationale
+- downstream Daisy queue items for first review or re-review when human review is required
 - downstream Vlad queue items when a physical symbol graphic change is requested
+- downstream Rupert queue items when publication-ready and human review is not required
 - queue status summaries for read-only chat/status checks
 
 Agreed operating rules:
 
-- Libby runs after `Tracy` and before `Daisy`
+- Libby runs after `Tracy` and after Vlad split/validation output is available, before Daisy is asked to coordinate any human review
 - Libby classifies at both file and symbol level, but symbol-level cases are the main review unit
+- every submitted single symbol and every child symbol extracted from a sheet must pass through Libby before Daisy or Rupert
 - each symbol-level output must retain lineage back to the originating source file and batch
 - Libby may browse externally whenever needed to resolve classification uncertainty
 - Libby may create new taxonomy terms and use them immediately
@@ -336,11 +349,11 @@ Agreed operating rules:
 - Libby does not override `Tracy` rights decisions or `Vlad` technical findings
 - Libby owns all non-approval outcomes from Daisy-organized review
 - Libby must send physical symbol graphic changes to `Vlad`
-- Libby must check Vlad graphic-change results and combine them with any metadata/source/classification updates before Daisy re-review
-- Libby never sends items to `Rupert`
+- Libby must check Vlad graphic-change results and combine them with any metadata/source/classification updates before either Daisy re-review or Rupert handoff
+- Libby may send items to `Rupert` only through a structured no-human-review-required publication-readiness handoff with validation, provenance, and classification evidence
 - Libby may prepare audited metadata/source/classification/disposition instructions, but durable write/delete mutations must go through Symgov-controlled backend helpers
 - explicit non-graphic follow-up types route back to Daisy even if the reviewer text mentions graphics in a negative or contextual phrase
-- Telegram chat with Libby starts read-only through the OpenClaw binding for `telegram:7643191699`; mutation commands require explicit authorization and audit
+- Telegram remains orchestrated by Alfi/main; Libby is not directly bound to `telegram:7643191699`. Any future direct Libby Telegram binding should start read-only and mutation commands would require explicit authorization and audit.
 
 Review-flow implication:
 
@@ -348,12 +361,14 @@ Review-flow implication:
   - technical validation / raster split
   - provenance review
   - classification review
-  - Daisy-managed human review coordination
-  - if approved, Rupert-managed publication staging after explicit human approval
+  - Libby decision: human review required or not required
+  - if review is required, Daisy-managed human review coordination
+  - if review is not required, Rupert-managed publication staging from Libby's auditable publication-readiness handoff
+  - if Daisy review is approved, Rupert-managed publication staging after explicit human approval
   - if not approved, Libby follow-up
   - optional Vlad graphic-change work
   - Libby consolidation
-  - Daisy re-review
+  - Daisy re-review when human review is still required, or Rupert handoff when no review is required
   - repeat until approval or explicit human disposition
 
 ### `Rupert` - publication and release management agent
@@ -370,6 +385,7 @@ Owns:
 Inputs:
 
 - explicit human approval handoff from a Daisy-coordinated review
+- Libby no-human-review-required publication-readiness handoff
 - approved symbol revision IDs
 - release target
 - effective date and Standards visibility
@@ -386,10 +402,10 @@ Outputs:
 
 Agreed operating rules:
 
-- Rupert runs only after explicit human approval
-- Rupert must not publish or stage items with missing approval evidence, missing symbol revisions, or unresolved release target ambiguity
+- Rupert runs only after explicit human approval or an explicit Libby no-human-review-required handoff
+- Rupert must not publish or stage items with missing human approval or Libby no-review evidence, missing symbol revisions, or unresolved release target ambiguity
 - Rupert must not override rights, classification, technical, policy, or review blocks
-- Rupert is reached only from an explicit approved human review decision, never from Libby or Vlad directly
+- Rupert is reached from an explicit approved human review decision or from Libby's structured no-human-review-required handoff; Rupert is never reached from Vlad directly
 - the first implementation stages release intent into a local release area and report artifact; durable database publication mutations can follow once final release authority is defined
 
 ## Current bootstrap and usage notes
@@ -423,8 +439,11 @@ Agreed operating rules:
   - writes local `review_coordination_reports`
   - can be auto-created from `Vlad` or `Tracy` review-case outputs on the live external submission path
   - is queryable through the backend Workspace API and visible in the Workspace UI as a read-only coordination lane
+  - marks Libby follow-up/human-review escalation queue items `completed` once the human review request has been created/escalated, with related Daisy queue completions mirrored into PostgreSQL by the backend queue bridge
 - `Libby` now:
   - accepts DB-backed and local runtime queue items for non-approval human review follow-up
+  - is the required classification and Category/Discipline pass for submitted single symbols and child symbols extracted from sheets
+  - decides whether human review is required before routing to Daisy or Rupert
   - writes local `review_followup_reports`
   - routes non-graphic follow-up back to Daisy for re-review
   - routes graphic-change follow-up to Vlad
@@ -432,11 +451,13 @@ Agreed operating rules:
   - accepts Libby-routed `symbol_graphic_change_request` queue items
   - writes graphic-change result artifacts
   - returns graphic-change results to Libby for consolidation before Daisy re-review
+  - marks `symbol_graphic_change_request` queue items `completed` after returning the graphic-change result to Libby
 - `Rupert` now:
-  - accepts publication handoff queue items after human approval
+  - accepts publication handoff queue items after human approval or a Libby no-human-review-required readiness handoff
   - writes local `publication_reports`
   - writes release-area manifests for staged symbol revisions
   - can persist durable publication records with `--persist-db`, writing publication jobs, packs, published pages, pack entries, audit events, and published symbol lifecycle updates
+  - causes Workspace Rupert cards to show `PUBLISHED` and link to the Standards record only after the queued symbol revision has a public published page
   - is registered in the SymGov-owned OpenClaw manifest and backend agent seed list
 - independent output contract
 - manageable even before advanced orchestration exists
@@ -483,8 +504,7 @@ Owns:
 
 Inputs:
 
-- failed or passed validation
-- provenance findings
+- Libby-routed review-required cases with validation, provenance, classification, Category, and Discipline context
 - clarification links
 - change request state
 
@@ -493,10 +513,11 @@ Outputs:
 - reviewer assignment proposals
 - stage movement recommendations
 - contributor evidence requests
+- human-review queue state for cases Libby or another upstream control requires
 
 Why after wave 1:
 
-- depends on upstream outputs
+- depends on upstream Libby review-required decisions and supporting outputs
 - better once intake, validation, and provenance contracts exist
 
 ## Wave 2 agents
@@ -576,13 +597,14 @@ For the next implementation pass, the recommended committed direction is:
 - `Vlad` as the first implemented Symgov agent
 - `Scott` and `Tracy` immediately after
 - `Daisy` as the first coordination agent after those outputs exist
-- `Rupert` as the first publication staging agent after Daisy-managed human approval
+- `Libby` as the required classification and review-required decision point for all single-symbol candidates
+- `Rupert` as the first publication staging agent after Daisy-managed human approval or Libby no-human-review-required handoff
 
 ## Deferred decisions
 
 - whether agent queues live inside the main Symgov database only or also map to OpenClaw session state
 - whether `Daisy` should be a true orchestrator agent or a workflow service plus human UI affordance
-- whether `Rupert` should perform final durable publication automatically after human approval, or only stage for operator release
+- whether `Rupert` should perform final durable publication automatically after human approval or Libby no-review handoff, or only stage for operator release
 - whether higher-cost external models should be allowed for policy ambiguity, rights ambiguity, or only for offline review
 
 ## Shared runtime contract for the first local implementation
@@ -955,18 +977,24 @@ For the first local implementation:
 - only `Scott` outputs with `intake_status = accepted` and `eligibility_status = eligible` can enqueue `Vlad` and `Tracy`
 - `Vlad` and `Tracy` may run in parallel once `Scott` has produced a stable accepted intake record
 - `Scott` outputs with `needs_review`, `rejected`, or malformed contracts do not auto-enqueue downstream agents
-- `Tracy` escalations and `Vlad` escalations can now create a `Daisy` coordination queue item once a persisted `review_case` exists
+- `Vlad` split output and accepted single-symbol output flow to `Libby` as symbol-level candidates
+- `Tracy` provenance output flows to `Libby` as source/right evidence for classification and review-required triage
+- `Tracy` escalations and `Vlad` escalations can create a `Daisy` coordination queue item only when human review is required and a persisted `review_case` exists
+- `Libby` routes no-human-review-required, publication-ready symbols to `Rupert`
+- `Libby` routes human-review-required symbols to `Daisy`
 - Daisy-coordinated human approvals can create a `Rupert` publication queue item for release staging
 - every Daisy-coordinated non-approval outcome routes to `Libby`
 - Libby may route graphic changes to `Vlad`, but Vlad returns results to Libby rather than Daisy or Rupert
-- Libby sends revised items back to `Daisy` for another review pass
+- Libby sends revised items back to `Daisy` for another review pass when human review remains required, or to `Rupert` when the item is publication-ready without further review
 
 This preserves a clean operating boundary:
 
 - `Scott` decides intake normalization and downstream eligibility
 - `Vlad` decides technical validation outcome
 - `Tracy` decides provenance and rights outcome
-- `Daisy` consumes stable `review_cases` and proposes coordination actions without taking final approval authority
-- `Libby` consumes non-approval review decisions, performs or coordinates follow-up, and returns revised items for Daisy review
+- `Libby` decides classification, Category, Discipline, and whether human review is required
+- `Libby` consumes non-approval review decisions, performs or coordinates follow-up, and returns revised items to Daisy only when human review remains required
+- `Daisy` consumes stable human-review-required `review_cases` and proposes coordination actions without taking final approval authority
+- `Rupert` stages/publishes only from explicit human approval or Libby's auditable no-human-review-required handoff
 - `Vlad` consumes Libby-routed graphic-change requests and returns results to Libby
-- `Rupert` consumes explicit approval handoffs and stages approved symbol revisions for publication without overriding release authority
+- `Rupert` consumes explicit human approval or Libby no-review handoffs and stages approved or cleared symbol revisions for publication without overriding release authority

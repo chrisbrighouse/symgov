@@ -21,6 +21,8 @@ from .models import (
     ProvenanceAssessment,
     ReviewCase,
     ReviewCaseAction,
+    ReviewSplitItem,
+    ReviewSymbolProperty,
     SymbolRevision,
     User,
     ValidationReport,
@@ -69,6 +71,47 @@ def text_value(*values: Any, fallback: str = "") -> str:
 
 def list_value(value: Any) -> list:
     return value if isinstance(value, list) else []
+
+
+def source_package_display_id(intake_record: IntakeRecord | None) -> str | None:
+    if intake_record is None:
+        return None
+    normalized = intake_record.normalized_submission_json or {}
+    package_id = str(normalized.get("source_package_code") or normalized.get("workspace_display_name") or "").strip().upper()
+    return package_id or None
+
+
+def split_item_display_metadata(split_item: ReviewSplitItem | None, fallback_index: int | None = None) -> dict[str, Any]:
+    if split_item is None:
+        return {}
+    payload = split_item.payload_json or {}
+    package_id = payload.get("package_display_id") if isinstance(payload, dict) else None
+    sequence = payload.get("package_symbol_sequence") if isinstance(payload, dict) else None
+    try:
+        sequence = int(sequence) if sequence is not None else fallback_index
+    except (TypeError, ValueError):
+        sequence = fallback_index
+    display_name = f"{package_id}-{sequence}" if package_id and sequence is not None else None
+    return {
+        "display_name": display_name,
+        "package_display_id": package_id,
+        "package_symbol_sequence": sequence,
+    }
+
+
+def load_review_symbol_properties(
+    session: Session,
+    *,
+    review_case: ReviewCase,
+    split_item: ReviewSplitItem | None = None,
+) -> ReviewSymbolProperty | None:
+    symbol_record_key = split_item.child_key if split_item is not None else str(review_case.id)
+    return (
+        session.query(ReviewSymbolProperty)
+        .filter(ReviewSymbolProperty.review_case_id == review_case.id)
+        .filter(ReviewSymbolProperty.symbol_record_key == symbol_record_key)
+        .one_or_none()
+    )
 
 
 def candidate_id_from_intake(intake_record: IntakeRecord | None) -> str:
@@ -166,9 +209,18 @@ def ensure_approved_symbol_revision(
     now = utc_now()
 
     slug = derive_symbol_slug(context, review_case)
-    canonical_name = derive_symbol_name(context, slug)
-    category = text_value(classification.category if classification else None, fallback="symbol")
-    discipline = text_value(classification.discipline if classification else None, fallback="general")
+    symbol_properties = load_review_symbol_properties(session, review_case=review_case)
+    canonical_name = text_value(symbol_properties.name if symbol_properties else None, derive_symbol_name(context, slug))
+    category = text_value(
+        symbol_properties.category if symbol_properties else None,
+        classification.category if classification else None,
+        fallback="symbol",
+    )
+    discipline = text_value(
+        symbol_properties.discipline if symbol_properties else None,
+        classification.discipline if classification else None,
+        fallback="general",
+    )
 
     symbol = session.query(GovernedSymbol).filter_by(slug=slug).one_or_none()
     if symbol is None:
@@ -214,15 +266,19 @@ def ensure_approved_symbol_revision(
     aliases = list_value(classification.aliases_json if classification else None)
     keywords = list_value(classification.search_terms_json if classification else None)
     source_refs = list_value(classification.source_refs_json if classification else None)
+    display_name = source_package_display_id(intake)
 
     revision.lifecycle_state = "approved"
     revision.payload_json = {
+        "name": canonical_name,
         "summary": text_value(
+            symbol_properties.description if symbol_properties else None,
             classification.review_summary if classification else None,
             provenance.summary if provenance else None,
             fallback=canonical_name,
         ),
         "description": text_value(
+            symbol_properties.description if symbol_properties else None,
             decision.decision_note,
             classification.review_summary if classification else None,
             fallback=canonical_name,
@@ -235,6 +291,10 @@ def ensure_approved_symbol_revision(
         "review_case_id": str(review_case.id),
         "review_decision_id": str(decision.id),
         "classification_record_id": str(classification.id) if classification else None,
+        "review_symbol_properties_id": str(symbol_properties.id) if symbol_properties else None,
+        "display_name": display_name,
+        "package_display_id": display_name,
+        "package_symbol_sequence": None,
         "classification": {
             "status": classification.classification_status if classification else None,
             "confidence": float(classification.confidence) if classification else None,
@@ -298,6 +358,61 @@ def child_lookup_by_id(validation_report: ValidationReport | None) -> dict[str, 
     return lookup
 
 
+def reviewed_split_item_for_child(
+    session: Session,
+    *,
+    review_case: ReviewCase,
+    decision: HumanReviewDecision,
+    child_decision: dict[str, Any],
+    child_manifest: dict[str, Any] | None,
+) -> ReviewSplitItem | None:
+    payload = decision.decision_payload_json or {}
+    split_child_item_id = payload.get("split_child_item_id") if isinstance(payload, dict) else None
+    if split_child_item_id:
+        try:
+            row = session.get(ReviewSplitItem, uuid.UUID(str(split_child_item_id)))
+            if row is not None and row.review_case_id == review_case.id:
+                return row
+        except ValueError:
+            pass
+
+    child_keys = [
+        child_decision.get("childId"),
+        child_decision.get("proposedSymbolId"),
+        child_decision.get("fileName"),
+    ]
+    if child_manifest:
+        child_keys.extend(
+            [
+                child_manifest.get("child_key"),
+                child_manifest.get("proposed_symbol_id"),
+                child_manifest.get("file_name"),
+                child_manifest.get("attachment_object_key"),
+            ]
+        )
+    lookup_keys = {str(key) for key in child_keys if key}
+    if lookup_keys:
+        row = (
+            session.query(ReviewSplitItem)
+            .filter(ReviewSplitItem.review_case_id == review_case.id)
+            .filter(
+                (ReviewSplitItem.child_key.in_(lookup_keys))
+                | (ReviewSplitItem.proposed_symbol_id.in_(lookup_keys))
+                | (ReviewSplitItem.file_name.in_(lookup_keys))
+                | (ReviewSplitItem.attachment_object_key.in_(lookup_keys))
+            )
+            .one_or_none()
+        )
+        if row is not None:
+            return row
+    if split_child_item_id:
+        raise RuntimeError(
+            f"Could not resolve reviewed split item {split_child_item_id} "
+            f"for publication decision {decision.id}."
+        )
+    return None
+
+
 def ensure_approved_child_symbol_revision(
     session: Session,
     *,
@@ -325,6 +440,21 @@ def ensure_approved_child_symbol_revision(
         child_manifest.get("proposed_symbol_name") if child_manifest else None,
         fallback=slug.replace("-", " ").title(),
     )
+    reviewed_split_item = reviewed_split_item_for_child(
+        session,
+        review_case=review_case,
+        decision=decision,
+        child_decision=child_decision,
+        child_manifest=child_manifest,
+    )
+    symbol_properties = load_review_symbol_properties(
+        session,
+        review_case=review_case,
+        split_item=reviewed_split_item,
+    )
+    canonical_name = text_value(symbol_properties.name if symbol_properties else None, canonical_name)
+    category = text_value(symbol_properties.category if symbol_properties else None, fallback="symbol")
+    discipline = text_value(symbol_properties.discipline if symbol_properties else None, fallback="general")
 
     symbol = session.query(GovernedSymbol).filter_by(slug=slug).one_or_none()
     if symbol is None:
@@ -332,8 +462,8 @@ def ensure_approved_child_symbol_revision(
             id=coerce_uuid(f"governed-symbol:{slug}"),
             slug=slug,
             canonical_name=canonical_name,
-            category="symbol",
-            discipline="general",
+            category=category,
+            discipline=discipline,
             owner_id=service_user.id,
             current_revision_id=None,
             created_at=now,
@@ -343,6 +473,8 @@ def ensure_approved_child_symbol_revision(
         session.flush()
     else:
         symbol.canonical_name = canonical_name
+        symbol.category = category
+        symbol.discipline = discipline
         symbol.updated_at = now
 
     revision_label = f"review-{decision.created_at.date().isoformat()}-{str(decision.id)[:8]}-{index + 1:02d}"
@@ -361,14 +493,22 @@ def ensure_approved_child_symbol_revision(
         session.add(revision)
 
     source_file = source_file_from_intake(intake)
+    display_metadata = split_item_display_metadata(reviewed_split_item, fallback_index=index + 1)
     child_object_key = text_value(
+        reviewed_split_item.attachment_object_key if reviewed_split_item else None,
         child_manifest.get("attachment_object_key") if child_manifest else None,
         child_decision.get("childId"),
     )
     revision.lifecycle_state = "approved"
     revision.payload_json = {
-        "summary": text_value(child_decision.get("note"), fallback=canonical_name),
-        "description": text_value(decision.decision_note, child_decision.get("note"), fallback=canonical_name),
+        "name": canonical_name,
+        "summary": text_value(symbol_properties.description if symbol_properties else None, child_decision.get("note"), fallback=canonical_name),
+        "description": text_value(
+            symbol_properties.description if symbol_properties else None,
+            decision.decision_note,
+            child_decision.get("note"),
+            fallback=canonical_name,
+        ),
         "aliases": [canonical_name] if canonical_name != proposed_id else [],
         "keywords": [proposed_id, "raster split child"],
         "source_refs": [],
@@ -377,12 +517,16 @@ def ensure_approved_child_symbol_revision(
         "review_case_id": str(review_case.id),
         "review_decision_id": str(decision.id),
         "classification_record_id": None,
+        "review_symbol_properties_id": str(symbol_properties.id) if symbol_properties else None,
+        "display_name": display_metadata.get("display_name"),
+        "package_display_id": display_metadata.get("package_display_id"),
+        "package_symbol_sequence": display_metadata.get("package_symbol_sequence"),
         "classification": {
             "status": "human_approved_split_child",
             "confidence": None,
             "libby_approved": None,
-            "discipline": "general",
-            "category": "symbol",
+            "discipline": discipline,
+            "category": category,
             "symbol_family": None,
             "process_category": None,
             "parent_equipment_class": None,
@@ -396,6 +540,8 @@ def ensure_approved_child_symbol_revision(
             "child_id": child_decision.get("childId"),
             "child_file_name": child_manifest.get("file_name") if child_manifest else None,
             "child_bbox": child_manifest.get("bbox") if child_manifest else None,
+            "review_split_item_id": str(reviewed_split_item.id) if reviewed_split_item else None,
+            "reviewed_attachment_object_key": reviewed_split_item.attachment_object_key if reviewed_split_item else None,
         },
     }
     revision.rationale = text_value(
@@ -441,6 +587,18 @@ def approved_revisions_for_decision(
             )
         )
     return revisions
+
+
+def revision_display_ids(revisions: list[SymbolRevision]) -> list[str]:
+    values = []
+    for revision in revisions:
+        payload = revision.payload_json or {}
+        if not isinstance(payload, dict):
+            continue
+        display_name = text_value(payload.get("display_name"), payload.get("workspace_display_name"))
+        if display_name:
+            values.append(display_name)
+    return values
 
 
 def build_pack_metadata(context: dict[str, Any], review_case: ReviewCase) -> tuple[str, str]:
@@ -530,6 +688,7 @@ def execute_publication_handoff(
             context=context,
         )
         revision_ids = [str(revision.id) for revision in revisions]
+        display_ids = revision_display_ids(revisions)
         pack_code, pack_title = build_pack_metadata(context, review_case)
         queue_id = f"aqi-rupert-review-{str(decision.id)[:8]}-{now.strftime('%Y%m%dT%H%M%SZ')}"
         queue_item = {
@@ -545,6 +704,8 @@ def execute_publication_handoff(
                 "human_decision": "approve",
                 "human_approved": True,
                 "symbol_revision_ids": revision_ids,
+                "symbol_display_ids": display_ids,
+                "display_name": display_ids[0] if len(display_ids) == 1 else None,
                 "release_target": "standards-current",
                 "publication_pack_code": pack_code,
                 "publication_pack_title": pack_title,

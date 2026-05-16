@@ -24,7 +24,7 @@ The current frontend is a Vite + React static SPA build with four primary workin
 - `Submissions` gathers external source symbols and sends them into the live intake path.
 - `Workspace` is the admin/operator processing view for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed activity.
 - `Reviews` is the SME-facing review interface for Daisy-coordinated review cases.
-- `Standards View` uses a browse/detail/clarification home route for published-only lookup, with focused routes for full symbol pages, guided lookup, and downloads.
+- `Standards View` uses a published-only browse/grid/detail surface, with focused routes for full symbol pages, guided lookup, clarifications, and downloads.
 
 Supporting routes still exist for focused tasks, but the product intent is now explicit:
 
@@ -37,10 +37,10 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 
 - a glass-morphism app shell with a full-width light top banner, simple engineering-symbol logo mark, and version/date stamping
 - primary banner navigation for `Submissions`, `Reviews`, and `Standards`, with the cog icon linking to the internal Workspace view
-- an admin Workspace processing dashboard headed `ADMIN WORKSPACE` / `Activity Monitors`, with eight compact vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed; live queue/review cards use a `HH:MM DDMMMYY` top label rendered in the `Europe/London` timezone so GMT/BST changes are automatic
-- an SME Reviews workbench headed `Daisy-coordinated Reviews`, with queue navigation, visual source evidence, classification/source context, visible case actions, comments, latest decision state, Daisy coordination, and per-child review actions
-- a Standards home that keeps browse, latest approved detail, and clarification context together
-- a live submission route that probes the backend and submits through the current public Symgov API
+- an admin Workspace processing dashboard headed `ADMIN WORKSPACE` / `Activity Monitors`, with eight equal-height compact vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed; live queue/review cards use a `HH:MM DDMMMYY` top label rendered in the `Europe/London` timezone so GMT/BST changes are automatic, the second visible card line uses a short package display name, Vlad cards can show a compact `Process` line for tools used, Rupert cards can link to the published Standards record after durable publication succeeds, and status sits on its own line under the activity string
+- an SME Reviews workbench headed `Daisy-coordinated Reviews`, with queue navigation, visual source evidence, reviewer-editable symbol properties, classification/source context, visible case actions, comments, latest decision state, Daisy coordination, and per-child review actions
+- a Standards home with left-side facets, a central approved-symbol grid, and an in-grid right detail panel for the selected row; published tables use `ID` for symbol identifiers and the `Name` column uses the published payload name when present
+- a live submission route that probes the backend and submits through the current public Symgov API, showing `Submission accepted` on successful submit instead of rendering the raw backend JSON
 - route-safe SPA navigation using hash routes so static hosting remains simple
 - accessible detail and compare SVG rendering for non-decorative symbol views
 - explicit published page and pack context in the seeded UI data
@@ -50,7 +50,12 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - Standards and Reviews retain seeded fallback data for local/static development where live APIs are still pending or unavailable.
 - The Workspace monitor now polls live agent queue items, review cases, and Daisy coordination reports every five seconds while the Workspace route is mounted and the browser tab is visible, using `GET /api/v1/workspace/agent-queue-items` plus the existing review and Daisy endpoints.
 - Workspace polling uses no-store timestamped requests, stops when the tab is hidden, and refreshes immediately when the tab becomes visible again.
-- Workspace monitor card labels should prefer operator-readable times over queue UUIDs where possible. Libby, Daisy, Human Review, Rupert, classification, review, and publication cards use `createdAt` or review `openedAt` rendered as London local time, preserving the existing card title/details underneath.
+- Workspace monitor cards use operator-readable times as the first visible row, never queue UUIDs where a timestamp exists. Libby, Daisy, Human Review, Rupert, classification, review, and publication cards use `createdAt` or review `openedAt` rendered as London local time.
+- Workspace monitor cards use backend-provided `displayName` as the second visible row when available. Submitted sheets/packages receive global uppercase 4-character hex display IDs starting at `0001`; extracted split symbols display as `{packageId}-{sequence}` with an unpadded per-package sequence such as `0001-1`, `0001-13`, or `0001-999`. Single-symbol submissions display as the package ID only, such as `0001`.
+- Workspace queue panels now stretch evenly to the bottom of the visible monitor area. The summary counters above the lanes and duplicate footer counts inside lanes have been removed, while the live refresh/status text has moved to a full-width single-line row above the lanes. The Scott lane shows completed items by default.
+- Vlad Workspace cards can show a `Process` line above the status indicator, sourced from backend `toolSummary` values derived from Vlad run traces and payload hints. Current labels include `Tess`, `Nano`, `DXF to SVG`, `Format conversion`, `Raster split`, and `Raster candidate`; the list is intentionally extensible as Vlad's processing-tool repertoire grows.
+- Rupert Workspace cards show `PUBLISHED` only after the queued symbol revision has a public published page. Those cards expose the Standards page target on the card and navigate to Standards View using the published symbol slug; Standards View accepts the linked `symbol` query parameter and opens the matching record.
+- Full filenames, proposed symbol names, queue IDs, and longer review details remain available to search/detail/tooltips rather than being used as the compact card title.
 - The Workspace monitor retains seeded `processingActivity` fallback when no API root is configured or the live queue endpoint is unavailable.
 - The Standards submission route now calls the live Symgov backend instead of using demo-only local submission behavior
 - Guided lookup is intentionally constrained to published approved records
@@ -65,6 +70,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
   - the Reviews decision rail now renders Daisy coordination output for the active review case when present
   - if no Daisy report exists yet for a case, the UI shows an explicit empty state instead of silently omitting coordination status
 - Reviews now includes SME filters for stage, reviewer, priority, and action type, and the decision rail can record approve, reject, request changes, request more evidence, rename/classify, duplicate, delete, and defer outcomes when the live decision endpoint is available.
+- Reviews now exposes reviewer-editable symbol properties alongside the source graphic. The symbol record identifier is labelled `ID`; `Name` is limited to 50 characters and allows letters, numbers, spaces, `-`, `/`, and `$`; `Description` is limited to 256 characters and allows any characters; `Format` is a read-only file-format badge under the description, seeded from classification, validation/intake metadata, filename, or object-key extension; `Category` and `Discipline` are free-text fields with explicit saved-value selectors. Blank property fields fall back to Libby suggestions when available. Category/discipline entries are remembered in the database with normalized display values, and reviewed name/description/category/discipline values are preferred by the publication handoff.
 - Focused routes remain available for audit, per-symbol reading, downloads, and guided lookup
 
 ## Frontend deployment notes
@@ -120,6 +126,7 @@ The product docs now also include the first agentization slice for Symgov:
 - the backend exposes those reports through `/api/v1/workspace/daisy/reports`
 - the Reviews UI now shows Daisy coordination status, reviewer assignment proposals, stage-transition proposals, contributor evidence requests, visual source evidence, latest recorded decision state, and a reviewer decision panel for the active case
 - the current implemented post-review loop is Daisy review -> Libby follow-up for every non-approval outcome -> optional Vlad graphic change -> Libby consolidation -> Daisy re-review; only explicit approval routes to Rupert
+- queue status tracks each agent's completed work rather than the full downstream governance state: Vlad marks Libby-routed `symbol_graphic_change_request` items completed after returning the changed image result to Libby, and Daisy marks Libby follow-up/human-review escalation work completed once the human review request has been created/escalated
 - durable post-review decisions and follow-on action records have a first backend implementation:
   - migration `20260426_0004_human_review_decisions.py`
   - ORM models `HumanReviewDecision` and `ReviewCaseAction`
@@ -151,12 +158,14 @@ Current intake/validation baseline:
 - current host-level dependencies installed outside `/data/.openclaw` for upgrade resilience include Debian `ripgrep` at `/usr/bin/rg` and Debian `python3-pil` at `/usr/lib/python3/dist-packages/PIL`
 - the remaining downstream status for that submission is provenance follow-up:
   - Tracy's queue item was still `queued` at the end of the 2026-04-17 repair pass
-- current live routing is now effectively:
+- target live routing is now:
   - `Scott` intake
-  - `Vlad` technical validation when applicable
-  - `Tracy` provenance and rights review
-  - `Libby` classification and source-reference enrichment
-  - `Daisy` coordination when downstream review follow-up exists
+  - `Vlad` technical validation and split processing for symbol sheets or other technical work
+  - `Tracy` provenance and rights review in parallel with Vlad where applicable
+  - `Libby` classification and source-reference enrichment for every single-symbol candidate, including submitted single symbols and children extracted from sheets
+  - `Libby` decides whether the classified symbol needs human review
+  - `Daisy` coordinates only the human reviews Libby or another upstream control requires
+  - `Rupert` receives publication-ready symbols either after Daisy-coordinated human approval or from a Libby no-human-review-required handoff with auditable classification, provenance, and validation evidence
 
 ## Libby review follow-up direction
 
@@ -172,21 +181,22 @@ Agreed Libby boundary:
 - does not replace `Tracy` rights judgment or `Vlad` technical validation
 - owns every non-approval response from Daisy-organized human review
 - sends physical symbol graphic changes to `Vlad`, then checks Vlad's result and combines it with other updates before Daisy re-review
-- never sends symbols to Rupert directly
+- may send publication-ready symbols directly to Rupert only when Libby has classified the symbol, recorded Category and Discipline where ascertainable, found no unresolved validation/provenance/classification block, and explicitly marks human review as not required
 - may prepare audited metadata/source/classification/disposition instructions, but durable write/delete mutations must go through Symgov-controlled backend helpers
 - accepts both single-case queue items and multi-item `payload_json.items` / `payload_json.cases` batches
 
 Agreed Libby workflow:
 
-- `Libby` should run after `Tracy` and before the first Daisy review
+- `Libby` should run after `Tracy` and after Vlad split/validation output is available, before any Daisy review decision is made
 - after Daisy review, any non-approval outcome returns to Libby
 - classification should exist at both file level and symbol level
 - the main actionable review unit should be the symbol, not only the source file
 - each symbol-level classification and review case must retain lineage back to the originating file, attachment/object key, and batch
-- Daisy-managed human review should start only after Libby has completed its classification pass
+- Daisy-managed human review should start only when Libby or another upstream control explicitly requires human review after Libby has completed its classification pass
 - items may cycle between Daisy review and Libby follow-up several times before final approval
 - multi-item queue work produces a parent `libby_batch_report` and per-item downstream Daisy or Vlad queue items
-- Libby's OpenClaw Telegram route is bound for `telegram:7643191699`; first chat commands should remain read-only, such as queue status and case explanation
+- Libby is not directly bound to Telegram; Alfi/main remains the Telegram-facing orchestrator and delegates or inspects Symgov work as needed
+- any future direct chat commands for Libby should be added only through an explicit new route-binding decision, and should start read-only, such as queue status and case explanation
 
 Agreed Libby persistence direction:
 
@@ -216,13 +226,14 @@ Agreed target routing after Libby implementation:
 - `Vlad` technical validation and raster split where needed
 - `Tracy` provenance and rights review
 - `Libby` classification and source-repair pass
-- `Daisy` review coordination for human follow-up
+- `Libby` routes clean, no-human-review-required symbols to `Rupert`
+- `Daisy` review coordination for human follow-up only when human review is required
 - raster split reviews are processed at child-symbol level; decided children leave the parent split workbench while undecided children remain open
 - approved split children route individually to `Rupert`; every non-approval child outcome routes individually to `Libby`
 - non-approval non-split review outcomes return to `Libby`
 - graphic-change requests route `Libby` -> `Vlad` -> `Libby`
-- `Libby` sends revised items back to `Daisy` for re-review
-- only approved review decisions route to `Rupert`
+- `Libby` sends revised items back to `Daisy` for re-review when human review remains required, or to `Rupert` when the item is now publication-ready without human review
+- `Rupert` accepts either explicit Daisy/human approval handoffs or Libby no-human-review-required publication handoffs; Rupert still blocks publication when validation, provenance, classification, policy, approval, or release evidence is incomplete
 
 ## OpenClaw resilience
 
@@ -234,7 +245,7 @@ That manifest is now the local source of truth for:
 
 - the expected safe OpenClaw plugin profile for SymGov operations
 - registered SymGov agent ids, names, workspaces, models, and tool profile
-- managed OpenClaw `bindings[]` entries for deterministic channel/account/peer routing
+- managed OpenClaw `bindings[]` entries for deterministic channel/account/peer routing; the current managed binding set is intentionally empty so Alfi/main remains the Telegram-facing orchestrator
 - expected OpenClaw `agent.json` metadata paths
 - required workspace files that prove each SymGov agent is still runnable
 
@@ -252,7 +263,7 @@ Current intent:
 - OpenClaw config and agent metadata are treated as rebuildable runtime state
 - OpenClaw bindings are also treated as rebuildable runtime state
 - after an OpenClaw upgrade, `reconcile-openclaw` should be the first repair step before doing manual edits
-- the current managed SymGov binding set is intentionally empty until concrete channel/account targets are chosen
+- the current managed SymGov binding set is intentionally empty so `telegram:7643191699` falls through to Alfi/main rather than routing directly to a Symgov worker agent
 - OpenClaw bindings are deterministic channel/account/peer matches; they are not free-form keyword routing rules
 
 ## Run
@@ -296,7 +307,7 @@ This repository is now referred to as **symgov** (symbol governance). See the ar
 - `.env.backend.storage` — current VPS object-storage snippet for the local MinIO deployment on `ai-stack`.
 - `backend/` — current backend scaffold containing SQLAlchemy models, Alembic config, and the first live migration set.
 - `backend/manage_symgov.py` — current backend bootstrap and inspection entrypoint for agent-definition seeding, DB/storage health checks, and the FastAPI server.
-- `openclaw-agents.manifest.json` — current SymGov-owned OpenClaw registration manifest for `Scott`, `Tracy`, and `Vlad`.
+- `openclaw-agents.manifest.json` — current SymGov-owned OpenClaw registration manifest for `Scott`, `Tracy`, `Vlad`, `Daisy`, `Libby`, `Rupert`, and `Ed`; its `bindings` array is intentionally empty so Alfi/main remains the Telegram orchestrator.
 
 ## Current VPS backend support
 
@@ -357,6 +368,9 @@ Current verified runtime baseline:
 - raster split child review persistence now uses `review_split_items`, materialized from Vlad `derivative_manifest` children, so each proposed child can carry its own lifecycle, open/processed status, latest review action, reviewer note/details, downstream agent, and downstream queue item
 - `GET /api/v1/workspace/review-cases` projects open `review_split_items` with `awaiting_decision` or `returned_for_review` as first-class human-review items with `reviewItemType: "split_item"`, parent review-case lineage, a one-child review payload, and the child preview as the primary review visual
 - split-review processing is handled through `POST /api/v1/workspace/review-cases/{id}/split-items/process-decisions`; it processes only non-pending child decisions, routes approved children to Rupert and non-approval children to Libby, and closes the parent split case only when no child items remain open
+- reviewer-editable symbol properties now persist in `review_symbol_properties` via Alembic revision `20260512_0006`, with `format` added by revision `20260515_0008`; review-case responses include `symbolProperties`, reviewers update them through the Workspace API, and publication staging prefers the reviewed `name`, `description`, `category`, and `discipline` values
+- reusable reviewer-entered `Category` and `Discipline` values persist in `review_symbol_property_options` via Alembic revision `20260515_0007`; saved values are normalized to capitalized mixed case, deduplicated by canonical key plus conservative fuzzy matching, fetched with no-store requests, and shown as explicit saved-value selectors in Reviews
+- clean test resets should use `/data/.codex/skills/clean-symgov/scripts/clean_symgov.py --apply`; this clears operational/review/publication/source-package records and generated runtime artifacts while preserving source code and agent definitions. Because `source_packages` are cleared by that explicit reset, the next submitted sheet/package display ID starts again at `0001`.
 
 The current MinIO bootstrap assets live outside this workspace in:
 

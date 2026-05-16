@@ -49,7 +49,7 @@ Product rules
   - id, symbol_revision_id, standard_version_id, relationship_type
 
 This keeps provenance and reference context separate from publication output. A symbol revision may be associated with multiple source packages, multiple standards, or both.
-Source-package membership may also be captured before normalization at intake/import time and later propagated into revision-level links.
+Source-package membership may also be captured before normalization at intake/import time and later propagated into revision-level links. For external sheet/file submissions, Symgov also uses `source_packages.package_code` as the stable Workspace package display ID: a global uppercase 4-character hexadecimal sequence starting at `0001`.
 
 ### Review and publish workflow
 
@@ -117,6 +117,9 @@ Phase-1 published API rule:
   - record a whole-case human decision for non-split review cases, route approval to Rupert, and route non-approval outcomes to Libby
 - `POST /api/v1/workspace/review-cases/{id}/split-items/process-decisions`
   - process only decided raster split child items, route approved children to Rupert and non-approved children to Libby, leave undecided children open, and close the parent split case only after all child items are processed
+- `PATCH /api/v1/workspace/review-cases/{id}/symbol-properties`
+  - update reviewer-editable symbol properties for the active review record: `Name`, `Description`, `Category`, and `Discipline`, while showing read-only source `Format` as file-format context
+  - remember reviewer-entered `Category` and `Discipline` values as reusable database-backed options, normalized to capitalized mixed case and deduplicated by canonical/fuzzy matching
 - `GET /api/v1/workspace/symbols/{symbol_id}`
   - governed record detail across lifecycle states
 - `GET /api/v1/workspace/symbols/{symbol_id}/audit`
@@ -276,6 +279,7 @@ These are distinct from `publication_packs`. `publication_packs` are Symgov-cont
 Recommended notes:
 
 - use this for named imported sets, supplier packages, standards appendices, or other upstream bundles
+- external sheet/file intake creates a source-package row with a global uppercase 4-character hex `package_code`, starting at `0001` after an explicit clean reset; this code is the compact Workspace package display ID
 - `package_type` should distinguish imported source bundles from internal convenience groupings if both are allowed later
 - package membership may begin at intake/import time before a submission is normalized into one or more symbol revisions
 
@@ -371,6 +375,36 @@ Recommended notes:
 - `actor_id uuid not null references users(id)`
 - `note text null`
 - `created_at timestamptz not null`
+
+#### `review_symbol_properties`
+
+- `id uuid primary key`
+- `review_case_id uuid not null references review_cases(id)`
+- `review_split_item_id uuid null references review_split_items(id)`
+- `symbol_record_key text not null`
+- `name text not null`
+- `description text not null default ''`
+- `category text null`
+- `discipline text null`
+- `source text not null default 'agent_initial'`
+- `updated_by text null`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+
+Recommended constraints:
+
+- unique `(review_case_id, symbol_record_key)`
+- index `review_split_item_id`
+
+Recommended notes:
+
+- this table stores reviewer-editable properties for individual symbol review records before publication
+- agent output can seed the values, but reviewers may override them from the review interface
+- `Name` is limited by the API/UI to 50 characters and allows letters, numbers, spaces, `-`, `/`, and `$`
+- `Description` is limited to 256 characters and may contain any characters
+- publication staging should prefer these reviewed values for `name`, `description`, `category`, and `discipline`
+- Standards should display the reviewed/published `name` in the `Name` column and label the symbol identifier column as `ID`
+- Standards browse should expose latest published records through facets and a central approved-symbol grid. Opening a row displays an in-grid right detail panel with the same height cap as the grid so detail content scrolls internally and the close control remains reachable.
 
 #### `publication_packs`
 
@@ -573,6 +607,21 @@ Recommended constraints:
 Recommended notes:
 
 - use this table for lightweight non-staff identities that can submit clarifications or intake metadata without becoming Workspace application users
+
+### Review symbol property options
+
+`review_symbol_property_options` stores reusable picklist values learned from reviewer-entered symbol properties. It is intentionally scoped first to `Category` and `Discipline`.
+
+Each row stores:
+
+- `field_name` such as `category` or `discipline`
+- `display_value` normalized to capitalized mixed case
+- `normalized_key` for case-insensitive and punctuation-insensitive deduplication
+- `use_count`, `created_at`, `updated_at`, and `last_used_at`
+
+When reviewers save symbol properties, the Workspace API normalizes Category and Discipline, records or updates the corresponding option row, and stores the normalized display value back on `review_symbol_properties`. The Reviews UI fetches the option list through `GET /api/v1/workspace/review-symbol-property-options` and presents saved values as explicit selectors beside editable text fields while preserving free-text entry for new terms.
+
+`review_symbol_properties.format` is read-only in the current Reviews UI. It is populated from Libby classification when available, otherwise from validation/intake metadata, source filename, or object-key extension. It renders as a compact file-format badge under the description and uses labels such as `PNG`, `JPEG`, `SVG`, `SVF`, and `DXF`.
 - these records are contact and provenance references only, not direct login principals for phase 1
 
 #### `intake_records`
@@ -595,6 +644,7 @@ Recommended notes:
 Recommended notes:
 
 - `source_package_id` is the first-class pre-normalization link when a raw submission belongs to a named imported or supplied package
+- external intake persists the allocated `source_packages.package_code` into `normalized_submission_json.source_package_code` and `normalized_submission_json.workspace_display_name`
 - if one intake payload represents multiple packaged members before symbol splitting is complete, keep the full incoming membership detail in `normalized_submission_json` until downstream normalization creates revision-level `source_package_entries`
 - keep `raw_object_key` in phase 1 even if `attachments` also exists, because intake handling benefits from a direct pointer to the original uploaded object before broader attachment linkage is normalized
 
@@ -674,6 +724,8 @@ Recommended notes:
 - `processed_at timestamptz null`
 
 `review_split_items` materializes Vlad `derivative_manifest.children` for raster split review cases. Once materialized, each split child has its own human-review lifecycle. The open review list exposes child items with `awaiting_decision` or `returned_for_review` as individual split-item review records, including parent review-case lineage and a one-child decision payload. Processed children leave the human-review queue after routing to Rupert or Libby, while remaining or returned children stay available for later SME decisions even if the original parent sheet review has already closed.
+
+Split-item payloads carry Workspace display metadata derived from the parent package: `package_display_id`, `package_symbol_sequence`, and `workspace_display_name`. The visible convention is `{packageId}-{sequence}` for extracted children, with sequence numbers starting at `1` for each package and not zero padded. For example, a sheet displayed as `0001` produces child names `0001-1`, `0001-2`, and `0001-13`.
 
 #### `publication_jobs`
 
