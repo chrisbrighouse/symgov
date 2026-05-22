@@ -208,6 +208,155 @@ class WorkspaceAgentQueueItemListResponse(BaseModel):
     items: list[WorkspaceAgentQueueItemResponse]
 
 
+class WorkspaceScottSourceSearchStartRequest(BaseModel):
+    durationSeconds: int = Field(default=120, ge=30, le=300)
+    seedQuery: str | None = Field(default=None, max_length=200)
+
+
+class WorkspaceScottSourceSearchStartResponse(BaseModel):
+    queueItemId: str
+    status: str
+    durationSeconds: int
+    startedAt: str
+    expectedCompletedAt: str
+
+
+class WorkspaceScottSourceSearchStopResponse(BaseModel):
+    queueItemId: str
+    status: str
+    stoppedAt: str
+    termination: str
+
+
+class WorkspaceScottSourceSiteResponse(BaseModel):
+    id: str
+    url: str
+    status: str
+    title: str | None = None
+    domain: str
+    description: str | None = None
+    industry: str | None = None
+    process: str | None = None
+    organizationType: str | None = None
+    symbolFormats: list[Any] = Field(default_factory=list)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    relevanceScore: float | None = None
+    firstSeenAt: str
+    lastSeenAt: str
+    lastSessionQueueItemId: str | None = None
+
+
+class WorkspaceScottSourceSiteListResponse(BaseModel):
+    items: list[WorkspaceScottSourceSiteResponse]
+    total: int
+    offset: int
+    limit: int
+    hasMore: bool
+
+
+class WorkspaceHannahCurationSearchStartRequest(BaseModel):
+    durationSeconds: int = Field(default=120, ge=30, le=300)
+
+
+class WorkspaceHannahCurationSearchStartResponse(BaseModel):
+    queueItemId: str
+    status: str
+    durationSeconds: int
+    startedAt: str
+    expectedCompletedAt: str
+
+
+class WorkspaceHannahCurationSearchStopResponse(BaseModel):
+    queueItemId: str
+    status: str
+    stoppedAt: str
+    termination: str
+
+
+class WorkspaceHannahPhotoCandidateResponse(BaseModel):
+    id: str
+    symbolId: str
+    symbolSlug: str | None = None
+    symbolName: str | None = None
+    pageTitle: str | None = None
+    category: str | None = None
+    discipline: str | None = None
+    sourceUrl: str
+    imageUrl: str
+    sourceDomain: str
+    title: str | None = None
+    description: str | None = None
+    rightsStatus: str
+    licenseLabel: str | None = None
+    status: str
+    relevanceScore: float | None = None
+    previewUrl: str | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    firstSeenAt: str
+    lastSeenAt: str
+    lastSessionQueueItemId: str | None = None
+
+
+class WorkspaceHannahPhotoCandidateListResponse(BaseModel):
+    items: list[WorkspaceHannahPhotoCandidateResponse]
+    total: int
+    offset: int
+    limit: int
+    hasMore: bool
+
+
+class WorkspaceWhitneyDemandScanStartRequest(BaseModel):
+    durationSeconds: int = Field(default=120, ge=30, le=300)
+    focus: str | None = Field(default=None, max_length=120)
+
+
+class WorkspaceWhitneyDemandScanStartResponse(BaseModel):
+    queueItemId: str
+    status: str
+    durationSeconds: int
+    startedAt: str
+    expectedCompletedAt: str
+
+
+class WorkspaceWhitneyDemandScanStopResponse(BaseModel):
+    queueItemId: str
+    status: str
+    stoppedAt: str
+    termination: str
+
+
+class WorkspaceWhitneyDemandSignalResponse(BaseModel):
+    id: str
+    signalType: str
+    marketSegment: str | None = None
+    discipline: str | None = None
+    category: str | None = None
+    sourceType: str
+    sourceRef: str | None = None
+    symbolId: str | None = None
+    symbolSlug: str | None = None
+    symbolName: str | None = None
+    pageTitle: str | None = None
+    title: str
+    summary: str
+    demandScore: float | None = None
+    confidence: float | None = None
+    recommendedAction: str | None = None
+    status: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    firstSeenAt: str
+    lastSeenAt: str
+    lastSessionQueueItemId: str | None = None
+
+
+class WorkspaceWhitneyDemandSignalListResponse(BaseModel):
+    items: list[WorkspaceWhitneyDemandSignalResponse]
+    total: int
+    offset: int
+    limit: int
+    hasMore: bool
+
+
 class WorkspaceDaisyAssignmentProposalResponse(BaseModel):
     proposalRank: int
     reviewer: str

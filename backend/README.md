@@ -39,6 +39,7 @@ cd /data/.openclaw/workspace/symgov/backend
 alembic upgrade head
 alembic current
 python manage_symgov.py seed-agent-definitions
+python manage_symgov.py seed-scott-source-discovery
 python manage_symgov.py check-db
 python manage_symgov.py check-storage
 python manage_symgov.py check-openclaw
@@ -77,6 +78,7 @@ Current VPS deployment notes:
 - Operational reminder:
   - backend code changes under `/data/.openclaw/workspace/symgov/backend` do not affect the public API until the live `openclaw-hz0t-symgov-api-1` service is restarted or redeployed
   - if public submissions still show older intake behavior after a local code change, treat that as a deployment/runtime refresh issue first
+  - testability in the VPS/containerized deployment only begins after the frontend build has been published and the live service has been refreshed; a local code edit alone is not enough
 
 Current external submission API:
 
@@ -100,6 +102,13 @@ Current Workspace APIs:
 - versioned agent queue route: `GET /api/v1/workspace/agent-queue-items`
 - compatibility alias: `GET /api/workspace/agent-queue-items`
 - review cases and Daisy reports remain the other live Workspace dashboard inputs
+- Scott source-discovery memory is exposed through `GET /api/v1/workspace/scott/source-sites`; the route returns URL, status, title, domain, descriptive metadata, formats, evidence, relevance score, timestamps, and last queue item, with offset/limit lazy loading plus server-side text filters and sorting for each grid column
+- Hannah published-symbol curation is started through `POST /api/v1/workspace/hannah/curation-searches`; the backend creates a Hannah queue item with a two-minute default run window, writes a runtime queue JSON record, and launches the Hannah runner with DB persistence.
+- Hannah published-symbol curation can be stopped through `POST /api/v1/workspace/hannah/curation-searches/{queue_item_id}/stop`; the backend marks the queue item `cancelled`, stamps `completed_at`, records stop metadata in the queue payload, updates the runtime queue JSON, and sends `SIGTERM` to the stored process group when available.
+- Hannah photo candidates are exposed through `GET /api/v1/workspace/hannah/photo-candidates`; the route supports lazy loading plus sort/filter parameters and returns symbol context, candidate/source URLs, source domain, rights status, license, score, curation status, timestamps, and preview URLs for attached public supplemental photos.
+- Whitney market demand sensing is started through `POST /api/v1/workspace/whitney/demand-scans`; the request accepts `durationSeconds` from 30 to 300 and optional `focus` text up to 120 characters. The backend creates a Whitney `market_demand_scan` queue item with the two-minute default run window, writes a runtime queue JSON record, and launches the Whitney runner with DB persistence. If a Whitney scan is already `queued`, `running`, or `sensing`, the endpoint returns the active queue item instead of launching a duplicate.
+- Whitney market demand sensing can be stopped through `POST /api/v1/workspace/whitney/demand-scans/{queue_item_id}/stop`; the backend marks the queue item `cancelled`, stamps `completed_at`, records stop metadata in the queue payload, updates the runtime queue JSON, and sends `SIGTERM` to the stored process group when available.
+- Whitney demand signals are exposed through `GET /api/v1/workspace/whitney/demand-signals`; the route supports lazy loading plus sort/filter parameters and returns signal type, market segment, discipline, category, symbol/page context, demand score, confidence, recommendation, source, status, evidence, timestamps, and queue lineage.
 - Workspace agent-queue, review-case, and review-child responses can include `displayName`, `packageDisplayId`, and `packageSymbolSequence` for compact monitor-card naming. The visible convention is `0001` for a submitted sheet or single-symbol package and `0001-1`, `0001-2`, ... for extracted split symbols.
 - Workspace agent-queue responses can include `toolSummary` for Vlad queue items. The field is derived from the latest `agent_runs.tool_trace_json` plus queue payload hints and currently supports compact labels such as `Tess`, `Nano`, `DXF to SVG`, `Format conversion`, `Raster split`, and `Raster candidate`.
 - Rupert Workspace agent-queue responses expose `publishedSymbolId`, `publishedPageCode`, `publishedPackCode`, and `publishedStandardsPath` after the queued symbol revision has a public published page; those queue rows report `status='published'` so the Workspace can show `PUBLISHED` and link to Standards View.
@@ -115,6 +124,7 @@ Current Workspace APIs:
   - Libby -> Daisy for first review or re-review when human review is required
   - Libby -> Rupert when a single-symbol item is classified, Category/Discipline have been added where ascertainable, no upstream block remains, and Libby records that human review is not required
 - published Standards rows prefer `symbol_revisions.payload_json.name` when building the `Name` column, with legacy `canonical_name` retained only as fallback
+- published Standards symbol list/detail payloads can include `supplementalPhotos` for Hannah-attached public equipment-photo references. The public preview route is `GET /api/v1/published/symbols/{symbol_id}/supplemental-photos/{photo_id}/preview`, and Standards UI keeps these real-world photos separate from the schematic symbol preview.
 
 Planned API growth boundaries:
 
@@ -160,7 +170,13 @@ python manage_symgov.py check-storage
 
 Current runner bridge notes:
 
-- `manage_symgov.py seed-agent-definitions` upserts baseline `agent_definitions` rows for `scott`, `vlad`, and `tracy`
+- `manage_symgov.py seed-agent-definitions` upserts baseline `agent_definitions` rows for `scott`, `vlad`, `tracy`, `daisy`, `libby`, `rupert`, `ed`, `hannah`, and `whitney`
+- `manage_symgov.py seed-scott-source-discovery` upserts Scott's durable source-discovery memory rows, including approved and ignored domains such as `linecad.com`, `freecads.com`, `svghmi.pro`, and `autodesk.com`
+- Scott source-search defaults now use a 2 minute window and seed toward `commons.wikimedia.org P&ID symbols`, while ignored domains are passed into the next run payload
+- Scott source-site browsing is read-only in the current frontend, but the response model carries stable row IDs and status values so later inline status actions can be added without replacing the grid contract
+- Hannah curation uses Alembic revision `20260519_0010_hannah_curation.py` for `hannah_symbol_curation_states` and `hannah_photo_candidates`. The runner searches eligible public published symbols through Wikimedia Commons metadata, records all scored candidates, uploads only low-risk licensed image files when storage is configured, and caps attached public supplemental photos at two per symbol.
+- Hannah persistence writes `hannah_curation_report` artifacts through the runtime bridge and records audit events for metadata updates and supplemental-photo attachment.
+- Whitney market intelligence uses Alembic revision `20260522_0011_whitney_market_intelligence.py` for `whitney_market_intelligence_reports` and `whitney_demand_signals`. The runner currently reads internal Symgov telemetry only, writes `market_intelligence_reports` runtime records, and persists `whitney_market_intelligence_report` artifacts through the runtime bridge. Demand signals are upserted by `(source_type, source_ref, signal_type)` so repeated scans refresh the durable signal instead of duplicating it.
 - `manage_symgov.py check-db` reports basic connectivity plus counts for the current agent runtime tables
 - `manage_symgov.py check-storage` probes the configured MinIO endpoint and live health URL
 - `manage_symgov.py check-openclaw` audits whether local OpenClaw registration still matches the SymGov manifest

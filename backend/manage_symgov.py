@@ -23,6 +23,12 @@ def parse_args():
     seed_parser = subparsers.add_parser("seed-agent-definitions", help="Upsert baseline agent_definitions rows.")
     seed_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
 
+    scott_seed_parser = subparsers.add_parser(
+        "seed-scott-source-discovery",
+        help="Upsert Scott source discovery memory rows.",
+    )
+    scott_seed_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+
     db_parser = subparsers.add_parser("check-db", help="Run a small database health and inspection check.")
     db_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
     db_parser.add_argument(
@@ -78,6 +84,11 @@ def main():
     if args.command == "seed-agent-definitions":
         bridge = RuntimePersistenceBridge(env_file=args.db_env_file)
         print(json.dumps({"operations": bridge.seed_agent_definitions()}, indent=2))
+        return
+
+    if args.command == "seed-scott-source-discovery":
+        bridge = RuntimePersistenceBridge(env_file=args.db_env_file)
+        print(json.dumps({"operations": bridge.seed_scott_source_discovery_sites()}, indent=2))
         return
 
     if args.command == "check-db":

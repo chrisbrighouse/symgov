@@ -22,7 +22,7 @@ Current architecture/design references:
 The current frontend is a Vite + React static SPA build with four primary working surfaces:
 
 - `Submissions` gathers external source symbols and sends them into the live intake path.
-- `Workspace` is the admin/operator processing view for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed activity.
+- `Workspace` is the admin/operator processing view for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, Hannah, Whitney, and Ed activity.
 - `Reviews` is the SME-facing review interface for Daisy-coordinated review cases.
 - `Standards View` uses a published-only browse/grid/detail surface, with focused routes for full symbol pages, guided lookup, clarifications, and downloads.
 
@@ -37,10 +37,13 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 
 - a glass-morphism app shell with a full-width light top banner, simple engineering-symbol logo mark, and version/date stamping
 - primary banner navigation for `Submissions`, `Reviews`, and `Standards`, with the cog icon linking to the internal Workspace view
-- an admin Workspace processing dashboard headed `ADMIN WORKSPACE` / `Activity Monitors`, with eight equal-height compact vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed; live queue/review cards use a `HH:MM DDMMMYY` top label rendered in the `Europe/London` timezone so GMT/BST changes are automatic, the second visible card line uses a short package display name, Vlad cards can show a compact `Process` line for tools used, Rupert cards can link to the published Standards record after durable publication succeeds, and status sits on its own line under the activity string
+- an admin Workspace with a persistent `ADMIN WORKSPACE` bar containing the `Agents`, `Sources`, `Curation`, and `Intelligence` tabs. `Agents` shows an `Activity Monitors` header with chevron navigation, queue search, and refresh status controls, followed by seven equal-width compact vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, and Rupert; the second monitor screen keeps the same lane width for Hannah, Whitney, and Ed with blank space to the right. Live queue/review cards use a `HH:MM DDMMMYY` top label rendered in the `Europe/London` timezone so GMT/BST changes are automatic, the second visible card line uses a short package display name, Vlad cards can show a compact `Process` line for tools used, Rupert cards can link to the published Standards record after durable publication succeeds, and status sits on its own line under the activity string
 - an SME Reviews workbench headed `Daisy-coordinated Reviews`, with queue navigation, visual source evidence, reviewer-editable symbol properties, classification/source context, visible case actions, comments, latest decision state, Daisy coordination, and per-child review actions
 - a Standards home with left-side facets, a central approved-symbol grid, and an in-grid right detail panel for the selected row; published tables use `ID` for symbol identifiers and the `Name` column uses the published payload name when present
 - a live submission route that probes the backend and submits through the current public Symgov API, showing `Submission accepted` on successful submit instead of rendering the raw backend JSON
+- an admin-only Workspace `Sources` tab with a `Sources` content header and a permanently visible source-memory grid showing URL first, status/title prominent on the left, sortable columns, simple per-column text filters, infinite scroll, and an internal horizontal scrollbar so wide source metadata never pushes the Workspace tabs off-screen
+- an admin-only Workspace `Curation` tab for Hannah with a two-minute published-symbol photo search, countdown, Stop control, and scored photo-candidate table. Hannah searches one eligible published symbol at a time, records candidate source evidence, attaches at most two low-risk supplemental photos per symbol, and exposes accepted photos immediately on Standards records.
+- an admin-only Workspace `Intelligence` tab for Whitney with a two-minute internal demand-sensing scan, countdown, Stop control, optional focus input, and scored demand-signal table. Whitney reads Symgov telemetry only in this slice and produces operator prioritization recommendations without mutating published Standards.
 - route-safe SPA navigation using hash routes so static hosting remains simple
 - accessible detail and compare SVG rendering for non-decorative symbol views
 - explicit published page and pack context in the seeded UI data
@@ -55,6 +58,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - Workspace queue panels now stretch evenly to the bottom of the visible monitor area. The summary counters above the lanes and duplicate footer counts inside lanes have been removed, while the live refresh/status text has moved to a full-width single-line row above the lanes. The Scott lane shows completed items by default.
 - Vlad Workspace cards can show a `Process` line above the status indicator, sourced from backend `toolSummary` values derived from Vlad run traces and payload hints. Current labels include `Tess`, `Nano`, `DXF to SVG`, `Format conversion`, `Raster split`, and `Raster candidate`; the list is intentionally extensible as Vlad's processing-tool repertoire grows.
 - Rupert Workspace cards show `PUBLISHED` only after the queued symbol revision has a public published page. Those cards expose the Standards page target on the card and navigate to Standards View using the published symbol slug; Standards View accepts the linked `symbol` query parameter and opens the matching record.
+- The Workspace `Sources` tab reads `GET /api/v1/workspace/scott/source-sites`, supports server-side sorting/filtering, and loads additional rows on scroll instead of showing paging controls. The source table is intentionally wider than the visible pane, but it must remain contained inside the Sources grid shell with horizontal overflow handled by the table frame rather than the page.
 - Full filenames, proposed symbol names, queue IDs, and longer review details remain available to search/detail/tooltips rather than being used as the compact card title.
 - The Workspace monitor retains seeded `processingActivity` fallback when no API root is configured or the live queue endpoint is unavailable.
 - The Standards submission route now calls the live Symgov backend instead of using demo-only local submission behavior
@@ -86,6 +90,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - Production assets are emitted into `dist/` with `npm run build`.
 - Use `npm run build:publish` to build and sync the current `dist/` output into the published workspace root.
 - Until that build output is intentionally published on the VPS, the public site may still reflect an older bundle than the local workspace source.
+- Do not treat a local workspace change as testable until it has been published into the VPS-hosted static root and the live service has been refreshed.
 - Because this workspace lives under `/data/.openclaw/workspace/symgov`, it is publishable directly through the existing `applications-web` nginx mount and should appear under `/apps/workspace/symgov/`.
 - The main app entry is:
   - `https://apps.chrisbrighouse.com/apps/workspace/symgov/`
@@ -141,6 +146,26 @@ The product docs now also include the first agentization slice for Symgov:
 - Ed writes local UX feedback artifacts under `/data/.openclaw/workspaces/ed/runtime`
 - Ed can summarize provided feedback or collect recent messages from the existing SymGov Ops Telegram group when invoked
 - Ed remains non-authoritative and does not approve, classify, publish, or change governance records
+
+`Hannah` now also exists as the Symgov catalogue quality and long-term curation scaffold:
+
+- Hannah owns the catalogue-curation scope for published Standards records
+- Hannah is registered through the SymGov-owned OpenClaw manifest and backend agent seed list
+- Hannah writes local curation reports under `/data/.openclaw/workspaces/hannah/runtime`
+- Hannah works only on public published Standards symbols that have reasonable Name, Title, Category, and Discipline values
+- Hannah records scored external photo candidates, attaches only low-risk supplemental photos, and keeps the public schematic preview distinct from real-world equipment photos
+- Hannah searches can be stopped from the Workspace Curation tab; the stop path marks the active queue item `cancelled`, records stop metadata, updates the runtime queue JSON, and terminates the detached runner process group when available
+
+`Whitney` now also exists as the Symgov market intelligence and demand sensing scaffold:
+
+- Whitney owns internal demand sensing for market intelligence, catalogue demand, and operator prioritization
+- Whitney is registered through the SymGov-owned OpenClaw manifest and backend agent seed list
+- Whitney writes local queue records, run logs, run records, output artifacts, and market intelligence reports under `/data/.openclaw/workspaces/whitney/runtime`
+- Whitney's first slice uses internal telemetry only: published Standards coverage, clarification volume, intake patterns, and open review pressure
+- Whitney records durable demand signals and market intelligence reports through `whitney_demand_signals` and `whitney_market_intelligence_reports`
+- Whitney demand scans use `market_demand_scan` queue items, start in `sensing`, complete as `signals_recorded`, and can be cancelled from the Workspace Intelligence tab
+- Whitney scan requests accept a 30-300 second run window plus an optional focus string; the current frontend uses the two-minute default
+- Whitney does not publish, classify, approve, validate, or mutate public Standards content directly
 
 Current intake/validation baseline:
 
@@ -307,7 +332,7 @@ This repository is now referred to as **symgov** (symbol governance). See the ar
 - `.env.backend.storage` — current VPS object-storage snippet for the local MinIO deployment on `ai-stack`.
 - `backend/` — current backend scaffold containing SQLAlchemy models, Alembic config, and the first live migration set.
 - `backend/manage_symgov.py` — current backend bootstrap and inspection entrypoint for agent-definition seeding, DB/storage health checks, and the FastAPI server.
-- `openclaw-agents.manifest.json` — current SymGov-owned OpenClaw registration manifest for `Scott`, `Tracy`, `Vlad`, `Daisy`, `Libby`, `Rupert`, and `Ed`; its `bindings` array is intentionally empty so Alfi/main remains the Telegram orchestrator.
+- `openclaw-agents.manifest.json` — current SymGov-owned OpenClaw registration manifest for `Scott`, `Tracy`, `Vlad`, `Daisy`, `Libby`, `Rupert`, `Ed`, `Hannah`, and `Whitney`; its managed bindings stay explicit so Alfi/main remains the default Telegram orchestrator unless a worker route is intentionally added.
 
 ## Current VPS backend support
 

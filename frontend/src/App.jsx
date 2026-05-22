@@ -1,6 +1,9 @@
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  fetchScottSourceSites,
+  fetchHannahPhotoCandidates,
+  fetchWhitneyDemandSignals,
   fetchHealth,
   fetchPublishedSymbols,
   fetchWorkspaceDaisyReports,
@@ -8,6 +11,12 @@ import {
   fetchWorkspaceReviewCases,
   fetchWorkspaceReviewSymbolPropertyOptions,
   processWorkspaceSplitReviewDecisions,
+  startHannahCurationSearch,
+  startScottSourceSearch,
+  startWhitneyDemandScan,
+  stopHannahCurationSearch,
+  stopScottSourceSearch,
+  stopWhitneyDemandScan,
   submitWorkspaceReviewDecision,
   submitExternalSubmission,
   updateWorkspaceReviewSymbolProperties
@@ -92,11 +101,81 @@ const WORKSPACE_QUEUE_COLUMNS = [
     subtitle: 'UX feedback',
     agentId: 'ed',
     tone: 'feedback'
+  },
+  {
+    id: 'curation',
+    title: 'Hannah',
+    subtitle: 'Curation',
+    agentId: 'hannah',
+    tone: 'curation'
+  },
+  {
+    id: 'market_intelligence',
+    title: 'Whitney',
+    subtitle: 'Demand',
+    agentId: 'whitney',
+    tone: 'intelligence'
   }
 ];
 
 const WORKSPACE_REFRESH_INTERVAL_MS = 5000;
 const DEFAULT_HIDDEN_WORKSPACE_STATUSES = new Set(['completed']);
+const SCOTT_SOURCE_SITE_PAGE_SIZE = 50;
+const SCOTT_SOURCE_SEARCH_DURATION_SECONDS = 120;
+const HANNAH_CANDIDATE_PAGE_SIZE = 50;
+const HANNAH_CURATION_SEARCH_DURATION_SECONDS = 120;
+const WHITNEY_SIGNAL_PAGE_SIZE = 50;
+const WHITNEY_DEMAND_SCAN_DURATION_SECONDS = 120;
+const SCOTT_SOURCE_COLUMNS = [
+  ['url', 'URL'],
+  ['status', 'Status'],
+  ['relevanceScore', 'Score'],
+  ['title', 'Title'],
+  ['domain', 'Domain'],
+  ['description', 'Description'],
+  ['industry', 'Industry'],
+  ['process', 'Process'],
+  ['organizationType', 'Organization'],
+  ['symbolFormats', 'Formats'],
+  ['evidence', 'Evidence'],
+  ['firstSeenAt', 'First seen'],
+  ['lastSeenAt', 'Last seen'],
+  ['lastSessionQueueItemId', 'Last queue item']
+];
+const HANNAH_CANDIDATE_COLUMNS = [
+  ['symbolName', 'Symbol'],
+  ['status', 'Status'],
+  ['relevanceScore', 'Score'],
+  ['rightsStatus', 'Rights'],
+  ['licenseLabel', 'License'],
+  ['sourceDomain', 'Domain'],
+  ['title', 'Title'],
+  ['sourceUrl', 'Source URL'],
+  ['imageUrl', 'Image URL'],
+  ['category', 'Category'],
+  ['discipline', 'Discipline'],
+  ['lastSeenAt', 'Last seen'],
+  ['lastSessionQueueItemId', 'Last queue item']
+];
+const WHITNEY_SIGNAL_COLUMNS = [
+  ['signalType', 'Signal'],
+  ['marketSegment', 'Segment'],
+  ['title', 'Title'],
+  ['demandScore', 'Demand'],
+  ['confidence', 'Confidence'],
+  ['recommendedAction', 'Recommended action'],
+  ['status', 'Status'],
+  ['discipline', 'Discipline'],
+  ['category', 'Category'],
+  ['sourceType', 'Source'],
+  ['lastSeenAt', 'Last seen'],
+  ['lastSessionQueueItemId', 'Last queue item']
+];
+const WORKSPACE_MONITOR_SCREENS = {
+  pipeline: ['intake', 'validation', 'provenance', 'classification', 'review_coordination', 'human_review', 'publication'],
+  intelligence: ['curation', 'market_intelligence', 'ux_feedback']
+};
+const WORKSPACE_MONITOR_SCREEN_SEQUENCE = ['pipeline', 'intelligence'];
 
 function App() {
   const location = useLocation();
@@ -140,7 +219,7 @@ function Header() {
         <NavLink to="/reviews" className={({ isActive }) => navClass(isActive)}>
           Reviews
         </NavLink>
-        <NavLink to="/standards" className={({ isActive }) => navClass(isActive)}>
+        <NavLink to="/standards" end className={({ isActive }) => navClass(isActive)}>
           Standards
         </NavLink>
         <NavLink to="/support" className={({ isActive }) => navClass(isActive)}>
@@ -485,6 +564,7 @@ function StandardsPage() {
             <div className="symbol-stage">
               <PublishedSymbolPreview symbol={activeSymbol} large />
             </div>
+            <SupplementalPhotoStrip photos={activeSymbol.supplementalPhotos || []} />
             <div className="fact-grid detail-list">
               <Fact label="Status" value={activeSymbol.status || 'Published'} />
               <Fact label="Revision" value={activeSymbol.revision} />
@@ -611,6 +691,8 @@ function getSymbolFacetValues(symbol, key) {
 
 function WorkspacePage() {
   const navigate = useNavigate();
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState('agents');
+  const [activeMonitorScreen, setActiveMonitorScreen] = useState('pipeline');
   const [query, setQuery] = useState('');
   const [columnStatusFilters, setColumnStatusFilters] = useState({});
   const [reviewState, setReviewState] = useState({
@@ -631,7 +713,81 @@ function WorkspacePage() {
     message: appConfig.apiRoot ? 'Loading live queue items...' : 'No API root configured. Showing seeded queue activity.',
     items: appConfig.apiRoot ? [] : processingActivity
   });
+  const [stoppedSourceSearches, setStoppedSourceSearches] = useState({});
   const [lastWorkspaceRefresh, setLastWorkspaceRefresh] = useState(null);
+  const {
+    searchState,
+    sourcesSort,
+    sourceFilters,
+    sourcesState,
+    handleStartScottSearch,
+    handleStopScottSearch,
+    handleSourceSort,
+    updateSourceFilter,
+    handleScottSourcesScroll
+  } = useScottSourceDiscoveryControls({
+    enabled: Boolean(appConfig.apiRoot),
+    sourcesActive: activeWorkspaceTab === 'sources',
+    onSearchStarted: (queueItemId) => {
+      setStoppedSourceSearches((current) => {
+        if (!queueItemId || !current[queueItemId]) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[queueItemId];
+        return next;
+      });
+    },
+    onSearchStopped: ({ queueItemId, remainingSeconds }) => {
+      if (!queueItemId || queueItemId === 'starting') {
+        return;
+      }
+      setStoppedSourceSearches((current) => ({
+        ...current,
+        [queueItemId]: {
+          remainingSeconds,
+          label: `STOPPED ${formatCountdown(remainingSeconds)}`
+        }
+      }));
+    }
+  });
+  const searchIsRunning = Boolean(searchState.result && searchState.remainingSeconds > 0 && searchState.result.status === 'searching');
+  const searchDisabled = searchState.pending || searchIsRunning || searchState.stopping || !appConfig.apiRoot;
+  const searchStatusText = scottSearchStatusText(searchState);
+  const {
+    curationState,
+    candidatesSort,
+    candidateFilters,
+    candidatesState,
+    handleStartHannahCuration,
+    handleStopHannahCuration,
+    handleCandidateSort,
+    updateCandidateFilter,
+    handleHannahCandidatesScroll
+  } = useHannahCurationControls({
+    enabled: Boolean(appConfig.apiRoot),
+    curationActive: activeWorkspaceTab === 'curation'
+  });
+  const curationIsRunning = Boolean(curationState.result && curationState.remainingSeconds > 0 && curationState.result.status === 'searching');
+  const curationDisabled = curationState.pending || curationIsRunning || curationState.stopping || !appConfig.apiRoot;
+  const curationStatusText = hannahCurationStatusText(curationState);
+  const {
+    scanState,
+    signalsSort,
+    signalFilters,
+    signalsState,
+    handleStartWhitneyDemandScan,
+    handleStopWhitneyDemandScan,
+    handleSignalSort,
+    updateSignalFilter,
+    handleWhitneySignalsScroll
+  } = useWhitneyDemandSensingControls({
+    enabled: Boolean(appConfig.apiRoot),
+    intelligenceActive: activeWorkspaceTab === 'intelligence'
+  });
+  const scanIsRunning = Boolean(scanState.result && scanState.remainingSeconds > 0 && scanState.result.status === 'sensing');
+  const scanDisabled = scanState.pending || scanIsRunning || scanState.stopping || !appConfig.apiRoot;
+  const scanStatusText = whitneyDemandScanStatusText(scanState);
 
   useEffect(() => {
     let cancelled = false;
@@ -770,13 +926,19 @@ function WorkspacePage() {
   ]);
 
   const monitorItems = useMemo(
-    () => buildWorkspaceMonitorItems(queueState.items, queueState.mode, reviewState.items, daisyState.items),
-    [queueState.items, queueState.mode, reviewState.items, daisyState.items]
+    () => buildWorkspaceMonitorItems(queueState.items, queueState.mode, reviewState.items, daisyState.items, stoppedSourceSearches),
+    [queueState.items, queueState.mode, reviewState.items, daisyState.items, stoppedSourceSearches]
   );
+  const monitorScreenColumns = useMemo(() => {
+    const columnById = new Map(monitorItems.map((column) => [column.id, column]));
+    return (WORKSPACE_MONITOR_SCREENS[activeMonitorScreen] || WORKSPACE_MONITOR_SCREENS.pipeline)
+      .map((columnId) => columnById.get(columnId))
+      .filter(Boolean);
+  }, [activeMonitorScreen, monitorItems]);
   const statusOptionsByColumn = useMemo(() => buildWorkspaceStatusOptions(monitorItems), [monitorItems]);
   const filteredColumns = useMemo(
-    () => filterWorkspaceMonitorColumns(monitorItems, query, columnStatusFilters),
-    [monitorItems, query, columnStatusFilters]
+    () => filterWorkspaceMonitorColumns(monitorScreenColumns, query, columnStatusFilters),
+    [monitorScreenColumns, query, columnStatusFilters]
   );
   const handleColumnStatusToggle = (columnId, statusKey) => {
     setColumnStatusFilters((current) => {
@@ -806,47 +968,244 @@ function WorkspacePage() {
 
     navigate(standardsPath);
   };
+  const goToNextMonitorScreen = () => {
+    const currentIndex = WORKSPACE_MONITOR_SCREEN_SEQUENCE.indexOf(activeMonitorScreen);
+    const nextIndex = currentIndex < WORKSPACE_MONITOR_SCREEN_SEQUENCE.length - 1 ? currentIndex + 1 : 0;
+    setActiveMonitorScreen(WORKSPACE_MONITOR_SCREEN_SEQUENCE[nextIndex]);
+  };
+  const goToPreviousMonitorScreen = () => {
+    const currentIndex = WORKSPACE_MONITOR_SCREEN_SEQUENCE.indexOf(activeMonitorScreen);
+    const previousIndex = currentIndex > 0 ? currentIndex - 1 : WORKSPACE_MONITOR_SCREEN_SEQUENCE.length - 1;
+    setActiveMonitorScreen(WORKSPACE_MONITOR_SCREEN_SEQUENCE[previousIndex]);
+  };
+  const onFirstMonitorScreen = activeMonitorScreen === WORKSPACE_MONITOR_SCREEN_SEQUENCE[0];
   return (
     <section className="experience-shell queue-monitor-shell">
       <div className="workspace-titlebar glass-panel">
         <div>
           <p className="eyebrow">ADMIN WORKSPACE</p>
-          <h2>Activity Monitors</h2>
+          <h2>Admin Workspace</h2>
         </div>
         <div className="workspace-titlebar-tools">
-          <label className="field monitor-search-field" aria-label="Search workspace activity">
-            <input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search for a Batch, Status, Case"
-            />
-          </label>
+          <div className="workspace-tab-list" role="tablist" aria-label="Workspace view">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeWorkspaceTab === 'agents'}
+              className={`workspace-tab ${activeWorkspaceTab === 'agents' ? 'active' : ''}`}
+              onClick={() => setActiveWorkspaceTab('agents')}
+            >
+              Agents
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeWorkspaceTab === 'sources'}
+              className={`workspace-tab ${activeWorkspaceTab === 'sources' ? 'active' : ''}`}
+              onClick={() => setActiveWorkspaceTab('sources')}
+            >
+              Sources
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeWorkspaceTab === 'curation'}
+              className={`workspace-tab ${activeWorkspaceTab === 'curation' ? 'active' : ''}`}
+              onClick={() => setActiveWorkspaceTab('curation')}
+            >
+              Curation
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeWorkspaceTab === 'intelligence'}
+              className={`workspace-tab ${activeWorkspaceTab === 'intelligence' ? 'active' : ''}`}
+              onClick={() => setActiveWorkspaceTab('intelligence')}
+            >
+              Intelligence
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className={`workspace-monitor-status-row health-chip health-${reviewState.mode}`} aria-live="polite">
-        <span>{refreshSummary}</span>
-      </div>
+      {activeWorkspaceTab === 'agents' ? (
+        <>
+          <div className="workspace-content-titlebar glass-panel">
+            <div>
+              <p className="eyebrow">Agents</p>
+              <div className="workspace-content-heading-row">
+                {!onFirstMonitorScreen ? (
+                  <button
+                    type="button"
+                    className="monitor-screen-chevron"
+                    aria-label="Show previous queue screen"
+                    onClick={goToPreviousMonitorScreen}
+                  >
+                    {'<'}
+                  </button>
+                ) : null}
+                <h2>Activity Monitors</h2>
+                {onFirstMonitorScreen ? (
+                  <button
+                    type="button"
+                    className="monitor-screen-chevron"
+                    aria-label="Show next queue screen"
+                    onClick={goToNextMonitorScreen}
+                  >
+                    {'>'}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div className="workspace-content-tools">
+              <label className="field monitor-search-field" aria-label="Search workspace activity">
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search for a Batch, Status, Case"
+                />
+              </label>
+              <div className={`workspace-monitor-status-row health-chip health-${reviewState.mode}`} aria-live="polite">
+                <span>{refreshSummary}</span>
+              </div>
+            </div>
+          </div>
 
-      <div className="queue-monitor-board">
-        {filteredColumns.map((column) => (
-          <WorkspaceQueueColumn
-            key={column.id}
-            column={column}
-            statusOptions={statusOptionsByColumn[column.id] || []}
-            statusFilter={columnStatusFilters[column.id] || {}}
-            onStatusToggle={handleColumnStatusToggle}
-            onReviewOpen={openReviewFromWorkspace}
-            onPublishedOpen={openPublishedFromWorkspace}
+          <div className="queue-monitor-board" role="tabpanel" aria-label="Agent queues">
+            {filteredColumns.map((column) => (
+              <WorkspaceQueueColumn
+                key={column.id}
+                column={column}
+                statusOptions={statusOptionsByColumn[column.id] || []}
+                statusFilter={columnStatusFilters[column.id] || {}}
+                onStatusToggle={handleColumnStatusToggle}
+                onReviewOpen={openReviewFromWorkspace}
+                onPublishedOpen={openPublishedFromWorkspace}
+              />
+            ))}
+          </div>
+        </>
+      ) : activeWorkspaceTab === 'sources' ? (
+        <div className="workspace-sources-tab" role="tabpanel" aria-label="Scott sources">
+          <div className="workspace-content-titlebar glass-panel">
+            <div>
+              <p className="eyebrow">Scott memory</p>
+              <h2>Sources</h2>
+            </div>
+            <div className="workspace-content-tools">
+              {searchStatusText ? <span className="search-inline-status">{searchStatusText}</span> : null}
+              <button type="button" className="action-button primary compact" disabled={searchDisabled} onClick={handleStartScottSearch}>
+                {searchState.pending ? 'Searching...' : 'Start search'}
+              </button>
+              {searchIsRunning ? (
+                <button
+                  type="button"
+                  className="action-button danger solid compact"
+                  disabled={searchState.stopping}
+                  onClick={handleStopScottSearch}
+                >
+                  {searchState.stopping ? 'Stopping...' : 'Stop'}
+                </button>
+              ) : null}
+              <span className="search-countdown">
+                {formatScottSearchTimer(searchState)}
+              </span>
+            </div>
+          </div>
+          {searchState.error ? <p className="error-text">{searchState.error}</p> : null}
+
+          <ScottSourcesPanel
+            state={sourcesState}
+            sort={sourcesSort}
+            filters={sourceFilters}
+            onSort={handleSourceSort}
+            onFilterChange={updateSourceFilter}
+            onScroll={handleScottSourcesScroll}
           />
-        ))}
-      </div>
+        </div>
+      ) : activeWorkspaceTab === 'curation' ? (
+        <div className="workspace-sources-tab" role="tabpanel" aria-label="Hannah curation">
+          <div className="workspace-content-titlebar glass-panel">
+            <div>
+              <p className="eyebrow">Hannah curation</p>
+              <h2>Curation</h2>
+            </div>
+            <div className="workspace-content-tools">
+              {curationStatusText ? <span className="search-inline-status">{curationStatusText}</span> : null}
+              <button type="button" className="action-button primary compact" disabled={curationDisabled} onClick={handleStartHannahCuration}>
+                {curationState.pending ? 'Searching...' : 'Start search'}
+              </button>
+              {curationIsRunning ? (
+                <button
+                  type="button"
+                  className="action-button danger solid compact"
+                  disabled={curationState.stopping}
+                  onClick={handleStopHannahCuration}
+                >
+                  {curationState.stopping ? 'Stopping...' : 'Stop'}
+                </button>
+              ) : null}
+              <span className="search-countdown">
+                {formatHannahCurationTimer(curationState)}
+              </span>
+            </div>
+          </div>
+          {curationState.error ? <p className="error-text">{curationState.error}</p> : null}
+
+          <HannahCurationPanel
+            state={candidatesState}
+            sort={candidatesSort}
+            filters={candidateFilters}
+            onSort={handleCandidateSort}
+            onFilterChange={updateCandidateFilter}
+            onScroll={handleHannahCandidatesScroll}
+          />
+        </div>
+      ) : (
+        <div className="workspace-sources-tab" role="tabpanel" aria-label="Whitney market intelligence">
+          <div className="workspace-content-titlebar glass-panel">
+            <div>
+              <p className="eyebrow">Whitney intelligence</p>
+              <h2>Demand Sensing</h2>
+            </div>
+            <div className="workspace-content-tools">
+              {scanStatusText ? <span className="search-inline-status">{scanStatusText}</span> : null}
+              <button type="button" className="action-button primary compact" disabled={scanDisabled} onClick={handleStartWhitneyDemandScan}>
+                {scanState.pending ? 'Sensing...' : 'Start scan'}
+              </button>
+              {scanIsRunning ? (
+                <button
+                  type="button"
+                  className="action-button danger solid compact"
+                  disabled={scanState.stopping}
+                  onClick={handleStopWhitneyDemandScan}
+                >
+                  {scanState.stopping ? 'Stopping...' : 'Stop'}
+                </button>
+              ) : null}
+              <span className="search-countdown">
+                {formatWhitneyDemandScanTimer(scanState)}
+              </span>
+            </div>
+          </div>
+          {scanState.error ? <p className="error-text">{scanState.error}</p> : null}
+
+          <WhitneyDemandSignalsPanel
+            state={signalsState}
+            sort={signalsSort}
+            filters={signalFilters}
+            onSort={handleSignalSort}
+            onFilterChange={updateSignalFilter}
+            onScroll={handleWhitneySignalsScroll}
+          />
+        </div>
+      )}
     </section>
   );
 }
 
-function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyItems) {
+function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyItems, stoppedSourceSearches = {}) {
   const columns = WORKSPACE_QUEUE_COLUMNS.map((column) => ({ ...column, items: [] }));
   const byId = Object.fromEntries(columns.map((column) => [column.id, column]));
 
@@ -860,12 +1219,14 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
         return;
       }
 
+      const stoppedSearch = stoppedSourceSearches[queueItem.id];
       column.items.push({
         id: queueItem.id,
         label: resolveQueueItemLabel(queueItem),
         title: compactTitle(queueItem.displayName || resolveQueueItemDisplayTitle(queueItem)),
         meta: queueItem.payload?.stage || queueItem.sourceType || queueItem.queueFamily,
-        status: queueItem.status,
+        status: stoppedSearch ? 'stopped' : queueItem.status,
+        statusLabel: stoppedSearch?.label,
         priority: queueItem.priority,
         publishedSymbolId: queueItem.publishedSymbolId,
         publishedPageCode: queueItem.publishedPageCode,
@@ -880,6 +1241,7 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
           queueItem.sourceType,
           queueItem.sourceId,
           queueItem.status,
+          stoppedSearch?.label,
           queueItem.priority,
           queueItem.publishedSymbolId,
           queueItem.publishedPageCode,
@@ -1258,7 +1620,7 @@ function WorkspaceMonitorCard({ item, onOpen }) {
   const status = String(item.status || 'pending').toLowerCase().replaceAll('_', '-');
   const isClickable = typeof onOpen === 'function' && (Boolean(item.reviewCaseId) || Boolean(item.publishedSymbolId) || Boolean(item.publishedStandardsPath));
   const CardElement = isClickable ? 'button' : 'article';
-  const statusLabel = getWorkspaceStatusKey(item.status) === 'published' ? 'PUBLISHED' : String(item.status || 'pending').replaceAll('_', ' ');
+  const statusLabel = item.statusLabel || (getWorkspaceStatusKey(item.status) === 'published' ? 'PUBLISHED' : String(item.status || 'pending').replaceAll('_', ' '));
 
   return (
     <CardElement
@@ -1350,6 +1712,31 @@ function PublishedSymbolPreview({ symbol, large = false }) {
   }
 
   return <SymbolGlyph symbolId={symbol?.id || symbol?.symbolId || 'SYMBOL'} large={large} />;
+}
+
+function SupplementalPhotoStrip({ photos }) {
+  if (!Array.isArray(photos) || photos.length === 0) {
+    return null;
+  }
+
+  return (
+    <section className="supplemental-photo-strip" aria-label="Real equipment photos">
+      <div className="supplemental-photo-grid">
+        {photos.slice(0, 2).map((photo) => (
+          <a
+            key={photo.id}
+            className="supplemental-photo-card"
+            href={photo.sourceUrl || photo.previewUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <img src={resolveWorkspaceAssetUrl(photo.previewUrl)} alt={photo.title || 'Supplemental equipment reference'} />
+            <span>{photo.title || photo.sourceDomain || 'Equipment photo'}</span>
+          </a>
+        ))}
+      </div>
+    </section>
+  );
 }
 
 function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, onSaveProperties, propertyOptions, workspaceMode }) {
@@ -2517,6 +2904,658 @@ function fileFormatLabel(file) {
   return extension || file.type || 'Unknown';
 }
 
+function formatCountdown(seconds) {
+  const safeSeconds = Math.max(0, Math.ceil(seconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const remainder = safeSeconds % 60;
+  return `${minutes}:${String(remainder).padStart(2, '0')}`;
+}
+
+function formatScottSearchTimer(searchState) {
+  if (!searchState.result) {
+    return formatCountdown(SCOTT_SOURCE_SEARCH_DURATION_SECONDS);
+  }
+  if (searchState.remainingSeconds > 0) {
+    return formatCountdown(searchState.remainingSeconds);
+  }
+  return 'Progress Saved';
+}
+
+function scottSearchStatusText(searchState) {
+  if (!searchState.result) {
+    return '';
+  }
+  if (searchState.result.queueItemId === 'starting') {
+    return searchState.stopping ? 'Stopping Scott source search.' : 'Starting Scott source search.';
+  }
+
+  const statusLabel =
+    searchState.result.status === 'cancelled'
+      ? 'Stopped'
+      : searchState.result.status === 'stop_requested'
+        ? 'Stop Requested'
+      : searchState.remainingSeconds > 0
+        ? 'Searching'
+        : 'Progress Saved';
+  return `Scott queue item ${searchState.result.queueItemId} is ${statusLabel}.`;
+}
+
+function formatHannahCurationTimer(curationState) {
+  if (!curationState.result) {
+    return formatCountdown(HANNAH_CURATION_SEARCH_DURATION_SECONDS);
+  }
+  if (curationState.remainingSeconds > 0) {
+    return formatCountdown(curationState.remainingSeconds);
+  }
+  return 'Progress Saved';
+}
+
+function hannahCurationStatusText(curationState) {
+  if (!curationState.result) {
+    return '';
+  }
+  if (curationState.result.queueItemId === 'starting') {
+    return 'Starting Hannah curation search.';
+  }
+  const statusLabel = curationState.remainingSeconds > 0 ? 'Searching' : 'Progress Saved';
+  return `Hannah queue item ${curationState.result.queueItemId} is ${statusLabel}.`;
+}
+
+function formatWhitneyDemandScanTimer(scanState) {
+  if (!scanState.result) {
+    return formatCountdown(WHITNEY_DEMAND_SCAN_DURATION_SECONDS);
+  }
+  if (scanState.remainingSeconds > 0) {
+    return formatCountdown(scanState.remainingSeconds);
+  }
+  return 'Signals Saved';
+}
+
+function whitneyDemandScanStatusText(scanState) {
+  if (!scanState.result) {
+    return '';
+  }
+  if (scanState.result.queueItemId === 'starting') {
+    return 'Starting Whitney demand scan.';
+  }
+  const statusLabel = scanState.remainingSeconds > 0 ? 'Sensing' : 'Signals Saved';
+  return `Whitney queue item ${scanState.result.queueItemId} is ${statusLabel}.`;
+}
+
+function useWhitneyDemandSensingControls({ enabled = true, intelligenceActive = false } = {}) {
+  const stopRequestedRef = useRef(false);
+  const [scanState, setScanState] = useState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
+  const [signalsSort, setSignalsSort] = useState({ key: 'lastSeenAt', direction: 'desc' });
+  const [signalFilters, setSignalFilters] = useState({});
+  const [signalsState, setSignalsState] = useState({
+    loading: false,
+    loadingMore: false,
+    error: '',
+    items: [],
+    total: 0,
+    hasMore: false
+  });
+
+  useEffect(() => {
+    if (!scanState.result?.expectedCompletedAt) {
+      return undefined;
+    }
+
+    const updateRemaining = () => {
+      const target = new Date(scanState.result.expectedCompletedAt).getTime();
+      const remainingSeconds = Number.isFinite(target) ? Math.max(0, Math.ceil((target - Date.now()) / 1000)) : 0;
+      setScanState((current) => ({
+        ...current,
+        pending: remainingSeconds > 0 && current.result?.status === 'sensing' && !current.stopping,
+        remainingSeconds
+      }));
+    };
+
+    updateRemaining();
+    const timer = window.setInterval(updateRemaining, 1000);
+    return () => window.clearInterval(timer);
+  }, [scanState.result]);
+
+  useEffect(() => {
+    if (!enabled || !intelligenceActive) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    setSignalsState((current) => ({ ...current, loading: true, loadingMore: false, error: '' }));
+
+    fetchWhitneyDemandSignals({
+      offset: 0,
+      limit: WHITNEY_SIGNAL_PAGE_SIZE,
+      sort: signalsSort.key,
+      direction: signalsSort.direction,
+      filters: signalFilters
+    }).then((payload) => {
+      if (cancelled) {
+        return;
+      }
+
+      setSignalsState({
+        loading: false,
+        loadingMore: false,
+        error: payload.ok ? '' : payload.message,
+        items: payload.ok ? payload.items : [],
+        total: payload.ok ? payload.total : 0,
+        hasMore: payload.ok ? payload.hasMore : false
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, intelligenceActive, signalsSort.key, signalsSort.direction, signalFilters]);
+
+  function updateSignalFilter(key, value) {
+    setSignalFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function handleSignalSort(key) {
+    setSignalsSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  }
+
+  function loadMoreWhitneySignals() {
+    if (!enabled || !intelligenceActive || signalsState.loading || signalsState.loadingMore || !signalsState.hasMore) {
+      return;
+    }
+
+    const offset = signalsState.items.length;
+    setSignalsState((current) => ({ ...current, loadingMore: true, error: '' }));
+
+    fetchWhitneyDemandSignals({
+      offset,
+      limit: WHITNEY_SIGNAL_PAGE_SIZE,
+      sort: signalsSort.key,
+      direction: signalsSort.direction,
+      filters: signalFilters
+    }).then((payload) => {
+      setSignalsState((current) => ({
+        loading: false,
+        loadingMore: false,
+        error: payload.ok ? '' : payload.message,
+        items: payload.ok ? [...current.items, ...payload.items] : current.items,
+        total: payload.ok ? payload.total : current.total,
+        hasMore: payload.ok ? payload.hasMore : current.hasMore
+      }));
+    });
+  }
+
+  function handleWhitneySignalsScroll(event) {
+    const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight < 120) {
+      loadMoreWhitneySignals();
+    }
+  }
+
+  function handleStartWhitneyDemandScan() {
+    if (!enabled) {
+      return;
+    }
+
+    const durationSeconds = WHITNEY_DEMAND_SCAN_DURATION_SECONDS;
+    stopRequestedRef.current = false;
+    const startedAt = new Date();
+    const expectedCompletedAt = new Date(startedAt.getTime() + durationSeconds * 1000).toISOString();
+    setScanState({
+      pending: true,
+      stopping: false,
+      result: {
+        queueItemId: 'starting',
+        status: 'sensing',
+        durationSeconds,
+        startedAt: startedAt.toISOString(),
+        expectedCompletedAt
+      },
+      error: '',
+      remainingSeconds: durationSeconds
+    });
+
+    startWhitneyDemandScan({ durationSeconds }).then((payload) => {
+      if (stopRequestedRef.current) {
+        setScanState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
+        return stopWhitneyDemandScan(payload.queueItemId).catch(() => {});
+      }
+
+      setScanState({
+        pending: payload.status === 'sensing',
+        stopping: false,
+        result: payload,
+        error: '',
+        remainingSeconds: payload.durationSeconds || WHITNEY_DEMAND_SCAN_DURATION_SECONDS
+      });
+    }).catch((scanError) => {
+      setScanState({
+        pending: false,
+        stopping: false,
+        result: null,
+        error: scanError instanceof Error ? scanError.message : 'Whitney demand scan could not be started.',
+        remainingSeconds: 0
+      });
+    });
+  }
+
+  function handleStopWhitneyDemandScan() {
+    const queueItemId = scanState.result?.queueItemId;
+    if (!queueItemId) {
+      return;
+    }
+
+    stopRequestedRef.current = true;
+    setScanState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
+
+    if (queueItemId === 'starting') {
+      return;
+    }
+
+    stopWhitneyDemandScan(queueItemId).catch(() => {});
+  }
+
+  return {
+    scanState,
+    signalsSort,
+    signalFilters,
+    signalsState,
+    handleStartWhitneyDemandScan,
+    handleStopWhitneyDemandScan,
+    handleSignalSort,
+    updateSignalFilter,
+    handleWhitneySignalsScroll
+  };
+}
+
+function useHannahCurationControls({ enabled = true, curationActive = false } = {}) {
+  const stopRequestedRef = useRef(false);
+  const [curationState, setCurationState] = useState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
+  const [candidatesSort, setCandidatesSort] = useState({ key: 'lastSeenAt', direction: 'desc' });
+  const [candidateFilters, setCandidateFilters] = useState({});
+  const [candidatesState, setCandidatesState] = useState({
+    loading: false,
+    loadingMore: false,
+    error: '',
+    items: [],
+    total: 0,
+    hasMore: false
+  });
+
+  useEffect(() => {
+    if (!curationState.result?.expectedCompletedAt) {
+      return undefined;
+    }
+
+    const updateRemaining = () => {
+      const target = new Date(curationState.result.expectedCompletedAt).getTime();
+      const remainingSeconds = Number.isFinite(target) ? Math.max(0, Math.ceil((target - Date.now()) / 1000)) : 0;
+      setCurationState((current) => ({
+        ...current,
+        pending: remainingSeconds > 0 && current.result?.status === 'searching' && !current.stopping,
+        remainingSeconds
+      }));
+    };
+
+    updateRemaining();
+    const timer = window.setInterval(updateRemaining, 1000);
+    return () => window.clearInterval(timer);
+  }, [curationState.result]);
+
+  useEffect(() => {
+    if (!enabled || !curationActive) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    setCandidatesState((current) => ({ ...current, loading: true, loadingMore: false, error: '' }));
+
+    fetchHannahPhotoCandidates({
+      offset: 0,
+      limit: HANNAH_CANDIDATE_PAGE_SIZE,
+      sort: candidatesSort.key,
+      direction: candidatesSort.direction,
+      filters: candidateFilters
+    }).then((payload) => {
+      if (cancelled) {
+        return;
+      }
+
+      setCandidatesState({
+        loading: false,
+        loadingMore: false,
+        error: payload.ok ? '' : payload.message,
+        items: payload.ok ? payload.items : [],
+        total: payload.ok ? payload.total : 0,
+        hasMore: payload.ok ? payload.hasMore : false
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, curationActive, candidatesSort.key, candidatesSort.direction, candidateFilters]);
+
+  function updateCandidateFilter(key, value) {
+    setCandidateFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function handleCandidateSort(key) {
+    setCandidatesSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  }
+
+  function loadMoreHannahCandidates() {
+    if (!enabled || !curationActive || candidatesState.loading || candidatesState.loadingMore || !candidatesState.hasMore) {
+      return;
+    }
+
+    const offset = candidatesState.items.length;
+    setCandidatesState((current) => ({ ...current, loadingMore: true, error: '' }));
+
+    fetchHannahPhotoCandidates({
+      offset,
+      limit: HANNAH_CANDIDATE_PAGE_SIZE,
+      sort: candidatesSort.key,
+      direction: candidatesSort.direction,
+      filters: candidateFilters
+    }).then((payload) => {
+      setCandidatesState((current) => ({
+        loading: false,
+        loadingMore: false,
+        error: payload.ok ? '' : payload.message,
+        items: payload.ok ? [...current.items, ...payload.items] : current.items,
+        total: payload.ok ? payload.total : current.total,
+        hasMore: payload.ok ? payload.hasMore : current.hasMore
+      }));
+    });
+  }
+
+  function handleHannahCandidatesScroll(event) {
+    const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight < 120) {
+      loadMoreHannahCandidates();
+    }
+  }
+
+  function handleStartHannahCuration() {
+    if (!enabled) {
+      return;
+    }
+
+    const durationSeconds = HANNAH_CURATION_SEARCH_DURATION_SECONDS;
+    stopRequestedRef.current = false;
+    const startedAt = new Date();
+    const expectedCompletedAt = new Date(startedAt.getTime() + durationSeconds * 1000).toISOString();
+    setCurationState({
+      pending: true,
+      stopping: false,
+      result: {
+        queueItemId: 'starting',
+        status: 'searching',
+        durationSeconds,
+        startedAt: startedAt.toISOString(),
+        expectedCompletedAt
+      },
+      error: '',
+      remainingSeconds: durationSeconds
+    });
+
+    startHannahCurationSearch({ durationSeconds }).then((payload) => {
+      if (stopRequestedRef.current) {
+        setCurationState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
+        return stopHannahCurationSearch(payload.queueItemId).catch(() => {});
+      }
+
+      setCurationState({
+        pending: payload.status === 'searching',
+        stopping: false,
+        result: payload,
+        error: '',
+        remainingSeconds: payload.durationSeconds || HANNAH_CURATION_SEARCH_DURATION_SECONDS
+      });
+    }).catch((curationError) => {
+      setCurationState({
+        pending: false,
+        stopping: false,
+        result: null,
+        error: curationError instanceof Error ? curationError.message : 'Hannah curation search could not be started.',
+        remainingSeconds: 0
+      });
+    });
+  }
+
+  function handleStopHannahCuration() {
+    const queueItemId = curationState.result?.queueItemId;
+    if (!queueItemId) {
+      return;
+    }
+
+    stopRequestedRef.current = true;
+    setCurationState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
+
+    if (queueItemId === 'starting') {
+      return;
+    }
+
+    stopHannahCurationSearch(queueItemId).catch(() => {});
+  }
+
+  return {
+    curationState,
+    candidatesSort,
+    candidateFilters,
+    candidatesState,
+    handleStartHannahCuration,
+    handleStopHannahCuration,
+    handleCandidateSort,
+    updateCandidateFilter,
+    handleHannahCandidatesScroll
+  };
+}
+
+function useScottSourceDiscoveryControls({ enabled = true, sourcesActive = false, onSearchStarted, onSearchStopped } = {}) {
+  const stopRequestedRef = useRef(false);
+  const [searchState, setSearchState] = useState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
+  const [sourcesSort, setSourcesSort] = useState({ key: 'lastSeenAt', direction: 'desc' });
+  const [sourceFilters, setSourceFilters] = useState({});
+  const [sourcesState, setSourcesState] = useState({
+    loading: false,
+    loadingMore: false,
+    error: '',
+    items: [],
+    total: 0,
+    hasMore: false
+  });
+
+  useEffect(() => {
+    if (!searchState.result?.expectedCompletedAt) {
+      return undefined;
+    }
+
+    const updateRemaining = () => {
+      const target = new Date(searchState.result.expectedCompletedAt).getTime();
+      const remainingSeconds = Number.isFinite(target) ? Math.max(0, Math.ceil((target - Date.now()) / 1000)) : 0;
+      setSearchState((current) => ({
+        ...current,
+        pending: remainingSeconds > 0 && current.result?.status === 'searching' && !current.stopping,
+        remainingSeconds
+      }));
+    };
+
+    updateRemaining();
+    const timer = window.setInterval(updateRemaining, 1000);
+    return () => window.clearInterval(timer);
+  }, [searchState.result]);
+
+  useEffect(() => {
+    if (!enabled || !sourcesActive) {
+      return undefined;
+    }
+
+    let cancelled = false;
+    setSourcesState((current) => ({ ...current, loading: true, loadingMore: false, error: '' }));
+
+    fetchScottSourceSites({
+      offset: 0,
+      limit: SCOTT_SOURCE_SITE_PAGE_SIZE,
+      sort: sourcesSort.key,
+      direction: sourcesSort.direction,
+      filters: sourceFilters
+    }).then((payload) => {
+      if (cancelled) {
+        return;
+      }
+
+      setSourcesState({
+        loading: false,
+        loadingMore: false,
+        error: payload.ok ? '' : payload.message,
+        items: payload.ok ? payload.items : [],
+        total: payload.ok ? payload.total : 0,
+        hasMore: payload.ok ? payload.hasMore : false
+      });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, sourcesActive, sourcesSort.key, sourcesSort.direction, sourceFilters]);
+
+  function updateSourceFilter(key, value) {
+    setSourceFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function handleSourceSort(key) {
+    setSourcesSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  }
+
+  function loadMoreScottSources() {
+    if (!enabled || !sourcesActive || sourcesState.loading || sourcesState.loadingMore || !sourcesState.hasMore) {
+      return;
+    }
+
+    const offset = sourcesState.items.length;
+    setSourcesState((current) => ({ ...current, loadingMore: true, error: '' }));
+
+    fetchScottSourceSites({
+      offset,
+      limit: SCOTT_SOURCE_SITE_PAGE_SIZE,
+      sort: sourcesSort.key,
+      direction: sourcesSort.direction,
+      filters: sourceFilters
+    }).then((payload) => {
+      setSourcesState((current) => ({
+        loading: false,
+        loadingMore: false,
+        error: payload.ok ? '' : payload.message,
+        items: payload.ok ? [...current.items, ...payload.items] : current.items,
+        total: payload.ok ? payload.total : current.total,
+        hasMore: payload.ok ? payload.hasMore : current.hasMore
+      }));
+    });
+  }
+
+  function handleScottSourcesScroll(event) {
+    const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight < 120) {
+      loadMoreScottSources();
+    }
+  }
+
+  function handleStartScottSearch() {
+    if (!enabled) {
+      return;
+    }
+
+    stopRequestedRef.current = false;
+    const durationSeconds = SCOTT_SOURCE_SEARCH_DURATION_SECONDS;
+    const startedAt = new Date();
+    const expectedCompletedAt = new Date(startedAt.getTime() + durationSeconds * 1000).toISOString();
+    setSearchState({
+      pending: true,
+      stopping: false,
+      result: {
+        queueItemId: 'starting',
+        status: 'searching',
+        durationSeconds,
+        startedAt: startedAt.toISOString(),
+        expectedCompletedAt
+      },
+      error: '',
+      remainingSeconds: durationSeconds
+    });
+
+    startScottSourceSearch({
+      durationSeconds,
+      seedQuery: 'commons.wikimedia.org P&ID symbols'
+    }).then((payload) => {
+      if (stopRequestedRef.current) {
+        onSearchStopped?.({
+          queueItemId: payload.queueItemId,
+          remainingSeconds: SCOTT_SOURCE_SEARCH_DURATION_SECONDS
+        });
+        setSearchState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
+        return stopScottSourceSearch(payload.queueItemId).catch(() => {});
+      }
+
+      onSearchStarted?.(payload.queueItemId);
+      setSearchState({
+        pending: payload.status === 'searching',
+        stopping: false,
+        result: payload,
+        error: '',
+        remainingSeconds: payload.durationSeconds || SCOTT_SOURCE_SEARCH_DURATION_SECONDS
+      });
+    }).catch((searchError) => {
+      setSearchState({
+        pending: false,
+        stopping: false,
+        result: null,
+        error: searchError instanceof Error ? searchError.message : 'Scott search could not be started.',
+        remainingSeconds: 0
+      });
+    });
+  }
+
+  function handleStopScottSearch() {
+    const queueItemId = searchState.result?.queueItemId;
+    if (!queueItemId) {
+      return;
+    }
+
+    stopRequestedRef.current = true;
+    const stoppedRemainingSeconds = searchState.remainingSeconds || SCOTT_SOURCE_SEARCH_DURATION_SECONDS;
+    onSearchStopped?.({ queueItemId, remainingSeconds: stoppedRemainingSeconds });
+    setSearchState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
+
+    if (queueItemId === 'starting') {
+      return;
+    }
+
+    stopScottSourceSearch(queueItemId).catch(() => {});
+  }
+
+  return {
+    searchState,
+    sourcesSort,
+    sourceFilters,
+    sourcesState,
+    handleStartScottSearch,
+    handleStopScottSearch,
+    handleSourceSort,
+    updateSourceFilter,
+    handleScottSourcesScroll
+  };
+}
+
 function SubmissionPage() {
   const rememberedDetails = useMemo(readSubmissionDetailsCookie, []);
   const [healthState, setHealthState] = useState({ loading: true, mode: 'loading', message: 'Checking API…' });
@@ -2682,6 +3721,232 @@ function SubmissionPage() {
       </form>
     </section>
   );
+}
+
+function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onScroll }) {
+  return (
+    <section className="glass-panel pane scott-sources-panel">
+      <div className="scott-sources-toolbar">
+        <div>
+          <p className="eyebrow">Scott memory</p>
+          <h3>Sources</h3>
+        </div>
+        <div className="scott-sources-summary">
+          <span>{state.loading ? 'Loading...' : `${state.items.length} of ${state.total} shown`}</span>
+        </div>
+      </div>
+
+      {state.error ? <p className="error-text">{state.error}</p> : null}
+
+      <div className="scott-sources-grid-shell" onScroll={onScroll}>
+        <table className="scott-sources-grid">
+          <thead>
+            <tr>
+              {SCOTT_SOURCE_COLUMNS.map(([key, label]) => (
+                <th key={key} scope="col">
+                  <button type="button" className="source-column-sort" onClick={() => onSort(key)}>
+                    <span>{label}</span>
+                    <span className="source-sort-indicator">{sort.key === key ? (sort.direction === 'asc' ? 'Up' : 'Down') : ''}</span>
+                  </button>
+                  <input
+                    type="search"
+                    value={filters[key] || ''}
+                    onChange={(event) => onFilterChange(key, event.target.value)}
+                    aria-label={`Filter ${label}`}
+                  />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {state.items.map((site) => (
+              <tr key={site.id}>
+                {SCOTT_SOURCE_COLUMNS.map(([key]) => (
+                  <td key={key} className={`source-cell source-cell-${key}`}>
+                    {formatScottSourceValue(site, key)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {!state.loading && !state.items.length ? (
+              <tr>
+                <td colSpan={SCOTT_SOURCE_COLUMNS.length} className="source-empty-cell">
+                  No source records match the current filters.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+        {state.loadingMore ? <p className="source-loading-row">Loading more sources...</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function formatScottSourceValue(site, key) {
+  const value = site?.[key];
+  if (key === 'symbolFormats') {
+    return Array.isArray(value) && value.length ? value.join(', ') : '';
+  }
+  if (key === 'evidence') {
+    return value && Object.keys(value).length ? JSON.stringify(value) : '';
+  }
+  if (key === 'relevanceScore') {
+    return value == null ? '' : Number(value).toFixed(4);
+  }
+  if (key === 'firstSeenAt' || key === 'lastSeenAt') {
+    return value ? new Date(value).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '';
+  }
+  return String(value || '');
+}
+
+function HannahCurationPanel({ state, sort, filters, onSort, onFilterChange, onScroll }) {
+  return (
+    <section className="glass-panel pane scott-sources-panel">
+      <div className="scott-sources-toolbar">
+        <div>
+          <p className="eyebrow">Hannah results</p>
+          <h3>Photo candidates</h3>
+        </div>
+        <div className="scott-sources-summary">
+          <span>{state.loading ? 'Loading...' : `${state.items.length} of ${state.total} shown`}</span>
+        </div>
+      </div>
+
+      {state.error ? <p className="error-text">{state.error}</p> : null}
+
+      <div className="scott-sources-grid-shell hannah-candidates-grid-shell" onScroll={onScroll}>
+        <table className="scott-sources-grid hannah-candidates-grid">
+          <thead>
+            <tr>
+              {HANNAH_CANDIDATE_COLUMNS.map(([key, label]) => (
+                <th key={key} scope="col">
+                  <button type="button" className="source-column-sort" onClick={() => onSort(key)}>
+                    <span>{label}</span>
+                    <span className="source-sort-indicator">{sort.key === key ? (sort.direction === 'asc' ? 'Up' : 'Down') : ''}</span>
+                  </button>
+                  <input
+                    type="search"
+                    value={filters[key] || ''}
+                    onChange={(event) => onFilterChange(key, event.target.value)}
+                    aria-label={`Filter ${label}`}
+                  />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {state.items.map((candidate) => (
+              <tr key={candidate.id}>
+                {HANNAH_CANDIDATE_COLUMNS.map(([key]) => (
+                  <td key={key} className={`source-cell source-cell-${key}`}>
+                    {formatHannahCandidateValue(candidate, key)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {!state.loading && !state.items.length ? (
+              <tr>
+                <td colSpan={HANNAH_CANDIDATE_COLUMNS.length} className="source-empty-cell">
+                  No curation records match the current filters.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+        {state.loadingMore ? <p className="source-loading-row">Loading more candidates...</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function formatHannahCandidateValue(candidate, key) {
+  const value = candidate?.[key];
+  if (key === 'relevanceScore') {
+    return value == null ? '' : Number(value).toFixed(4);
+  }
+  if (key === 'lastSeenAt') {
+    return value ? new Date(value).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '';
+  }
+  if (key === 'sourceUrl' || key === 'imageUrl') {
+    return value ? (
+      <a href={value} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+        {value}
+      </a>
+    ) : '';
+  }
+  return String(value || '');
+}
+
+function WhitneyDemandSignalsPanel({ state, sort, filters, onSort, onFilterChange, onScroll }) {
+  return (
+    <section className="glass-panel pane scott-sources-panel">
+      <div className="scott-sources-toolbar">
+        <div>
+          <p className="eyebrow">Whitney signals</p>
+          <h3>Demand signals</h3>
+        </div>
+        <div className="scott-sources-summary">
+          <span>{state.loading ? 'Loading...' : `${state.items.length} of ${state.total} shown`}</span>
+        </div>
+      </div>
+
+      {state.error ? <p className="error-text">{state.error}</p> : null}
+
+      <div className="scott-sources-grid-shell whitney-signals-grid-shell" onScroll={onScroll}>
+        <table className="scott-sources-grid whitney-signals-grid">
+          <thead>
+            <tr>
+              {WHITNEY_SIGNAL_COLUMNS.map(([key, label]) => (
+                <th key={key} scope="col">
+                  <button type="button" className="source-column-sort" onClick={() => onSort(key)}>
+                    <span>{label}</span>
+                    <span className="source-sort-indicator">{sort.key === key ? (sort.direction === 'asc' ? 'Up' : 'Down') : ''}</span>
+                  </button>
+                  <input
+                    type="search"
+                    value={filters[key] || ''}
+                    onChange={(event) => onFilterChange(key, event.target.value)}
+                    aria-label={`Filter ${label}`}
+                  />
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {state.items.map((signal) => (
+              <tr key={signal.id}>
+                {WHITNEY_SIGNAL_COLUMNS.map(([key]) => (
+                  <td key={key} className={`source-cell source-cell-${key}`}>
+                    {formatWhitneySignalValue(signal, key)}
+                  </td>
+                ))}
+              </tr>
+            ))}
+            {!state.loading && !state.items.length ? (
+              <tr>
+                <td colSpan={WHITNEY_SIGNAL_COLUMNS.length} className="source-empty-cell">
+                  No demand signals match the current filters.
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+        {state.loadingMore ? <p className="source-loading-row">Loading more signals...</p> : null}
+      </div>
+    </section>
+  );
+}
+
+function formatWhitneySignalValue(signal, key) {
+  const value = signal?.[key];
+  if (key === 'demandScore' || key === 'confidence') {
+    return value == null ? '' : Number(value).toFixed(4);
+  }
+  if (key === 'lastSeenAt') {
+    return value ? new Date(value).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '';
+  }
+  return String(value || '');
 }
 
 function SupportPage() {

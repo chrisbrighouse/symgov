@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import text
+from sqlalchemy import Text, cast, text
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db_session
-from ..models import Attachment
+from ..models import Attachment, GovernedSymbol, HannahPhotoCandidate, PublishedPage, SymbolRevision
 from ..runtime import download_object_bytes
 from ..settings import get_settings
 
@@ -47,7 +47,7 @@ PUBLISHED_SYMBOLS_SQL = """
 """
 
 
-def published_symbol_row(row) -> dict:
+def published_symbol_row(row, supplemental_photos_by_symbol: dict[str, list[dict]] | None = None) -> dict:
     payload = row.payload_json or {}
     keywords = payload.get("keywords") or payload.get("search_terms") or []
     if not isinstance(keywords, list):
@@ -55,6 +55,8 @@ def published_symbol_row(row) -> dict:
     downloads = payload.get("downloads") or []
     if not isinstance(downloads, list):
         downloads = []
+
+    supplemental_photos = (supplemental_photos_by_symbol or {}).get(str(row.symbol_id), [])
 
     return {
         "id": row.slug,
@@ -84,8 +86,42 @@ def published_symbol_row(row) -> dict:
         "previewUrl": f"/api/v1/published/symbols/{row.slug}/preview"
         if payload.get("source_object_key")
         else None,
+        "supplementalPhotos": supplemental_photos,
         "payload": payload,
     }
+
+
+def load_supplemental_photos(session: Session, rows) -> dict[str, list[dict]]:
+    symbol_ids = [row.symbol_id for row in rows]
+    if not symbol_ids:
+        return {}
+    photo_rows = (
+        session.query(HannahPhotoCandidate, GovernedSymbol.slug)
+        .join(GovernedSymbol, GovernedSymbol.id == HannahPhotoCandidate.symbol_id)
+        .filter(HannahPhotoCandidate.symbol_id.in_(symbol_ids))
+        .filter(HannahPhotoCandidate.status == "attached")
+        .filter(HannahPhotoCandidate.object_key.isnot(None))
+        .order_by(HannahPhotoCandidate.relevance_score.desc(), HannahPhotoCandidate.last_seen_at.desc())
+        .all()
+    )
+    grouped: dict[str, list[dict]] = {}
+    for candidate, slug in photo_rows:
+        bucket = grouped.setdefault(str(candidate.symbol_id), [])
+        if len(bucket) >= 2:
+            continue
+        bucket.append(
+            {
+                "id": str(candidate.id),
+                "title": candidate.title,
+                "sourceUrl": candidate.source_url,
+                "sourceDomain": candidate.source_domain,
+                "licenseLabel": candidate.license_label,
+                "rightsStatus": candidate.rights_status,
+                "score": float(candidate.relevance_score) if candidate.relevance_score is not None else None,
+                "previewUrl": f"/api/v1/published/symbols/{slug}/supplemental-photos/{candidate.id}/preview",
+            }
+        )
+    return grouped
 
 
 def pack_row(row) -> dict:
@@ -137,7 +173,8 @@ def list_published_symbols(
         ),
         params,
     ).all()
-    return {"items": [published_symbol_row(row) for row in rows]}
+    supplemental = load_supplemental_photos(session, rows)
+    return {"items": [published_symbol_row(row, supplemental) for row in rows]}
 
 
 @router.get("/symbols/{symbol_id}")
@@ -156,7 +193,8 @@ def get_published_symbol(symbol_id: str, session: Session = Depends(get_db_sessi
     ).all()
     if not rows:
         raise HTTPException(status_code=404, detail="Published symbol was not found.")
-    return {"item": published_symbol_row(rows[0])}
+    supplemental = load_supplemental_photos(session, rows)
+    return {"item": published_symbol_row(rows[0], supplemental)}
 
 
 @router.get("/symbols/{symbol_id}/preview")
@@ -187,6 +225,27 @@ def get_published_symbol_preview(symbol_id: str, session: Session = Depends(get_
     return Response(content=payload["payload"], media_type=media_type)
 
 
+@router.get("/symbols/{symbol_id}/supplemental-photos/{photo_id}/preview")
+@legacy_router.get("/published/symbols/{symbol_id}/supplemental-photos/{photo_id}/preview", include_in_schema=False)
+def get_published_symbol_supplemental_photo_preview(symbol_id: str, photo_id: str, session: Session = Depends(get_db_session)) -> Response:
+    row = (
+        session.query(HannahPhotoCandidate)
+        .join(GovernedSymbol, GovernedSymbol.id == HannahPhotoCandidate.symbol_id)
+        .filter(HannahPhotoCandidate.id == photo_id)
+        .filter(HannahPhotoCandidate.status == "attached")
+        .filter(HannahPhotoCandidate.object_key.isnot(None))
+        .filter((GovernedSymbol.slug == symbol_id) | (cast(GovernedSymbol.id, Text) == symbol_id))
+        .one_or_none()
+    )
+    if row is None or not row.object_key:
+        raise HTTPException(status_code=404, detail="Published supplemental photo was not found.")
+
+    attachment = session.query(Attachment).filter(Attachment.object_key == row.object_key).one_or_none()
+    payload = download_object_bytes(object_key=row.object_key, env_file=str(get_settings().storage_env_file))
+    media_type = attachment.content_type if attachment is not None else payload["content_type"]
+    return Response(content=payload["payload"], media_type=media_type)
+
+
 @router.get("/pages/{page_code}")
 @legacy_router.get("/published/pages/{page_code}", include_in_schema=False)
 def get_published_page(page_code: str, session: Session = Depends(get_db_session)) -> dict:
@@ -196,7 +255,8 @@ def get_published_page(page_code: str, session: Session = Depends(get_db_session
     ).all()
     if not rows:
         raise HTTPException(status_code=404, detail="Published page was not found.")
-    return {"item": published_symbol_row(rows[0])}
+    supplemental = load_supplemental_photos(session, rows)
+    return {"item": published_symbol_row(rows[0], supplemental)}
 
 
 @router.get("/packs")

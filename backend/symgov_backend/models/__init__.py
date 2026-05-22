@@ -13,6 +13,8 @@ from .schema import (
     ControlException,
     ExternalIdentity,
     GovernedSymbol,
+    HannahPhotoCandidate,
+    HannahSymbolCurationState,
     HumanReviewDecision,
     ImpactedPageLink,
     IntakeRecord,
@@ -27,6 +29,7 @@ from .schema import (
     ReviewSplitItem,
     ReviewSymbolProperty,
     ReviewSymbolPropertyOption,
+    ScottSourceDiscoverySite,
     SourcePackage,
     SourcePackageEntry,
     Standard,
@@ -35,6 +38,8 @@ from .schema import (
     SymbolStandardLink,
     User,
     ValidationReport,
+    WhitneyDemandSignal,
+    WhitneyMarketIntelligenceReport,
 )
 
 __all__ = [
@@ -52,6 +57,8 @@ __all__ = [
     "ControlException",
     "ExternalIdentity",
     "GovernedSymbol",
+    "HannahPhotoCandidate",
+    "HannahSymbolCurationState",
     "HumanReviewDecision",
     "ImpactedPageLink",
     "IntakeRecord",
@@ -66,6 +73,7 @@ __all__ = [
     "ReviewSplitItem",
     "ReviewSymbolProperty",
     "ReviewSymbolPropertyOption",
+    "ScottSourceDiscoverySite",
     "SourcePackage",
     "SourcePackageEntry",
     "Standard",
@@ -74,4 +82,6 @@ __all__ = [
     "SymbolStandardLink",
     "User",
     "ValidationReport",
+    "WhitneyDemandSignal",
+    "WhitneyMarketIntelligenceReport",
 ]

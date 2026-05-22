@@ -5,7 +5,7 @@
 - This pass stays lightweight and implementation-ready for plain HTML, CSS, and small JS enhancements.
 - Standards View is publication-facing and only exposes currently published content.
 - Published symbol pages resolve to the latest approved revision only.
-- Workspace View is admin/operator-facing processing visibility for agent activity.
+- Workspace View is admin/operator-facing processing visibility for agent activity, source memory, and Hannah published-catalogue curation.
 - Reviews View is for SMEs handling Daisy-coordinated human review cases.
 - Voting is explicitly out of scope for this phase.
 - The current implementation target is a route-based prototype with primary browse/review surfaces plus focused supporting routes.
@@ -60,7 +60,7 @@ On mobile, keep facets and browse first, then stack the selected detail panel be
 
 ### Purpose
 
-Provide an admin-only processing surface for seeing what Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed are doing.
+Provide an admin-only processing surface for seeing what Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, Hannah, Whitney, and Ed are doing.
 
 ### Core user jobs
 
@@ -69,14 +69,34 @@ Provide an admin-only processing surface for seeing what Scott, Vlad, Tracy, Lib
 - Inspect processing summaries, artifact counts, and exception states.
 - Jump from a processing flow to a Daisy-coordinated review case.
 - Jump from a successfully published Rupert item to the published Standards record.
+- Start Hannah's published-symbol photo curation run and inspect scored candidate photo sources before or after attachment.
+- Start Whitney's demand-sensing scan and inspect market intelligence signals for catalogue and operator prioritization.
 
 ### Current layout decision
 
 Make the main Workspace route processing-first:
 
-- Top: title, queue search, and a full-width single-line live status row so refresh and processing text does not compete with the search control
-- Main: eight equal-height compact monitor lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed, each with its own scrollable card stack
+- Top: persistent `ADMIN WORKSPACE` titlebar with `Agents`, `Sources`, `Curation`, and `Intelligence` tabs
+- Agents: title with chevron monitor-screen navigation, queue search, and a full-width single-line live status row so refresh and processing text does not compete with the search control
+- Main: compact monitor lanes split into a first screen for Scott, Vlad, Tracy, Libby, Daisy, Human Review, and Rupert, plus a second screen for Hannah, Whitney, and Ed in that order using the same lane width and leaving blank space to the right
+- Sources: Scott source-memory grid and source-search controls
+- Curation: Hannah two-minute published-symbol photo search with countdown, active-run Stop control, and a scored candidate table
+- Intelligence: Whitney two-minute demand-sensing scan with countdown, active-run Stop control, and a scored demand-signal table
 - Cards: activity and source context first, optional Vlad process/tool summary where available, optional Standards target for published Rupert cards, then queue status on its own line for scanability
+
+### Curation UX rules
+
+- Hannah curation is admin-only and works on published Standards symbols, not intake candidates or review drafts.
+- Curation controls should match the Scott Sources search pattern: Start is disabled while a run is active, Stop appears only during the active countdown, and stopping resets the visible controls immediately while the backend cancels the queued run.
+- Candidate rows should show symbol context, source domain, source URL, title, rights status, license, score, candidate status, and queue item/timestamp context.
+- Real-world supplemental photos must be labelled and displayed separately from the schematic symbol preview.
+
+### Intelligence UX rules
+
+- Whitney market intelligence is admin-only and produces recommendations, not direct governance mutations.
+- Demand scan controls should match the Scott Sources and Hannah Curation patterns: Start is disabled while a run is active, Stop appears only during the active countdown, and stopping resets the visible controls immediately while the backend cancels the queued run.
+- Demand-signal rows should show signal type, market segment, title, demand score, confidence, recommendation, source, status, and queue item/timestamp context.
+- Standards detail should show no more than two public supplemental photos for a symbol.
 
 ## Reviews View
 

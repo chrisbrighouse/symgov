@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import signal
+import subprocess
+import sys
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -9,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import and_, select
+from sqlalchemy import Text, and_, cast, func, select
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db_session
@@ -21,6 +25,8 @@ from ..models import (
     AuditEvent,
     ClassificationRecord,
     HumanReviewDecision,
+    HannahPhotoCandidate,
+    HannahSymbolCurationState,
     IntakeRecord,
     ProvenanceAssessment,
     PublicationPack,
@@ -30,10 +36,12 @@ from ..models import (
     ReviewSplitItem,
     ReviewSymbolProperty,
     ReviewSymbolPropertyOption,
+    ScottSourceDiscoverySite,
     SourcePackage,
     GovernedSymbol,
     SymbolRevision,
     ValidationReport,
+    WhitneyDemandSignal,
 )
 from ..publication_handoff import execute_publication_handoff
 from ..review_followup_handoff import execute_review_followup_handoff
@@ -57,6 +65,21 @@ from ..schemas import (
     WorkspaceReviewSymbolPropertyOptionResponse,
     WorkspaceReviewSymbolPropertiesResponse,
     WorkspaceReviewSymbolPropertiesUpdateRequest,
+    WorkspaceScottSourceSiteListResponse,
+    WorkspaceScottSourceSiteResponse,
+    WorkspaceScottSourceSearchStopResponse,
+    WorkspaceScottSourceSearchStartRequest,
+    WorkspaceScottSourceSearchStartResponse,
+    WorkspaceHannahCurationSearchStartRequest,
+    WorkspaceHannahCurationSearchStartResponse,
+    WorkspaceHannahCurationSearchStopResponse,
+    WorkspaceHannahPhotoCandidateListResponse,
+    WorkspaceHannahPhotoCandidateResponse,
+    WorkspaceWhitneyDemandScanStartRequest,
+    WorkspaceWhitneyDemandScanStartResponse,
+    WorkspaceWhitneyDemandScanStopResponse,
+    WorkspaceWhitneyDemandSignalListResponse,
+    WorkspaceWhitneyDemandSignalResponse,
     WorkspaceSplitReviewProcessItemResponse,
     WorkspaceSplitReviewProcessRequest,
     WorkspaceSplitReviewProcessResponse,
@@ -67,6 +90,16 @@ from ..settings import get_settings
 router = APIRouter(prefix="/workspace", tags=["workspace"])
 legacy_router = APIRouter(tags=["workspace"])
 DAISY_RUNTIME_REPORT_ROOT = Path("/data/.openclaw/workspaces/daisy/runtime/review_coordination_reports")
+SCOTT_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/scott/runtime")
+SCOTT_RUNNER = Path("/data/.openclaw/workspaces/scott/run_scott_intake.py")
+SCOTT_DB_ENV_FILE = Path("/data/.openclaw/workspace/symgov/.env.backend.database")
+HANNAH_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/hannah/runtime")
+HANNAH_RUNNER = Path("/data/symgov/scripts/run_hannah_curation.py")
+HANNAH_DB_ENV_FILE = SCOTT_DB_ENV_FILE
+HANNAH_STORAGE_ENV_FILE = Path("/data/.openclaw/workspace/symgov/.env.backend.storage")
+WHITNEY_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/whitney/runtime")
+WHITNEY_RUNNER = Path("/data/.openclaw/workspaces/whitney/run_whitney_market_intelligence.py")
+WHITNEY_DB_ENV_FILE = SCOTT_DB_ENV_FILE
 OPEN_SPLIT_ITEM_STATUSES = ("awaiting_decision", "returned_for_review")
 DECISION_TRANSITIONS = {
     "approve": {
@@ -1328,6 +1361,1020 @@ def list_workspace_agent_queue_items(
         ))
 
     return WorkspaceAgentQueueItemListResponse(items=items)
+
+
+@router.post(
+    "/scott/source-searches",
+    response_model=WorkspaceScottSourceSearchStartResponse,
+    responses={409: {"description": "Scott source search already running"}},
+)
+@legacy_router.post(
+    "/workspace/scott/source-searches",
+    response_model=WorkspaceScottSourceSearchStartResponse,
+    include_in_schema=False,
+)
+def start_scott_source_search(
+    request: WorkspaceScottSourceSearchStartRequest,
+    session: Session = Depends(get_db_session),
+) -> WorkspaceScottSourceSearchStartResponse:
+    active_statuses = ("queued", "running", "searching")
+    scott_definition = session.query(AgentDefinition).filter_by(slug="scott").one_or_none()
+    if scott_definition is None:
+        raise HTTPException(status_code=500, detail="Scott agent definition is missing.")
+
+    active_item = (
+        session.query(AgentQueueItem)
+        .filter(AgentQueueItem.agent_id == scott_definition.id)
+        .filter(AgentQueueItem.source_type == "source_discovery_search")
+        .filter(AgentQueueItem.status.in_(active_statuses))
+        .order_by(AgentQueueItem.created_at.desc())
+        .first()
+    )
+    if active_item is not None:
+        expected_completed_at = (active_item.started_at or active_item.created_at) + timedelta(
+            seconds=int((active_item.payload_json or {}).get("duration_seconds") or request.durationSeconds)
+        )
+        return WorkspaceScottSourceSearchStartResponse(
+            queueItemId=str(active_item.id),
+            status=active_item.status,
+            durationSeconds=int((active_item.payload_json or {}).get("duration_seconds") or request.durationSeconds),
+            startedAt=isoformat_utc(active_item.started_at or active_item.created_at),
+            expectedCompletedAt=isoformat_utc(expected_completed_at),
+        )
+
+    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    expected_completed_at = started_at + timedelta(seconds=request.durationSeconds)
+    queue_item_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+    discovered_sites = session.query(ScottSourceDiscoverySite).order_by(ScottSourceDiscoverySite.last_seen_at.desc()).all()
+    memory_count = len(discovered_sites)
+    preferred_sites = [
+        {
+            "domain": site.domain,
+            "url": site.url,
+            "title": site.title,
+            "description": site.description,
+            "symbol_formats": site.symbol_formats_json or [],
+        }
+        for site in discovered_sites
+        if site.status != "ignored"
+    ]
+    ignored_domains = [site.domain for site in discovered_sites if site.status == "ignored"]
+    payload = {
+        "task_type": "source_discovery_search",
+        "display_name": "Source discovery search",
+        "stage": "Web source discovery",
+        "duration_seconds": request.durationSeconds,
+        "seed_query": request.seedQuery or "commons.wikimedia.org P&ID symbols",
+        "memory_site_count": memory_count,
+        "preferred_sites": preferred_sites,
+        "ignored_domains": ignored_domains,
+        "started_by": "admin",
+        "expected_completed_at": isoformat_utc(expected_completed_at),
+    }
+    queue_item = AgentQueueItem(
+        id=queue_item_id,
+        agent_id=scott_definition.id,
+        source_type="source_discovery_search",
+        source_id=source_id,
+        status="searching",
+        priority="medium",
+        payload_json=payload,
+        confidence=None,
+        escalation_reason=None,
+        created_at=started_at,
+        started_at=started_at,
+        completed_at=None,
+    )
+    session.add(queue_item)
+    session.commit()
+
+    queue_record = {
+        "id": str(queue_item_id),
+        "agent_id": "scott",
+        "source_type": "source_discovery_search",
+        "source_id": str(source_id),
+        "status": "searching",
+        "priority": "medium",
+        "payload_json": payload,
+        "created_at": isoformat_utc(started_at),
+        "started_at": isoformat_utc(started_at),
+        "completed_at": None,
+    }
+    queue_dir = SCOTT_RUNTIME_ROOT / "agent_queue_items"
+    log_dir = SCOTT_RUNTIME_ROOT / "source_discovery_logs"
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    queue_path = queue_dir / f"{queue_item_id}.json"
+    queue_path.write_text(json.dumps(queue_record, indent=2) + "\n", encoding="utf-8")
+
+    log_path = log_dir / f"{queue_item_id}.log"
+    with log_path.open("a", encoding="utf-8") as log_handle:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                str(SCOTT_RUNNER),
+                "--queue-item",
+                str(queue_path),
+                "--runtime-root",
+                str(SCOTT_RUNTIME_ROOT),
+                "--persist-db",
+                "--db-env-file",
+                str(SCOTT_DB_ENV_FILE),
+            ],
+            stdout=log_handle,
+            stderr=log_handle,
+            close_fds=True,
+            start_new_session=True,
+        )
+
+    payload["process_pid"] = process.pid
+    payload["process_group_id"] = process.pid
+    queue_item.payload_json = payload
+    queue_record["payload_json"] = payload
+    queue_path.write_text(json.dumps(queue_record, indent=2) + "\n", encoding="utf-8")
+    session.add(queue_item)
+    session.commit()
+
+    return WorkspaceScottSourceSearchStartResponse(
+        queueItemId=str(queue_item_id),
+        status="searching",
+        durationSeconds=request.durationSeconds,
+        startedAt=isoformat_utc(started_at),
+        expectedCompletedAt=isoformat_utc(expected_completed_at),
+    )
+
+
+@router.post(
+    "/scott/source-searches/{queue_item_id}/stop",
+    response_model=WorkspaceScottSourceSearchStopResponse,
+)
+@legacy_router.post(
+    "/workspace/scott/source-searches/{queue_item_id}/stop",
+    response_model=WorkspaceScottSourceSearchStopResponse,
+    include_in_schema=False,
+)
+def stop_scott_source_search(
+    queue_item_id: uuid.UUID,
+    session: Session = Depends(get_db_session),
+) -> WorkspaceScottSourceSearchStopResponse:
+    scott_definition = session.query(AgentDefinition).filter_by(slug="scott").one_or_none()
+    if scott_definition is None:
+        raise HTTPException(status_code=500, detail="Scott agent definition is missing.")
+
+    queue_item = (
+        session.query(AgentQueueItem)
+        .filter(AgentQueueItem.id == queue_item_id)
+        .filter(AgentQueueItem.agent_id == scott_definition.id)
+        .filter(AgentQueueItem.source_type == "source_discovery_search")
+        .one_or_none()
+    )
+    if queue_item is None:
+        raise HTTPException(status_code=404, detail="Scott source search queue item was not found.")
+
+    stopped_at = datetime.now(timezone.utc).replace(microsecond=0)
+    payload = dict(queue_item.payload_json or {})
+    process_pid = payload.get("process_pid")
+    process_group_id = payload.get("process_group_id") or process_pid
+    termination = "not_running"
+
+    if isinstance(process_group_id, int):
+        try:
+            os.killpg(process_group_id, signal.SIGTERM)
+            termination = "terminated"
+        except ProcessLookupError:
+            termination = "not_running"
+        except PermissionError:
+            termination = "permission_denied"
+        except OSError:
+            if isinstance(process_pid, int):
+                try:
+                    os.kill(process_pid, signal.SIGTERM)
+                    termination = "terminated"
+                except ProcessLookupError:
+                    termination = "not_running"
+                except PermissionError:
+                    termination = "permission_denied"
+                except OSError:
+                    termination = "failed"
+            else:
+                termination = "failed"
+
+    payload["stopped_at"] = isoformat_utc(stopped_at)
+    payload["stop_requested_by"] = "admin"
+    payload["termination"] = termination
+    queue_item.status = "cancelled"
+    queue_item.payload_json = payload
+    queue_item.completed_at = stopped_at
+    session.add(queue_item)
+    session.commit()
+
+    queue_path = SCOTT_RUNTIME_ROOT / "agent_queue_items" / f"{queue_item_id}.json"
+    if queue_path.exists():
+        try:
+            queue_record = json.loads(queue_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            queue_record = {}
+        queue_record.update(
+            {
+                "id": str(queue_item_id),
+                "agent_id": "scott",
+                "source_type": "source_discovery_search",
+                "status": "cancelled",
+                "payload_json": payload,
+                "completed_at": isoformat_utc(stopped_at),
+            }
+        )
+        queue_path.write_text(json.dumps(queue_record, indent=2) + "\n", encoding="utf-8")
+
+    return WorkspaceScottSourceSearchStopResponse(
+        queueItemId=str(queue_item_id),
+        status="cancelled",
+        stoppedAt=isoformat_utc(stopped_at),
+        termination=termination,
+    )
+
+
+SCOTT_SOURCE_SITE_SORT_COLUMNS = {
+    "url": ScottSourceDiscoverySite.url,
+    "status": ScottSourceDiscoverySite.status,
+    "title": ScottSourceDiscoverySite.title,
+    "domain": ScottSourceDiscoverySite.domain,
+    "description": ScottSourceDiscoverySite.description,
+    "industry": ScottSourceDiscoverySite.industry,
+    "process": ScottSourceDiscoverySite.process,
+    "organizationType": ScottSourceDiscoverySite.organization_type,
+    "symbolFormats": cast(ScottSourceDiscoverySite.symbol_formats_json, Text),
+    "evidence": cast(ScottSourceDiscoverySite.evidence_json, Text),
+    "relevanceScore": ScottSourceDiscoverySite.relevance_score,
+    "firstSeenAt": ScottSourceDiscoverySite.first_seen_at,
+    "lastSeenAt": ScottSourceDiscoverySite.last_seen_at,
+    "lastSessionQueueItemId": ScottSourceDiscoverySite.last_session_queue_item_id,
+}
+
+SCOTT_SOURCE_SITE_FILTER_COLUMNS = {
+    **SCOTT_SOURCE_SITE_SORT_COLUMNS,
+    "organization_type": ScottSourceDiscoverySite.organization_type,
+    "symbol_formats": cast(ScottSourceDiscoverySite.symbol_formats_json, Text),
+    "relevance_score": ScottSourceDiscoverySite.relevance_score,
+    "first_seen_at": ScottSourceDiscoverySite.first_seen_at,
+    "last_seen_at": ScottSourceDiscoverySite.last_seen_at,
+    "last_session_queue_item_id": ScottSourceDiscoverySite.last_session_queue_item_id,
+}
+
+
+def scott_source_site_response(site: ScottSourceDiscoverySite) -> WorkspaceScottSourceSiteResponse:
+    return WorkspaceScottSourceSiteResponse(
+        id=str(site.id),
+        url=site.url,
+        status=site.status,
+        title=site.title,
+        domain=site.domain,
+        description=site.description,
+        industry=site.industry,
+        process=site.process,
+        organizationType=site.organization_type,
+        symbolFormats=site.symbol_formats_json or [],
+        evidence=site.evidence_json or {},
+        relevanceScore=float(site.relevance_score) if site.relevance_score is not None else None,
+        firstSeenAt=isoformat_utc(site.first_seen_at),
+        lastSeenAt=isoformat_utc(site.last_seen_at),
+        lastSessionQueueItemId=str(site.last_session_queue_item_id) if site.last_session_queue_item_id else None,
+    )
+
+
+@router.get(
+    "/scott/source-sites",
+    response_model=WorkspaceScottSourceSiteListResponse,
+)
+@legacy_router.get(
+    "/workspace/scott/source-sites",
+    response_model=WorkspaceScottSourceSiteListResponse,
+    include_in_schema=False,
+)
+def list_scott_source_sites(
+    session: Session = Depends(get_db_session),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    sort: str = Query(default="lastSeenAt"),
+    direction: str = Query(default="desc", pattern="^(asc|desc)$"),
+    url: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    title: str | None = Query(default=None),
+    domain: str | None = Query(default=None),
+    description: str | None = Query(default=None),
+    industry: str | None = Query(default=None),
+    process: str | None = Query(default=None),
+    organizationType: str | None = Query(default=None),
+    symbolFormats: str | None = Query(default=None),
+    evidence: str | None = Query(default=None),
+    relevanceScore: str | None = Query(default=None),
+    firstSeenAt: str | None = Query(default=None),
+    lastSeenAt: str | None = Query(default=None),
+    lastSessionQueueItemId: str | None = Query(default=None),
+) -> WorkspaceScottSourceSiteListResponse:
+    filters = {
+        "url": url,
+        "status": status,
+        "title": title,
+        "domain": domain,
+        "description": description,
+        "industry": industry,
+        "process": process,
+        "organizationType": organizationType,
+        "symbolFormats": symbolFormats,
+        "evidence": evidence,
+        "relevanceScore": relevanceScore,
+        "firstSeenAt": firstSeenAt,
+        "lastSeenAt": lastSeenAt,
+        "lastSessionQueueItemId": lastSessionQueueItemId,
+    }
+
+    query = session.query(ScottSourceDiscoverySite)
+    for key, raw_value in filters.items():
+        value = (raw_value or "").strip()
+        if not value:
+            continue
+        column = SCOTT_SOURCE_SITE_FILTER_COLUMNS[key]
+        query = query.filter(func.lower(cast(column, Text)).like(f"%{value.lower()}%"))
+
+    total = query.count()
+    sort_column = SCOTT_SOURCE_SITE_SORT_COLUMNS.get(sort, ScottSourceDiscoverySite.last_seen_at)
+    ordered_column = sort_column.asc() if direction == "asc" else sort_column.desc()
+    rows = query.order_by(ordered_column, ScottSourceDiscoverySite.url.asc()).offset(offset).limit(limit).all()
+
+    return WorkspaceScottSourceSiteListResponse(
+        items=[scott_source_site_response(site) for site in rows],
+        total=total,
+        offset=offset,
+        limit=limit,
+        hasMore=offset + len(rows) < total,
+    )
+
+
+@router.post(
+    "/hannah/curation-searches",
+    response_model=WorkspaceHannahCurationSearchStartResponse,
+    responses={409: {"description": "Hannah curation search already running"}},
+)
+@legacy_router.post(
+    "/workspace/hannah/curation-searches",
+    response_model=WorkspaceHannahCurationSearchStartResponse,
+    include_in_schema=False,
+)
+def start_hannah_curation_search(
+    request: WorkspaceHannahCurationSearchStartRequest,
+    session: Session = Depends(get_db_session),
+) -> WorkspaceHannahCurationSearchStartResponse:
+    active_statuses = ("queued", "running", "searching")
+    hannah_definition = session.query(AgentDefinition).filter_by(slug="hannah").one_or_none()
+    if hannah_definition is None:
+        raise HTTPException(status_code=500, detail="Hannah agent definition is missing.")
+
+    active_item = (
+        session.query(AgentQueueItem)
+        .filter(AgentQueueItem.agent_id == hannah_definition.id)
+        .filter(AgentQueueItem.source_type == "published_symbol_photo_search")
+        .filter(AgentQueueItem.status.in_(active_statuses))
+        .order_by(AgentQueueItem.created_at.desc())
+        .first()
+    )
+    if active_item is not None:
+        expected_completed_at = (active_item.started_at or active_item.created_at) + timedelta(
+            seconds=int((active_item.payload_json or {}).get("duration_seconds") or request.durationSeconds)
+        )
+        return WorkspaceHannahCurationSearchStartResponse(
+            queueItemId=str(active_item.id),
+            status=active_item.status,
+            durationSeconds=int((active_item.payload_json or {}).get("duration_seconds") or request.durationSeconds),
+            startedAt=isoformat_utc(active_item.started_at or active_item.created_at),
+            expectedCompletedAt=isoformat_utc(expected_completed_at),
+        )
+
+    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    expected_completed_at = started_at + timedelta(seconds=request.durationSeconds)
+    queue_item_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+    payload = {
+        "task_type": "published_symbol_photo_search",
+        "display_name": "Published symbol photo search",
+        "stage": "Catalogue curation",
+        "duration_seconds": request.durationSeconds,
+        "started_by": "admin",
+        "expected_completed_at": isoformat_utc(expected_completed_at),
+        "minimum_fields": ["name", "title", "category", "discipline"],
+        "max_photos_per_symbol": 2,
+    }
+    queue_item = AgentQueueItem(
+        id=queue_item_id,
+        agent_id=hannah_definition.id,
+        source_type="published_symbol_photo_search",
+        source_id=source_id,
+        status="searching",
+        priority="medium",
+        payload_json=payload,
+        confidence=None,
+        escalation_reason=None,
+        created_at=started_at,
+        started_at=started_at,
+        completed_at=None,
+    )
+    session.add(queue_item)
+    session.commit()
+
+    queue_record = {
+        "id": str(queue_item_id),
+        "agent_id": "hannah",
+        "source_type": "published_symbol_photo_search",
+        "source_id": str(source_id),
+        "status": "searching",
+        "priority": "medium",
+        "payload_json": payload,
+        "created_at": isoformat_utc(started_at),
+        "started_at": isoformat_utc(started_at),
+        "completed_at": None,
+    }
+    queue_dir = HANNAH_RUNTIME_ROOT / "agent_queue_items"
+    log_dir = HANNAH_RUNTIME_ROOT / "curation_logs"
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    queue_path = queue_dir / f"{queue_item_id}.json"
+    queue_path.write_text(json.dumps(queue_record, indent=2) + "\n", encoding="utf-8")
+
+    log_path = log_dir / f"{queue_item_id}.log"
+    with log_path.open("a", encoding="utf-8") as log_handle:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                str(HANNAH_RUNNER),
+                "--queue-item",
+                str(queue_path),
+                "--runtime-root",
+                str(HANNAH_RUNTIME_ROOT),
+                "--persist-db",
+                "--db-env-file",
+                str(HANNAH_DB_ENV_FILE),
+                "--storage-env-file",
+                str(HANNAH_STORAGE_ENV_FILE),
+            ],
+            stdout=log_handle,
+            stderr=log_handle,
+            close_fds=True,
+            start_new_session=True,
+        )
+
+    payload["process_pid"] = process.pid
+    payload["process_group_id"] = process.pid
+    queue_item.payload_json = payload
+    queue_record["payload_json"] = payload
+    queue_path.write_text(json.dumps(queue_record, indent=2) + "\n", encoding="utf-8")
+    session.add(queue_item)
+    session.commit()
+
+    return WorkspaceHannahCurationSearchStartResponse(
+        queueItemId=str(queue_item_id),
+        status="searching",
+        durationSeconds=request.durationSeconds,
+        startedAt=isoformat_utc(started_at),
+        expectedCompletedAt=isoformat_utc(expected_completed_at),
+    )
+
+
+@router.post(
+    "/hannah/curation-searches/{queue_item_id}/stop",
+    response_model=WorkspaceHannahCurationSearchStopResponse,
+)
+@legacy_router.post(
+    "/workspace/hannah/curation-searches/{queue_item_id}/stop",
+    response_model=WorkspaceHannahCurationSearchStopResponse,
+    include_in_schema=False,
+)
+def stop_hannah_curation_search(
+    queue_item_id: uuid.UUID,
+    session: Session = Depends(get_db_session),
+) -> WorkspaceHannahCurationSearchStopResponse:
+    hannah_definition = session.query(AgentDefinition).filter_by(slug="hannah").one_or_none()
+    if hannah_definition is None:
+        raise HTTPException(status_code=500, detail="Hannah agent definition is missing.")
+
+    queue_item = (
+        session.query(AgentQueueItem)
+        .filter(AgentQueueItem.id == queue_item_id)
+        .filter(AgentQueueItem.agent_id == hannah_definition.id)
+        .filter(AgentQueueItem.source_type == "published_symbol_photo_search")
+        .one_or_none()
+    )
+    if queue_item is None:
+        raise HTTPException(status_code=404, detail="Hannah curation search queue item was not found.")
+
+    stopped_at = datetime.now(timezone.utc).replace(microsecond=0)
+    payload = dict(queue_item.payload_json or {})
+    process_pid = payload.get("process_pid")
+    process_group_id = payload.get("process_group_id") or process_pid
+    termination = "not_running"
+
+    if isinstance(process_group_id, int):
+        try:
+            os.killpg(process_group_id, signal.SIGTERM)
+            termination = "terminated"
+        except ProcessLookupError:
+            termination = "not_running"
+        except PermissionError:
+            termination = "permission_denied"
+        except OSError:
+            if isinstance(process_pid, int):
+                try:
+                    os.kill(process_pid, signal.SIGTERM)
+                    termination = "terminated"
+                except ProcessLookupError:
+                    termination = "not_running"
+                except PermissionError:
+                    termination = "permission_denied"
+                except OSError:
+                    termination = "failed"
+            else:
+                termination = "failed"
+
+    payload["stopped_at"] = isoformat_utc(stopped_at)
+    payload["stop_requested_by"] = "admin"
+    payload["termination"] = termination
+    queue_item.status = "cancelled"
+    queue_item.payload_json = payload
+    queue_item.completed_at = stopped_at
+    session.add(queue_item)
+    session.commit()
+
+    queue_path = HANNAH_RUNTIME_ROOT / "agent_queue_items" / f"{queue_item_id}.json"
+    if queue_path.exists():
+        try:
+            queue_record = json.loads(queue_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            queue_record = {}
+        queue_record.update(
+            {
+                "id": str(queue_item_id),
+                "agent_id": "hannah",
+                "source_type": "published_symbol_photo_search",
+                "status": "cancelled",
+                "payload_json": payload,
+                "completed_at": isoformat_utc(stopped_at),
+            }
+        )
+        queue_path.write_text(json.dumps(queue_record, indent=2) + "\n", encoding="utf-8")
+
+    return WorkspaceHannahCurationSearchStopResponse(
+        queueItemId=str(queue_item_id),
+        status="cancelled",
+        stoppedAt=isoformat_utc(stopped_at),
+        termination=termination,
+    )
+
+
+HANNAH_PHOTO_SORT_COLUMNS = {
+    "symbolName": GovernedSymbol.canonical_name,
+    "sourceUrl": HannahPhotoCandidate.source_url,
+    "sourceDomain": HannahPhotoCandidate.source_domain,
+    "title": HannahPhotoCandidate.title,
+    "rightsStatus": HannahPhotoCandidate.rights_status,
+    "licenseLabel": HannahPhotoCandidate.license_label,
+    "status": HannahPhotoCandidate.status,
+    "relevanceScore": HannahPhotoCandidate.relevance_score,
+    "lastSeenAt": HannahPhotoCandidate.last_seen_at,
+    "lastSessionQueueItemId": HannahPhotoCandidate.queue_item_id,
+}
+
+
+def hannah_photo_candidate_response(row) -> WorkspaceHannahPhotoCandidateResponse:
+    candidate = row[0]
+    preview_url = (
+        f"/api/v1/published/symbols/{row.symbol_slug}/supplemental-photos/{candidate.id}/preview"
+        if candidate.object_key and candidate.status == "attached" and row.symbol_slug
+        else None
+    )
+    return WorkspaceHannahPhotoCandidateResponse(
+        id=str(candidate.id),
+        symbolId=str(candidate.symbol_id),
+        symbolSlug=row.symbol_slug,
+        symbolName=row.symbol_name,
+        pageTitle=row.page_title,
+        category=row.category,
+        discipline=row.discipline,
+        sourceUrl=candidate.source_url,
+        imageUrl=candidate.image_url,
+        sourceDomain=candidate.source_domain,
+        title=candidate.title,
+        description=candidate.description,
+        rightsStatus=candidate.rights_status,
+        licenseLabel=candidate.license_label,
+        status=candidate.status,
+        relevanceScore=float(candidate.relevance_score) if candidate.relevance_score is not None else None,
+        previewUrl=preview_url,
+        evidence=candidate.evidence_json or {},
+        firstSeenAt=isoformat_utc(candidate.first_seen_at),
+        lastSeenAt=isoformat_utc(candidate.last_seen_at),
+        lastSessionQueueItemId=str(candidate.queue_item_id) if candidate.queue_item_id else None,
+    )
+
+
+@router.get(
+    "/hannah/photo-candidates",
+    response_model=WorkspaceHannahPhotoCandidateListResponse,
+)
+@legacy_router.get(
+    "/workspace/hannah/photo-candidates",
+    response_model=WorkspaceHannahPhotoCandidateListResponse,
+    include_in_schema=False,
+)
+def list_hannah_photo_candidates(
+    session: Session = Depends(get_db_session),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    sort: str = Query(default="lastSeenAt"),
+    direction: str = Query(default="desc", pattern="^(asc|desc)$"),
+    symbolName: str | None = Query(default=None),
+    sourceUrl: str | None = Query(default=None),
+    sourceDomain: str | None = Query(default=None),
+    title: str | None = Query(default=None),
+    rightsStatus: str | None = Query(default=None),
+    licenseLabel: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    relevanceScore: str | None = Query(default=None),
+    lastSeenAt: str | None = Query(default=None),
+    lastSessionQueueItemId: str | None = Query(default=None),
+) -> WorkspaceHannahPhotoCandidateListResponse:
+    query = (
+        session.query(
+            HannahPhotoCandidate,
+            GovernedSymbol.slug.label("symbol_slug"),
+            GovernedSymbol.canonical_name.label("symbol_name"),
+            GovernedSymbol.category.label("category"),
+            GovernedSymbol.discipline.label("discipline"),
+            PublishedPage.title.label("page_title"),
+        )
+        .join(GovernedSymbol, GovernedSymbol.id == HannahPhotoCandidate.symbol_id)
+        .outerjoin(PublishedPage, PublishedPage.id == HannahPhotoCandidate.published_page_id)
+    )
+    filter_values = {
+        "symbolName": symbolName,
+        "sourceUrl": sourceUrl,
+        "sourceDomain": sourceDomain,
+        "title": title,
+        "rightsStatus": rightsStatus,
+        "licenseLabel": licenseLabel,
+        "status": status,
+        "relevanceScore": relevanceScore,
+        "lastSeenAt": lastSeenAt,
+        "lastSessionQueueItemId": lastSessionQueueItemId,
+    }
+    for key, raw_value in filter_values.items():
+        value = (raw_value or "").strip()
+        if not value:
+            continue
+        column = HANNAH_PHOTO_SORT_COLUMNS[key]
+        query = query.filter(func.lower(cast(column, Text)).like(f"%{value.lower()}%"))
+
+    total = query.count()
+    sort_column = HANNAH_PHOTO_SORT_COLUMNS.get(sort, HannahPhotoCandidate.last_seen_at)
+    ordered_column = sort_column.asc() if direction == "asc" else sort_column.desc()
+    rows = query.order_by(ordered_column, HannahPhotoCandidate.source_url.asc()).offset(offset).limit(limit).all()
+    return WorkspaceHannahPhotoCandidateListResponse(
+        items=[hannah_photo_candidate_response(row) for row in rows],
+        total=total,
+        offset=offset,
+        limit=limit,
+        hasMore=offset + len(rows) < total,
+    )
+
+
+@router.post(
+    "/whitney/demand-scans",
+    response_model=WorkspaceWhitneyDemandScanStartResponse,
+    responses={409: {"description": "Whitney demand scan already running"}},
+)
+@legacy_router.post(
+    "/workspace/whitney/demand-scans",
+    response_model=WorkspaceWhitneyDemandScanStartResponse,
+    include_in_schema=False,
+)
+def start_whitney_demand_scan(
+    request: WorkspaceWhitneyDemandScanStartRequest,
+    session: Session = Depends(get_db_session),
+) -> WorkspaceWhitneyDemandScanStartResponse:
+    active_statuses = ("queued", "running", "sensing")
+    whitney_definition = session.query(AgentDefinition).filter_by(slug="whitney").one_or_none()
+    if whitney_definition is None:
+        raise HTTPException(status_code=500, detail="Whitney agent definition is missing.")
+
+    active_item = (
+        session.query(AgentQueueItem)
+        .filter(AgentQueueItem.agent_id == whitney_definition.id)
+        .filter(AgentQueueItem.source_type == "market_demand_scan")
+        .filter(AgentQueueItem.status.in_(active_statuses))
+        .order_by(AgentQueueItem.created_at.desc())
+        .first()
+    )
+    if active_item is not None:
+        expected_completed_at = (active_item.started_at or active_item.created_at) + timedelta(
+            seconds=int((active_item.payload_json or {}).get("duration_seconds") or request.durationSeconds)
+        )
+        return WorkspaceWhitneyDemandScanStartResponse(
+            queueItemId=str(active_item.id),
+            status=active_item.status,
+            durationSeconds=int((active_item.payload_json or {}).get("duration_seconds") or request.durationSeconds),
+            startedAt=isoformat_utc(active_item.started_at or active_item.created_at),
+            expectedCompletedAt=isoformat_utc(expected_completed_at),
+        )
+
+    started_at = datetime.now(timezone.utc).replace(microsecond=0)
+    expected_completed_at = started_at + timedelta(seconds=request.durationSeconds)
+    queue_item_id = uuid.uuid4()
+    source_id = uuid.uuid4()
+    payload = {
+        "task_type": "market_demand_scan",
+        "display_name": "Market demand sensing scan",
+        "stage": "Market intelligence",
+        "duration_seconds": request.durationSeconds,
+        "focus": (request.focus or "").strip() or None,
+        "started_by": "admin",
+        "expected_completed_at": isoformat_utc(expected_completed_at),
+        "input_sources": ["published_symbols", "clarifications", "intake_records", "review_cases"],
+    }
+    queue_item = AgentQueueItem(
+        id=queue_item_id,
+        agent_id=whitney_definition.id,
+        source_type="market_demand_scan",
+        source_id=source_id,
+        status="sensing",
+        priority="medium",
+        payload_json=payload,
+        confidence=None,
+        escalation_reason=None,
+        created_at=started_at,
+        started_at=started_at,
+        completed_at=None,
+    )
+    session.add(queue_item)
+    session.commit()
+
+    queue_record = {
+        "id": str(queue_item_id),
+        "agent_id": "whitney",
+        "source_type": "market_demand_scan",
+        "source_id": str(source_id),
+        "status": "sensing",
+        "priority": "medium",
+        "payload_json": payload,
+        "created_at": isoformat_utc(started_at),
+        "started_at": isoformat_utc(started_at),
+        "completed_at": None,
+    }
+    queue_dir = WHITNEY_RUNTIME_ROOT / "agent_queue_items"
+    log_dir = WHITNEY_RUNTIME_ROOT / "market_intelligence_logs"
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    queue_path = queue_dir / f"{queue_item_id}.json"
+    queue_path.write_text(json.dumps(queue_record, indent=2) + "\n", encoding="utf-8")
+
+    log_path = log_dir / f"{queue_item_id}.log"
+    with log_path.open("a", encoding="utf-8") as log_handle:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                str(WHITNEY_RUNNER),
+                "--queue-item",
+                str(queue_path),
+                "--runtime-root",
+                str(WHITNEY_RUNTIME_ROOT),
+                "--persist-db",
+                "--db-env-file",
+                str(WHITNEY_DB_ENV_FILE),
+            ],
+            stdout=log_handle,
+            stderr=log_handle,
+            close_fds=True,
+            start_new_session=True,
+        )
+
+    payload["process_pid"] = process.pid
+    payload["process_group_id"] = process.pid
+    queue_item.payload_json = payload
+    queue_record["payload_json"] = payload
+    queue_path.write_text(json.dumps(queue_record, indent=2) + "\n", encoding="utf-8")
+    session.add(queue_item)
+    session.commit()
+
+    return WorkspaceWhitneyDemandScanStartResponse(
+        queueItemId=str(queue_item_id),
+        status="sensing",
+        durationSeconds=request.durationSeconds,
+        startedAt=isoformat_utc(started_at),
+        expectedCompletedAt=isoformat_utc(expected_completed_at),
+    )
+
+
+@router.post(
+    "/whitney/demand-scans/{queue_item_id}/stop",
+    response_model=WorkspaceWhitneyDemandScanStopResponse,
+)
+@legacy_router.post(
+    "/workspace/whitney/demand-scans/{queue_item_id}/stop",
+    response_model=WorkspaceWhitneyDemandScanStopResponse,
+    include_in_schema=False,
+)
+def stop_whitney_demand_scan(
+    queue_item_id: uuid.UUID,
+    session: Session = Depends(get_db_session),
+) -> WorkspaceWhitneyDemandScanStopResponse:
+    whitney_definition = session.query(AgentDefinition).filter_by(slug="whitney").one_or_none()
+    if whitney_definition is None:
+        raise HTTPException(status_code=500, detail="Whitney agent definition is missing.")
+
+    queue_item = (
+        session.query(AgentQueueItem)
+        .filter(AgentQueueItem.id == queue_item_id)
+        .filter(AgentQueueItem.agent_id == whitney_definition.id)
+        .filter(AgentQueueItem.source_type == "market_demand_scan")
+        .one_or_none()
+    )
+    if queue_item is None:
+        raise HTTPException(status_code=404, detail="Whitney demand scan queue item was not found.")
+
+    stopped_at = datetime.now(timezone.utc).replace(microsecond=0)
+    payload = dict(queue_item.payload_json or {})
+    process_pid = payload.get("process_pid")
+    process_group_id = payload.get("process_group_id") or process_pid
+    termination = "not_running"
+
+    if isinstance(process_group_id, int):
+        try:
+            os.killpg(process_group_id, signal.SIGTERM)
+            termination = "terminated"
+        except ProcessLookupError:
+            termination = "not_running"
+        except PermissionError:
+            termination = "permission_denied"
+        except OSError:
+            if isinstance(process_pid, int):
+                try:
+                    os.kill(process_pid, signal.SIGTERM)
+                    termination = "terminated"
+                except ProcessLookupError:
+                    termination = "not_running"
+                except PermissionError:
+                    termination = "permission_denied"
+                except OSError:
+                    termination = "failed"
+            else:
+                termination = "failed"
+
+    payload["stopped_at"] = isoformat_utc(stopped_at)
+    payload["stop_requested_by"] = "admin"
+    payload["termination"] = termination
+    queue_item.status = "cancelled"
+    queue_item.payload_json = payload
+    queue_item.completed_at = stopped_at
+    session.add(queue_item)
+    session.commit()
+
+    queue_path = WHITNEY_RUNTIME_ROOT / "agent_queue_items" / f"{queue_item_id}.json"
+    if queue_path.exists():
+        try:
+            queue_record = json.loads(queue_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            queue_record = {}
+        queue_record.update(
+            {
+                "id": str(queue_item_id),
+                "agent_id": "whitney",
+                "source_type": "market_demand_scan",
+                "status": "cancelled",
+                "payload_json": payload,
+                "completed_at": isoformat_utc(stopped_at),
+            }
+        )
+        queue_path.write_text(json.dumps(queue_record, indent=2) + "\n", encoding="utf-8")
+
+    return WorkspaceWhitneyDemandScanStopResponse(
+        queueItemId=str(queue_item_id),
+        status="cancelled",
+        stoppedAt=isoformat_utc(stopped_at),
+        termination=termination,
+    )
+
+
+WHITNEY_SIGNAL_SORT_COLUMNS = {
+    "signalType": WhitneyDemandSignal.signal_type,
+    "marketSegment": WhitneyDemandSignal.market_segment,
+    "discipline": WhitneyDemandSignal.discipline,
+    "category": WhitneyDemandSignal.category,
+    "sourceType": WhitneyDemandSignal.source_type,
+    "title": WhitneyDemandSignal.title,
+    "demandScore": WhitneyDemandSignal.demand_score,
+    "confidence": WhitneyDemandSignal.confidence,
+    "recommendedAction": WhitneyDemandSignal.recommended_action,
+    "status": WhitneyDemandSignal.status,
+    "lastSeenAt": WhitneyDemandSignal.last_seen_at,
+    "lastSessionQueueItemId": WhitneyDemandSignal.queue_item_id,
+}
+
+
+def whitney_demand_signal_response(row) -> WorkspaceWhitneyDemandSignalResponse:
+    signal = row[0]
+    return WorkspaceWhitneyDemandSignalResponse(
+        id=str(signal.id),
+        signalType=signal.signal_type,
+        marketSegment=signal.market_segment,
+        discipline=signal.discipline,
+        category=signal.category,
+        sourceType=signal.source_type,
+        sourceRef=signal.source_ref,
+        symbolId=str(signal.symbol_id) if signal.symbol_id else None,
+        symbolSlug=row.symbol_slug,
+        symbolName=row.symbol_name,
+        pageTitle=row.page_title,
+        title=signal.title,
+        summary=signal.summary,
+        demandScore=float(signal.demand_score) if signal.demand_score is not None else None,
+        confidence=float(signal.confidence) if signal.confidence is not None else None,
+        recommendedAction=signal.recommended_action,
+        status=signal.status,
+        evidence=signal.evidence_json or {},
+        firstSeenAt=isoformat_utc(signal.first_seen_at),
+        lastSeenAt=isoformat_utc(signal.last_seen_at),
+        lastSessionQueueItemId=str(signal.queue_item_id) if signal.queue_item_id else None,
+    )
+
+
+@router.get(
+    "/whitney/demand-signals",
+    response_model=WorkspaceWhitneyDemandSignalListResponse,
+)
+@legacy_router.get(
+    "/workspace/whitney/demand-signals",
+    response_model=WorkspaceWhitneyDemandSignalListResponse,
+    include_in_schema=False,
+)
+def list_whitney_demand_signals(
+    session: Session = Depends(get_db_session),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    sort: str = Query(default="lastSeenAt"),
+    direction: str = Query(default="desc", pattern="^(asc|desc)$"),
+    signalType: str | None = Query(default=None),
+    marketSegment: str | None = Query(default=None),
+    discipline: str | None = Query(default=None),
+    category: str | None = Query(default=None),
+    sourceType: str | None = Query(default=None),
+    title: str | None = Query(default=None),
+    demandScore: str | None = Query(default=None),
+    confidence: str | None = Query(default=None),
+    recommendedAction: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    lastSeenAt: str | None = Query(default=None),
+    lastSessionQueueItemId: str | None = Query(default=None),
+) -> WorkspaceWhitneyDemandSignalListResponse:
+    query = (
+        session.query(
+            WhitneyDemandSignal,
+            GovernedSymbol.slug.label("symbol_slug"),
+            GovernedSymbol.canonical_name.label("symbol_name"),
+            PublishedPage.title.label("page_title"),
+        )
+        .outerjoin(GovernedSymbol, GovernedSymbol.id == WhitneyDemandSignal.symbol_id)
+        .outerjoin(PublishedPage, PublishedPage.id == WhitneyDemandSignal.published_page_id)
+    )
+    filter_values = {
+        "signalType": signalType,
+        "marketSegment": marketSegment,
+        "discipline": discipline,
+        "category": category,
+        "sourceType": sourceType,
+        "title": title,
+        "demandScore": demandScore,
+        "confidence": confidence,
+        "recommendedAction": recommendedAction,
+        "status": status,
+        "lastSeenAt": lastSeenAt,
+        "lastSessionQueueItemId": lastSessionQueueItemId,
+    }
+    for key, raw_value in filter_values.items():
+        value = (raw_value or "").strip()
+        if not value:
+            continue
+        column = WHITNEY_SIGNAL_SORT_COLUMNS[key]
+        query = query.filter(func.lower(cast(column, Text)).like(f"%{value.lower()}%"))
+
+    total = query.count()
+    sort_column = WHITNEY_SIGNAL_SORT_COLUMNS.get(sort, WhitneyDemandSignal.last_seen_at)
+    ordered_column = sort_column.asc() if direction == "asc" else sort_column.desc()
+    rows = query.order_by(ordered_column, WhitneyDemandSignal.title.asc()).offset(offset).limit(limit).all()
+    return WorkspaceWhitneyDemandSignalListResponse(
+        items=[whitney_demand_signal_response(row) for row in rows],
+        total=total,
+        offset=offset,
+        limit=limit,
+        hasMore=offset + len(rows) < total,
+    )
 
 
 @router.get(

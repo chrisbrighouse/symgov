@@ -237,6 +237,66 @@
         "run_ed_feedback.py",
         "runtime/agent_definitions/ed.json"
       ]
+    },
+    {
+      "id": "hannah",
+      "name": "Hannah",
+      "workspace": "/data/.openclaw/workspaces/hannah",
+      "agent_dir": "/data/.openclaw/agents/hannah/agent",
+      "model": "openai/gpt-5-mini",
+      "identity_name": "Hannah",
+      "tools": {
+        "profile": "full",
+        "allow": [
+          "group:runtime",
+          "group:sessions"
+        ],
+        "elevated": {
+          "enabled": true,
+          "allowFrom": {
+            "telegram": [
+              7643191699
+            ]
+          }
+        }
+      },
+      "agent_to_agent": true,
+      "required_workspace_files": [
+        "AGENTS.md",
+        "IDENTITY.md",
+        "run_hannah_curation.py",
+        "runtime/agent_definitions/hannah.json"
+      ]
+    },
+    {
+      "id": "whitney",
+      "name": "Whitney",
+      "workspace": "/data/.openclaw/workspaces/whitney",
+      "agent_dir": "/data/.openclaw/agents/whitney/agent",
+      "model": "openai/gpt-5-mini",
+      "identity_name": "Whitney",
+      "tools": {
+        "profile": "full",
+        "allow": [
+          "group:runtime",
+          "group:sessions"
+        ],
+        "elevated": {
+          "enabled": true,
+          "allowFrom": {
+            "telegram": [
+              7643191699
+            ]
+          }
+        }
+      },
+      "agent_to_agent": true,
+      "required_workspace_files": [
+        "AGENTS.md",
+        "IDENTITY.md",
+        "run_whitney_market_intelligence.py",
+        "runtime/agent_definitions/whitney.json"
+      ]
     }
   ]
 }

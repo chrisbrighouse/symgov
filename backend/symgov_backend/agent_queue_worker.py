@@ -55,9 +55,22 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
         "module": "symgov_ed_runner_worker",
         "persist_db": False,
     },
+    "hannah": {
+        "runtime_root": Path("/data/.openclaw/workspaces/hannah/runtime"),
+        "runner_path": Path("/data/symgov/scripts/run_hannah_curation.py"),
+        "module": "symgov_hannah_runner_worker",
+        "persist_db": True,
+        "storage": True,
+    },
+    "whitney": {
+        "runtime_root": Path("/data/.openclaw/workspaces/whitney/runtime"),
+        "runner_path": Path("/data/.openclaw/workspaces/whitney/run_whitney_market_intelligence.py"),
+        "module": "symgov_whitney_runner_worker",
+        "persist_db": True,
+    },
 }
 
-DEFAULT_AGENT_ORDER = ("scott", "vlad", "tracy", "libby", "daisy", "rupert", "ed")
+DEFAULT_AGENT_ORDER = ("scott", "vlad", "tracy", "libby", "daisy", "rupert", "ed", "hannah", "whitney")
 LIBBY_RUNTIME_ROOT = AGENT_SPECS["libby"]["runtime_root"]
 
 

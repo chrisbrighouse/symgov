@@ -1,6 +1,6 @@
 # symgov Agent Architecture
 
-Last updated: 2026-04-26
+Last updated: 2026-05-22
 
 ## Purpose
 
@@ -26,7 +26,7 @@ This means Symgov agent work does not need a new model strategy first. It needs 
 
 Current implementation baseline:
 
-- baseline `agent_definitions` rows for `scott`, `vlad`, and `tracy` now exist in the live Symgov database
+- baseline `agent_definitions` rows for `scott`, `vlad`, `tracy`, `daisy`, `libby`, `rupert`, `ed`, and `hannah` are now defined by the backend seed path
 - the current local runners remain file-backed first, but now support a first verified PostgreSQL write-through bridge for queue items, agent runs, output artifacts, and durable agent-specific records
 - the current verified smoke path is `Scott` intake -> downstream enqueue -> `Vlad` validation + `Tracy` provenance
 - the current bootstrap and inspection entrypoint is `/data/.openclaw/workspace/symgov/backend/manage_symgov.py`
@@ -52,7 +52,7 @@ The spreadsheet under `Documentation/Symgov` describes a future operating model 
 - `Libby` classification and discoverability
 - `Daisy` review coordination
 - `Rupert` publication and release management
-- `David` curation
+- `Hannah` catalogue quality and long-term curation
 - `Reggie` audit and compliance
 - `Whitney` market intelligence
 - `Ed` documentation and policy (also oversees UI changes to provide the best user experience)
@@ -63,7 +63,10 @@ Current implementation status is now mixed rather than empty:
 - `Daisy` now exists as the first review-coordination scaffold and can be created automatically from persisted `review_cases`
 - `Libby` now exists as the classification-and-research scaffold between `Tracy` and `Daisy`
 - `Rupert` now exists as the first publishing and release-management scaffold after either human approval or an auditable Libby no-human-review-required handoff
-- the remaining named agents still exist only as planning targets
+- `Ed` now exists as the visual experience/help/feedback scaffold
+- `Hannah` now exists as the catalogue quality and long-term curation scaffold for published Standards records
+- `Whitney` now exists as the market intelligence and demand sensing scaffold for internal demand telemetry
+- `Reggie` remains the only named planning-wave agent without a current scaffold
 
 The implementation direction should be:
 
@@ -112,6 +115,7 @@ Examples:
 - `Daisy` writes reviewer assignment proposals, stage-transition proposals, and contributor evidence requests against existing `review_cases`
 - `Rupert` writes release packages, publication logs, withdrawal actions
 - `Reggie` writes anomaly alerts, control exceptions, audit summaries
+- `Whitney` writes demand signals, market intelligence summaries, and prioritization recommendations
 
 Free-text summaries can exist, but downstream workflow should key off structured fields.
 
@@ -408,6 +412,48 @@ Agreed operating rules:
 - Rupert is reached from an explicit approved human review decision or from Libby's structured no-human-review-required handoff; Rupert is never reached from Vlad directly
 - the first implementation stages release intent into a local release area and report artifact; durable database publication mutations can follow once final release authority is defined
 
+### `Hannah` - catalogue quality and published-record curation agent
+
+Owns:
+
+- published Standards catalogue quality
+- supplemental real-world equipment photo curation
+- long-term maintenance signals for already-published records
+- low-risk published metadata cleanup when the backend records an audit trail
+
+Inputs:
+
+- public published symbol records
+- published page and pack context
+- governed symbol Category and Discipline values
+- prior Hannah curation state and photo-candidate records
+
+Outputs:
+
+- `hannah_curation_report` output artifacts
+- `hannah_symbol_curation_states`
+- `hannah_photo_candidates`
+- attached supplemental-photo object-storage assets for low-risk licensed images
+- audit events for metadata updates and supplemental-photo attachment
+
+Agreed operating rules:
+
+- Hannah works only after Rupert has published a symbol into public Standards content.
+- Hannah is separate from Scott intake/source discovery, Tracy provenance, Libby classification, Rupert publication, and Ed UI/help ownership.
+- Hannah searches one eligible published symbol at a time until the configured run window expires.
+- Hannah curation searches can be stopped by an admin from the Workspace Curation tab; stopping cancels the queue item, records stop metadata, and terminates the detached runner process group when the backend has a stored process id.
+- Eligibility requires reasonable Name, page title, Category, and Discipline values before search begins.
+- Hannah records scored candidates for admin inspection and auto-attaches only low-risk licensed photos.
+- Public Standards displays at most two Hannah-attached supplemental photos per symbol, kept distinct from the schematic symbol preview.
+- Hannah may make low-risk metadata updates only through audited backend persistence.
+
+Current implementation status:
+
+- Hannah is registered in the SymGov-owned OpenClaw manifest and backend agent seed list with queue family `curation`.
+- The Workspace Curation tab starts Hannah through `POST /api/v1/workspace/hannah/curation-searches`, stops active searches through `POST /api/v1/workspace/hannah/curation-searches/{queue_item_id}/stop`, and reads candidates through `GET /api/v1/workspace/hannah/photo-candidates`.
+- Alembic revision `20260519_0010_hannah_curation.py` creates `hannah_symbol_curation_states` and `hannah_photo_candidates`.
+- The runner at `/data/symgov/scripts/run_hannah_curation.py` queries Wikimedia Commons image metadata, scores candidates, uploads permitted low-risk image files when storage is configured, and persists reports through the runtime bridge.
+
 ## Current bootstrap and usage notes
 
 - Seed baseline agent rows with:
@@ -423,10 +469,11 @@ Agreed operating rules:
 - Run local scaffold-only agents with:
   - `python /data/.openclaw/workspaces/daisy/run_daisy_coordination.py --queue-item ... --runtime-root ...`
   - `python /data/.openclaw/workspaces/rupert/run_rupert_publication.py --queue-item ... --runtime-root ...`
+  - `python /data/symgov/scripts/run_hannah_curation.py --queue-item ... --runtime-root /data/.openclaw/workspaces/hannah/runtime --persist-db`
 
 ## Current verified live state
 
-- `agent_definitions` contains seed definitions for `scott`, `vlad`, `tracy`, `daisy`, `libby`, and `rupert`
+- `agent_definitions` contains seed definitions for `scott`, `vlad`, `tracy`, `daisy`, `libby`, `rupert`, `ed`, and `hannah`
 - `Scott` has been verified writing `agent_queue_items`, `agent_runs`, `agent_output_artifacts`, and `intake_records`
 - `Vlad` has been verified writing `agent_queue_items`, `agent_runs`, `agent_output_artifacts`, and `validation_reports`
 - `Vlad` Phase 1 raster split persistence has now also been verified for:
@@ -459,8 +506,13 @@ Agreed operating rules:
   - can persist durable publication records with `--persist-db`, writing publication jobs, packs, published pages, pack entries, audit events, and published symbol lifecycle updates
   - causes Workspace Rupert cards to show `PUBLISHED` and link to the Standards record only after the queued symbol revision has a public published page
   - is registered in the SymGov-owned OpenClaw manifest and backend agent seed list
-- independent output contract
-- manageable even before advanced orchestration exists
+- `Hannah` now:
+  - accepts `published_symbol_photo_search` queue items
+  - writes local curation reports
+  - persists candidate rows and per-symbol curation state through the runtime bridge
+  - attaches low-risk licensed supplemental photos to published symbol revisions when storage is configured
+  - exposes candidate results in the Workspace Curation tab and accepted photos in Standards detail
+  - supports admin cancellation of active curation searches through a Workspace Stop control
 
 ### `Ed` - visual experience and help agent (also oversees UI changes to provide the best user experience)
 
@@ -493,6 +545,49 @@ Current implementation status:
 
 Rupert should produce structured publication summaries, page metadata, and pack context that Ed can render. Ed (also oversees UI changes to provide the best user experience) may propose UI grouping such as source-file pack grouping, discipline grouping, or search facets, but those should consume published APIs rather than mutate publication data.
 
+### `Whitney` - market intelligence and demand sensing agent
+
+Owns:
+
+- market intelligence queue
+- demand signal detection
+- catalogue demand summaries
+- prioritization recommendations for operator review
+
+Inputs:
+
+- published Standards coverage by category and discipline
+- clarification request volume
+- external intake patterns
+- open review-case pressure
+- future approved external market-research evidence, only when source capture and provenance are explicit
+
+Outputs:
+
+- durable `whitney_market_intelligence_reports`
+- durable `whitney_demand_signals`
+- ranked recommendations for catalogue coverage, aliases, examples, source-pack priority, or queue attention
+- active/watch demand signals for clarification demand, submission interest, review pressure, and thin published-catalogue coverage
+- evidence traces that distinguish internal telemetry from external research
+
+Does not own:
+
+- publication writes
+- symbol approval, rejection, validation, classification, provenance, or rights decisions
+- Hannah's published-catalogue photo curation
+- Ed's UI/help decisions
+- direct public Standards content mutation
+
+Current implementation status:
+
+- Whitney has a local OpenClaw workspace at `/data/.openclaw/workspaces/whitney`
+- Whitney is registered in the SymGov-owned OpenClaw manifest and backend agent seed list with queue family `market_intelligence`
+- Whitney writes local queue records, `market_intelligence_logs`, `agent_runs`, `agent_output_artifacts`, and `market_intelligence_reports` under `/data/.openclaw/workspaces/whitney/runtime`
+- Whitney's first slice uses internal Symgov telemetry only: published coverage, clarification volume, intake records, and open review pressure over the runner lookback window
+- Workspace starts Whitney through `POST /api/v1/workspace/whitney/demand-scans`; request payload is `durationSeconds` plus optional `focus`
+- Whitney queue items use `source_type = 'market_demand_scan'`, run as `sensing`, complete as `signals_recorded`, and retain cancelled records with stop metadata when the Workspace Stop control is used
+- Workspace exposes Whitney through the `Intelligence` tab and demand-signal table, while the Agents monitor uses chevron navigation between a seven-lane pipeline screen and a second monitor screen ordered Hannah, Whitney, Ed
+
 ### `Daisy` - review coordination agent
 
 Owns:
@@ -520,17 +615,11 @@ Why after wave 1:
 - depends on upstream Libby review-required decisions and supporting outputs
 - better once intake, validation, and provenance contracts exist
 
-## Wave 2 agents
+## Remaining planning waves
 
-- `Libby` for classification and discoverability
-- `Rupert` for publication jobs and release control
 - `Reggie` for compliance monitoring and control rules
 
-## Wave 3 agents
-
-- `David` for catalogue curation
-- `Whitney` for market intelligence
-- `Ed` for documentation and policy maintenance (also oversees UI changes to provide the best user experience)
+Libby, Rupert, Ed, Hannah, and Whitney have moved from planning slots into current scaffolded implementation slices.
 
 ## Recommended first implementation slice
 
@@ -551,6 +640,7 @@ Practical sequence:
 4. Add `Tracy` provenance queue and evidence outputs.
 5. Add `Daisy` to coordinate exceptions and stage movement across those outputs.
 6. Add `Rupert` to stage approved symbols for release and Standards publication.
+7. Add `Hannah` to curate published Standards catalogue quality after publication.
 
 ## Gemma usage policy
 
