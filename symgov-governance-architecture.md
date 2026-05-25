@@ -1,6 +1,6 @@
 # symgov Governance — Architecture
 
-Last updated: 2026-04-12
+Last updated: 2026-05-22
 
 ## Summary
 
@@ -49,7 +49,7 @@ Product rules
   - id, symbol_revision_id, standard_version_id, relationship_type
 
 This keeps provenance and reference context separate from publication output. A symbol revision may be associated with multiple source packages, multiple standards, or both.
-Source-package membership may also be captured before normalization at intake/import time and later propagated into revision-level links.
+Source-package membership may also be captured before normalization at intake/import time and later propagated into revision-level links. For external sheet/file submissions, Symgov also uses `source_packages.package_code` as the stable Workspace package display ID: a global uppercase 4-character hexadecimal sequence starting at `0001`.
 
 ### Review and publish workflow
 
@@ -88,6 +88,8 @@ This model keeps published page membership, pack membership, clarification captu
   - list latest approved published records with search and pack filters
 - `GET /api/v1/published/symbols/{symbol_id}`
   - latest approved symbol detail only
+- `GET /api/v1/published/symbols/{symbol_id}/supplemental-photos/{photo_id}/preview`
+  - public preview for a Hannah-attached real-world equipment photo
 - `GET /api/v1/published/pages/{page_code}`
   - published page metadata and latest approved symbol/page payload
 - `GET /api/v1/published/packs`
@@ -101,6 +103,7 @@ Phase-1 published API rule:
 - public Standards endpoints must only return `publication_packs.audience = 'public'`
 - `internal_preview` content remains a Workspace-only concern
 - published page codes are generated from durable symbol and pack metadata rather than accepted from frontend input
+- Hannah supplemental photos must remain separate from the schematic `previewUrl`; public payloads expose them as `supplementalPhotos` and the read path caps displayed attached photos at two per symbol
 
 ### Governance Workspace
 
@@ -113,10 +116,32 @@ Phase-1 published API rule:
 - `GET /api/v1/workspace/review-cases`
   - Daisy-visible review cases with source preview context and latest decision summary
   - open split children are projected as first-class human-review items with `reviewItemType: "split_item"`, `parentReviewCaseId`, one child payload, and the child preview as the primary visual while their `review_split_items.status` is `awaiting_decision` or `returned_for_review`
+- `GET /api/v1/workspace/scott/source-sites`
+  - Scott source-discovery memory rows for admin inspection, including URL, status, title, domain, classification metadata, source formats, evidence, relevance score, timestamps, last source-search queue item, candidate-only operator prompts, and a `Next run` inclusion flag
+  - supports offset/limit lazy loading, sortable columns, and simple text filters so the admin grid can scale without paging controls
+- `POST /api/v1/workspace/hannah/curation-searches`
+  - start a Hannah published-symbol curation run with a two-minute default duration, queue-item persistence, runtime JSON handoff, and detached runner launch
+- `POST /api/v1/workspace/hannah/curation-searches/{queue_item_id}/stop`
+  - stop an active Hannah curation run from Workspace, mark the queue item `cancelled`, persist stop metadata, update the runtime queue JSON, and terminate the detached runner process group when available
+- `GET /api/v1/workspace/hannah/photo-candidates`
+  - Hannah photo-candidate rows for admin inspection, including symbol context, source URL/domain, image URL, rights status, license, relevance score, candidate status, timestamps, last queue item, and preview URL where a supplemental photo has been attached
+  - supports offset/limit lazy loading, sortable columns, and simple text filters for the Workspace Curation tab
+- `POST /api/v1/workspace/whitney/demand-scans`
+  - start a Whitney market intelligence and demand-sensing run with a two-minute default duration, queue-item persistence, runtime JSON handoff, and detached runner launch
+  - request body accepts `durationSeconds` from 30 to 300 and optional `focus`; response returns `queueItemId`, `status`, `durationSeconds`, `startedAt`, and `expectedCompletedAt`
+  - active `queued`, `running`, or `sensing` scans are returned as the current run rather than duplicated
+- `POST /api/v1/workspace/whitney/demand-scans/{queue_item_id}/stop`
+  - stop an active Whitney demand scan from Workspace, mark the queue item `cancelled`, persist stop metadata, update the runtime queue JSON, and terminate the detached runner process group when available
+- `GET /api/v1/workspace/whitney/demand-signals`
+  - Whitney demand-signal rows for admin inspection, including signal type, market segment, symbol/page context, source, demand score, confidence, recommendation, status, evidence, timestamps, and last queue item
+  - supports offset/limit lazy loading, sortable columns, and simple text filters for the Workspace Intelligence tab
 - `POST /api/v1/workspace/review-cases/{id}/decisions`
   - record a whole-case human decision for non-split review cases, route approval to Rupert, and route non-approval outcomes to Libby
 - `POST /api/v1/workspace/review-cases/{id}/split-items/process-decisions`
   - process only decided raster split child items, route approved children to Rupert and non-approved children to Libby, leave undecided children open, and close the parent split case only after all child items are processed
+- `PATCH /api/v1/workspace/review-cases/{id}/symbol-properties`
+  - update reviewer-editable symbol properties for the active review record: `Name`, `Description`, `Category`, and `Discipline`, while showing read-only source `Format` as file-format context
+  - remember reviewer-entered `Category` and `Discipline` values as reusable database-backed options, normalized to capitalized mixed case and deduplicated by canonical/fuzzy matching
 - `GET /api/v1/workspace/symbols/{symbol_id}`
   - governed record detail across lifecycle states
 - `GET /api/v1/workspace/symbols/{symbol_id}/audit`
@@ -276,6 +301,7 @@ These are distinct from `publication_packs`. `publication_packs` are Symgov-cont
 Recommended notes:
 
 - use this for named imported sets, supplier packages, standards appendices, or other upstream bundles
+- external sheet/file intake creates a source-package row with a global uppercase 4-character hex `package_code`, starting at `0001` after an explicit clean reset; this code is the compact Workspace package display ID
 - `package_type` should distinguish imported source bundles from internal convenience groupings if both are allowed later
 - package membership may begin at intake/import time before a submission is normalized into one or more symbol revisions
 
@@ -372,6 +398,36 @@ Recommended notes:
 - `note text null`
 - `created_at timestamptz not null`
 
+#### `review_symbol_properties`
+
+- `id uuid primary key`
+- `review_case_id uuid not null references review_cases(id)`
+- `review_split_item_id uuid null references review_split_items(id)`
+- `symbol_record_key text not null`
+- `name text not null`
+- `description text not null default ''`
+- `category text null`
+- `discipline text null`
+- `source text not null default 'agent_initial'`
+- `updated_by text null`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+
+Recommended constraints:
+
+- unique `(review_case_id, symbol_record_key)`
+- index `review_split_item_id`
+
+Recommended notes:
+
+- this table stores reviewer-editable properties for individual symbol review records before publication
+- agent output can seed the values, but reviewers may override them from the review interface
+- `Name` is limited by the API/UI to 50 characters and allows letters, numbers, spaces, `-`, `/`, and `$`
+- `Description` is limited to 256 characters and may contain any characters
+- publication staging should prefer these reviewed values for `name`, `description`, `category`, and `discipline`
+- Standards should display the reviewed/published `name` in the `Name` column and label the symbol identifier column as `ID`
+- Standards browse should expose latest published records through facets and a central approved-symbol grid. Opening a row displays an in-grid right detail panel with the same height cap as the grid so detail content scrolls internally and the close control remains reachable.
+
 #### `publication_packs`
 
 - `id uuid primary key`
@@ -454,7 +510,120 @@ Decision for phase 1:
 - current implementation note:
   - Rupert `--persist-db` writes the authoritative publication tables first
   - `refresh_published_symbol_views()` is a migration-owned security-definer function that lets the app role refresh the materialized view without owning it
-  - public published APIs compose directly from `publication_packs`, `published_pages`, `pack_entries`, `symbol_revisions`, and `governed_symbols`; the refreshed materialized view remains available for future browse optimization
+  - public published APIs compose directly from `publication_packs`, `published_pages`, `pack_entries`, `symbol_revisions`, `governed_symbols`, and Hannah attached-photo rows; the refreshed materialized view remains available for future browse optimization
+
+### Hannah curation tables
+
+Hannah is the published-catalogue quality and long-term curation agent. Her first durable slice focuses on supplemental real-world equipment photos for already-published Standards records.
+
+#### `hannah_symbol_curation_states`
+
+- `id uuid primary key`
+- `symbol_id uuid not null references governed_symbols(id)`
+- `status text not null`
+- `attempt_count integer not null default 0`
+- `photo_count integer not null default 0`
+- `last_attempt_at timestamptz null`
+- `last_success_at timestamptz null`
+- `notes_json jsonb not null default '{}'::jsonb`
+- `created_at timestamptz not null`
+- `updated_at timestamptz not null`
+
+Recommended constraints:
+
+- unique `symbol_id`
+- index `(status, last_attempt_at)`
+
+Recommended notes:
+
+- this table prevents Hannah from repeatedly searching the same published symbol without state
+- eligibility is enforced before search: published symbol records need reasonable Name, page title, Category, and Discipline values, and Category/Discipline must not collapse to the same placeholder value
+- Hannah prioritizes public published symbols with fewer than two attached public supplemental photos and older or missing curation attempts
+
+#### `hannah_photo_candidates`
+
+- `id uuid primary key`
+- `symbol_id uuid not null references governed_symbols(id)`
+- `symbol_revision_id uuid null references symbol_revisions(id)`
+- `published_page_id uuid null references published_pages(id)`
+- `queue_item_id uuid null references agent_queue_items(id)`
+- `source_url text not null`
+- `image_url text not null`
+- `source_domain text not null`
+- `title text null`
+- `description text null`
+- `rights_status text not null`
+- `license_label text null`
+- `status text not null`
+- `relevance_score numeric(5,4) null`
+- `attachment_id uuid null references attachments(id)`
+- `object_key text null`
+- `evidence_json jsonb not null default '{}'::jsonb`
+- `first_seen_at timestamptz not null`
+- `last_seen_at timestamptz not null`
+
+Recommended constraints:
+
+- unique `(symbol_id, image_url)`
+- index `(symbol_id, status, relevance_score)`
+- index `last_seen_at`
+
+Recommended notes:
+
+- all scored candidates are kept for admin inspection even when not attached
+- only low-risk licensed candidates are auto-attached in the current implementation
+- attached photos are stored as normal object-storage attachments with `parent_type='symbol_revision'`
+- write and read paths enforce a maximum of two public supplemental photos per symbol
+- metadata and photo attachment actions should be traceable through audit events such as `hannah_metadata_updated` and `hannah_supplemental_photo_attached`
+
+### Whitney market intelligence tables
+
+Whitney is the market intelligence and demand sensing agent. Her first durable slice focuses on internal Symgov telemetry so recommendations remain evidence-backed before any external market-research dependency is introduced.
+
+#### `whitney_market_intelligence_reports`
+
+- `id uuid primary key`
+- `queue_item_id uuid null references agent_queue_items(id)`
+- `report_type text not null`
+- `status text not null`
+- `summary text not null`
+- `signals_json jsonb not null default '[]'::jsonb`
+- `recommendations_json jsonb not null default '[]'::jsonb`
+- `evidence_json jsonb not null default '{}'::jsonb`
+- `created_at timestamptz not null`
+- `completed_at timestamptz not null`
+
+#### `whitney_demand_signals`
+
+- `id uuid primary key`
+- `queue_item_id uuid null references agent_queue_items(id)`
+- `report_id uuid null references whitney_market_intelligence_reports(id)`
+- `symbol_id uuid null references governed_symbols(id)`
+- `published_page_id uuid null references published_pages(id)`
+- `signal_type text not null`
+- `market_segment text null`
+- `discipline text null`
+- `category text null`
+- `source_type text not null`
+- `source_ref text null`
+- `title text not null`
+- `summary text not null`
+- `demand_score numeric(5,4) null`
+- `confidence numeric(5,4) null`
+- `recommended_action text null`
+- `evidence_json jsonb not null default '{}'::jsonb`
+- `status text not null`
+- `first_seen_at timestamptz not null`
+- `last_seen_at timestamptz not null`
+
+Recommended notes:
+
+- Whitney uses source type `market_demand_scan` for demand sensing queue items.
+- The phase-1 runner derives signals from published Standards coverage, clarification volume, intake records, and open review-case pressure.
+- Current signal types are `clarification_demand`, `submission_interest`, `review_pressure`, and `catalogue_coverage_gap`.
+- Demand signals are refreshed by unique `(source_type, source_ref, signal_type)` identity across repeated scans.
+- Whitney's outputs are recommendations for operator prioritization; they do not directly mutate published Standards, classification, validation, provenance, review, or publication records.
+- Stopped Whitney demand scans retain their queue record with `status = 'cancelled'`, `completed_at`, `stopped_at`, `stop_requested_by`, and `termination` metadata so Workspace history remains auditable.
 
 ### Clarification and linkage tables
 
@@ -523,6 +692,8 @@ Recommended notes:
 
 - `source_type` plus `source_id` deliberately allows queue items to point at `intake_records`, `symbol_revisions`, `change_requests`, and later `review_cases`
 - do not overload queue rows with full agent output; outputs belong in durable output tables
+- Hannah uses source type `published_symbol_photo_search` for published Standards curation searches
+- Stopped Hannah curation searches retain their queue record with `status = 'cancelled'`, `completed_at`, `stopped_at`, `stop_requested_by`, and `termination` metadata so Workspace history remains auditable
 
 Decision for phase 1:
 
@@ -573,6 +744,21 @@ Recommended constraints:
 Recommended notes:
 
 - use this table for lightweight non-staff identities that can submit clarifications or intake metadata without becoming Workspace application users
+
+### Review symbol property options
+
+`review_symbol_property_options` stores reusable picklist values learned from reviewer-entered symbol properties. It is intentionally scoped first to `Category` and `Discipline`.
+
+Each row stores:
+
+- `field_name` such as `category` or `discipline`
+- `display_value` normalized to capitalized mixed case
+- `normalized_key` for case-insensitive and punctuation-insensitive deduplication
+- `use_count`, `created_at`, `updated_at`, and `last_used_at`
+
+When reviewers save symbol properties, the Workspace API normalizes Category and Discipline, records or updates the corresponding option row, and stores the normalized display value back on `review_symbol_properties`. The Reviews UI fetches the option list through `GET /api/v1/workspace/review-symbol-property-options` and presents saved values as explicit selectors beside editable text fields while preserving free-text entry for new terms.
+
+`review_symbol_properties.format` is read-only in the current Reviews UI. It is populated from Libby classification when available, otherwise from validation/intake metadata, source filename, or object-key extension. It renders as a compact file-format badge under the description and uses labels such as `PNG`, `JPEG`, `SVG`, `SVF`, and `DXF`.
 - these records are contact and provenance references only, not direct login principals for phase 1
 
 #### `intake_records`
@@ -595,6 +781,7 @@ Recommended notes:
 Recommended notes:
 
 - `source_package_id` is the first-class pre-normalization link when a raw submission belongs to a named imported or supplied package
+- external intake persists the allocated `source_packages.package_code` into `normalized_submission_json.source_package_code` and `normalized_submission_json.workspace_display_name`
 - if one intake payload represents multiple packaged members before symbol splitting is complete, keep the full incoming membership detail in `normalized_submission_json` until downstream normalization creates revision-level `source_package_entries`
 - keep `raw_object_key` in phase 1 even if `attachments` also exists, because intake handling benefits from a direct pointer to the original uploaded object before broader attachment linkage is normalized
 
@@ -674,6 +861,8 @@ Recommended notes:
 - `processed_at timestamptz null`
 
 `review_split_items` materializes Vlad `derivative_manifest.children` for raster split review cases. Once materialized, each split child has its own human-review lifecycle. The open review list exposes child items with `awaiting_decision` or `returned_for_review` as individual split-item review records, including parent review-case lineage and a one-child decision payload. Processed children leave the human-review queue after routing to Rupert or Libby, while remaining or returned children stay available for later SME decisions even if the original parent sheet review has already closed.
+
+Split-item payloads carry Workspace display metadata derived from the parent package: `package_display_id`, `package_symbol_sequence`, and `workspace_display_name`. The visible convention is `{packageId}-{sequence}` for extracted children, with sequence numbers starting at `1` for each package and not zero padded. For example, a sheet displayed as `0001` produces child names `0001-1`, `0001-2`, and `0001-13`.
 
 #### `publication_jobs`
 

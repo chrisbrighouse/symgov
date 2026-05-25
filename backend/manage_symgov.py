@@ -3,7 +3,14 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
+from symgov_backend.agent_queue_worker import (
+    DEFAULT_AGENT_ORDER,
+    AgentQueueWorkerConfig,
+    drain_agent_queues,
+    process_agent_queues_once,
+)
 from symgov_backend.api import serve_api
 from symgov_backend.openclaw_sync import audit_openclaw_registration, reconcile_openclaw_registration
 from symgov_backend.runtime import RuntimePersistenceBridge, check_database_health, check_storage_health
@@ -15,6 +22,12 @@ def parse_args():
 
     seed_parser = subparsers.add_parser("seed-agent-definitions", help="Upsert baseline agent_definitions rows.")
     seed_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+
+    scott_seed_parser = subparsers.add_parser(
+        "seed-scott-source-discovery",
+        help="Upsert Scott source discovery memory rows.",
+    )
+    scott_seed_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
 
     db_parser = subparsers.add_parser("check-db", help="Run a small database health and inspection check.")
     db_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
@@ -45,6 +58,46 @@ def parse_args():
     api_parser.add_argument("--host", default="0.0.0.0", help="Host interface to bind.")
     api_parser.add_argument("--port", type=int, default=8010, help="TCP port to bind.")
 
+    worker_parser = subparsers.add_parser("process-agent-queue", help="Process queued Symgov agent work.")
+    worker_parser.add_argument(
+        "--agent",
+        action="append",
+        choices=[*DEFAULT_AGENT_ORDER, "all"],
+        help="Agent queue to process. Repeat for multiple agents, or use all.",
+    )
+    worker_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    worker_parser.add_argument("--storage-env-file", help="Path to the Symgov storage env file.")
+    worker_parser.add_argument("--limit", type=int, default=10, help="Maximum queued items to process in one run.")
+    worker_parser.add_argument(
+        "--drain",
+        action="store_true",
+        help="Keep processing selected queues until a full cycle finds no queued work.",
+    )
+    worker_parser.add_argument("--max-cycles", type=int, default=50, help="Maximum drain cycles.")
+    worker_parser.add_argument(
+        "--agent-runtime",
+        choices=["direct", "hermes"],
+        default="direct",
+        help="Queue execution runtime. direct preserves the current in-process runner behavior; hermes dispatches via Hermes.",
+    )
+    worker_parser.add_argument("--hermes-profile", default="symgov", help="Hermes profile for --agent-runtime hermes.")
+    worker_parser.add_argument(
+        "--hermes-timeout-seconds",
+        type=int,
+        default=600,
+        help="Timeout for each Hermes specialist dispatch.",
+    )
+    worker_parser.add_argument(
+        "--hermes-host-openclaw-root",
+        default="/docker/openclaw-hz0t/data/.openclaw",
+        help="Host path corresponding to /data/.openclaw for host-side Hermes dispatch.",
+    )
+    worker_parser.add_argument(
+        "--hermes-container-openclaw-root",
+        default="/data/.openclaw",
+        help="Container path prefix to translate for host-side Hermes dispatch.",
+    )
+
     return parser.parse_args()
 
 
@@ -54,6 +107,11 @@ def main():
     if args.command == "seed-agent-definitions":
         bridge = RuntimePersistenceBridge(env_file=args.db_env_file)
         print(json.dumps({"operations": bridge.seed_agent_definitions()}, indent=2))
+        return
+
+    if args.command == "seed-scott-source-discovery":
+        bridge = RuntimePersistenceBridge(env_file=args.db_env_file)
+        print(json.dumps({"operations": bridge.seed_scott_source_discovery_sites()}, indent=2))
         return
 
     if args.command == "check-db":
@@ -74,6 +132,25 @@ def main():
 
     if args.command == "serve-api":
         serve_api(host=args.host, port=args.port)
+        return
+
+    if args.command == "process-agent-queue":
+        requested = args.agent or ["libby"]
+        agents = DEFAULT_AGENT_ORDER if "all" in requested else tuple(requested)
+        config = AgentQueueWorkerConfig(
+            agents=agents,
+            db_env_file=Path(args.db_env_file) if args.db_env_file else None,
+            storage_env_file=Path(args.storage_env_file) if args.storage_env_file else None,
+            limit=args.limit,
+            drain=args.drain,
+            agent_runtime=args.agent_runtime,
+            hermes_profile=args.hermes_profile,
+            hermes_timeout_seconds=args.hermes_timeout_seconds,
+            hermes_host_openclaw_root=Path(args.hermes_host_openclaw_root),
+            hermes_container_openclaw_root=Path(args.hermes_container_openclaw_root),
+        )
+        result = drain_agent_queues(config, max_cycles=args.max_cycles) if args.drain else process_agent_queues_once(config)
+        print(json.dumps(result, indent=2))
         return
 
     raise SystemExit(f"Unsupported command: {args.command}")

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+REVIEW_SYMBOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9 \-/$]*$")
 
 
 class APIHealthResponse(BaseModel):
@@ -38,13 +42,15 @@ class ExternalSubmissionQueueItemResponse(BaseModel):
     fileName: str
     fileNote: str
     batchSummary: str
+    status: str = "queued"
     routes: list[str]
     payload: dict[str, Any]
     attachmentId: str
     attachmentObjectKey: str
-    intakeRecordId: str
-    intakeStatus: str
-    eligibilityStatus: str
+    scottQueueItemPath: str | None = None
+    intakeRecordId: str | None = None
+    intakeStatus: str = "pending"
+    eligibilityStatus: str = "pending"
     dbPersistence: dict[str, Any] | None = None
     downstreamCreated: dict[str, Any]
 
@@ -62,6 +68,9 @@ class WorkspaceReviewChildResponse(BaseModel):
     id: str
     proposedSymbolId: str
     proposedSymbolName: str
+    displayName: str | None = None
+    packageDisplayId: str | None = None
+    packageSymbolSequence: int | None = None
     fileName: str
     parentFileName: str
     nameSource: str | None = None
@@ -74,6 +83,32 @@ class WorkspaceReviewChildResponse(BaseModel):
     processedAt: str | None = None
     downstreamAgentSlug: str | None = None
     downstreamQueueItemId: str | None = None
+
+
+class WorkspaceReviewSymbolPropertiesResponse(BaseModel):
+    id: str
+    reviewCaseId: str
+    splitItemId: str | None = None
+    symbolRecordKey: str
+    name: str
+    description: str = ""
+    category: str | None = None
+    discipline: str | None = None
+    format: str | None = None
+    source: str
+    updatedBy: str | None = None
+    updatedAt: str
+
+
+class WorkspaceReviewSymbolPropertyOptionResponse(BaseModel):
+    fieldName: str
+    value: str
+    useCount: int
+    lastUsedAt: str
+
+
+class WorkspaceReviewSymbolPropertyOptionListResponse(BaseModel):
+    items: list[WorkspaceReviewSymbolPropertyOptionResponse]
 
 
 class WorkspaceHumanReviewDecisionSummary(BaseModel):
@@ -96,6 +131,9 @@ class WorkspaceReviewCaseResponse(BaseModel):
     splitChildKey: str | None = None
     splitChildStatus: str | None = None
     symbolId: str
+    displayName: str | None = None
+    packageDisplayId: str | None = None
+    packageSymbolSequence: int | None = None
     title: str
     owner: str
     due: str
@@ -133,6 +171,7 @@ class WorkspaceReviewCaseResponse(BaseModel):
     sourceRefs: list[str] = []
     classificationSummary: str | None = None
     latestDecision: WorkspaceHumanReviewDecisionSummary | None = None
+    symbolProperties: WorkspaceReviewSymbolPropertiesResponse | None = None
     children: list[WorkspaceReviewChildResponse]
 
 
@@ -147,9 +186,17 @@ class WorkspaceAgentQueueItemResponse(BaseModel):
     queueFamily: str
     sourceType: str
     sourceId: str
+    displayName: str | None = None
+    packageDisplayId: str | None = None
+    packageSymbolSequence: int | None = None
     status: str
     priority: str
     payload: dict[str, Any]
+    toolSummary: list[str] = Field(default_factory=list)
+    publishedSymbolId: str | None = None
+    publishedPageCode: str | None = None
+    publishedPackCode: str | None = None
+    publishedStandardsPath: str | None = None
     confidence: float | None = None
     escalationReason: str | None = None
     createdAt: str
@@ -159,6 +206,180 @@ class WorkspaceAgentQueueItemResponse(BaseModel):
 
 class WorkspaceAgentQueueItemListResponse(BaseModel):
     items: list[WorkspaceAgentQueueItemResponse]
+
+
+class WorkspaceScottSourceSearchStartRequest(BaseModel):
+    durationSeconds: int = Field(default=120, ge=30, le=300)
+    seedQuery: str | None = Field(default=None, max_length=200)
+
+
+class WorkspaceScottSourceSearchStartResponse(BaseModel):
+    queueItemId: str
+    status: str
+    durationSeconds: int
+    startedAt: str
+    expectedCompletedAt: str
+
+
+class WorkspaceScottSourceSearchStopResponse(BaseModel):
+    queueItemId: str
+    status: str
+    stoppedAt: str
+    termination: str
+
+
+class WorkspaceScottSourceSiteResponse(BaseModel):
+    id: str
+    url: str
+    status: str
+    title: str | None = None
+    domain: str
+    description: str | None = None
+    industry: str | None = None
+    process: str | None = None
+    organizationType: str | None = None
+    sourcePrompt: str | None = None
+    includeNextRun: bool = False
+    symbolFormats: list[Any] = Field(default_factory=list)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    relevanceScore: float | None = None
+    firstSeenAt: str
+    lastSeenAt: str
+    lastSessionQueueItemId: str | None = None
+
+
+class WorkspaceScottSourceSitePromptUpdateRequest(BaseModel):
+    sourcePrompt: str | None = Field(default=None, max_length=4000)
+
+
+class WorkspaceScottSourceSiteIncludeNextRunUpdateRequest(BaseModel):
+    includeNextRun: bool
+
+
+class WorkspaceScottSourceSiteStatusUpdateRequest(BaseModel):
+    status: str = Field(min_length=1, max_length=64)
+
+    @field_validator("status")
+    @classmethod
+    def normalize_status(cls, value: str) -> str:
+        normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+        if normalized == "ignore":
+            return "ignored"
+        allowed = {"candidate", "low_signal", "ignored"}
+        if normalized not in allowed:
+            raise ValueError(f"Unsupported Scott source status: {value}")
+        return normalized
+
+
+class WorkspaceScottSourceSiteListResponse(BaseModel):
+    items: list[WorkspaceScottSourceSiteResponse]
+    total: int
+    offset: int
+    limit: int
+    hasMore: bool
+
+
+class WorkspaceHannahCurationSearchStartRequest(BaseModel):
+    durationSeconds: int = Field(default=120, ge=30, le=300)
+
+
+class WorkspaceHannahCurationSearchStartResponse(BaseModel):
+    queueItemId: str
+    status: str
+    durationSeconds: int
+    startedAt: str
+    expectedCompletedAt: str
+
+
+class WorkspaceHannahCurationSearchStopResponse(BaseModel):
+    queueItemId: str
+    status: str
+    stoppedAt: str
+    termination: str
+
+
+class WorkspaceHannahPhotoCandidateResponse(BaseModel):
+    id: str
+    symbolId: str
+    symbolSlug: str | None = None
+    symbolName: str | None = None
+    pageTitle: str | None = None
+    category: str | None = None
+    discipline: str | None = None
+    sourceUrl: str
+    imageUrl: str
+    sourceDomain: str
+    title: str | None = None
+    description: str | None = None
+    rightsStatus: str
+    licenseLabel: str | None = None
+    status: str
+    relevanceScore: float | None = None
+    previewUrl: str | None = None
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    firstSeenAt: str
+    lastSeenAt: str
+    lastSessionQueueItemId: str | None = None
+
+
+class WorkspaceHannahPhotoCandidateListResponse(BaseModel):
+    items: list[WorkspaceHannahPhotoCandidateResponse]
+    total: int
+    offset: int
+    limit: int
+    hasMore: bool
+
+
+class WorkspaceWhitneyDemandScanStartRequest(BaseModel):
+    durationSeconds: int = Field(default=120, ge=30, le=300)
+    focus: str | None = Field(default=None, max_length=120)
+
+
+class WorkspaceWhitneyDemandScanStartResponse(BaseModel):
+    queueItemId: str
+    status: str
+    durationSeconds: int
+    startedAt: str
+    expectedCompletedAt: str
+
+
+class WorkspaceWhitneyDemandScanStopResponse(BaseModel):
+    queueItemId: str
+    status: str
+    stoppedAt: str
+    termination: str
+
+
+class WorkspaceWhitneyDemandSignalResponse(BaseModel):
+    id: str
+    signalType: str
+    marketSegment: str | None = None
+    discipline: str | None = None
+    category: str | None = None
+    sourceType: str
+    sourceRef: str | None = None
+    symbolId: str | None = None
+    symbolSlug: str | None = None
+    symbolName: str | None = None
+    pageTitle: str | None = None
+    title: str
+    summary: str
+    demandScore: float | None = None
+    confidence: float | None = None
+    recommendedAction: str | None = None
+    status: str
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    firstSeenAt: str
+    lastSeenAt: str
+    lastSessionQueueItemId: str | None = None
+
+
+class WorkspaceWhitneyDemandSignalListResponse(BaseModel):
+    items: list[WorkspaceWhitneyDemandSignalResponse]
+    total: int
+    offset: int
+    limit: int
+    hasMore: bool
 
 
 class WorkspaceDaisyAssignmentProposalResponse(BaseModel):
@@ -220,6 +441,31 @@ class WorkspaceReviewDecisionRequest(BaseModel):
     deciderRole: str = "sme_reviewer"
     childDecisions: list[WorkspaceReviewChildDecisionInput] = Field(default_factory=list)
     caseComment: str = ""
+
+
+class WorkspaceReviewSymbolPropertiesUpdateRequest(BaseModel):
+    splitItemId: str | None = None
+    name: str = Field(min_length=1, max_length=50)
+    description: str = Field(default="", max_length=256)
+    category: str | None = Field(default=None, max_length=80)
+    discipline: str | None = Field(default=None, max_length=80)
+    format: str | None = Field(default=None, max_length=40)
+    updatedBy: str = Field(default="Human", max_length=80)
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not REVIEW_SYMBOL_NAME_PATTERN.match(trimmed):
+            raise ValueError("Name may only contain letters, numbers, spaces, hyphens, slashes, and dollar signs.")
+        return trimmed
+
+    @field_validator("description", "category", "discipline", "format", "updatedBy")
+    @classmethod
+    def trim_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip()
 
 
 class WorkspaceSplitReviewProcessRequest(BaseModel):

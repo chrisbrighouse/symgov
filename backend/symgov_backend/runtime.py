@@ -18,7 +18,7 @@ from typing import Any
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DEPS = BACKEND_ROOT / ".deps"
 
-if BACKEND_DEPS.exists() and str(BACKEND_DEPS) not in sys.path:
+if os.environ.get("SYMGOV_DISABLE_BACKEND_DEPS", "").strip().lower() not in {"1", "true", "yes", "on"} and BACKEND_DEPS.exists() and str(BACKEND_DEPS) not in sys.path:
     sys.path.insert(0, str(BACKEND_DEPS))
 
 from sqlalchemy import text
@@ -42,10 +42,16 @@ from .models import (
     PublishedPage,
     ReviewCase,
     ReviewSplitItem,
+    ScottSourceDiscoverySite,
     ControlException,
+    SourcePackage,
     SymbolRevision,
+    HannahPhotoCandidate,
+    HannahSymbolCurationState,
     User,
     ValidationReport,
+    WhitneyDemandSignal,
+    WhitneyMarketIntelligenceReport,
 )
 
 
@@ -108,6 +114,101 @@ AGENT_DEFINITION_SEEDS = (
         "status": "active",
         "queue_family": "ux_feedback",
     },
+    {
+        "slug": "hannah",
+        "display_name": "Hannah",
+        "role": "catalogue quality and long-term curation agent",
+        "model": "ollama/gemma4:e4b",
+        "status": "active",
+        "queue_family": "curation",
+    },
+    {
+        "slug": "whitney",
+        "display_name": "Whitney",
+        "role": "market intelligence and demand sensing agent",
+        "model": "ollama/gemma4:e4b",
+        "status": "active",
+        "queue_family": "market_intelligence",
+    },
+)
+
+SCOTT_SOURCE_DISCOVERY_SITE_SEEDS = (
+    {
+        "domain": "commons.wikimedia.org",
+        "url": "https://commons.wikimedia.org/w/index.php?search=P%26ID+symbols&title=Special%3AMediaSearch&type=image",
+        "title": "Wikimedia Commons",
+        "description": "Useful source of symbol imagery, especially for P&ID symbol discovery.",
+        "industry": "cross-industry",
+        "process": "symbol discovery",
+        "organization_type": "public media repository",
+        "symbol_formats_json": ["image"],
+        "evidence_json": {
+            "example_search": "P&ID symbols MediaSearch",
+            "note": "Approved as a good source of symbol information.",
+        },
+        "status": "recommended",
+        "relevance_score": Decimal("0.9900"),
+    },
+    {
+        "domain": "linecad.com",
+        "url": "https://linecad.com",
+        "title": "linecad.com",
+        "description": "Ignored for Scott source discovery per operator guidance.",
+        "industry": "cross-industry",
+        "process": "symbol discovery",
+        "organization_type": "website",
+        "symbol_formats_json": [],
+        "evidence_json": {
+            "note": "Explicitly ignored.",
+        },
+        "status": "ignored",
+        "relevance_score": Decimal("0.0000"),
+    },
+    {
+        "domain": "freecads.com",
+        "url": "https://freecads.com",
+        "title": "freecads.com",
+        "description": "Ignored for Scott source discovery per operator guidance.",
+        "industry": "cross-industry",
+        "process": "symbol discovery",
+        "organization_type": "website",
+        "symbol_formats_json": [],
+        "evidence_json": {
+            "note": "Explicitly ignored.",
+        },
+        "status": "ignored",
+        "relevance_score": Decimal("0.0000"),
+    },
+    {
+        "domain": "autodesk.com",
+        "url": "https://autodesk.com",
+        "title": "autodesk.com",
+        "description": "Ignored for Scott source discovery per operator guidance.",
+        "industry": "cross-industry",
+        "process": "symbol discovery",
+        "organization_type": "website",
+        "symbol_formats_json": [],
+        "evidence_json": {
+            "note": "Explicitly ignored.",
+        },
+        "status": "ignored",
+        "relevance_score": Decimal("0.0000"),
+    },
+    {
+        "domain": "svghmi.pro",
+        "url": "https://svghmi.pro",
+        "title": "svghmi.pro",
+        "description": "Ignored for Scott source discovery per operator guidance.",
+        "industry": "cross-industry",
+        "process": "symbol discovery",
+        "organization_type": "website",
+        "symbol_formats_json": [],
+        "evidence_json": {
+            "note": "Explicitly ignored.",
+        },
+        "status": "ignored",
+        "relevance_score": Decimal("0.0000"),
+    },
 )
 
 
@@ -154,6 +255,74 @@ def slugify_public_code(value: Any) -> str:
             last_dash = True
     slug = "".join(chars).strip("-")
     return slug or "published"
+
+
+def normalize_scott_source_discovery_status(site_payload: dict[str, Any]) -> str:
+    status = str(site_payload.get("status") or "").strip().lower()
+    access_status = str(site_payload.get("access_status") or "").strip().lower()
+    if status in {"ignored", "blocked", "unreachable", "inaccessible", "timeout", "failed"}:
+        return "ignored"
+    if access_status in {"blocked", "unreachable", "inaccessible", "timeout", "failed", "error"}:
+        return "ignored"
+    if status:
+        return status
+    return "candidate"
+
+
+def next_source_package_code(session) -> str:
+    session.execute(text("LOCK TABLE source_packages IN EXCLUSIVE MODE"))
+    codes = session.execute(text("select package_code from source_packages")).scalars().all()
+    current_max = 0
+    for code in codes:
+        candidate = str(code or "").strip().upper()
+        if len(candidate) == 4 and all(char in "0123456789ABCDEF" for char in candidate):
+            current_max = max(current_max, int(candidate, 16))
+    next_value = current_max + 1
+    if next_value > 0xFFFF:
+        raise RuntimeError("Source package code space exhausted.")
+    return f"{next_value:04X}"
+
+
+def ensure_source_package_for_intake(session, durable_record: dict[str, Any], created_at: datetime) -> SourcePackage:
+    package_id = coerce_uuid(durable_record.get("source_package_id"))
+    normalized = dict(durable_record.get("normalized_submission_json") or {})
+    source_file = (
+        normalized.get("original_filename")
+        or normalized.get("origin_file_name")
+        or normalized.get("file_name")
+        or durable_record.get("raw_object_key")
+        or durable_record.get("source_ref")
+        or "Submitted sheet"
+    )
+
+    if package_id is not None:
+        package = session.get(SourcePackage, package_id)
+        if package is not None:
+            return package
+
+    package_code = str(normalized.get("source_package_code") or "").strip().upper()
+    if not (len(package_code) == 4 and all(char in "0123456789ABCDEF" for char in package_code)):
+        package_code = next_source_package_code(session)
+
+    package = session.query(SourcePackage).filter_by(package_code=package_code).one_or_none()
+    if package is None:
+        package = SourcePackage(
+            id=package_id or uuid.uuid4(),
+            package_code=package_code,
+            title=Path(str(source_file)).name,
+            provider=durable_record.get("submitter"),
+            package_type="submission_sheet",
+            status="active",
+            created_at=created_at,
+            updated_at=created_at,
+        )
+        session.add(package)
+    else:
+        package.title = package.title or Path(str(source_file)).name
+        package.provider = package.provider or durable_record.get("submitter")
+        package.updated_at = created_at
+    session.flush()
+    return package
 
 
 def read_storage_env_file(env_file: str | os.PathLike[str] | None = None) -> tuple[Path, dict[str, str]]:
@@ -438,6 +607,191 @@ class RuntimePersistenceBridge:
                 operations.append({"slug": spec["slug"], "action": "updated" if changed else "unchanged"})
 
         return operations
+
+    def seed_scott_source_discovery_sites(self) -> list[dict[str, str]]:
+        operations: list[dict[str, str]] = []
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        with self.session_scope() as session:
+            for spec in SCOTT_SOURCE_DISCOVERY_SITE_SEEDS:
+                domain = str(spec["domain"]).strip().lower()
+                row = (
+                    session.query(ScottSourceDiscoverySite)
+                    .filter(text("lower(domain) = :domain"))
+                    .params(domain=domain)
+                    .one_or_none()
+                )
+                if row is None:
+                    row = ScottSourceDiscoverySite(
+                        id=coerce_uuid(f"scott-source-discovery-site:{domain}"),
+                        domain=domain,
+                        first_seen_at=now,
+                        last_seen_at=now,
+                    )
+                    session.add(row)
+                    action = "inserted"
+                else:
+                    action = "updated"
+
+                changed = False
+                for field in (
+                    "url",
+                    "title",
+                    "description",
+                    "industry",
+                    "process",
+                    "organization_type",
+                    "status",
+                ):
+                    if getattr(row, field) != spec[field]:
+                        setattr(row, field, spec[field])
+                        changed = True
+
+                if list(row.symbol_formats_json or []) != list(spec["symbol_formats_json"]):
+                    row.symbol_formats_json = list(spec["symbol_formats_json"])
+                    changed = True
+                if dict(row.evidence_json or {}) != dict(spec["evidence_json"]):
+                    row.evidence_json = dict(spec["evidence_json"])
+                    changed = True
+                if row.relevance_score != spec["relevance_score"]:
+                    row.relevance_score = spec["relevance_score"]
+                    changed = True
+
+                row.last_seen_at = now
+                operations.append({"domain": domain, "action": action if action == "inserted" else ("updated" if changed else "unchanged")})
+
+        return operations
+
+    def persist_hannah_curation_report(self, durable_record: dict[str, Any]) -> dict[str, Any]:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        completed_at = parse_timestamp(durable_record.get("completed_at")) if durable_record.get("completed_at") else now
+        queue_item_id = coerce_uuid(durable_record.get("queue_item_id"))
+        candidate_results: list[dict[str, Any]] = []
+        state_results: list[dict[str, Any]] = []
+        metadata_results: list[dict[str, Any]] = []
+
+        with self.session_scope() as session:
+            for attempt in durable_record.get("symbol_attempts") or []:
+                symbol_id = coerce_uuid(attempt.get("symbol_id"))
+                if symbol_id is None:
+                    continue
+                photo_count = int(attempt.get("photo_count") or 0)
+                state = session.query(HannahSymbolCurationState).filter_by(symbol_id=symbol_id).one_or_none()
+                if state is None:
+                    state = HannahSymbolCurationState(
+                        id=uuid.uuid4(),
+                        symbol_id=symbol_id,
+                        status=attempt.get("status") or "attempted",
+                        attempt_count=0,
+                        photo_count=photo_count,
+                        last_attempt_at=completed_at,
+                        last_success_at=completed_at if photo_count else None,
+                        notes_json=attempt.get("notes") or {},
+                        created_at=completed_at,
+                        updated_at=completed_at,
+                    )
+                    session.add(state)
+                state.status = attempt.get("status") or state.status
+                state.attempt_count = int(state.attempt_count or 0) + 1
+                state.photo_count = photo_count
+                state.last_attempt_at = completed_at
+                if photo_count:
+                    state.last_success_at = completed_at
+                state.notes_json = attempt.get("notes") or state.notes_json or {}
+                state.updated_at = completed_at
+                state_results.append({"symbol_id": str(symbol_id), "status": state.status})
+
+                for update in attempt.get("metadata_updates") or []:
+                    field = update.get("field")
+                    value = str(update.get("value") or "").strip()
+                    if field not in {"canonical_name", "category", "discipline"} or not value:
+                        continue
+                    symbol = session.get(GovernedSymbol, symbol_id)
+                    if symbol is None:
+                        continue
+                    before = getattr(symbol, field)
+                    if before == value:
+                        continue
+                    setattr(symbol, field, value)
+                    symbol.updated_at = completed_at
+                    session.add(
+                        AuditEvent(
+                            id=uuid.uuid4(),
+                            entity_type="governed_symbol",
+                            entity_id=symbol_id,
+                            action="hannah_metadata_updated",
+                            actor_id=None,
+                            payload_json={
+                                "field": field,
+                                "before": before,
+                                "after": value,
+                                "queue_item_id": str(queue_item_id) if queue_item_id else None,
+                            },
+                            created_at=completed_at,
+                        )
+                    )
+                    metadata_results.append({"symbol_id": str(symbol_id), "field": field, "action": "updated"})
+
+            for candidate in durable_record.get("candidates") or []:
+                symbol_id = coerce_uuid(candidate.get("symbol_id"))
+                image_url = str(candidate.get("image_url") or "").strip()
+                if symbol_id is None or not image_url:
+                    continue
+                row = session.query(HannahPhotoCandidate).filter_by(symbol_id=symbol_id, image_url=image_url).one_or_none()
+                action = "updated"
+                if row is None:
+                    row = HannahPhotoCandidate(
+                        id=coerce_uuid(candidate.get("id")) or uuid.uuid4(),
+                        symbol_id=symbol_id,
+                        image_url=image_url,
+                        first_seen_at=completed_at,
+                    )
+                    session.add(row)
+                    action = "inserted"
+
+                row.symbol_revision_id = coerce_uuid(candidate.get("symbol_revision_id"))
+                row.published_page_id = coerce_uuid(candidate.get("published_page_id"))
+                row.queue_item_id = queue_item_id
+                row.source_url = candidate.get("source_url") or image_url
+                row.source_domain = candidate.get("source_domain") or "unknown"
+                row.title = candidate.get("title")
+                row.description = candidate.get("description")
+                row.rights_status = candidate.get("rights_status") or "unknown"
+                row.license_label = candidate.get("license_label")
+                row.status = candidate.get("status") or "candidate"
+                row.relevance_score = coerce_numeric(candidate.get("relevance_score"))
+                row.attachment_id = coerce_uuid(candidate.get("attachment_id"))
+                row.object_key = candidate.get("object_key")
+                row.evidence_json = candidate.get("evidence") or {}
+                row.last_seen_at = completed_at
+                candidate_results.append({"id": str(row.id), "symbol_id": str(symbol_id), "status": row.status, "action": action})
+
+                if row.status == "attached" and row.object_key:
+                    session.add(
+                        AuditEvent(
+                            id=uuid.uuid4(),
+                            entity_type="governed_symbol",
+                            entity_id=symbol_id,
+                            action="hannah_supplemental_photo_attached",
+                            actor_id=None,
+                            payload_json={
+                                "candidate_id": str(row.id),
+                                "object_key": row.object_key,
+                                "source_url": row.source_url,
+                                "license_label": row.license_label,
+                                "queue_item_id": str(queue_item_id) if queue_item_id else None,
+                            },
+                            created_at=completed_at,
+                        )
+                    )
+
+        return {
+            "candidate_count": len(candidate_results),
+            "state_count": len(state_results),
+            "metadata_update_count": len(metadata_results),
+            "candidates": candidate_results,
+            "states": state_results,
+            "metadata_updates": metadata_results,
+        }
 
     def upsert_external_identity(
         self,
@@ -778,6 +1132,8 @@ class RuntimePersistenceBridge:
         child_key: str,
         attachment_object_key: str,
         payload_updates: dict[str, Any] | None = None,
+        latest_note: str | None = None,
+        latest_details: str | None = None,
     ) -> dict[str, str]:
         now = datetime.now(timezone.utc).replace(microsecond=0)
         with self.session_scope() as session:
@@ -795,8 +1151,8 @@ class RuntimePersistenceBridge:
             row.file_name = Path(attachment_object_key).name
             row.status = "returned_for_review"
             row.latest_action = None
-            row.latest_note = None
-            row.latest_details = None
+            row.latest_note = latest_note
+            row.latest_details = latest_details
             row.downstream_agent_slug = None
             row.downstream_queue_item_id = None
             row.processed_at = None
@@ -807,6 +1163,69 @@ class RuntimePersistenceBridge:
                 "review_case_id": str(row.review_case_id),
                 "child_key": row.child_key,
                 "attachment_object_key": row.attachment_object_key,
+                "status": row.status,
+            }
+
+    def dispose_review_split_item(
+        self,
+        *,
+        review_case_id: str | uuid.UUID,
+        child_key: str,
+        disposition: str,
+        latest_note: str | None = None,
+        latest_details: str | None = None,
+        payload_updates: dict[str, Any] | None = None,
+    ) -> dict[str, str]:
+        normalized_disposition = "deleted" if disposition == "deleted" else "rejected"
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        with self.session_scope() as session:
+            row = (
+                session.query(ReviewSplitItem)
+                .filter(
+                    ReviewSplitItem.review_case_id == coerce_uuid(review_case_id),
+                    ReviewSplitItem.child_key == child_key,
+                )
+                .one_or_none()
+            )
+            if row is None:
+                raise RuntimeError(f"Missing review_split_items row for case {review_case_id} child {child_key}.")
+            row.status = normalized_disposition
+            row.latest_action = normalized_disposition
+            row.latest_note = latest_note
+            row.latest_details = latest_details
+            row.downstream_agent_slug = None
+            row.downstream_queue_item_id = None
+            row.processed_at = now
+            row.updated_at = now
+            row.payload_json = {
+                **(row.payload_json or {}),
+                "libby_disposition": {
+                    "disposition": normalized_disposition,
+                    "note": latest_note,
+                    "details": latest_details,
+                    "recorded_at": now.isoformat().replace("+00:00", "Z"),
+                },
+                **(payload_updates or {}),
+            }
+            session.add(
+                AuditEvent(
+                    entity_type="review_split_item",
+                    entity_id=row.id,
+                    action=f"libby_split_item_{normalized_disposition}",
+                    actor_id=None,
+                    payload_json={
+                        "review_case_id": str(row.review_case_id),
+                        "child_key": row.child_key,
+                        "note": latest_note,
+                        "details": latest_details,
+                    },
+                    created_at=now,
+                )
+            )
+            return {
+                "id": str(row.id),
+                "review_case_id": str(row.review_case_id),
+                "child_key": row.child_key,
                 "status": row.status,
             }
 
@@ -1188,6 +1607,14 @@ class RuntimePersistenceBridge:
             output_artifact.created_at = parse_timestamp(output_artifact_record["created_at"])
 
             if durable_kind == "intake_record":
+                created_at = parse_timestamp(durable_record["created_at"])
+                source_package = ensure_source_package_for_intake(session, durable_record, created_at)
+                normalized_submission = dict(durable_record["normalized_submission_json"])
+                normalized_submission["source_package_code"] = source_package.package_code
+                normalized_submission["workspace_display_name"] = source_package.package_code
+                durable_record["source_package_id"] = str(source_package.id)
+                durable_record["normalized_submission_json"] = normalized_submission
+
                 record = session.get(IntakeRecord, coerce_uuid(durable_record["id"]))
                 if record is None:
                     record = IntakeRecord(id=coerce_uuid(durable_record["id"]))
@@ -1201,10 +1628,10 @@ class RuntimePersistenceBridge:
                 record.eligibility_status = durable_record["eligibility_status"]
                 record.source_package_id = coerce_uuid(durable_record.get("source_package_id"))
                 record.raw_object_key = durable_record.get("raw_object_key")
-                record.normalized_submission_json = durable_record["normalized_submission_json"]
+                record.normalized_submission_json = normalized_submission
                 record.routing_recommendation_json = durable_record["routing_recommendation_json"]
                 record.report_json = durable_record["report_json"]
-                record.created_at = parse_timestamp(durable_record["created_at"])
+                record.created_at = created_at
             elif durable_kind == "validation_report":
                 record = session.get(ValidationReport, coerce_uuid(durable_record["id"]))
                 if record is None:
@@ -1303,6 +1730,198 @@ class RuntimePersistenceBridge:
                 record.updated_at = parse_timestamp(durable_record.get("updated_at") or durable_record["created_at"])
             elif durable_kind == "review_followup_report":
                 pass
+            elif durable_kind == "scott_source_discovery":
+                completed_at = parse_timestamp(durable_record["completed_at"])
+                for site_payload in durable_record.get("sites", []):
+                    domain = str(site_payload.get("domain") or "").strip().lower()
+                    url = str(site_payload.get("url") or "").strip()
+                    if not domain or not url:
+                        continue
+
+                    record = (
+                        session.query(ScottSourceDiscoverySite)
+                        .filter(text("lower(domain) = :domain"))
+                        .params(domain=domain)
+                        .one_or_none()
+                    )
+                    if record is None:
+                        record = ScottSourceDiscoverySite(
+                            id=uuid.uuid4(),
+                            domain=domain,
+                            first_seen_at=completed_at,
+                        )
+                        session.add(record)
+
+                    record.url = url
+                    record.title = site_payload.get("title")
+                    record.description = site_payload.get("description")
+                    record.industry = site_payload.get("industry")
+                    record.process = site_payload.get("process")
+                    record.organization_type = site_payload.get("organization_type")
+                    record.symbol_formats_json = site_payload.get("symbol_formats") or []
+                    record.evidence_json = site_payload.get("evidence") or {}
+                    record.status = normalize_scott_source_discovery_status(site_payload)
+                    record.relevance_score = coerce_numeric(site_payload.get("relevance_score"))
+                    record.last_seen_at = completed_at
+                    record.last_session_queue_item_id = queue_item_id
+            elif durable_kind == "hannah_curation_report":
+                completed_at = parse_timestamp(durable_record["completed_at"])
+                for attempt in durable_record.get("symbol_attempts") or []:
+                    symbol_id = coerce_uuid(attempt.get("symbol_id"))
+                    if symbol_id is None:
+                        continue
+                    state = session.query(HannahSymbolCurationState).filter_by(symbol_id=symbol_id).one_or_none()
+                    if state is None:
+                        state = HannahSymbolCurationState(
+                            id=uuid.uuid4(),
+                            symbol_id=symbol_id,
+                            created_at=completed_at,
+                        )
+                        session.add(state)
+                    state.status = attempt.get("status") or "attempted"
+                    state.attempt_count = int(state.attempt_count or 0) + 1
+                    state.photo_count = int(attempt.get("photo_count") or 0)
+                    state.last_attempt_at = completed_at
+                    if state.photo_count:
+                        state.last_success_at = completed_at
+                    state.notes_json = attempt.get("notes") or {}
+                    state.updated_at = completed_at
+
+                    for update in attempt.get("metadata_updates") or []:
+                        field = update.get("field")
+                        value = str(update.get("value") or "").strip()
+                        if field not in {"canonical_name", "category", "discipline"} or not value:
+                            continue
+                        symbol = session.get(GovernedSymbol, symbol_id)
+                        if symbol is None:
+                            continue
+                        before = getattr(symbol, field)
+                        if before == value:
+                            continue
+                        setattr(symbol, field, value)
+                        symbol.updated_at = completed_at
+                        session.add(
+                            AuditEvent(
+                                id=uuid.uuid4(),
+                                entity_type="governed_symbol",
+                                entity_id=symbol_id,
+                                action="hannah_metadata_updated",
+                                actor_id=None,
+                                payload_json={
+                                    "field": field,
+                                    "before": before,
+                                    "after": value,
+                                    "queue_item_id": str(queue_item_id),
+                                },
+                                created_at=completed_at,
+                            )
+                        )
+
+                for candidate_payload in durable_record.get("candidates") or []:
+                    symbol_id = coerce_uuid(candidate_payload.get("symbol_id"))
+                    image_url = str(candidate_payload.get("image_url") or "").strip()
+                    if symbol_id is None or not image_url:
+                        continue
+                    record = session.query(HannahPhotoCandidate).filter_by(symbol_id=symbol_id, image_url=image_url).one_or_none()
+                    if record is None:
+                        record = HannahPhotoCandidate(
+                            id=coerce_uuid(candidate_payload.get("id")) or uuid.uuid4(),
+                            symbol_id=symbol_id,
+                            image_url=image_url,
+                            first_seen_at=completed_at,
+                        )
+                        session.add(record)
+                    record.symbol_revision_id = coerce_uuid(candidate_payload.get("symbol_revision_id"))
+                    record.published_page_id = coerce_uuid(candidate_payload.get("published_page_id"))
+                    record.queue_item_id = queue_item_id
+                    record.source_url = candidate_payload.get("source_url") or image_url
+                    record.source_domain = candidate_payload.get("source_domain") or "unknown"
+                    record.title = candidate_payload.get("title")
+                    record.description = candidate_payload.get("description")
+                    record.rights_status = candidate_payload.get("rights_status") or "unknown"
+                    record.license_label = candidate_payload.get("license_label")
+                    record.status = candidate_payload.get("status") or "candidate"
+                    record.relevance_score = coerce_numeric(candidate_payload.get("relevance_score"))
+                    record.attachment_id = coerce_uuid(candidate_payload.get("attachment_id"))
+                    record.object_key = candidate_payload.get("object_key")
+                    record.evidence_json = candidate_payload.get("evidence") or {}
+                    record.last_seen_at = completed_at
+                    if record.status == "attached" and record.object_key:
+                        session.add(
+                            AuditEvent(
+                                id=uuid.uuid4(),
+                                entity_type="governed_symbol",
+                                entity_id=symbol_id,
+                                action="hannah_supplemental_photo_attached",
+                                actor_id=None,
+                                payload_json={
+                                    "candidate_id": str(record.id),
+                                    "object_key": record.object_key,
+                                    "source_url": record.source_url,
+                                    "license_label": record.license_label,
+                                    "queue_item_id": str(queue_item_id),
+                                },
+                                created_at=completed_at,
+                            )
+                        )
+            elif durable_kind == "whitney_market_intelligence_report":
+                completed_at = parse_timestamp(durable_record["completed_at"])
+                created_at = parse_timestamp(durable_record.get("created_at") or durable_record["completed_at"])
+                report_id = coerce_uuid(durable_record["id"])
+                report = session.get(WhitneyMarketIntelligenceReport, report_id)
+                if report is None:
+                    report = WhitneyMarketIntelligenceReport(id=report_id)
+                    session.add(report)
+                report.queue_item_id = queue_item_id
+                report.report_type = durable_record.get("report_type") or "demand_sensing"
+                report.status = durable_record.get("status") or "completed"
+                report.summary = durable_record.get("summary") or "Whitney demand sensing report completed."
+                report.signals_json = durable_record.get("signals") or []
+                report.recommendations_json = durable_record.get("recommendations") or []
+                report.evidence_json = durable_record.get("evidence") or {}
+                report.created_at = created_at
+                report.completed_at = completed_at
+                session.flush()
+
+                for signal_payload in durable_record.get("signals") or []:
+                    source_type = str(signal_payload.get("source_type") or "internal_telemetry")
+                    source_ref = str(signal_payload.get("source_ref") or signal_payload.get("id") or "")
+                    signal_type = str(signal_payload.get("signal_type") or "demand_signal")
+                    signal_id = coerce_uuid(signal_payload.get("id")) or coerce_uuid(
+                        f"whitney-demand-signal:{source_type}:{source_ref}:{signal_type}"
+                    )
+                    signal = session.get(WhitneyDemandSignal, signal_id)
+                    if signal is None:
+                        signal = (
+                            session.query(WhitneyDemandSignal)
+                            .filter_by(source_type=source_type, source_ref=source_ref, signal_type=signal_type)
+                            .one_or_none()
+                        )
+                    if signal is None:
+                        signal = WhitneyDemandSignal(
+                            id=signal_id,
+                            first_seen_at=completed_at,
+                        )
+                        session.add(signal)
+
+                    signal.queue_item_id = queue_item_id
+                    signal.report_id = report_id
+                    signal.symbol_id = coerce_uuid(signal_payload.get("symbol_id"))
+                    signal.published_page_id = coerce_uuid(signal_payload.get("published_page_id"))
+                    signal.signal_type = signal_type
+                    signal.market_segment = signal_payload.get("market_segment")
+                    signal.discipline = signal_payload.get("discipline")
+                    signal.category = signal_payload.get("category")
+                    signal.source_type = source_type
+                    signal.source_ref = source_ref
+                    signal.title = signal_payload.get("title") or "Demand signal"
+                    signal.summary = signal_payload.get("summary") or ""
+                    signal.demand_score = coerce_numeric(signal_payload.get("demand_score"))
+                    signal.confidence = coerce_numeric(signal_payload.get("confidence"))
+                    signal.recommended_action = signal_payload.get("recommended_action")
+                    signal.evidence_json = signal_payload.get("evidence") or {}
+                    signal.status = signal_payload.get("status") or "active"
+                    signal.last_seen_at = completed_at
             else:
                 raise ValueError(f"Unsupported durable_kind: {durable_kind}")
 

@@ -14,8 +14,9 @@
 
 ## Standards View components
 
-- `BrowsePane` with searchable approved results
-- `PublishedDetailPane` showing latest approved revision only
+- `BrowsePane` with searchable approved results; visible table labels use `ID` for the symbol identifier and `Name` for the published payload name
+- `PublishedDetailPane` showing latest approved revision only; when opened from the browse grid it sits in the right side of the browser grid and uses the same height cap as the approved-symbol grid
+- `SupplementalPhotoStrip` for Hannah-attached real-world equipment photo references. It is separate from the schematic symbol preview and displays at most two public attached photos.
 - `ClarificationContextPane` bound to current symbol and published page context
 - `GuidedLookupRoute` for focused conversational lookup
 - `DownloadRoute` for pack and export browsing
@@ -24,10 +25,10 @@
 ### Standards desktop grid
 
 - 12-column grid
-- Browse pane: columns 1-4
-- Published detail pane: columns 5-8
-- Clarification context pane: columns 9-12
-- Collapse to a single column on mobile with browse, detail, then clarification order
+- Facets pane: left columns
+- Approved-symbol grid: center columns
+- Published detail pane: right columns when a row is selected, scrolling internally to keep `Close` reachable
+- Collapse to a single column on mobile with facets, grid, then detail order
 
 ### Standards interaction priority
 
@@ -38,25 +39,38 @@
 
 ## Workspace View components
 
-- `WorkspaceTitlebar` with `ADMIN WORKSPACE` / `Activity Monitors`, search, visible last refresh time, and `Auto-refresh 5s` status that only polls while the Workspace page is mounted and the tab is visible
-- `MonitorSummaryRow` with compact counts for visible, active, escalated, and published activity
-- `QueueMonitorBoard` with eight vertical lanes for Scott, Vlad, Tracy, Libby, Daisy, Human Review, Rupert, and Ed
-- `MonitorColumn` with count, stage label, scrollable card stack, and compact footer status
-- `MonitorCard` with London-local `HH:MM DDMMMYY` time/date label where live timestamps are available, truncated title, source metadata, status, and priority dot. Agent queue cards use `createdAt`; Human Review cards use review `openedAt`, including individual split-item review records.
+- `WorkspaceTitlebar` as a persistent `ADMIN WORKSPACE` bar with `Agents`, `Sources`, `Curation`, and `Intelligence` tabs
+- `WorkspaceContentTitlebar` for tab-specific headings: `Activity Monitors` on Agents with chevron monitor-screen navigation, queue search, and refresh status controls; `Sources` on Sources; `Curation` on Hannah's curation workspace; and `Demand Sensing` on Whitney's market intelligence workspace
+- `WorkspaceMonitorStatusRow` as a compact single-line live status control in the Agents content titlebar, including last refresh time and `Auto-refresh 5s` state while polling is active
+- `QueueMonitorBoard` with two monitor screens: `Pipeline` shows Scott, Vlad, Tracy, Libby, Daisy, Human Review, and Rupert; `Intelligence` shows Hannah, Whitney, and Ed from left to right
+- `MonitorColumn` with count, stage label, and an internally scrollable card stack; duplicate footer counts are omitted
+- `MonitorCard` with London-local `HH:MM DDMMMYY` time/date label as the first visible row where live timestamps are available, short package/symbol display name as the second visible row, source metadata, optional Vlad `Process` line, optional Standards target for published Rupert cards, status on its own line under the activity string, and priority dot. Agent queue cards use `createdAt`; Human Review cards use review `openedAt`, including individual split-item review records.
+- `ScottSourceDiscoveryPanel` for the Workspace `Sources` tab. It renders the always-visible source memory grid, showing URL first with status and title prominent on the left, and supports sortable/filterable columns with infinite scroll instead of paging. It includes a `Next run` checkbox column with checked/unchecked filtering and a candidate-only Scott prompt editor for source access/download instructions.
+- `HannahCurationPanel` for the Workspace `Curation` tab. It renders Hannah's scored published-symbol photo candidates with source/domain, rights status, license, score, symbol context, sortable/filterable columns, and infinite scroll. Its titlebar controls mirror Scott's source-search pattern: `Start search`, a running countdown, and a red `Stop` button while a curation run is active.
+- `WhitneyDemandSignalsPanel` for the Workspace `Intelligence` tab. It renders Whitney's demand signals with signal type, market segment, demand score, confidence, recommendation, source, symbol/page context, sortable/filterable columns, and infinite scroll. Its titlebar controls mirror Scott and Hannah: `Start scan`, a running countdown, and a red `Stop` button while a demand scan is active.
+- Human Review cards link to the matching Reviews item. Rupert cards become clickable only after durable public publication exists, display `PUBLISHED`, and link to Standards View through the backend-provided published symbol target.
+- Workspace display names use backend-provided `displayName`: submitted sheets and single-symbol packages show the 4-character uppercase hex package ID such as `0001`, while extracted symbols show `{packageId}-{sequence}` such as `0001-1` or `0001-999`. Long filenames and proposed symbol names stay in detail/search context rather than the compact card title.
 - `GovernedRecordRoute`, `AuditRoute`, and `PublishRoute` for focused follow-through
 
 ### Workspace desktop grid
 
 - Full-width admin canvas
-- Summary metrics above the monitor board
-- Eight monitor lanes across HD desktop screens
+- Persistent Workspace tabs in the Admin Workspace bar
+- Agents content titlebar with chevron monitor-screen navigation, search, and status controls above the monitor board
+- Equal-height monitor lanes across HD desktop screens, split into a seven-lane first screen for Scott through Rupert and a second screen for Hannah, Whitney, and Ed that keeps the same lane width with blank space to the right
+- Sources tab uses the same full-width admin canvas for the source-memory grid
+- Curation tab uses the same full-width admin canvas for Hannah's curation controls and candidate grid
+- Intelligence tab uses the same full-width admin canvas for Whitney's demand scan controls and demand-signal grid
 - Horizontal board overflow on narrower desktop screens
 - Single-column stacking on small screens
 
 ### Workspace interaction priority
 
 - Monitor processing activity first
-- Search by batch, file, agent, status, or case second
+- Search by batch, status, or case second
+- Inspect Scott source-discovery progress from the Sources grid when administering web-search inputs, mark source rows for Scott's next run, and add candidate-only prompts that help Scott retrieve symbol files from selected sources
+- Inspect Hannah curation progress and photo candidates from the Curation grid when administering published Standards quality
+- Inspect Whitney demand signals from the Intelligence grid when prioritizing catalogue coverage or market-driven follow-up
 - Approve or request changes third
 - Use focused routes for audit or full record inspection when needed
 
@@ -64,12 +78,13 @@
 
 - `ReviewFilterGrid` for stage, reviewer, priority, action, and search-based triage
 - `ReviewQueuePane` for Daisy-visible cases, compact queue cards, and previous/next movement through filtered items
-- `ReviewSourceVisual` for source-image evidence, child-preview fallback, and glyph fallback
+- `ReviewSourceVisual` for source-image evidence, child-preview fallback, glyph fallback, and the reviewer-editable symbol properties beside the graphic
 - `ReviewFocusPane` for source facts, classification facts, Libby summary, and child-symbol decision cards
 - `SplitReviewCard` for per-child preview, metadata, open review status, action buttons, reviewer note, and requested detail
 - `ReviewDecisionPane` for case-level action buttons, reviewer identity, case comment, decision note, latest decision, submit state, review notes, and Daisy coordination on non-split cases.
 - For raster split cases, `ReviewDecisionPane` becomes a simpler `Process Symbols` panel with Ready / Waiting / Total counts, selected child-action counts, and a `Process Selected Symbols` button that stays disabled until at least one child has a non-pending decision. It does not show whole-file case action controls because split batches can contain mixed outcomes.
 - `ReviewDecisionPane` should surface the recorded downstream action after submit: Rupert handoff for approval, Libby follow-up for non-approval, and later Vlad graphic-change routing only when Libby requests it
+- The symbol identifier is labelled `ID`; the review properties are `Name`, `Description`, editable `Category`, and editable `Discipline`, with read-only `Format` rendered as a compact file-format badge under the description. Category and Discipline expose explicit saved-value selectors beside free-text inputs.
 
 ### Reviews desktop grid
 

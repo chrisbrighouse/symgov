@@ -157,6 +157,429 @@ export async function fetchWorkspaceQueueItems() {
   }
 }
 
+export async function startScottSourceSearch({ durationSeconds = 120, seedQuery = '' } = {}) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+
+  const sourceSearchPayload = {
+    durationSeconds,
+    seedQuery: seedQuery.trim() || null
+  };
+  const postSourceSearch = async (payload, wrapped = false) => {
+    const requestBody = wrapped ? { request: payload } : payload;
+    const response = await fetch(`${appConfig.apiRoot}/workspace/scott/source-searches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await postSourceSearch(sourceSearchPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await postSourceSearch(sourceSearchPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Scott search could not be started.');
+  }
+
+  return payload;
+}
+
+export async function stopScottSourceSearch(queueItemId) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+  if (!queueItemId) {
+    throw new Error('Scott queue item is not available yet.');
+  }
+
+  const response = await fetch(`${appConfig.apiRoot}/workspace/scott/source-searches/${encodeURIComponent(queueItemId)}/stop`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  const payload = await parseJson(response);
+
+  if (!response.ok) {
+    throw new Error(payload?.detail || 'Scott search could not be stopped.');
+  }
+
+  return payload;
+}
+
+export async function fetchScottSourceSites({ offset = 0, limit = 50, sort = 'lastSeenAt', direction = 'desc', filters = {} } = {}) {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [], total: 0, hasMore: false };
+  }
+
+  const params = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit),
+    sort,
+    direction
+  });
+
+  Object.entries(filters || {}).forEach(([key, value]) => {
+    const normalized = String(value || '').trim();
+    if (normalized) {
+      params.set(key, normalized);
+    }
+  });
+
+  try {
+    const response = await fetch(workspaceUrl(`/workspace/scott/source-sites?${params.toString()}`), { cache: 'no-store' });
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Scott source sites could not be loaded.',
+        items: [],
+        total: 0,
+        hasMore: false
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: 'Scott source sites loaded.',
+      items: Array.isArray(payload?.items) ? payload.items : [],
+      total: Number(payload?.total || 0),
+      hasMore: Boolean(payload?.hasMore)
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'offline',
+      message: error instanceof Error ? error.message : 'Scott source sites could not be loaded.',
+      items: [],
+      total: 0,
+      hasMore: false
+    };
+  }
+}
+
+export async function updateScottSourceSitePrompt(sourceSiteId, sourcePrompt) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+  if (!sourceSiteId) {
+    throw new Error('Source site is not available.');
+  }
+
+  const promptPayload = { sourcePrompt };
+  const patchPrompt = async (payload, wrapped = false) => {
+    const response = await fetch(workspaceUrl(`/workspace/scott/source-sites/${encodeURIComponent(sourceSiteId)}/prompt`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(wrapped ? { request: payload } : payload)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await patchPrompt(promptPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await patchPrompt(promptPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Scott source prompt could not be saved.');
+  }
+
+  return payload;
+}
+
+export async function updateScottSourceSiteIncludeNextRun(sourceSiteId, includeNextRun) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+  if (!sourceSiteId) {
+    throw new Error('Source site is not available.');
+  }
+
+  const includeNextRunPayload = { includeNextRun };
+  const patchIncludeNextRun = async (payload, wrapped = false) => {
+    const response = await fetch(workspaceUrl(`/workspace/scott/source-sites/${encodeURIComponent(sourceSiteId)}/include-next-run`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(wrapped ? { request: payload } : payload)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await patchIncludeNextRun(includeNextRunPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await patchIncludeNextRun(includeNextRunPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Scott include-next-run flag could not be saved.');
+  }
+
+  return payload;
+}
+
+export async function updateScottSourceSiteStatus(sourceSiteId, status) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+  if (!sourceSiteId) {
+    throw new Error('Source site is not available.');
+  }
+
+  const statusPayload = { status };
+  const patchStatus = async (payload, wrapped = false) => {
+    const response = await fetch(workspaceUrl(`/workspace/scott/source-sites/${encodeURIComponent(sourceSiteId)}/status`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(wrapped ? { request: payload } : payload)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await patchStatus(statusPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await patchStatus(statusPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Scott source status could not be saved.');
+  }
+
+  return payload;
+}
+
+export async function startHannahCurationSearch({ durationSeconds = 120 } = {}) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+
+  const curationPayload = { durationSeconds };
+  const postCurationSearch = async (payload, wrapped = false) => {
+    const requestBody = wrapped ? { request: payload } : payload;
+    const response = await fetch(`${appConfig.apiRoot}/workspace/hannah/curation-searches`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await postCurationSearch(curationPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await postCurationSearch(curationPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Hannah curation search could not be started.');
+  }
+
+  return payload;
+}
+
+export async function stopHannahCurationSearch(queueItemId) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+  if (!queueItemId) {
+    throw new Error('Hannah queue item is not available yet.');
+  }
+
+  const response = await fetch(`${appConfig.apiRoot}/workspace/hannah/curation-searches/${encodeURIComponent(queueItemId)}/stop`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  const payload = await parseJson(response);
+
+  if (!response.ok) {
+    throw new Error(payload?.detail || 'Hannah curation search could not be stopped.');
+  }
+
+  return payload;
+}
+
+export async function fetchHannahPhotoCandidates({ offset = 0, limit = 50, sort = 'lastSeenAt', direction = 'desc', filters = {} } = {}) {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [], total: 0, hasMore: false };
+  }
+
+  const params = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit),
+    sort,
+    direction
+  });
+
+  Object.entries(filters || {}).forEach(([key, value]) => {
+    const normalized = String(value || '').trim();
+    if (normalized) {
+      params.set(key, normalized);
+    }
+  });
+
+  try {
+    const response = await fetch(workspaceUrl(`/workspace/hannah/photo-candidates?${params.toString()}`), { cache: 'no-store' });
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Hannah photo candidates could not be loaded.',
+        items: [],
+        total: 0,
+        hasMore: false
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: 'Hannah photo candidates loaded.',
+      items: Array.isArray(payload?.items) ? payload.items : [],
+      total: Number(payload?.total || 0),
+      hasMore: Boolean(payload?.hasMore)
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'offline',
+      message: error instanceof Error ? error.message : 'Hannah photo candidates could not be loaded.',
+      items: [],
+      total: 0,
+      hasMore: false
+    };
+  }
+}
+
+export async function startWhitneyDemandScan({ durationSeconds = 120, focus = '' } = {}) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+
+  const scanPayload = {
+    durationSeconds,
+    focus: focus.trim() || null
+  };
+  const postDemandScan = async (payload, wrapped = false) => {
+    const requestBody = wrapped ? { request: payload } : payload;
+    const response = await fetch(`${appConfig.apiRoot}/workspace/whitney/demand-scans`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await postDemandScan(scanPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await postDemandScan(scanPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Whitney demand scan could not be started.');
+  }
+
+  return payload;
+}
+
+export async function stopWhitneyDemandScan(queueItemId) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+  if (!queueItemId) {
+    throw new Error('Whitney queue item is not available yet.');
+  }
+
+  const response = await fetch(`${appConfig.apiRoot}/workspace/whitney/demand-scans/${encodeURIComponent(queueItemId)}/stop`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' }
+  });
+  const payload = await parseJson(response);
+
+  if (!response.ok) {
+    throw new Error(payload?.detail || 'Whitney demand scan could not be stopped.');
+  }
+
+  return payload;
+}
+
+export async function fetchWhitneyDemandSignals({ offset = 0, limit = 50, sort = 'lastSeenAt', direction = 'desc', filters = {} } = {}) {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [], total: 0, hasMore: false };
+  }
+
+  const params = new URLSearchParams({
+    offset: String(offset),
+    limit: String(limit),
+    sort,
+    direction
+  });
+
+  Object.entries(filters || {}).forEach(([key, value]) => {
+    const normalized = String(value || '').trim();
+    if (normalized) {
+      params.set(key, normalized);
+    }
+  });
+
+  try {
+    const response = await fetch(workspaceUrl(`/workspace/whitney/demand-signals?${params.toString()}`), { cache: 'no-store' });
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Whitney demand signals could not be loaded.',
+        items: [],
+        total: 0,
+        hasMore: false
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: 'Whitney demand signals loaded.',
+      items: Array.isArray(payload?.items) ? payload.items : [],
+      total: Number(payload?.total || 0),
+      hasMore: Boolean(payload?.hasMore)
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'offline',
+      message: error instanceof Error ? error.message : 'Whitney demand signals could not be loaded.',
+      items: [],
+      total: 0,
+      hasMore: false
+    };
+  }
+}
+
 export async function fetchWorkspaceDaisyReports(reviewCaseId) {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
@@ -253,6 +676,73 @@ export async function processWorkspaceSplitReviewDecisions(reviewCaseId, decisio
   }
 
   return payload;
+}
+
+export async function updateWorkspaceReviewSymbolProperties(reviewCaseId, propertiesPayload) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+
+  const endpoint = `${appConfig.apiRoot}/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/symbol-properties`;
+  const patchProperties = async (payload, wrapped = false) => {
+    const requestBody = wrapped ? { request: payload } : payload;
+    const response = await fetch(endpoint, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await patchProperties(propertiesPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await patchProperties(propertiesPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Symbol properties update failed.');
+  }
+
+  return payload;
+}
+
+export async function fetchWorkspaceReviewSymbolPropertyOptions() {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
+  }
+
+  try {
+    const response = await fetch(`${appConfig.apiRoot}/workspace/review-symbol-property-options?_=${Date.now()}`, {
+      cache: 'no-store'
+    });
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Review property options load failed.',
+        items: []
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: payload.items?.length ? 'Review property options loaded.' : 'No review property options are available yet.',
+      items: payload.items || []
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'error',
+      message: error instanceof Error ? error.message : 'Review property options load failed.',
+      items: []
+    };
+  }
 }
 
 export async function fetchPublishedSymbols() {

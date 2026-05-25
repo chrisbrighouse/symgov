@@ -17,6 +17,32 @@
       "slack"
     ]
   },
+  "model_profiles": {
+    "fast": {
+      "model": "openai/gpt-5-mini",
+      "description": "Low-latency default for intake, routing, and coordination work."
+    },
+    "deep_reasoning": {
+      "model": "openai/gpt-5.2",
+      "description": "Higher-capability reasoning for release and governance decisions."
+    },
+    "vision": {
+      "model": "google/gemini-3.1-pro-preview",
+      "description": "Vision-capable analysis for graphical symbol validation and raster inspection."
+    },
+    "research": {
+      "model": "openai/gpt-5.3-codex",
+      "description": "Research-heavy provenance, curation, and intelligence tasks."
+    },
+    "classification": {
+      "model": "anthropic/claude-sonnet-4-6",
+      "description": "Classification, taxonomy, and symbol metadata reasoning tasks."
+    },
+    "design": {
+      "model": "openai/gpt-5.2",
+      "description": "Interface, documentation, copy, and experience review tasks."
+    }
+  },
   "bindings": [
     {
       "type": "route",
@@ -33,7 +59,7 @@
       "name": "Scott",
       "workspace": "/data/.openclaw/workspaces/scott",
       "agent_dir": "/data/.openclaw/agents/scott/agent",
-      "model": "openai/gpt-5-mini",
+      "model_profile": "fast",
       "identity_name": "Scott",
       "tools": {
         "profile": "full",
@@ -63,7 +89,7 @@
       "name": "Tracy",
       "workspace": "/data/.openclaw/workspaces/tracy",
       "agent_dir": "/data/.openclaw/agents/tracy/agent",
-      "model": "openai/gpt-5-mini",
+      "model_profile": "research",
       "identity_name": "Tracy",
       "tools": {
         "profile": "full",
@@ -93,7 +119,7 @@
       "name": "Vlad",
       "workspace": "/data/.openclaw/workspaces/vlad",
       "agent_dir": "/data/.openclaw/agents/vlad/agent",
-      "model": "openai/gpt-5-mini",
+      "model_profile": "vision",
       "identity_name": "Vlad",
       "tools": {
         "profile": "full",
@@ -123,7 +149,7 @@
       "name": "Daisy",
       "workspace": "/data/.openclaw/workspaces/daisy",
       "agent_dir": "/data/.openclaw/agents/daisy/agent",
-      "model": "openai/gpt-5-mini",
+      "model_profile": "fast",
       "identity_name": "Daisy",
       "tools": {
         "profile": "full",
@@ -153,7 +179,7 @@
       "name": "Libby",
       "workspace": "/data/.openclaw/workspaces/libby",
       "agent_dir": "/data/.openclaw/agents/libby/agent",
-      "model": "openai/gpt-5-mini",
+      "model_profile": "classification",
       "identity_name": "Libby",
       "tools": {
         "profile": "full",
@@ -183,7 +209,7 @@
       "name": "Rupert",
       "workspace": "/data/.openclaw/workspaces/rupert",
       "agent_dir": "/data/.openclaw/agents/rupert/agent",
-      "model": "openai/gpt-5-mini",
+      "model_profile": "fast",
       "identity_name": "Rupert",
       "tools": {
         "profile": "full",
@@ -213,7 +239,7 @@
       "name": "Ed",
       "workspace": "/data/.openclaw/workspaces/ed",
       "agent_dir": "/data/.openclaw/agents/ed/agent",
-      "model": "openai/gpt-5-mini",
+      "model_profile": "design",
       "identity_name": "Ed",
       "tools": {
         "profile": "full",
@@ -236,6 +262,66 @@
         "IDENTITY.md",
         "run_ed_feedback.py",
         "runtime/agent_definitions/ed.json"
+      ]
+    },
+    {
+      "id": "hannah",
+      "name": "Hannah",
+      "workspace": "/data/.openclaw/workspaces/hannah",
+      "agent_dir": "/data/.openclaw/agents/hannah/agent",
+      "model_profile": "research",
+      "identity_name": "Hannah",
+      "tools": {
+        "profile": "full",
+        "allow": [
+          "group:runtime",
+          "group:sessions"
+        ],
+        "elevated": {
+          "enabled": true,
+          "allowFrom": {
+            "telegram": [
+              7643191699
+            ]
+          }
+        }
+      },
+      "agent_to_agent": true,
+      "required_workspace_files": [
+        "AGENTS.md",
+        "IDENTITY.md",
+        "run_hannah_curation.py",
+        "runtime/agent_definitions/hannah.json"
+      ]
+    },
+    {
+      "id": "whitney",
+      "name": "Whitney",
+      "workspace": "/data/.openclaw/workspaces/whitney",
+      "agent_dir": "/data/.openclaw/agents/whitney/agent",
+      "model_profile": "research",
+      "identity_name": "Whitney",
+      "tools": {
+        "profile": "full",
+        "allow": [
+          "group:runtime",
+          "group:sessions"
+        ],
+        "elevated": {
+          "enabled": true,
+          "allowFrom": {
+            "telegram": [
+              7643191699
+            ]
+          }
+        }
+      },
+      "agent_to_agent": true,
+      "required_workspace_files": [
+        "AGENTS.md",
+        "IDENTITY.md",
+        "run_whitney_market_intelligence.py",
+        "runtime/agent_definitions/whitney.json"
       ]
     }
   ]

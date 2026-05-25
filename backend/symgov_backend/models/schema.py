@@ -345,6 +345,130 @@ class AgentQueueItem(Base):
     completed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ScottSourceDiscoverySite(Base):
+    __tablename__ = "scott_source_discovery_sites"
+    __table_args__ = (
+        Index("uq_scott_source_discovery_sites_domain", text("lower(domain)"), unique=True),
+        Index("ix_scott_source_discovery_sites_status_score_seen", "status", "relevance_score", "last_seen_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    domain: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    industry: Mapped[str | None] = mapped_column(Text, nullable=True)
+    process: Mapped[str | None] = mapped_column(Text, nullable=True)
+    organization_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    include_next_run: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    symbol_formats_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    relevance_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    first_seen_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_session_queue_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_queue_items.id"), nullable=True)
+
+
+class HannahSymbolCurationState(Base):
+    __tablename__ = "hannah_symbol_curation_states"
+    __table_args__ = (
+        Index("uq_hannah_symbol_curation_states_symbol", "symbol_id", unique=True),
+        Index("ix_hannah_symbol_curation_states_status_attempt", "status", "last_attempt_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbol_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("governed_symbols.id"), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    photo_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    last_attempt_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_success_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class HannahPhotoCandidate(Base):
+    __tablename__ = "hannah_photo_candidates"
+    __table_args__ = (
+        Index("ix_hannah_photo_candidates_symbol_status_score", "symbol_id", "status", "relevance_score"),
+        Index("ix_hannah_photo_candidates_last_seen", "last_seen_at"),
+        Index("uq_hannah_photo_candidates_image_symbol", "symbol_id", "image_url", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbol_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("governed_symbols.id"), nullable=False)
+    symbol_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_revisions.id"), nullable=True)
+    published_page_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("published_pages.id"), nullable=True)
+    queue_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_queue_items.id"), nullable=True)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    image_url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_domain: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rights_status: Mapped[str] = mapped_column(Text, nullable=False)
+    license_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    relevance_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    attachment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("attachments.id"), nullable=True)
+    object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    first_seen_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WhitneyMarketIntelligenceReport(Base):
+    __tablename__ = "whitney_market_intelligence_reports"
+    __table_args__ = (Index("ix_whitney_reports_queue_completed", "queue_item_id", "completed_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    queue_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_queue_items.id"), nullable=True)
+    report_type: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    signals_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    recommendations_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class WhitneyDemandSignal(Base):
+    __tablename__ = "whitney_demand_signals"
+    __table_args__ = (
+        Index("ix_whitney_demand_signals_type_score_seen", "signal_type", "demand_score", "last_seen_at"),
+        Index("ix_whitney_demand_signals_segment_seen", "market_segment", "last_seen_at"),
+        Index("uq_whitney_demand_signals_source", "source_type", "source_ref", "signal_type", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    queue_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_queue_items.id"), nullable=True)
+    report_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("whitney_market_intelligence_reports.id"),
+        nullable=True,
+    )
+    symbol_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("governed_symbols.id"), nullable=True)
+    published_page_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("published_pages.id"), nullable=True)
+    signal_type: Mapped[str] = mapped_column(Text, nullable=False)
+    market_segment: Mapped[str | None] = mapped_column(Text, nullable=True)
+    discipline: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)
+    source_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    demand_score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    recommended_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    first_seen_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class AgentRun(Base):
     __tablename__ = "agent_runs"
     __table_args__ = (Index("ix_agent_runs_queue_item_started_at", "queue_item_id", "started_at"),)
@@ -558,6 +682,46 @@ class ReviewSplitItem(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     processed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ReviewSymbolProperty(Base):
+    __tablename__ = "review_symbol_properties"
+    __table_args__ = (
+        Index("uq_review_symbol_properties_case_key", "review_case_id", "symbol_record_key", unique=True),
+        Index("ix_review_symbol_properties_split_item", "review_split_item_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    review_case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("review_cases.id"), nullable=False)
+    review_split_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("review_split_items.id"), nullable=True)
+    symbol_record_key: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    discipline: Mapped[str | None] = mapped_column(Text, nullable=True)
+    format: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'agent_initial'"))
+    updated_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ReviewSymbolPropertyOption(Base):
+    __tablename__ = "review_symbol_property_options"
+    __table_args__ = (
+        CheckConstraint("field_name in ('category', 'discipline')", name="review_symbol_property_options_field_name"),
+        Index("uq_review_symbol_property_options_field_key", "field_name", "normalized_key", unique=True),
+        Index("ix_review_symbol_property_options_field_value", "field_name", "display_value"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    display_value: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_key: Mapped[str] = mapped_column(Text, nullable=False)
+    use_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_used_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class PublicationJob(Base):
