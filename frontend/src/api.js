@@ -266,6 +266,105 @@ export async function fetchScottSourceSites({ offset = 0, limit = 50, sort = 'la
   }
 }
 
+export async function updateScottSourceSitePrompt(sourceSiteId, sourcePrompt) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+  if (!sourceSiteId) {
+    throw new Error('Source site is not available.');
+  }
+
+  const promptPayload = { sourcePrompt };
+  const patchPrompt = async (payload, wrapped = false) => {
+    const response = await fetch(workspaceUrl(`/workspace/scott/source-sites/${encodeURIComponent(sourceSiteId)}/prompt`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(wrapped ? { request: payload } : payload)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await patchPrompt(promptPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await patchPrompt(promptPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Scott source prompt could not be saved.');
+  }
+
+  return payload;
+}
+
+export async function updateScottSourceSiteIncludeNextRun(sourceSiteId, includeNextRun) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+  if (!sourceSiteId) {
+    throw new Error('Source site is not available.');
+  }
+
+  const includeNextRunPayload = { includeNextRun };
+  const patchIncludeNextRun = async (payload, wrapped = false) => {
+    const response = await fetch(workspaceUrl(`/workspace/scott/source-sites/${encodeURIComponent(sourceSiteId)}/include-next-run`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(wrapped ? { request: payload } : payload)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await patchIncludeNextRun(includeNextRunPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await patchIncludeNextRun(includeNextRunPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Scott include-next-run flag could not be saved.');
+  }
+
+  return payload;
+}
+
+export async function updateScottSourceSiteStatus(sourceSiteId, status) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+  if (!sourceSiteId) {
+    throw new Error('Source site is not available.');
+  }
+
+  const statusPayload = { status };
+  const patchStatus = async (payload, wrapped = false) => {
+    const response = await fetch(workspaceUrl(`/workspace/scott/source-sites/${encodeURIComponent(sourceSiteId)}/status`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(wrapped ? { request: payload } : payload)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await patchStatus(statusPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await patchStatus(statusPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Scott source status could not be saved.');
+  }
+
+  return payload;
+}
+
 export async function startHannahCurationSearch({ durationSeconds = 120 } = {}) {
   if (!appConfig.apiRoot) {
     throw new Error('API root is not configured.');

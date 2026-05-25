@@ -41,7 +41,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - an SME Reviews workbench headed `Daisy-coordinated Reviews`, with queue navigation, visual source evidence, reviewer-editable symbol properties, classification/source context, visible case actions, comments, latest decision state, Daisy coordination, and per-child review actions
 - a Standards home with left-side facets, a central approved-symbol grid, and an in-grid right detail panel for the selected row; published tables use `ID` for symbol identifiers and the `Name` column uses the published payload name when present
 - a live submission route that probes the backend and submits through the current public Symgov API, showing `Submission accepted` on successful submit instead of rendering the raw backend JSON
-- an admin-only Workspace `Sources` tab with a `Sources` content header and a permanently visible source-memory grid showing URL first, status/title prominent on the left, sortable columns, simple per-column text filters, infinite scroll, and an internal horizontal scrollbar so wide source metadata never pushes the Workspace tabs off-screen
+- an admin-only Workspace `Sources` tab with a `Sources` content header and a permanently visible source-memory grid showing URL first, status/title prominent on the left, a `Next run` checkbox with checked/unchecked filtering, candidate-only Scott prompt editing, sortable columns, simple per-column filters, infinite scroll, and an internal horizontal scrollbar so wide source metadata never pushes the Workspace tabs off-screen
 - an admin-only Workspace `Curation` tab for Hannah with a two-minute published-symbol photo search, countdown, Stop control, and scored photo-candidate table. Hannah searches one eligible published symbol at a time, records candidate source evidence, attaches at most two low-risk supplemental photos per symbol, and exposes accepted photos immediately on Standards records.
 - an admin-only Workspace `Intelligence` tab for Whitney with a two-minute internal demand-sensing scan, countdown, Stop control, optional focus input, and scored demand-signal table. Whitney reads Symgov telemetry only in this slice and produces operator prioritization recommendations without mutating published Standards.
 - route-safe SPA navigation using hash routes so static hosting remains simple
@@ -58,7 +58,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - Workspace queue panels now stretch evenly to the bottom of the visible monitor area. The summary counters above the lanes and duplicate footer counts inside lanes have been removed, while the live refresh/status text has moved to a full-width single-line row above the lanes. The Scott lane shows completed items by default.
 - Vlad Workspace cards can show a `Process` line above the status indicator, sourced from backend `toolSummary` values derived from Vlad run traces and payload hints. Current labels include `Tess`, `Nano`, `DXF to SVG`, `Format conversion`, `Raster split`, and `Raster candidate`; the list is intentionally extensible as Vlad's processing-tool repertoire grows.
 - Rupert Workspace cards show `PUBLISHED` only after the queued symbol revision has a public published page. Those cards expose the Standards page target on the card and navigate to Standards View using the published symbol slug; Standards View accepts the linked `symbol` query parameter and opens the matching record.
-- The Workspace `Sources` tab reads `GET /api/v1/workspace/scott/source-sites`, supports server-side sorting/filtering, and loads additional rows on scroll instead of showing paging controls. The source table is intentionally wider than the visible pane, but it must remain contained inside the Sources grid shell with horizontal overflow handled by the table frame rather than the page.
+- The Workspace `Sources` tab reads `GET /api/v1/workspace/scott/source-sites`, supports server-side sorting/filtering, candidate-only prompt saves, and `Next run` checkbox saves, and loads additional rows on scroll instead of showing paging controls. The source table is intentionally wider than the visible pane, but it must remain contained inside the Sources grid shell with horizontal overflow handled by the table frame rather than the page. Checked source rows are inspected first on Scott's next source-discovery run; prompts attached to checked rows are available to Scott for that checked-source pass, including same-domain URLs mentioned in the prompt, but prompt text is not written verbatim into durable evidence.
 - Full filenames, proposed symbol names, queue IDs, and longer review details remain available to search/detail/tooltips rather than being used as the compact card title.
 - The Workspace monitor retains seeded `processingActivity` fallback when no API root is configured or the live queue endpoint is unavailable.
 - The Standards submission route now calls the live Symgov backend instead of using demo-only local submission behavior
@@ -153,7 +153,7 @@ The product docs now also include the first agentization slice for Symgov:
 - Hannah is registered through the SymGov-owned OpenClaw manifest and backend agent seed list
 - Hannah writes local curation reports under `/data/.openclaw/workspaces/hannah/runtime`
 - Hannah works only on public published Standards symbols that have reasonable Name, Title, Category, and Discipline values
-- Hannah records scored external photo candidates, attaches only low-risk supplemental photos, and keeps the public schematic preview distinct from real-world equipment photos
+- Hannah records scored external photo candidates, attaches only low-risk supplemental photos, and keeps the public schematic preview distinct from real-world equipment photos. Candidate images should be photographic representations of real examples of the equipment represented by the symbol, not text documents, manuals, description pages, or diagram-only references.
 - Hannah searches can be stopped from the Workspace Curation tab; the stop path marks the active queue item `cancelled`, records stop metadata, updates the runtime queue JSON, and terminates the detached runner process group when available
 
 `Whitney` now also exists as the Symgov market intelligence and demand sensing scaffold:
@@ -269,10 +269,12 @@ To make SymGov more resilient to OpenClaw upgrades, the current workspace now ke
 That manifest is now the local source of truth for:
 
 - the expected safe OpenClaw plugin profile for SymGov operations
-- registered SymGov agent ids, names, workspaces, models, and tool profile
+- registered SymGov agent ids, names, workspaces, model profiles, resolved model ids, and tool profile
 - managed OpenClaw `bindings[]` entries for deterministic channel/account/peer routing; the current managed binding set is intentionally empty so Alfi/main remains the Telegram-facing orchestrator
 - expected OpenClaw `agent.json` metadata paths
 - required workspace files that prove each SymGov agent is still runnable
+
+Per-agent LLM model access is configured through top-level `model_profiles` in the manifest. Each agent references a `model_profile`, and `reconcile-openclaw` expands that profile into the concrete OpenClaw `agents.list[].model` and per-agent `agent.json` model field. This keeps model policy in one SymGov-owned place while leaving provider credentials and runtime access in OpenClaw's normal configuration.
 
 Use the backend CLI to audit or repair OpenClaw registration after upgrades:
 

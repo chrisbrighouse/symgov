@@ -10,5 +10,10 @@ backend/.venv/
 backend/.deps/
 backend/.deps-api/
 
+*.bak
+*.bak*
+symgov-notifications.json
+openclaw-agents.manifest.json.bak*
+
 __pycache__/
 *.py[cod]

@@ -444,6 +444,7 @@ Agreed operating rules:
 - Hannah curation searches can be stopped by an admin from the Workspace Curation tab; stopping cancels the queue item, records stop metadata, and terminates the detached runner process group when the backend has a stored process id.
 - Eligibility requires reasonable Name, page title, Category, and Discipline values before search begins.
 - Hannah records scored candidates for admin inspection and auto-attaches only low-risk licensed photos.
+- Hannah should accept only actual photographic representations of real examples of the equipment represented by the symbol. Text documents, manual pages, equipment descriptions, schematic-only diagrams, and other non-photographic references are not suitable supplemental photos.
 - Public Standards displays at most two Hannah-attached supplemental photos per symbol, kept distinct from the schematic symbol preview.
 - Hannah may make low-risk metadata updates only through audited backend persistence.
 
@@ -675,6 +676,16 @@ To make Symgov agents real in the current environment, add:
 - `AGENTS.md` instructions per workspace
 - helper scripts for structured task execution where deterministic tools exist
 - agent-to-agent allow-list updates for the new agent IDs
+
+Per-agent LLM access is configured through the SymGov OpenClaw manifest. The manifest defines named `model_profiles` such as `fast`, `vision`, `research`, `deep_reasoning`, and `design`; each agent references a profile with `model_profile`. The OpenClaw reconciliation path resolves that profile to the concrete model id written into OpenClaw `agents.list[].model` and each managed `agent.json`.
+
+Current profile intent:
+
+- `fast`: low-latency intake, routing, and coordination work
+- `vision`: graphical symbol validation and raster inspection
+- `research`: provenance, classification, curation, and intelligence tasks
+- `deep_reasoning`: release and governance decisions
+- `design`: UI, documentation, copy, and experience review
 
 If asynchronous external triggers are needed later, current hook allow-lists will also need extending because only `main` and `pat` are currently hook-enabled.
 

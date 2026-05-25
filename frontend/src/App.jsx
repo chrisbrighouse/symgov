@@ -19,6 +19,9 @@ import {
   stopWhitneyDemandScan,
   submitWorkspaceReviewDecision,
   submitExternalSubmission,
+  updateScottSourceSiteIncludeNextRun,
+  updateScottSourceSitePrompt,
+  updateScottSourceSiteStatus,
   updateWorkspaceReviewSymbolProperties
 } from './api.js';
 import { appConfig } from './config.js';
@@ -57,7 +60,7 @@ const WORKSPACE_QUEUE_COLUMNS = [
   {
     id: 'validation',
     title: 'Vlad',
-    subtitle: 'Validation',
+    subtitle: 'Image Processing',
     agentId: 'vlad',
     tone: 'validation'
   },
@@ -129,6 +132,8 @@ const WHITNEY_DEMAND_SCAN_DURATION_SECONDS = 120;
 const SCOTT_SOURCE_COLUMNS = [
   ['url', 'URL'],
   ['status', 'Status'],
+  ['includeNextRun', 'Next run'],
+  ['sourcePrompt', 'Scott prompt'],
   ['relevanceScore', 'Score'],
   ['title', 'Title'],
   ['domain', 'Domain'],
@@ -141,6 +146,11 @@ const SCOTT_SOURCE_COLUMNS = [
   ['firstSeenAt', 'First seen'],
   ['lastSeenAt', 'Last seen'],
   ['lastSessionQueueItemId', 'Last queue item']
+];
+const SCOTT_SOURCE_STATUS_OPTIONS = [
+  ['candidate', 'Candidate'],
+  ['low_signal', 'Low_signal'],
+  ['ignored', 'Ignore']
 ];
 const HANNAH_CANDIDATE_COLUMNS = [
   ['symbolName', 'Symbol'],
@@ -724,6 +734,9 @@ function WorkspacePage() {
     handleStopScottSearch,
     handleSourceSort,
     updateSourceFilter,
+    updateSourceSitePrompt,
+    updateSourceSiteIncludeNextRun,
+    updateSourceSiteStatus,
     handleScottSourcesScroll
   } = useScottSourceDiscoveryControls({
     enabled: Boolean(appConfig.apiRoot),
@@ -1121,6 +1134,9 @@ function WorkspacePage() {
             filters={sourceFilters}
             onSort={handleSourceSort}
             onFilterChange={updateSourceFilter}
+            onPromptSaved={updateSourceSitePrompt}
+            onIncludeNextRunSaved={updateSourceSiteIncludeNextRun}
+            onStatusSaved={updateSourceSiteStatus}
             onScroll={handleScottSourcesScroll}
           />
         </div>
@@ -3470,6 +3486,27 @@ function useScottSourceDiscoveryControls({ enabled = true, sourcesActive = false
     }
   }
 
+  function updateSourceSitePrompt(sourceSiteId, updatedSite) {
+    setSourcesState((current) => ({
+      ...current,
+      items: current.items.map((site) => (site.id === sourceSiteId ? { ...site, ...updatedSite } : site))
+    }));
+  }
+
+  function updateSourceSiteIncludeNextRun(sourceSiteId, updatedSite) {
+    setSourcesState((current) => ({
+      ...current,
+      items: current.items.map((site) => (site.id === sourceSiteId ? { ...site, ...updatedSite } : site))
+    }));
+  }
+
+  function updateSourceSiteStatus(sourceSiteId, updatedSite) {
+    setSourcesState((current) => ({
+      ...current,
+      items: current.items.map((site) => (site.id === sourceSiteId ? { ...site, ...updatedSite } : site))
+    }));
+  }
+
   function handleStartScottSearch() {
     if (!enabled) {
       return;
@@ -3552,6 +3589,9 @@ function useScottSourceDiscoveryControls({ enabled = true, sourcesActive = false
     handleStopScottSearch,
     handleSourceSort,
     updateSourceFilter,
+    updateSourceSitePrompt,
+    updateSourceSiteIncludeNextRun,
+    updateSourceSiteStatus,
     handleScottSourcesScroll
   };
 }
@@ -3723,7 +3763,70 @@ function SubmissionPage() {
   );
 }
 
-function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onScroll }) {
+function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onPromptSaved, onIncludeNextRunSaved, onStatusSaved, onScroll }) {
+  const [promptDrafts, setPromptDrafts] = useState({});
+  const [promptSaves, setPromptSaves] = useState({});
+  const [includeNextRunSaves, setIncludeNextRunSaves] = useState({});
+  const [statusSaves, setStatusSaves] = useState({});
+
+  function handlePromptChange(siteId, value) {
+    setPromptDrafts((current) => ({ ...current, [siteId]: value }));
+  }
+
+  function handlePromptSave(site) {
+    const sourcePrompt = promptDrafts[site.id] ?? site.sourcePrompt ?? '';
+    setPromptSaves((current) => ({ ...current, [site.id]: { pending: true, error: '' } }));
+    updateScottSourceSitePrompt(site.id, sourcePrompt).then((updatedSite) => {
+      onPromptSaved?.(site.id, updatedSite);
+      setPromptDrafts((current) => {
+        const next = { ...current };
+        delete next[site.id];
+        return next;
+      });
+      setPromptSaves((current) => ({ ...current, [site.id]: { pending: false, error: '' } }));
+    }).catch((error) => {
+      setPromptSaves((current) => ({
+        ...current,
+        [site.id]: {
+          pending: false,
+          error: error instanceof Error ? error.message : 'Prompt could not be saved.'
+        }
+      }));
+    });
+  }
+
+  function handleIncludeNextRunChange(site, includeNextRun) {
+    setIncludeNextRunSaves((current) => ({ ...current, [site.id]: { pending: true, error: '' } }));
+    updateScottSourceSiteIncludeNextRun(site.id, includeNextRun).then((updatedSite) => {
+      onIncludeNextRunSaved?.(site.id, updatedSite);
+      setIncludeNextRunSaves((current) => ({ ...current, [site.id]: { pending: false, error: '' } }));
+    }).catch((error) => {
+      setIncludeNextRunSaves((current) => ({
+        ...current,
+        [site.id]: {
+          pending: false,
+          error: error instanceof Error ? error.message : 'Next-run flag could not be saved.'
+        }
+      }));
+    });
+  }
+
+  function handleStatusChange(site, status) {
+    setStatusSaves((current) => ({ ...current, [site.id]: { pending: true, error: '' } }));
+    updateScottSourceSiteStatus(site.id, status).then((updatedSite) => {
+      onStatusSaved?.(site.id, updatedSite);
+      setStatusSaves((current) => ({ ...current, [site.id]: { pending: false, error: '' } }));
+    }).catch((error) => {
+      setStatusSaves((current) => ({
+        ...current,
+        [site.id]: {
+          pending: false,
+          error: error instanceof Error ? error.message : 'Status could not be saved.'
+        }
+      }));
+    });
+  }
+
   return (
     <section className="glass-panel pane scott-sources-panel">
       <div className="scott-sources-toolbar">
@@ -3748,12 +3851,29 @@ function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onScr
                     <span>{label}</span>
                     <span className="source-sort-indicator">{sort.key === key ? (sort.direction === 'asc' ? 'Up' : 'Down') : ''}</span>
                   </button>
-                  <input
-                    type="search"
-                    value={filters[key] || ''}
-                    onChange={(event) => onFilterChange(key, event.target.value)}
-                    aria-label={`Filter ${label}`}
-                  />
+                  {key === 'status' ? (
+                    <ScottSourceStatusFilter
+                      value={filters[key] || ''}
+                      onChange={(value) => onFilterChange(key, value)}
+                    />
+                  ) : key === 'includeNextRun' ? (
+                    <select
+                      value={filters[key] || ''}
+                      onChange={(event) => onFilterChange(key, event.target.value)}
+                      aria-label={`Filter ${label}`}
+                    >
+                      <option value="">All</option>
+                      <option value="true">Checked</option>
+                      <option value="false">Unchecked</option>
+                    </select>
+                  ) : (
+                    <input
+                      type="search"
+                      value={filters[key] || ''}
+                      onChange={(event) => onFilterChange(key, event.target.value)}
+                      aria-label={`Filter ${label}`}
+                    />
+                  )}
                 </th>
               ))}
             </tr>
@@ -3763,7 +3883,29 @@ function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onScr
               <tr key={site.id}>
                 {SCOTT_SOURCE_COLUMNS.map(([key]) => (
                   <td key={key} className={`source-cell source-cell-${key}`}>
-                    {formatScottSourceValue(site, key)}
+                    {key === 'status' ? (
+                      <ScottSourceStatusCell
+                        site={site}
+                        saveState={statusSaves[site.id]}
+                        onChange={handleStatusChange}
+                      />
+                    ) : key === 'includeNextRun' ? (
+                      <ScottSourceIncludeNextRunCell
+                        site={site}
+                        saveState={includeNextRunSaves[site.id]}
+                        onChange={handleIncludeNextRunChange}
+                      />
+                    ) : key === 'sourcePrompt' ? (
+                      <ScottSourcePromptCell
+                        site={site}
+                        draftValue={promptDrafts[site.id]}
+                        saveState={promptSaves[site.id]}
+                        onChange={handlePromptChange}
+                        onSave={handlePromptSave}
+                      />
+                    ) : (
+                      formatScottSourceValue(site, key)
+                    )}
                   </td>
                 ))}
               </tr>
@@ -3783,6 +3925,114 @@ function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onScr
   );
 }
 
+function ScottSourceStatusFilter({ value, onChange }) {
+  const selected = new Set(
+    String(value || '')
+      .split(',')
+      .map((status) => status.trim())
+      .filter(Boolean)
+  );
+
+  function handleToggle(status, checked) {
+    const next = new Set(selected);
+    if (checked) {
+      next.add(status);
+    } else {
+      next.delete(status);
+    }
+    onChange(Array.from(next).join(','));
+  }
+
+  return (
+    <details className="source-status-filter">
+      <summary>{selected.size ? `${selected.size} selected` : 'All'}</summary>
+      <div className="source-status-filter-menu">
+        {SCOTT_SOURCE_STATUS_OPTIONS.map(([status, label]) => (
+          <label key={status}>
+            <input
+              type="checkbox"
+              checked={selected.has(status)}
+              onChange={(event) => handleToggle(status, event.target.checked)}
+            />
+            <span>{label}</span>
+          </label>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function ScottSourceStatusCell({ site, saveState, onChange }) {
+  const statusValue = normalizeScottSourceStatus(site?.status);
+  return (
+    <div className="source-status-editor">
+      <select
+        value={statusValue}
+        disabled={Boolean(saveState?.pending)}
+        onChange={(event) => onChange(site, event.target.value)}
+        aria-label={`Status for ${site.domain || site.url}`}
+      >
+        {SCOTT_SOURCE_STATUS_OPTIONS.map(([status, label]) => (
+          <option key={status} value={status}>{label}</option>
+        ))}
+      </select>
+      {saveState?.pending ? <span className="source-status-saving">Saving</span> : null}
+      {saveState?.error ? <span className="source-prompt-error">{saveState.error}</span> : null}
+    </div>
+  );
+}
+
+function ScottSourceIncludeNextRunCell({ site, saveState, onChange }) {
+  return (
+    <label className="source-next-run-toggle">
+      <input
+        type="checkbox"
+        checked={Boolean(site?.includeNextRun)}
+        disabled={Boolean(saveState?.pending)}
+        onChange={(event) => onChange(site, event.target.checked)}
+        aria-label={`Include ${site.domain || site.url} in Scott's next run`}
+      />
+      <span>{saveState?.pending ? 'Saving' : site?.includeNextRun ? 'Checked' : 'Off'}</span>
+      {saveState?.error ? <span className="source-prompt-error">{saveState.error}</span> : null}
+    </label>
+  );
+}
+
+function ScottSourcePromptCell({ site, draftValue, saveState, onChange, onSave }) {
+  const isCandidate = String(site?.status || '').toLowerCase() === 'candidate';
+  if (!isCandidate) {
+    return site?.sourcePrompt ? <span>{site.sourcePrompt}</span> : <span className="source-prompt-disabled">Candidate only</span>;
+  }
+
+  const value = draftValue ?? site.sourcePrompt ?? '';
+  const pending = Boolean(saveState?.pending);
+  const isDirty = value !== (site.sourcePrompt ?? '');
+
+  return (
+    <div className="source-prompt-editor">
+      <textarea
+        value={value}
+        rows="4"
+        maxLength="4000"
+        onChange={(event) => onChange(site.id, event.target.value)}
+        placeholder="Access notes, login steps, or download instructions for Scott"
+        aria-label={`Scott prompt for ${site.domain || site.url}`}
+      />
+      <div className="source-prompt-actions">
+        <button
+          type="button"
+          className="mini-action-button"
+          disabled={pending || !isDirty}
+          onClick={() => onSave(site)}
+        >
+          {pending ? 'Saving...' : 'Save'}
+        </button>
+        {saveState?.error ? <span className="source-prompt-error">{saveState.error}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 function formatScottSourceValue(site, key) {
   const value = site?.[key];
   if (key === 'symbolFormats') {
@@ -3798,6 +4048,14 @@ function formatScottSourceValue(site, key) {
     return value ? new Date(value).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '';
   }
   return String(value || '');
+}
+
+function normalizeScottSourceStatus(status) {
+  const normalized = String(status || 'candidate').trim().toLowerCase().replaceAll('-', '_').replaceAll(' ', '_');
+  if (normalized === 'ignore') {
+    return 'ignored';
+  }
+  return SCOTT_SOURCE_STATUS_OPTIONS.some(([value]) => value === normalized) ? normalized : 'candidate';
 }
 
 function HannahCurationPanel({ state, sort, filters, onSort, onFilterChange, onScroll }) {

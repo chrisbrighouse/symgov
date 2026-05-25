@@ -79,7 +79,7 @@ Make the main Workspace route processing-first:
 - Top: persistent `ADMIN WORKSPACE` titlebar with `Agents`, `Sources`, `Curation`, and `Intelligence` tabs
 - Agents: title with chevron monitor-screen navigation, queue search, and a full-width single-line live status row so refresh and processing text does not compete with the search control
 - Main: compact monitor lanes split into a first screen for Scott, Vlad, Tracy, Libby, Daisy, Human Review, and Rupert, plus a second screen for Hannah, Whitney, and Ed in that order using the same lane width and leaving blank space to the right
-- Sources: Scott source-memory grid and source-search controls
+- Sources: Scott source-memory grid, source-search controls, `Next run` row selection, and candidate-only prompt editing for source access/download instructions
 - Curation: Hannah two-minute published-symbol photo search with countdown, active-run Stop control, and a scored candidate table
 - Intelligence: Whitney two-minute demand-sensing scan with countdown, active-run Stop control, and a scored demand-signal table
 - Cards: activity and source context first, optional Vlad process/tool summary where available, optional Standards target for published Rupert cards, then queue status on its own line for scanability

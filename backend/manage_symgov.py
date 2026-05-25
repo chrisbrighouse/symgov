@@ -74,6 +74,29 @@ def parse_args():
         help="Keep processing selected queues until a full cycle finds no queued work.",
     )
     worker_parser.add_argument("--max-cycles", type=int, default=50, help="Maximum drain cycles.")
+    worker_parser.add_argument(
+        "--agent-runtime",
+        choices=["direct", "hermes"],
+        default="direct",
+        help="Queue execution runtime. direct preserves the current in-process runner behavior; hermes dispatches via Hermes.",
+    )
+    worker_parser.add_argument("--hermes-profile", default="symgov", help="Hermes profile for --agent-runtime hermes.")
+    worker_parser.add_argument(
+        "--hermes-timeout-seconds",
+        type=int,
+        default=600,
+        help="Timeout for each Hermes specialist dispatch.",
+    )
+    worker_parser.add_argument(
+        "--hermes-host-openclaw-root",
+        default="/docker/openclaw-hz0t/data/.openclaw",
+        help="Host path corresponding to /data/.openclaw for host-side Hermes dispatch.",
+    )
+    worker_parser.add_argument(
+        "--hermes-container-openclaw-root",
+        default="/data/.openclaw",
+        help="Container path prefix to translate for host-side Hermes dispatch.",
+    )
 
     return parser.parse_args()
 
@@ -120,6 +143,11 @@ def main():
             storage_env_file=Path(args.storage_env_file) if args.storage_env_file else None,
             limit=args.limit,
             drain=args.drain,
+            agent_runtime=args.agent_runtime,
+            hermes_profile=args.hermes_profile,
+            hermes_timeout_seconds=args.hermes_timeout_seconds,
+            hermes_host_openclaw_root=Path(args.hermes_host_openclaw_root),
+            hermes_container_openclaw_root=Path(args.hermes_container_openclaw_root),
         )
         result = drain_agent_queues(config, max_cycles=args.max_cycles) if args.drain else process_agent_queues_once(config)
         print(json.dumps(result, indent=2))

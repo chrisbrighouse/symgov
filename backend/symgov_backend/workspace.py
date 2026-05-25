@@ -13,8 +13,8 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import Text, and_, cast, func, inspect as inspect_database, select
-from sqlalchemy.orm import Session, load_only
+from sqlalchemy import Text, and_, cast, func, select
+from sqlalchemy.orm import Session
 
 from ..dependencies import get_db_session
 from ..models import (
@@ -65,11 +65,8 @@ from ..schemas import (
     WorkspaceReviewSymbolPropertyOptionResponse,
     WorkspaceReviewSymbolPropertiesResponse,
     WorkspaceReviewSymbolPropertiesUpdateRequest,
-    WorkspaceScottSourceSiteIncludeNextRunUpdateRequest,
     WorkspaceScottSourceSiteListResponse,
-    WorkspaceScottSourceSitePromptUpdateRequest,
     WorkspaceScottSourceSiteResponse,
-    WorkspaceScottSourceSiteStatusUpdateRequest,
     WorkspaceScottSourceSearchStopResponse,
     WorkspaceScottSourceSearchStartRequest,
     WorkspaceScottSourceSearchStartResponse,
@@ -169,48 +166,6 @@ DECISION_TRANSITIONS = {
         "close": False,
     },
 }
-
-SCOTT_SOURCE_SITE_BASE_LOAD_COLUMNS = (
-    ScottSourceDiscoverySite.id,
-    ScottSourceDiscoverySite.domain,
-    ScottSourceDiscoverySite.url,
-    ScottSourceDiscoverySite.title,
-    ScottSourceDiscoverySite.description,
-    ScottSourceDiscoverySite.industry,
-    ScottSourceDiscoverySite.process,
-    ScottSourceDiscoverySite.organization_type,
-    ScottSourceDiscoverySite.symbol_formats_json,
-    ScottSourceDiscoverySite.evidence_json,
-    ScottSourceDiscoverySite.status,
-    ScottSourceDiscoverySite.relevance_score,
-    ScottSourceDiscoverySite.first_seen_at,
-    ScottSourceDiscoverySite.last_seen_at,
-    ScottSourceDiscoverySite.last_session_queue_item_id,
-)
-
-
-def scott_source_site_columns(session: Session) -> set[str]:
-    inspector = inspect_database(session.get_bind())
-    return {column["name"] for column in inspector.get_columns("scott_source_discovery_sites")}
-
-
-def scott_source_prompt_column_exists(session: Session) -> bool:
-    return "source_prompt" in scott_source_site_columns(session)
-
-
-def scott_source_include_next_run_column_exists(session: Session) -> bool:
-    return "include_next_run" in scott_source_site_columns(session)
-
-
-def scott_source_site_query(session: Session, prompt_column_exists: bool, include_next_run_column_exists: bool):
-    query = session.query(ScottSourceDiscoverySite)
-    load_columns = list(SCOTT_SOURCE_SITE_BASE_LOAD_COLUMNS)
-    if prompt_column_exists:
-        load_columns.append(ScottSourceDiscoverySite.source_prompt)
-    if include_next_run_column_exists:
-        load_columns.append(ScottSourceDiscoverySite.include_next_run)
-    query = query.options(load_only(*load_columns))
-    return query
 CHILD_ACTION_ALIASES = {
     "approved": "approve",
     "rejected": "reject",
@@ -1451,12 +1406,7 @@ def start_scott_source_search(
     expected_completed_at = started_at + timedelta(seconds=request.durationSeconds)
     queue_item_id = uuid.uuid4()
     source_id = uuid.uuid4()
-    available_columns = scott_source_site_columns(session)
-    prompt_column_exists = "source_prompt" in available_columns
-    include_next_run_column_exists = "include_next_run" in available_columns
-    discovered_sites = scott_source_site_query(session, prompt_column_exists, include_next_run_column_exists).order_by(
-        ScottSourceDiscoverySite.last_seen_at.desc()
-    ).all()
+    discovered_sites = session.query(ScottSourceDiscoverySite).order_by(ScottSourceDiscoverySite.last_seen_at.desc()).all()
     memory_count = len(discovered_sites)
     preferred_sites = [
         {
@@ -1465,17 +1415,11 @@ def start_scott_source_search(
             "title": site.title,
             "description": site.description,
             "symbol_formats": site.symbol_formats_json or [],
-            "source_prompt": site.source_prompt if prompt_column_exists else None,
-            "include_next_run": bool(site.include_next_run) if include_next_run_column_exists else False,
         }
         for site in discovered_sites
-        if (site.status or "").strip().lower() not in {"ignored", "ignore"}
+        if site.status != "ignored"
     ]
-    ignored_domains = [
-        site.domain
-        for site in discovered_sites
-        if (site.status or "").strip().lower() in {"ignored", "ignore"}
-    ]
+    ignored_domains = [site.domain for site in discovered_sites if site.status == "ignored"]
     payload = {
         "task_type": "source_discovery_search",
         "display_name": "Source discovery search",
@@ -1660,8 +1604,6 @@ SCOTT_SOURCE_SITE_SORT_COLUMNS = {
     "industry": ScottSourceDiscoverySite.industry,
     "process": ScottSourceDiscoverySite.process,
     "organizationType": ScottSourceDiscoverySite.organization_type,
-    "sourcePrompt": ScottSourceDiscoverySite.source_prompt,
-    "includeNextRun": ScottSourceDiscoverySite.include_next_run,
     "symbolFormats": cast(ScottSourceDiscoverySite.symbol_formats_json, Text),
     "evidence": cast(ScottSourceDiscoverySite.evidence_json, Text),
     "relevanceScore": ScottSourceDiscoverySite.relevance_score,
@@ -1673,8 +1615,6 @@ SCOTT_SOURCE_SITE_SORT_COLUMNS = {
 SCOTT_SOURCE_SITE_FILTER_COLUMNS = {
     **SCOTT_SOURCE_SITE_SORT_COLUMNS,
     "organization_type": ScottSourceDiscoverySite.organization_type,
-    "source_prompt": ScottSourceDiscoverySite.source_prompt,
-    "include_next_run": ScottSourceDiscoverySite.include_next_run,
     "symbol_formats": cast(ScottSourceDiscoverySite.symbol_formats_json, Text),
     "relevance_score": ScottSourceDiscoverySite.relevance_score,
     "first_seen_at": ScottSourceDiscoverySite.first_seen_at,
@@ -1683,11 +1623,7 @@ SCOTT_SOURCE_SITE_FILTER_COLUMNS = {
 }
 
 
-def scott_source_site_response(
-    site: ScottSourceDiscoverySite,
-    include_source_prompt: bool = True,
-    include_next_run_available: bool = True,
-) -> WorkspaceScottSourceSiteResponse:
+def scott_source_site_response(site: ScottSourceDiscoverySite) -> WorkspaceScottSourceSiteResponse:
     return WorkspaceScottSourceSiteResponse(
         id=str(site.id),
         url=site.url,
@@ -1698,8 +1634,6 @@ def scott_source_site_response(
         industry=site.industry,
         process=site.process,
         organizationType=site.organization_type,
-        sourcePrompt=site.source_prompt if include_source_prompt else None,
-        includeNextRun=bool(site.include_next_run) if include_next_run_available else False,
         symbolFormats=site.symbol_formats_json or [],
         evidence=site.evidence_json or {},
         relevanceScore=float(site.relevance_score) if site.relevance_score is not None else None,
@@ -1738,8 +1672,6 @@ def list_scott_source_sites(
     firstSeenAt: str | None = Query(default=None),
     lastSeenAt: str | None = Query(default=None),
     lastSessionQueueItemId: str | None = Query(default=None),
-    sourcePrompt: str | None = Query(default=None),
-    includeNextRun: str | None = Query(default=None),
 ) -> WorkspaceScottSourceSiteListResponse:
     filters = {
         "url": url,
@@ -1756,158 +1688,27 @@ def list_scott_source_sites(
         "firstSeenAt": firstSeenAt,
         "lastSeenAt": lastSeenAt,
         "lastSessionQueueItemId": lastSessionQueueItemId,
-        "sourcePrompt": sourcePrompt,
-        "includeNextRun": includeNextRun,
     }
 
-    available_columns = scott_source_site_columns(session)
-    prompt_column_exists = "source_prompt" in available_columns
-    include_next_run_column_exists = "include_next_run" in available_columns
-    query = scott_source_site_query(session, prompt_column_exists, include_next_run_column_exists)
+    query = session.query(ScottSourceDiscoverySite)
     for key, raw_value in filters.items():
         value = (raw_value or "").strip()
         if not value:
-            continue
-        if key == "sourcePrompt" and not prompt_column_exists:
-            continue
-        if key == "includeNextRun":
-            if not include_next_run_column_exists:
-                continue
-            normalized = value.lower()
-            if normalized in {"true", "1", "yes", "checked"}:
-                query = query.filter(ScottSourceDiscoverySite.include_next_run.is_(True))
-            elif normalized in {"false", "0", "no", "unchecked"}:
-                query = query.filter(ScottSourceDiscoverySite.include_next_run.is_(False))
-            continue
-        if key == "status":
-            status_values = [
-                status_value.strip().lower().replace("-", "_").replace(" ", "_")
-                for status_value in value.split(",")
-                if status_value.strip()
-            ]
-            normalized_statuses = ["ignored" if status_value == "ignore" else status_value for status_value in status_values]
-            if normalized_statuses:
-                query = query.filter(func.lower(ScottSourceDiscoverySite.status).in_(normalized_statuses))
             continue
         column = SCOTT_SOURCE_SITE_FILTER_COLUMNS[key]
         query = query.filter(func.lower(cast(column, Text)).like(f"%{value.lower()}%"))
 
     total = query.count()
-    sort_column = (
-        ScottSourceDiscoverySite.last_seen_at
-        if (sort == "sourcePrompt" and not prompt_column_exists) or (sort == "includeNextRun" and not include_next_run_column_exists)
-        else SCOTT_SOURCE_SITE_SORT_COLUMNS.get(sort, ScottSourceDiscoverySite.last_seen_at)
-    )
+    sort_column = SCOTT_SOURCE_SITE_SORT_COLUMNS.get(sort, ScottSourceDiscoverySite.last_seen_at)
     ordered_column = sort_column.asc() if direction == "asc" else sort_column.desc()
     rows = query.order_by(ordered_column, ScottSourceDiscoverySite.url.asc()).offset(offset).limit(limit).all()
 
     return WorkspaceScottSourceSiteListResponse(
-        items=[
-            scott_source_site_response(
-                site,
-                include_source_prompt=prompt_column_exists,
-                include_next_run_available=include_next_run_column_exists,
-            )
-            for site in rows
-        ],
+        items=[scott_source_site_response(site) for site in rows],
         total=total,
         offset=offset,
         limit=limit,
         hasMore=offset + len(rows) < total,
-    )
-
-
-@router.patch(
-    "/scott/source-sites/{source_site_id}/prompt",
-    response_model=WorkspaceScottSourceSiteResponse,
-)
-@legacy_router.patch(
-    "/workspace/scott/source-sites/{source_site_id}/prompt",
-    response_model=WorkspaceScottSourceSiteResponse,
-    include_in_schema=False,
-)
-def update_scott_source_site_prompt(
-    source_site_id: uuid.UUID,
-    request: WorkspaceScottSourceSitePromptUpdateRequest,
-    session: Session = Depends(get_db_session),
-) -> WorkspaceScottSourceSiteResponse:
-    if not scott_source_prompt_column_exists(session):
-        raise HTTPException(status_code=503, detail="Scott source prompts are not available until the source prompt migration is applied.")
-    site = session.query(ScottSourceDiscoverySite).filter_by(id=source_site_id).one_or_none()
-    if site is None:
-        raise HTTPException(status_code=404, detail="Scott source site not found.")
-    if (site.status or "").strip().lower() != "candidate":
-        raise HTTPException(status_code=409, detail="Source prompts can only be edited for Candidate sources.")
-
-    normalized_prompt = (request.sourcePrompt or "").strip()
-    site.source_prompt = normalized_prompt or None
-    session.add(site)
-    session.commit()
-    session.refresh(site)
-    return scott_source_site_response(site)
-
-
-@router.patch(
-    "/scott/source-sites/{source_site_id}/include-next-run",
-    response_model=WorkspaceScottSourceSiteResponse,
-)
-@legacy_router.patch(
-    "/workspace/scott/source-sites/{source_site_id}/include-next-run",
-    response_model=WorkspaceScottSourceSiteResponse,
-    include_in_schema=False,
-)
-def update_scott_source_site_include_next_run(
-    source_site_id: uuid.UUID,
-    request: WorkspaceScottSourceSiteIncludeNextRunUpdateRequest,
-    session: Session = Depends(get_db_session),
-) -> WorkspaceScottSourceSiteResponse:
-    available_columns = scott_source_site_columns(session)
-    if "include_next_run" not in available_columns:
-        raise HTTPException(status_code=503, detail="Scott include-next-run is not available until the include-next-run migration is applied.")
-    site = session.query(ScottSourceDiscoverySite).filter_by(id=source_site_id).one_or_none()
-    if site is None:
-        raise HTTPException(status_code=404, detail="Scott source site not found.")
-
-    site.include_next_run = bool(request.includeNextRun)
-    session.add(site)
-    session.commit()
-    session.refresh(site)
-    return scott_source_site_response(
-        site,
-        include_source_prompt="source_prompt" in available_columns,
-        include_next_run_available=True,
-    )
-
-
-@router.patch(
-    "/scott/source-sites/{source_site_id}/status",
-    response_model=WorkspaceScottSourceSiteResponse,
-)
-@legacy_router.patch(
-    "/workspace/scott/source-sites/{source_site_id}/status",
-    response_model=WorkspaceScottSourceSiteResponse,
-    include_in_schema=False,
-)
-def update_scott_source_site_status(
-    source_site_id: uuid.UUID,
-    request: WorkspaceScottSourceSiteStatusUpdateRequest,
-    session: Session = Depends(get_db_session),
-) -> WorkspaceScottSourceSiteResponse:
-    available_columns = scott_source_site_columns(session)
-    site = session.query(ScottSourceDiscoverySite).filter_by(id=source_site_id).one_or_none()
-    if site is None:
-        raise HTTPException(status_code=404, detail="Scott source site not found.")
-
-    site.status = request.status
-    if request.status == "ignored" and "include_next_run" in available_columns:
-        site.include_next_run = False
-    session.add(site)
-    session.commit()
-    session.refresh(site)
-    return scott_source_site_response(
-        site,
-        include_source_prompt="source_prompt" in available_columns,
-        include_next_run_available="include_next_run" in available_columns,
     )
 
 

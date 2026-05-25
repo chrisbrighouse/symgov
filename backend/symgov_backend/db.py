@@ -7,7 +7,7 @@ import sys
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DEPS = BACKEND_ROOT / ".deps"
 
-if BACKEND_DEPS.exists() and str(BACKEND_DEPS) not in sys.path:
+if os.environ.get("SYMGOV_DISABLE_BACKEND_DEPS", "").strip().lower() not in {"1", "true", "yes", "on"} and BACKEND_DEPS.exists() and str(BACKEND_DEPS) not in sys.path:
     sys.path.insert(0, str(BACKEND_DEPS))
 
 from sqlalchemy import create_engine

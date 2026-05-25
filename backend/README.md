@@ -54,11 +54,13 @@ OpenClaw resilience notes:
 - `manage_symgov.py check-openclaw` audits:
   - plugin safety profile
   - OpenClaw config registration
+  - manifest-defined model profiles expanded into concrete per-agent OpenClaw model ids
   - managed OpenClaw `bindings[]`
   - `agent.json` presence and contents
   - workspace state files
   - required SymGov runner and definition files
 - `manage_symgov.py reconcile-openclaw` repairs the OpenClaw-side registration state from that manifest.
+- Per-agent LLM model access is configured through manifest `model_profiles` plus each agent's `model_profile`. Reconciliation resolves the profile to OpenClaw's concrete `agents.list[].model` and per-agent `agent.json` `model` field.
 - This is intended as the first post-upgrade recovery path when OpenClaw updates leave SymGov agent registration or plugin state inconsistent.
 - The current managed binding set is intentionally empty so `telegram:7643191699` remains handled by Alfi/main. Do not bind Telegram directly to `Libby` unless the orchestrator model is intentionally changed.
 - OpenClaw bindings currently support deterministic match fields such as channel, account, and peer; they do not provide arbitrary keyword-routing rules.
@@ -102,7 +104,7 @@ Current Workspace APIs:
 - versioned agent queue route: `GET /api/v1/workspace/agent-queue-items`
 - compatibility alias: `GET /api/workspace/agent-queue-items`
 - review cases and Daisy reports remain the other live Workspace dashboard inputs
-- Scott source-discovery memory is exposed through `GET /api/v1/workspace/scott/source-sites`; the route returns URL, status, title, domain, descriptive metadata, formats, evidence, relevance score, timestamps, and last queue item, with offset/limit lazy loading plus server-side text filters and sorting for each grid column
+- Scott source-discovery memory is exposed through `GET /api/v1/workspace/scott/source-sites`; the route returns URL, status, title, domain, descriptive metadata, `includeNextRun`, candidate-only source prompts, formats, evidence, relevance score, timestamps, and last queue item, with offset/limit lazy loading plus server-side filters and sorting for each grid column. Candidate source prompts are edited through `PATCH /api/v1/workspace/scott/source-sites/{source_site_id}/prompt`; `Next run` inclusion is edited through `PATCH /api/v1/workspace/scott/source-sites/{source_site_id}/include-next-run`. The frontend retries these PATCH calls with a wrapped `{request: ...}` body when the deployed API expects FastAPI's wrapped body shape.
 - Hannah published-symbol curation is started through `POST /api/v1/workspace/hannah/curation-searches`; the backend creates a Hannah queue item with a two-minute default run window, writes a runtime queue JSON record, and launches the Hannah runner with DB persistence.
 - Hannah published-symbol curation can be stopped through `POST /api/v1/workspace/hannah/curation-searches/{queue_item_id}/stop`; the backend marks the queue item `cancelled`, stamps `completed_at`, records stop metadata in the queue payload, updates the runtime queue JSON, and sends `SIGTERM` to the stored process group when available.
 - Hannah photo candidates are exposed through `GET /api/v1/workspace/hannah/photo-candidates`; the route supports lazy loading plus sort/filter parameters and returns symbol context, candidate/source URLs, source domain, rights status, license, score, curation status, timestamps, and preview URLs for attached public supplemental photos.
@@ -172,8 +174,8 @@ Current runner bridge notes:
 
 - `manage_symgov.py seed-agent-definitions` upserts baseline `agent_definitions` rows for `scott`, `vlad`, `tracy`, `daisy`, `libby`, `rupert`, `ed`, `hannah`, and `whitney`
 - `manage_symgov.py seed-scott-source-discovery` upserts Scott's durable source-discovery memory rows, including approved and ignored domains such as `linecad.com`, `freecads.com`, `svghmi.pro`, and `autodesk.com`
-- Scott source-search defaults now use a 2 minute window and seed toward `commons.wikimedia.org P&ID symbols`, while ignored domains are passed into the next run payload
-- Scott source-site browsing is read-only in the current frontend, but the response model carries stable row IDs and status values so later inline status actions can be added without replacing the grid contract
+- Scott source-search defaults now use a 2 minute window and seed toward `commons.wikimedia.org P&ID symbols`, while ignored domains and checked `include_next_run` rows are passed into the next run payload
+- Scott source-site browsing now supports two operator edits from the Workspace Sources grid: candidate-only source prompts and `Next run` checkboxes. Checked rows are inspected before the normal web search. If a checked row has a prompt, Scott keeps that prompt available during the checked-source pass and can inspect same-domain URLs mentioned in it, but durable evidence records only prompt availability rather than the prompt text.
 - Hannah curation uses Alembic revision `20260519_0010_hannah_curation.py` for `hannah_symbol_curation_states` and `hannah_photo_candidates`. The runner searches eligible public published symbols through Wikimedia Commons metadata, records all scored candidates, uploads only low-risk licensed image files when storage is configured, and caps attached public supplemental photos at two per symbol.
 - Hannah persistence writes `hannah_curation_report` artifacts through the runtime bridge and records audit events for metadata updates and supplemental-photo attachment.
 - Whitney market intelligence uses Alembic revision `20260522_0011_whitney_market_intelligence.py` for `whitney_market_intelligence_reports` and `whitney_demand_signals`. The runner currently reads internal Symgov telemetry only, writes `market_intelligence_reports` runtime records, and persists `whitney_market_intelligence_report` artifacts through the runtime bridge. Demand signals are upserted by `(source_type, source_ref, signal_type)` so repeated scans refresh the durable signal instead of duplicating it.

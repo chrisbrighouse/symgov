@@ -45,7 +45,7 @@
 - `QueueMonitorBoard` with two monitor screens: `Pipeline` shows Scott, Vlad, Tracy, Libby, Daisy, Human Review, and Rupert; `Intelligence` shows Hannah, Whitney, and Ed from left to right
 - `MonitorColumn` with count, stage label, and an internally scrollable card stack; duplicate footer counts are omitted
 - `MonitorCard` with London-local `HH:MM DDMMMYY` time/date label as the first visible row where live timestamps are available, short package/symbol display name as the second visible row, source metadata, optional Vlad `Process` line, optional Standards target for published Rupert cards, status on its own line under the activity string, and priority dot. Agent queue cards use `createdAt`; Human Review cards use review `openedAt`, including individual split-item review records.
-- `ScottSourceDiscoveryPanel` for the Workspace `Sources` tab. It renders the always-visible source memory grid, showing URL first with status and title prominent on the left, and supports sortable/filterable columns with infinite scroll instead of paging.
+- `ScottSourceDiscoveryPanel` for the Workspace `Sources` tab. It renders the always-visible source memory grid, showing URL first with status and title prominent on the left, and supports sortable/filterable columns with infinite scroll instead of paging. It includes a `Next run` checkbox column with checked/unchecked filtering and a candidate-only Scott prompt editor for source access/download instructions.
 - `HannahCurationPanel` for the Workspace `Curation` tab. It renders Hannah's scored published-symbol photo candidates with source/domain, rights status, license, score, symbol context, sortable/filterable columns, and infinite scroll. Its titlebar controls mirror Scott's source-search pattern: `Start search`, a running countdown, and a red `Stop` button while a curation run is active.
 - `WhitneyDemandSignalsPanel` for the Workspace `Intelligence` tab. It renders Whitney's demand signals with signal type, market segment, demand score, confidence, recommendation, source, symbol/page context, sortable/filterable columns, and infinite scroll. Its titlebar controls mirror Scott and Hannah: `Start scan`, a running countdown, and a red `Stop` button while a demand scan is active.
 - Human Review cards link to the matching Reviews item. Rupert cards become clickable only after durable public publication exists, display `PUBLISHED`, and link to Standards View through the backend-provided published symbol target.
@@ -68,7 +68,7 @@
 
 - Monitor processing activity first
 - Search by batch, status, or case second
-- Inspect Scott source-discovery progress from the Sources grid when administering web-search inputs
+- Inspect Scott source-discovery progress from the Sources grid when administering web-search inputs, mark source rows for Scott's next run, and add candidate-only prompts that help Scott retrieve symbol files from selected sources
 - Inspect Hannah curation progress and photo candidates from the Curation grid when administering published Standards quality
 - Inspect Whitney demand signals from the Intelligence grid when prioritizing catalogue coverage or market-driven follow-up
 - Approve or request changes third

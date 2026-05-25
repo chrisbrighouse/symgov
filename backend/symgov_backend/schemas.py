@@ -238,12 +238,37 @@ class WorkspaceScottSourceSiteResponse(BaseModel):
     industry: str | None = None
     process: str | None = None
     organizationType: str | None = None
+    sourcePrompt: str | None = None
+    includeNextRun: bool = False
     symbolFormats: list[Any] = Field(default_factory=list)
     evidence: dict[str, Any] = Field(default_factory=dict)
     relevanceScore: float | None = None
     firstSeenAt: str
     lastSeenAt: str
     lastSessionQueueItemId: str | None = None
+
+
+class WorkspaceScottSourceSitePromptUpdateRequest(BaseModel):
+    sourcePrompt: str | None = Field(default=None, max_length=4000)
+
+
+class WorkspaceScottSourceSiteIncludeNextRunUpdateRequest(BaseModel):
+    includeNextRun: bool
+
+
+class WorkspaceScottSourceSiteStatusUpdateRequest(BaseModel):
+    status: str = Field(min_length=1, max_length=64)
+
+    @field_validator("status")
+    @classmethod
+    def normalize_status(cls, value: str) -> str:
+        normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+        if normalized == "ignore":
+            return "ignored"
+        allowed = {"candidate", "low_signal", "ignored"}
+        if normalized not in allowed:
+            raise ValueError(f"Unsupported Scott source status: {value}")
+        return normalized
 
 
 class WorkspaceScottSourceSiteListResponse(BaseModel):

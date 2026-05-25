@@ -21,6 +21,7 @@ class OpenClawAgentSpec:
     name: str
     workspace: Path
     agent_dir: Path
+    model_profile: str | None
     model: str
     identity_name: str
     tools: dict[str, Any]
@@ -32,6 +33,7 @@ class OpenClawAgentSpec:
 class OpenClawManifest:
     safe_plugins_allow: tuple[str, ...]
     safe_plugins_disable: tuple[str, ...]
+    model_profiles: dict[str, dict[str, Any]]
     bindings: tuple[dict[str, Any], ...]
     agents: tuple[OpenClawAgentSpec, ...]
 
@@ -43,24 +45,42 @@ def _json_dumps(value: Any) -> str:
 def load_manifest(path: str | Path | None = None) -> OpenClawManifest:
     manifest_path = Path(path) if path else MANIFEST_PATH
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    agents = tuple(
-        OpenClawAgentSpec(
-            id=entry["id"],
-            name=entry["name"],
-            workspace=Path(entry["workspace"]),
-            agent_dir=Path(entry["agent_dir"]),
-            model=entry["model"],
-            identity_name=entry["identity_name"],
-            tools=entry["tools"],
-            agent_to_agent=bool(entry.get("agent_to_agent", False)),
-            required_workspace_files=tuple(entry.get("required_workspace_files", [])),
+    model_profiles = deepcopy(data.get("model_profiles", {}))
+    agents = []
+    for entry in data["agents"]:
+        model_profile = entry.get("model_profile")
+        if model_profile:
+            profile = model_profiles.get(model_profile)
+            if profile is None:
+                raise ValueError(f"Agent {entry['id']} references unknown model_profile: {model_profile}")
+            if not profile.get("model"):
+                raise ValueError(f"model_profile {model_profile} must define a model")
+            model = str(profile["model"])
+        elif entry.get("model"):
+            model = str(entry["model"])
+        else:
+            raise ValueError(f"Agent {entry['id']} must define model_profile or model")
+
+        agents.append(
+            OpenClawAgentSpec(
+                id=entry["id"],
+                name=entry["name"],
+                workspace=Path(entry["workspace"]),
+                agent_dir=Path(entry["agent_dir"]),
+                model_profile=str(model_profile) if model_profile else None,
+                model=model,
+                identity_name=entry["identity_name"],
+                tools=entry["tools"],
+                agent_to_agent=bool(entry.get("agent_to_agent", False)),
+                required_workspace_files=tuple(entry.get("required_workspace_files", [])),
+            )
         )
-        for entry in data["agents"]
-    )
+    agents = tuple(agents)
     safe_plugins = data["safe_plugins"]
     return OpenClawManifest(
         safe_plugins_allow=tuple(safe_plugins.get("allow", [])),
         safe_plugins_disable=tuple(safe_plugins.get("disable", [])),
+        model_profiles=model_profiles,
         bindings=tuple(data.get("bindings", [])),
         agents=agents,
     )
@@ -174,6 +194,8 @@ def audit_openclaw_registration(
         agent_status.append(
             {
                 "id": spec.id,
+                "model_profile": spec.model_profile,
+                "expected_model": spec.model,
                 "config_present": entry is not None,
                 "config_ok": config_ok,
                 "config_mismatches": mismatches,

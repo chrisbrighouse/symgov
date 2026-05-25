@@ -29,6 +29,15 @@ class SymgovAPISettings:
     agent_worker_interval_seconds: float = float(os.environ.get("SYMGOV_AGENT_WORKER_INTERVAL_SECONDS", "10"))
     agent_worker_limit: int = int(os.environ.get("SYMGOV_AGENT_WORKER_LIMIT", "10"))
     agent_worker_drain: bool = os.environ.get("SYMGOV_AGENT_WORKER_DRAIN", "1").strip().lower() in {"1", "true", "yes", "on"}
+    agent_runtime: str = os.environ.get("SYMGOV_AGENT_RUNTIME", "direct").strip().lower()
+    hermes_profile: str = os.environ.get("SYMGOV_HERMES_PROFILE", "symgov").strip() or "symgov"
+    hermes_timeout_seconds: int = int(os.environ.get("SYMGOV_HERMES_TIMEOUT_SECONDS", "600"))
+    hermes_host_openclaw_root: Path = Path(
+        os.environ.get("SYMGOV_HERMES_HOST_OPENCLAW_ROOT", "/docker/openclaw-hz0t/data/.openclaw")
+    )
+    hermes_container_openclaw_root: Path = Path(
+        os.environ.get("SYMGOV_HERMES_CONTAINER_OPENCLAW_ROOT", "/data/.openclaw")
+    )
 
 
 def get_settings() -> SymgovAPISettings:

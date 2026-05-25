@@ -132,7 +132,7 @@ def search_commons_images(symbol: dict[str, Any], trace: list[dict[str, str]]) -
             symbol.get("name"),
             symbol.get("category"),
             symbol.get("discipline"),
-            "equipment photograph",
+            "real equipment photograph",
         )
         if part
     )

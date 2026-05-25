@@ -360,6 +360,8 @@ class ScottSourceDiscoverySite(Base):
     industry: Mapped[str | None] = mapped_column(Text, nullable=True)
     process: Mapped[str | None] = mapped_column(Text, nullable=True)
     organization_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    include_next_run: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     symbol_formats_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
     evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     status: Mapped[str] = mapped_column(Text, nullable=False)

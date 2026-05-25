@@ -117,7 +117,7 @@ Phase-1 published API rule:
   - Daisy-visible review cases with source preview context and latest decision summary
   - open split children are projected as first-class human-review items with `reviewItemType: "split_item"`, `parentReviewCaseId`, one child payload, and the child preview as the primary visual while their `review_split_items.status` is `awaiting_decision` or `returned_for_review`
 - `GET /api/v1/workspace/scott/source-sites`
-  - Scott source-discovery memory rows for admin inspection, including URL, status, title, domain, classification metadata, source formats, evidence, relevance score, timestamps, and last source-search queue item
+  - Scott source-discovery memory rows for admin inspection, including URL, status, title, domain, classification metadata, source formats, evidence, relevance score, timestamps, last source-search queue item, candidate-only operator prompts, and a `Next run` inclusion flag
   - supports offset/limit lazy loading, sortable columns, and simple text filters so the admin grid can scale without paging controls
 - `POST /api/v1/workspace/hannah/curation-searches`
   - start a Hannah published-symbol curation run with a two-minute default duration, queue-item persistence, runtime JSON handoff, and detached runner launch

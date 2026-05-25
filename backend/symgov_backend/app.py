@@ -68,6 +68,11 @@ def create_app() -> FastAPI:
             else settings.libby_worker_interval_seconds,
             limit=settings.agent_worker_limit if settings.enable_agent_workers else settings.libby_worker_limit,
             drain=settings.agent_worker_drain,
+            agent_runtime=settings.agent_runtime,
+            hermes_profile=settings.hermes_profile,
+            hermes_timeout_seconds=settings.hermes_timeout_seconds,
+            hermes_host_openclaw_root=settings.hermes_host_openclaw_root,
+            hermes_container_openclaw_root=settings.hermes_container_openclaw_root,
         )
         app.state.agent_worker_stop_event = stop_event
         app.state.agent_worker_task = asyncio.create_task(run_agent_queue_worker(config, stop_event))
