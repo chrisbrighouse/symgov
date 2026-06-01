@@ -269,7 +269,7 @@ def process_agent_queue_item_with_hermes(agent: str, queue_path: Path, runtime_r
     start_time = datetime.now(timezone.utc).timestamp()
     started_at = _utc_now()
     completed = subprocess.run(
-        ["hermes", "-p", config.hermes_profile, "chat", "-q", prompt, "--quiet"],
+        ["/root/.local/bin/hermes", "-p", config.hermes_profile, "chat", "-q", prompt, "--quiet"],
         cwd=workdir,
         capture_output=True,
         text=True,

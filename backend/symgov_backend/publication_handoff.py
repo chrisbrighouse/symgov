@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import subprocess
 import sys
@@ -8,11 +9,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+try:
+    from PIL import Image, UnidentifiedImageError
+except ModuleNotFoundError:  # pragma: no cover - production image-processing dependency
+    Image = None  # type: ignore[assignment]
+    UnidentifiedImageError = OSError  # type: ignore[assignment]
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .models import (
     AgentDefinition,
+    AgentQueueItem,
     AuditEvent,
     ClassificationRecord,
     GovernedSymbol,
@@ -27,7 +34,8 @@ from .models import (
     User,
     ValidationReport,
 )
-from .runtime import coerce_uuid, slugify_public_code
+from .settings import get_settings
+from .runtime import coerce_uuid, download_object_bytes, slugify_public_code
 
 
 RUPERT_RUNNER = Path("/data/.openclaw/workspaces/rupert/run_rupert_publication.py")
@@ -640,6 +648,235 @@ def run_rupert(queue_path: Path) -> dict[str, Any]:
         raise RuntimeError(f"Rupert returned invalid JSON: {completed.stdout}") from exc
 
 
+def _canonical_grayscale_pixels(payload: bytes, *, size: tuple[int, int]) -> list[int]:
+    if Image is None:
+        raise RuntimeError("Pillow is required for graphical duplicate detection.")
+    with Image.open(io.BytesIO(payload)) as image:
+        if image.mode in {"RGBA", "LA"}:
+            background = Image.new("RGBA", image.size, "WHITE")
+            background.alpha_composite(image.convert("RGBA"))
+            image = background.convert("RGB")
+        gray = image.convert("L").resize(size)
+        return list(gray.getdata())
+
+
+def _image_dhash_hex(payload: bytes) -> str:
+    pixels = _canonical_grayscale_pixels(payload, size=(9, 8))
+    bits: list[int] = []
+    for row in range(8):
+        base = row * 9
+        for col in range(8):
+            bits.append(1 if pixels[base + col] > pixels[base + col + 1] else 0)
+    value = 0
+    for bit in bits:
+        value = (value << 1) | bit
+    return f"{value:016x}"
+
+
+def _pixel_difference_score(left_payload: bytes, right_payload: bytes) -> float:
+    left_pixels = _canonical_grayscale_pixels(left_payload, size=(128, 128))
+    right_pixels = _canonical_grayscale_pixels(right_payload, size=(128, 128))
+    total = sum(abs(left - right) for left, right in zip(left_pixels, right_pixels))
+    return total / (255.0 * len(left_pixels))
+
+
+def _hamming_distance_hex(left: str, right: str) -> int:
+    return (int(left, 16) ^ int(right, 16)).bit_count()
+
+
+def _revision_source_object_key(revision: SymbolRevision) -> str | None:
+    payload = revision.payload_json or {}
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("source_object_key")
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def detect_graphical_duplicates(
+    session: Session,
+    *,
+    revisions: list[SymbolRevision],
+    distance_threshold: int = 4,
+    pixel_difference_threshold: float = 0.08,
+) -> list[dict[str, Any]]:
+    settings = get_settings()
+    storage_env = str(settings.storage_env_file)
+    published_rows = (
+        session.query(SymbolRevision, GovernedSymbol)
+        .join(GovernedSymbol, GovernedSymbol.id == SymbolRevision.symbol_id)
+        .filter(SymbolRevision.lifecycle_state == "published")
+        .all()
+    )
+    published_hashes: list[dict[str, Any]] = []
+    for row_revision, row_symbol in published_rows:
+        object_key = _revision_source_object_key(row_revision)
+        if not object_key:
+            continue
+        try:
+            payload = download_object_bytes(object_key=object_key, env_file=storage_env)
+            payload_bytes = payload["payload"]
+            hash_hex = _image_dhash_hex(payload_bytes)
+        except Exception:
+            continue
+        published_hashes.append(
+            {
+                "revision_id": str(row_revision.id),
+                "symbol_slug": row_symbol.slug,
+                "object_key": object_key,
+                "dhash": hash_hex,
+                "payload": payload_bytes,
+            }
+        )
+
+    matches: list[dict[str, Any]] = []
+    for revision in revisions:
+        candidate_key = _revision_source_object_key(revision)
+        if not candidate_key:
+            continue
+        try:
+            candidate_payload = download_object_bytes(object_key=candidate_key, env_file=storage_env)
+            candidate_payload_bytes = candidate_payload["payload"]
+            candidate_hash = _image_dhash_hex(candidate_payload_bytes)
+        except (FileNotFoundError, RuntimeError, UnidentifiedImageError, OSError):
+            continue
+        for published in published_hashes:
+            if published["revision_id"] == str(revision.id):
+                continue
+            distance = _hamming_distance_hex(candidate_hash, published["dhash"])
+            if distance > distance_threshold:
+                continue
+            pixel_difference = _pixel_difference_score(candidate_payload_bytes, published["payload"])
+            if pixel_difference <= pixel_difference_threshold:
+                matches.append(
+                    {
+                        "candidate_revision_id": str(revision.id),
+                        "candidate_object_key": candidate_key,
+                        "candidate_dhash": candidate_hash,
+                        "matched_revision_id": published["revision_id"],
+                        "matched_symbol_slug": published["symbol_slug"],
+                        "matched_object_key": published["object_key"],
+                        "matched_dhash": published["dhash"],
+                        "hamming_distance": distance,
+                        "distance_threshold": distance_threshold,
+                        "pixel_difference": round(pixel_difference, 6),
+                        "pixel_difference_threshold": pixel_difference_threshold,
+                    }
+                )
+    return matches
+
+
+def queue_libby_duplicate_followup(
+    session: Session,
+    *,
+    review_case: ReviewCase,
+    decision: HumanReviewDecision,
+    action: ReviewCaseAction,
+    duplicates: list[dict[str, Any]],
+) -> dict[str, Any]:
+    now = utc_now()
+    libby_definition = session.query(AgentDefinition).filter_by(slug="libby").one_or_none()
+    if libby_definition is None:
+        raise RuntimeError("Libby agent definition not found while queueing duplicate follow-up.")
+
+    first = duplicates[0]
+    reviewer_message = (
+        "Graphical duplicate suspected before publication: "
+        f"candidate revision {first['candidate_revision_id']} visually matches published symbol "
+        f"{first['matched_symbol_slug']} (dHash distance {first['hamming_distance']} <= {first['distance_threshold']}; "
+        f"pixel difference {first['pixel_difference']} <= {first['pixel_difference_threshold']})."
+    )
+    payload = {
+        "task_type": "publication_duplicate_detected",
+        "review_case_id": str(review_case.id),
+        "review_decision_id": str(decision.id),
+        "current_stage": "duplicate_resolution",
+        "decision_code": "duplicate",
+        "decision_summary": "Automatic publication duplicate gate detected a graphical duplicate.",
+        "decision_note": reviewer_message,
+        "case_comment": reviewer_message,
+        "origin": "rupert_publication_gate",
+        "libby_follow_up_type": "duplicate_resolution",
+        "duplicate_evidence": duplicates,
+    }
+    queue_id = f"aqi-libby-duplicate-{str(decision.id)[:8]}-{now.strftime('%Y%m%dT%H%M%SZ')}"
+    queue_item = {
+        "id": queue_id,
+        "agent_id": "libby",
+        "source_type": "review_decision",
+        "source_id": str(decision.id),
+        "status": "queued",
+        "priority": "high",
+        "payload_json": payload,
+        "confidence": None,
+        "escalation_reason": "graphical_duplicate_detected",
+        "created_at": isoformat_utc(now),
+        "started_at": None,
+        "completed_at": None,
+    }
+
+    db_queue_item = session.get(AgentQueueItem, coerce_uuid(queue_id))
+    if db_queue_item is None:
+        db_queue_item = AgentQueueItem(id=coerce_uuid(queue_id))
+        session.add(db_queue_item)
+    db_queue_item.agent_id = libby_definition.id
+    db_queue_item.source_type = "review_decision"
+    db_queue_item.source_id = coerce_uuid(str(decision.id))
+    db_queue_item.status = "queued"
+    db_queue_item.priority = "high"
+    db_queue_item.payload_json = payload
+    db_queue_item.confidence = None
+    db_queue_item.escalation_reason = "graphical_duplicate_detected"
+    db_queue_item.created_at = now
+    db_queue_item.started_at = None
+    db_queue_item.completed_at = None
+
+    review_case.current_stage = "duplicate_resolution"
+    review_case.closed_at = None
+
+    action.action_status = "completed"
+    action.completed_at = now
+    action.action_payload_json = {
+        **(action.action_payload_json or {}),
+        "libby_queue_item_id": queue_id,
+        "publication_blocked_reason": "graphical_duplicate_detected",
+        "duplicate_gate": {
+            "status": "detected",
+            "reviewer_message": reviewer_message,
+            "duplicate_evidence": duplicates,
+            "libby_queue_item_id": queue_id,
+        },
+    }
+
+    session.add(
+        AuditEvent(
+            id=uuid.uuid4(),
+            entity_type="review_case",
+            entity_id=review_case.id,
+            action="publication_duplicate_detected",
+            actor_id=None,
+            payload_json={
+                "decision_id": str(decision.id),
+                "review_case_action_id": str(action.id),
+                "libby_queue_item_id": queue_id,
+                "duplicate_evidence": duplicates,
+                "reviewer_message": reviewer_message,
+            },
+            created_at=now,
+        )
+    )
+    session.commit()
+
+    queue_file = Path("/data/.openclaw/workspaces/libby/runtime") / "agent_queue_items" / f"{queue_id}.json"
+    queue_file.parent.mkdir(parents=True, exist_ok=True)
+    with queue_file.open("w", encoding="utf-8") as handle:
+        json.dump(queue_item, handle, indent=2)
+        handle.write("\n")
+    return {"status": "duplicate_detected", "libby_queue_item_id": queue_id, "reviewer_message": reviewer_message}
+
+
 def execute_publication_handoff(
     session: Session,
     *,
@@ -687,6 +924,15 @@ def execute_publication_handoff(
             decision=decision,
             context=context,
         )
+        duplicate_matches = detect_graphical_duplicates(session, revisions=revisions)
+        if duplicate_matches:
+            return queue_libby_duplicate_followup(
+                session,
+                review_case=review_case,
+                decision=decision,
+                action=action,
+                duplicates=duplicate_matches,
+            )
         revision_ids = [str(revision.id) for revision in revisions]
         display_ids = revision_display_ids(revisions)
         pack_code, pack_title = build_pack_metadata(context, review_case)

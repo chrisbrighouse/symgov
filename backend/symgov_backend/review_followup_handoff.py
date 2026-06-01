@@ -36,21 +36,25 @@ def list_value(value: Any) -> list:
 
 
 def classify_follow_up(decision_code: str, child_decisions: list[dict[str, Any]]) -> str:
-    action_codes = {str(item.get("action") or "").strip() for item in child_decisions}
+    action_codes = {
+        str(item.get("action") or "").strip().lower().replace("-", "_")
+        for item in child_decisions
+    }
+    normalized_decision_code = str(decision_code or "").strip().lower().replace("-", "_")
     details_text = " ".join(
         str(item.get(key) or "")
         for item in child_decisions
         for key in ("note", "details")
     ).lower()
-    if decision_code in {"deleted", "reject"} or "deleted" in action_codes or "reject" in action_codes:
+    if normalized_decision_code in {"deleted", "delete", "reject", "rejected"} or action_codes.intersection({"deleted", "delete", "reject", "rejected"}):
         return "deletion_or_rejection"
-    if decision_code == "duplicate" or "duplicate" in action_codes:
+    if normalized_decision_code == "duplicate" or "duplicate" in action_codes:
         return "duplicate_resolution"
-    if decision_code in {"rename_classify"} or "rename_classify" in action_codes:
+    if normalized_decision_code in {"rename_classify"} or "rename_classify" in action_codes:
         return "metadata_or_classification_update"
-    if decision_code == "more_evidence":
+    if normalized_decision_code == "more_evidence":
         return "evidence_request"
-    if decision_code == "defer":
+    if normalized_decision_code == "defer":
         return "deferral"
     graphic_terms = (
         "graphic",
@@ -70,7 +74,7 @@ def classify_follow_up(decision_code: str, child_decisions: list[dict[str, Any]]
         "remove text",
         "erase text",
     )
-    if decision_code == "request_changes" and any(term in details_text for term in graphic_terms):
+    if normalized_decision_code == "request_changes" and any(term in details_text for term in graphic_terms):
         return "graphic_change_triage"
     if any(term in details_text for term in graphic_terms):
         return "graphic_change_triage"

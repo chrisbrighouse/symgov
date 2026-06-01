@@ -13,6 +13,7 @@ if os.environ.get("SYMGOV_DISABLE_BACKEND_DEPS", "").strip().lower() not in {"1"
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 
 DEFAULT_ENV_FILE = Path("/data/.openclaw/workspace/symgov/.env.backend.database")
@@ -57,16 +58,39 @@ def normalize_database_url(database_url: str) -> str:
 def create_database_engine(
     env_file: str | os.PathLike[str] | None = None,
     migration: bool = False,
+    nopool: bool = False,
     **engine_kwargs: object,
 ) -> Engine:
     database_url = normalize_database_url(get_database_url(env_file=env_file, migration=migration))
+    if nopool:
+        # NullPool opens a fresh connection per checkout and closes it on return.
+        # Use this for short-lived engines created per-task (e.g. agent workers,
+        # CLI commands, reconciliation runs). Avoids idle-connection accumulation
+        # when many engines are created and never explicitly disposed.
+        # NullPool ignores pool_size / max_overflow / pool_recycle, so don't pass them.
+        engine_kwargs["poolclass"] = NullPool
+        # pool_pre_ping is still meaningful (validates connection on checkout).
+        engine_kwargs.setdefault("pool_pre_ping", True)
+        # Drop any pool-sizing kwargs that NullPool can't consume.
+        for unsupported in ("pool_size", "max_overflow", "pool_recycle", "pool_timeout"):
+            engine_kwargs.pop(unsupported, None)
+        return create_engine(database_url, **engine_kwargs)
+
+    # Conservative defaults to keep total idle connection count low across many engines.
+    # ~7 agent workers + runtime + dependencies engines * default(5+10) easily exhausts a
+    # Postgres max_connections=100. With pool_size=2 + max_overflow=4 + pool_recycle=1800,
+    # each engine stays small and recycles every 30 minutes. Callers can override.
+    engine_kwargs.setdefault("pool_size", 2)
+    engine_kwargs.setdefault("max_overflow", 4)
+    engine_kwargs.setdefault("pool_recycle", 1800)
     return create_engine(database_url, **engine_kwargs)
 
 
 def create_session_factory(
     env_file: str | os.PathLike[str] | None = None,
     migration: bool = False,
+    nopool: bool = False,
     **engine_kwargs: object,
 ) -> sessionmaker[Session]:
-    engine = create_database_engine(env_file=env_file, migration=migration, **engine_kwargs)
+    engine = create_database_engine(env_file=env_file, migration=migration, nopool=nopool, **engine_kwargs)
     return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)

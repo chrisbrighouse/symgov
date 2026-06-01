@@ -78,6 +78,8 @@ from ..schemas import (
     WorkspaceHannahCurationSearchStopResponse,
     WorkspaceHannahPhotoCandidateListResponse,
     WorkspaceHannahPhotoCandidateResponse,
+    WorkspaceHannahCleanupActionRequest,
+    WorkspaceHannahCleanupActionResponse,
     WorkspaceWhitneyDemandScanStartRequest,
     WorkspaceWhitneyDemandScanStartResponse,
     WorkspaceWhitneyDemandScanStopResponse,
@@ -271,11 +273,7 @@ def suppress_parent_sheet_review(
     intake_record_id: uuid.UUID | None,
     split_intake_ids: set[uuid.UUID],
 ) -> bool:
-    return (
-        review_case.source_entity_type == "provenance_assessment"
-        and review_case.current_stage == "classification_review"
-        and intake_record_id in split_intake_ids
-    )
+    return review_case.source_entity_type == "provenance_assessment" and intake_record_id in split_intake_ids
 
 
 def close_parent_sheet_reviews_for_split(
@@ -299,7 +297,6 @@ def close_parent_sheet_reviews_for_split(
             ),
         )
         .where(ReviewCase.closed_at.is_(None))
-        .where(ReviewCase.current_stage == "classification_review")
         .where(ProvenanceAssessment.intake_record_id == intake_record_id)
     ).all()
     for review_case, _ in rows:
@@ -451,16 +448,26 @@ def queue_item_display_parts(session: Session, queue_item: AgentQueueItem) -> tu
             if value
         }
         if child_keys:
+            # Try specific unique match first
             split_item = (
                 session.query(ReviewSplitItem)
                 .filter(ReviewSplitItem.review_case_id == coerce_uuid(review_case_id))
-                .filter(
-                    (ReviewSplitItem.child_key.in_(child_keys))
-                    | (ReviewSplitItem.proposed_symbol_id.in_(child_keys))
-                    | (ReviewSplitItem.file_name.in_(child_keys))
-                )
-                .one_or_none()
+                .filter(ReviewSplitItem.child_key.in_(child_keys))
+                .first()
             )
+            
+            # Fallback to broader match only if unique key not found
+            if split_item is None:
+                split_item = (
+                    session.query(ReviewSplitItem)
+                    .filter(ReviewSplitItem.review_case_id == coerce_uuid(review_case_id))
+                    .filter(
+                        (ReviewSplitItem.proposed_symbol_id.in_(child_keys))
+                        | (ReviewSplitItem.file_name.in_(child_keys))
+                    )
+                    .first()
+                )
+
             if split_item is not None:
                 return split_item_display_parts(split_item)
 
@@ -1908,6 +1915,89 @@ def update_scott_source_site_status(
         site,
         include_source_prompt="source_prompt" in available_columns,
         include_next_run_available="include_next_run" in available_columns,
+    )
+
+
+def _resolve_symbol_by_record_ref(session: Session, record_ref: str) -> GovernedSymbol | None:
+    normalized = record_ref.strip().lower()
+    if not normalized:
+        return None
+    return (
+        session.query(GovernedSymbol)
+        .filter((func.lower(GovernedSymbol.slug) == normalized) | (func.lower(GovernedSymbol.canonical_name) == normalized))
+        .order_by(GovernedSymbol.updated_at.desc())
+        .first()
+    )
+
+
+def _parse_hannah_cleanup_message(message: str) -> tuple[str, str, str | None]:
+    text = " ".join(message.strip().split())
+    lower = text.lower()
+    if lower.startswith("@hannah"):
+        text = text[7:].strip()
+        lower = text.lower()
+
+    delete_match = re.search(r"(?:delete|remove)\s+record\s+([a-z0-9._-]+)", lower)
+    if delete_match:
+        return "delete_record", delete_match.group(1), None
+
+    discipline_match = re.search(
+        r"set\s+(?:the\s+)?discipline\s+(?:of\s+)?record\s+([a-z0-9._-]+)\s+to\s+([a-z0-9 _\-/]+)",
+        lower,
+    )
+    if discipline_match:
+        discipline = discipline_match.group(2).strip()
+        return "set_discipline", discipline_match.group(1), discipline
+
+    raise HTTPException(
+        status_code=422,
+        detail="Unsupported Hannah clean-up command. Try: 'delete record <id>' or 'set Discipline of record <id> to <value>'.",
+    )
+
+
+@router.post(
+    "/hannah/cleanup-actions",
+    response_model=WorkspaceHannahCleanupActionResponse,
+)
+@legacy_router.post(
+    "/workspace/hannah/cleanup-actions",
+    response_model=WorkspaceHannahCleanupActionResponse,
+    include_in_schema=False,
+)
+def run_hannah_cleanup_action(
+    request: WorkspaceHannahCleanupActionRequest,
+    session: Session = Depends(get_db_session),
+) -> WorkspaceHannahCleanupActionResponse:
+    action, record_ref, action_value = _parse_hannah_cleanup_message(request.message)
+    symbol = _resolve_symbol_by_record_ref(session, record_ref)
+    if symbol is None:
+        raise HTTPException(status_code=404, detail=f"Record '{record_ref}' was not found in published symbols.")
+
+    if action == "delete_record":
+        revision_count = session.query(SymbolRevision).filter(SymbolRevision.symbol_id == symbol.id).count()
+        session.delete(symbol)
+        session.commit()
+        return WorkspaceHannahCleanupActionResponse(
+            action=action,
+            recordRef=record_ref,
+            status="completed",
+            detail=f"Deleted published symbol '{symbol.slug}'.",
+            changes={"symbolSlug": symbol.slug, "symbolId": str(symbol.id), "revisionsDeleted": revision_count},
+        )
+
+    assert action == "set_discipline"
+    new_discipline = str(action_value or "").strip()
+    old_discipline = symbol.discipline
+    symbol.discipline = new_discipline
+    symbol.updated_at = datetime.now(timezone.utc).replace(microsecond=0)
+    session.add(symbol)
+    session.commit()
+    return WorkspaceHannahCleanupActionResponse(
+        action=action,
+        recordRef=record_ref,
+        status="completed",
+        detail=f"Updated discipline for '{symbol.slug}' to '{new_discipline}'.",
+        changes={"symbolSlug": symbol.slug, "symbolId": str(symbol.id), "oldDiscipline": old_discipline, "newDiscipline": new_discipline},
     )
 
 

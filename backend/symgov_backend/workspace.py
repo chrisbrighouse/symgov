@@ -226,11 +226,7 @@ def suppress_parent_sheet_review(
     intake_record_id: uuid.UUID | None,
     split_intake_ids: set[uuid.UUID],
 ) -> bool:
-    return (
-        review_case.source_entity_type == "provenance_assessment"
-        and review_case.current_stage == "classification_review"
-        and intake_record_id in split_intake_ids
-    )
+    return review_case.source_entity_type == "provenance_assessment" and intake_record_id in split_intake_ids
 
 
 def close_parent_sheet_reviews_for_split(
@@ -254,7 +250,6 @@ def close_parent_sheet_reviews_for_split(
             ),
         )
         .where(ReviewCase.closed_at.is_(None))
-        .where(ReviewCase.current_stage == "classification_review")
         .where(ProvenanceAssessment.intake_record_id == intake_record_id)
     ).all()
     for review_case, _ in rows:
@@ -2968,9 +2963,17 @@ def process_workspace_split_review_decisions(
         downstream_queue_item_id = None
         if refreshed_action is not None:
             action_payload = refreshed_action.action_payload_json or {}
-            downstream_queue_item_id = action_payload.get("rupert_queue_item_id") or action_payload.get("libby_queue_item_id")
+            duplicate_gate = action_payload.get("duplicate_gate") if isinstance(action_payload, dict) else None
+            if isinstance(duplicate_gate, dict) and duplicate_gate.get("status") == "detected":
+                downstream_queue_item_id = duplicate_gate.get("libby_queue_item_id") or action_payload.get("libby_queue_item_id")
+                item_status = "queued_libby"
+            else:
+                downstream_queue_item_id = action_payload.get("rupert_queue_item_id") or action_payload.get("libby_queue_item_id")
+                item_status = "queued_rupert" if is_approval else "queued_libby"
+        else:
+            item_status = "queued_rupert" if is_approval else "queued_libby"
         if item is not None:
-            item.status = "queued_rupert" if is_approval else "queued_libby"
+            item.status = item_status
             item.downstream_queue_item_id = downstream_queue_item_id
             item.processed_at = datetime.now(timezone.utc).replace(microsecond=0)
             item.updated_at = item.processed_at

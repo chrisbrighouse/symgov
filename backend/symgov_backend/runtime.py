@@ -22,6 +22,7 @@ if os.environ.get("SYMGOV_DISABLE_BACKEND_DEPS", "").strip().lower() not in {"1"
     sys.path.insert(0, str(BACKEND_DEPS))
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 
 from .db import create_session_factory, read_env_file
 from .models import (
@@ -508,7 +509,7 @@ def check_database_health(
     env_file: str | os.PathLike[str] | None = None,
     migration: bool = False,
 ) -> dict[str, Any]:
-    session_factory = create_session_factory(env_file=env_file, migration=migration, pool_pre_ping=True)
+    session_factory = create_session_factory(env_file=env_file, migration=migration, nopool=True)
     engine = session_factory.kw["bind"]
     assert engine is not None
     parsed = urllib.parse.urlparse(str(engine.url))
@@ -563,8 +564,14 @@ def check_database_health(
 
 
 class RuntimePersistenceBridge:
-    def __init__(self, env_file: str | os.PathLike[str] | None = None):
-        self.session_factory = create_session_factory(env_file=env_file, pool_pre_ping=True)
+    def __init__(self, env_file: str | os.PathLike[str] | None = None, nopool: bool = True):
+        # RuntimePersistenceBridge is frequently constructed per-task by agent
+        # workers (see agent_queue_worker.py), and the resulting engines are
+        # never explicitly disposed. Default to NullPool so each query opens
+        # and closes its own connection, preventing idle-connection accumulation
+        # against Postgres max_connections. Long-lived callers can pass
+        # nopool=False to opt back into the standard pool.
+        self.session_factory = create_session_factory(env_file=env_file, nopool=nopool)
 
     @contextmanager
     def session_scope(self):
@@ -857,12 +864,24 @@ class RuntimePersistenceBridge:
         sha256: str | None = None,
     ) -> dict[str, str]:
         now = datetime.now(timezone.utc).replace(microsecond=0)
-        attachment_id = uuid.uuid4()
+        parent_uuid = coerce_uuid(parent_id)
+
+        # Idempotency guard: retries can attempt to re-create the same object_key.
+        # Reuse the existing attachment row when one already exists for that key.
         with self.session_scope() as session:
+            existing = session.query(Attachment).filter(Attachment.object_key == object_key).one_or_none()
+            if existing is not None:
+                return {
+                    "id": str(existing.id),
+                    "object_key": existing.object_key,
+                    "filename": existing.filename,
+                }
+
+            attachment_id = uuid.uuid4()
             row = Attachment(
                 id=attachment_id,
                 parent_type=parent_type,
-                parent_id=coerce_uuid(parent_id),
+                parent_id=parent_uuid,
                 filename=filename,
                 object_key=object_key,
                 content_type=content_type,
@@ -871,6 +890,20 @@ class RuntimePersistenceBridge:
                 created_at=now,
             )
             session.add(row)
+            try:
+                session.flush()
+            except IntegrityError:
+                # Race-safe fallback: another worker inserted the same object_key.
+                session.rollback()
+                existing = session.query(Attachment).filter(Attachment.object_key == object_key).one_or_none()
+                if existing is None:
+                    raise
+                return {
+                    "id": str(existing.id),
+                    "object_key": existing.object_key,
+                    "filename": existing.filename,
+                }
+
         return {
             "id": str(attachment_id),
             "object_key": object_key,

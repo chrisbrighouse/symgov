@@ -11,7 +11,13 @@ from symgov_backend.agent_queue_worker import (
     drain_agent_queues,
     process_agent_queues_once,
 )
+from symgov_backend.agent_queue_reconciliation import reconcile_agent_queue_state
 from symgov_backend.api import serve_api
+from symgov_backend.automation_policy import (
+    evaluate_publication_automation_candidate,
+    evaluate_publication_automation_candidates,
+    evaluate_review_split_metadata_candidates,
+)
 from symgov_backend.openclaw_sync import audit_openclaw_registration, reconcile_openclaw_registration
 from symgov_backend.runtime import RuntimePersistenceBridge, check_database_health, check_storage_health
 
@@ -98,6 +104,41 @@ def parse_args():
         help="Container path prefix to translate for host-side Hermes dispatch.",
     )
 
+    reconcile_parser = subparsers.add_parser(
+        "reconcile-agent-queue",
+        help="Compare DB agent_queue_items with runtime queue JSON and optionally repair verified stale terminal statuses.",
+    )
+    reconcile_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    reconcile_parser.add_argument(
+        "--agent",
+        action="append",
+        choices=[*DEFAULT_AGENT_ORDER, "all"],
+        help="Agent queue to inspect. Repeat for multiple agents, or use all.",
+    )
+    reconcile_parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply verified runtime->DB queue status repairs. Omit for dry-run.",
+    )
+    reconcile_parser.add_argument(
+        "--include-terminal-db-rows",
+        action="store_true",
+        help="Inspect terminal DB rows too. Default inspects active/stuck DB rows only.",
+    )
+
+    gate_parser = subparsers.add_parser(
+        "evaluate-automation-gates",
+        help="Evaluate conservative publication automation gates without creating publication work.",
+    )
+    gate_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    gate_parser.add_argument("--classification-id", help="Evaluate one classification_records id instead of recent candidates.")
+    gate_parser.add_argument("--limit", type=int, default=50, help="Maximum current classification records to evaluate.")
+    gate_parser.add_argument(
+        "--review-split-metadata",
+        action="store_true",
+        help="Evaluate split-symbol name/category/discipline metadata instead of classification records.",
+    )
+
     return parser.parse_args()
 
 
@@ -150,6 +191,28 @@ def main():
             hermes_container_openclaw_root=Path(args.hermes_container_openclaw_root),
         )
         result = drain_agent_queues(config, max_cycles=args.max_cycles) if args.drain else process_agent_queues_once(config)
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "reconcile-agent-queue":
+        requested = args.agent or ["all"]
+        agents = DEFAULT_AGENT_ORDER if "all" in requested else tuple(requested)
+        result = reconcile_agent_queue_state(
+            db_env_file=args.db_env_file,
+            agents=agents,
+            apply=args.apply,
+            active_only=not args.include_terminal_db_rows,
+        )
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "evaluate-automation-gates":
+        if args.review_split_metadata:
+            result = evaluate_review_split_metadata_candidates(db_env_file=args.db_env_file, limit=args.limit)
+        elif args.classification_id:
+            result = evaluate_publication_automation_candidate(args.classification_id, db_env_file=args.db_env_file)
+        else:
+            result = evaluate_publication_automation_candidates(db_env_file=args.db_env_file, limit=args.limit)
         print(json.dumps(result, indent=2))
         return
 

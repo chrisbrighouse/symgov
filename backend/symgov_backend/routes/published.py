@@ -23,17 +23,21 @@ PUBLISHED_SYMBOLS_SQL = """
         gs.discipline,
         sr.id::text AS symbol_revision_id,
         sr.revision_label,
+        sr.created_at AS revision_created_at,
         sr.payload_json,
         sr.rationale,
         pp.id::text AS page_id,
         pp.page_code,
         pp.title AS page_title,
         pp.effective_date,
+        pp.updated_at AS page_updated_at,
         pk.id::text AS pack_id,
         pk.pack_code,
         pk.title AS pack_title,
         pk.audience,
-        pe.sort_order
+        pk.updated_at AS pack_updated_at,
+        pe.sort_order,
+        GREATEST(gs.updated_at, sr.created_at, pp.updated_at, pk.updated_at) AS last_updated_at
     FROM published_pages pp
     JOIN publication_packs pk ON pk.id = pp.pack_id
     JOIN pack_entries pe ON pe.pack_id = pk.id
@@ -70,10 +74,12 @@ def published_symbol_row(row, supplemental_photos_by_symbol: dict[str, list[dict
         "discipline": row.discipline,
         "revisionId": row.symbol_revision_id,
         "revision": row.revision_label,
+        "revisionCreatedAt": row.revision_created_at.isoformat() if row.revision_created_at else None,
         "status": "Published",
         "summary": payload.get("summary") or payload.get("description") or row.canonical_name,
         "rationale": row.rationale or "",
         "effectiveDate": row.effective_date.isoformat(),
+        "lastUpdatedAt": row.last_updated_at.isoformat() if row.last_updated_at else None,
         "pageId": row.page_id,
         "pageCode": row.page_code,
         "pageTitle": row.page_title,

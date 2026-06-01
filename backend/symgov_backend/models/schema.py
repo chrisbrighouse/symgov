@@ -495,6 +495,30 @@ class AgentOutputArtifact(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class HannahCurationSourceSite(Base):
+    __tablename__ = "hannah_curation_source_sites"
+    __table_args__ = (
+        Index("uq_hannah_curation_source_sites_domain", text("lower(domain)"), unique=True),
+        Index("ix_hannah_curation_source_sites_status_score", "status", "usefulness_score"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    domain: Mapped[str] = mapped_column(Text, nullable=False)
+    base_url: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_type: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    usefulness_score: Mapped[float] = mapped_column(Numeric(3, 2), nullable=False, server_default=text("1.00"))
+    reliability_score: Mapped[float] = mapped_column(Numeric(3, 2), nullable=False, server_default=text("1.00"))
+    feedback_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    config_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    last_search_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class IntakeRecord(Base):
     __tablename__ = "intake_records"
     __table_args__ = (Index("ix_intake_records_status_eligibility_created_at", "intake_status", "eligibility_status", "created_at"),)

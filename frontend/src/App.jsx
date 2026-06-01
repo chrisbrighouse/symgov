@@ -259,6 +259,15 @@ function EngineeringSymbolLogo() {
   );
 }
 
+function CameraIconMini() {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+  );
+}
+
 function CogIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -282,11 +291,14 @@ function StandardsPage() {
     message: appConfig.apiRoot ? 'Loading live published records…' : 'No API root configured. Showing seeded published records.',
     items: appConfig.apiRoot ? [] : symbols
   });
+  const standardsGridRef = useRef(null);
   const standardsSymbols = standardsState.items.length ? standardsState.items : symbols;
   const requestedSymbolId = searchParams.get('symbol') || '';
   const standardsColumns = [
     ['id', 'ID'],
     ['name', 'Name'],
+    ['lastUpdatedAt', 'Last update'],
+    ['photoStatus', 'Photos'],
     ['category', 'Category'],
     ['discipline', 'Discipline'],
     ['pack', 'Pack'],
@@ -430,7 +442,107 @@ function StandardsPage() {
     setDisplayCount(60);
   }, [query, columnFilters, facetFilters, sortState]);
 
-  const activeSymbol = filteredSymbols.find((symbol) => symbol.id === activeId) || filteredSymbols[0];
+  const activeSymbol = filteredSymbols.find((symbol) => symbol.id === activeId) || null;
+
+  function selectSymbol(symbolId) {
+    setActiveId(symbolId);
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (symbolId) {
+        next.set('symbol', symbolId);
+      } else {
+        next.delete('symbol');
+      }
+      return next;
+    }, { replace: true });
+  }
+
+  function handleStandardsGridKeyDown(event) {
+    if (event.defaultPrevented) {
+      return;
+    }
+
+    if (!filteredSymbols.length) {
+      return;
+    }
+
+    if (!['ArrowDown', 'ArrowUp', 'j', 'k', 'Home', 'End'].includes(event.key)) {
+      return;
+    }
+
+    const activeElement = document.activeElement;
+    const activeTag = activeElement?.tagName;
+    const isEditableElement = ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeTag) || activeElement?.isContentEditable;
+    if (isEditableElement) {
+      return;
+    }
+
+    // If nothing is selected yet, treat the visually-displayed fallback (first row)
+    // as the current row so the very first arrow press moves to row 2 — matches
+    // what a user sees in the detail panel after page load.
+    const effectiveActiveId = activeId || filteredSymbols[0]?.id || '';
+    if (!effectiveActiveId) {
+      return;
+    }
+
+    const currentIndex = filteredSymbols.findIndex((symbol) => symbol.id === effectiveActiveId);
+    if (currentIndex < 0) {
+      return;
+    }
+
+    let nextIndex = currentIndex;
+    if (event.key === 'ArrowDown' || event.key === 'j') {
+      // From the "no selection yet" state, ArrowDown should select the first row
+      // (not skip past it to row 2).
+      nextIndex = activeId ? Math.min(currentIndex + 1, filteredSymbols.length - 1) : currentIndex;
+    } else if (event.key === 'ArrowUp' || event.key === 'k') {
+      nextIndex = Math.max(currentIndex - 1, 0);
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = filteredSymbols.length - 1;
+    }
+
+    // If we materialized the implicit selection on ArrowDown, we still want to commit it.
+    const shouldCommit = !activeId || nextIndex !== currentIndex;
+    if (!shouldCommit) {
+      return;
+    }
+
+    event.preventDefault();
+    const nextSymbol = filteredSymbols[nextIndex];
+    if (nextIndex >= visibleSymbols.length) {
+      setDisplayCount((current) => Math.min(Math.max(current + 40, nextIndex + 1), filteredSymbols.length));
+    }
+    selectSymbol(nextSymbol.id);
+  }
+
+  // Also listen at the document level so arrow keys work regardless of which
+  // element inside the Standards page currently has focus (the per-row tabindex
+  // means real browsers — particularly Edge/Firefox — leave focus on the <tr>
+  // after a click, and key events on the row may not always bubble through
+  // React's grid handler reliably).
+  const standardsKeyHandlerRef = useRef(handleStandardsGridKeyDown);
+  standardsKeyHandlerRef.current = handleStandardsGridKeyDown;
+  useEffect(() => {
+    function onDocumentKeyDown(event) {
+      standardsKeyHandlerRef.current?.(event);
+    }
+    document.addEventListener('keydown', onDocumentKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onDocumentKeyDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!activeId) {
+      return;
+    }
+    const row = standardsGridRef.current?.querySelector(`tr[data-symbol-id="${activeId}"]`);
+    if (row) {
+      row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [activeId, visibleSymbols]);
 
   function updateColumnFilter(key, value) {
     setColumnFilters((current) => ({ ...current, [key]: value }));
@@ -511,7 +623,15 @@ function StandardsPage() {
             <strong>{filteredSymbols.length} approved symbols</strong>
             <span>{visibleSymbols.length < filteredSymbols.length ? `Showing ${visibleSymbols.length}; scroll for more` : 'All visible'}</span>
           </div>
-          <div className="approved-symbol-grid" onScroll={handleGridScroll}>
+          <div
+            className="approved-symbol-grid"
+            ref={standardsGridRef}
+            onScroll={handleGridScroll}
+            onKeyDown={handleStandardsGridKeyDown}
+            tabIndex={0}
+            role="region"
+            aria-label="Published symbols table"
+          >
             <table>
               <thead>
                 <tr>
@@ -536,13 +656,30 @@ function StandardsPage() {
                 {visibleSymbols.map((symbol) => (
                   <tr
                     key={symbol.id}
+                    data-symbol-id={symbol.id}
                     className={symbol.id === activeId ? 'active' : ''}
+                    tabIndex={0}
+                    aria-selected={symbol.id === activeId}
                     onClick={() => {
-                      setActiveId(symbol.id);
-                      setSearchParams({ symbol: symbol.id }, { replace: true });
+                      selectSymbol(symbol.id);
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        selectSymbol(symbol.id);
+                      }
                     }}
                   >
-                    <td><PublishedSymbolPreview symbol={symbol} /></td>
+                    <td className="preview-cell">
+                      <div className="preview-indicator-wrapper">
+                        <PublishedSymbolPreview symbol={symbol} />
+                        {symbol.supplementalPhotos?.length > 0 && (
+                          <div className="photo-indicator-dot" title="Has equipment photos">
+                            <CameraIconMini />
+                          </div>
+                        )}
+                      </div>
+                    </td>
                     {standardsColumns.map(([key]) => (
                       <td key={`${symbol.id}-${key}`}>{getSymbolField(symbol, key) || 'Pending'}</td>
                     ))}
@@ -567,7 +704,7 @@ function StandardsPage() {
                 </h3>
                 <p>{activeSymbol.summary}</p>
               </div>
-              <button type="button" className="action-button secondary compact" onClick={() => setActiveId('')}>
+              <button type="button" className="action-button secondary compact" onClick={() => selectSymbol('')}>
                 Close
               </button>
             </div>
@@ -578,7 +715,8 @@ function StandardsPage() {
             <div className="fact-grid detail-list">
               <Fact label="Status" value={activeSymbol.status || 'Published'} />
               <Fact label="Revision" value={activeSymbol.revision} />
-              <Fact label="Effective" value={activeSymbol.effectiveDate} />
+              <Fact label="Last update" value={formatPublishedDate(activeSymbol.lastUpdatedAt || activeSymbol.revisionCreatedAt)} />
+              <Fact label="Effective" value={formatPublishedDate(activeSymbol.effectiveDate)} />
               <Fact label="Published Page" value={activeSymbol.pageCode} />
               <Fact label="Pack" value={activeSymbol.pack} />
               <Fact label="Category" value={activeSymbol.category} />
@@ -617,6 +755,13 @@ function getSymbolField(symbol, key) {
   if (key === 'format') {
     return symbol.format || symbol.contentType || (symbol.downloads || []).join(', ');
   }
+  if (key === 'photoStatus') {
+    const count = Array.isArray(symbol.supplementalPhotos) ? symbol.supplementalPhotos.length : 0;
+    return count ? `${count} added` : 'None yet';
+  }
+  if (key === 'lastUpdatedAt' || key === 'effectiveDate' || key === 'revisionCreatedAt') {
+    return formatPublishedDate(symbol[key]);
+  }
   if (key === 'symbolFamily') {
     return symbol.symbolFamily || symbol.family || symbol.category || '';
   }
@@ -625,6 +770,24 @@ function getSymbolField(symbol, key) {
     return value.join(', ');
   }
   return String(value || '');
+}
+
+const PUBLISHED_DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/London',
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric'
+});
+
+function formatPublishedDate(value) {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value || '');
+  }
+  return PUBLISHED_DATE_FORMATTER.format(date).replace(',', '');
 }
 
 function displaySymbolName(record) {
@@ -1537,10 +1700,36 @@ function filterWorkspaceMonitorColumns(columns, query, columnStatusFilters) {
   return columns.map((column) => ({
     ...column,
     items: column.items.filter((item) => {
-      const matchesQuery = !normalizedQuery || item.searchText.toLowerCase().includes(normalizedQuery);
-      const matchesStatus = isWorkspaceStatusVisible(getWorkspaceStatusKey(item.status), columnStatusFilters[column.id], column.id);
+      const searchableText = [
+        item.searchText,
+        item.label,
+        item.title,
+        item.meta,
+        item.detail,
+        item.id,
+        item.reviewCaseId,
+        item.publishedSymbolId,
+        item.publishedPageCode,
+        item.publishedPackCode
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      const matchesQuery = !normalizedQuery || searchableText.includes(normalizedQuery);
+      if (!matchesQuery) {
+        return false;
+      }
 
-      return matchesQuery && matchesStatus;
+      const statusKey = getWorkspaceStatusKey(item.status);
+      const columnFilter = columnStatusFilters[column.id] || {};
+
+      // When searching for a specific symbol/card ID, include all matching statuses
+      // by default so completed upstream stages stay visible across columns.
+      if (normalizedQuery && !Object.prototype.hasOwnProperty.call(columnFilter, statusKey)) {
+        return true;
+      }
+
+      return isWorkspaceStatusVisible(statusKey, columnFilter, column.id);
     })
   }));
 }
@@ -1550,7 +1739,11 @@ function getWorkspaceStatusKey(status) {
 }
 
 function formatWorkspaceStatusLabel(status) {
-  return getWorkspaceStatusKey(status).replaceAll(' ', '_').toUpperCase();
+  const key = getWorkspaceStatusKey(status);
+  if (key === 'deleted') {
+    return 'DELETE';
+  }
+  return key.replaceAll(' ', '_').toUpperCase();
 }
 
 function isDefaultHiddenWorkspaceStatus(statusKey, columnId) {
@@ -1670,11 +1863,30 @@ function WorkspaceMonitorCard({ item, onOpen }) {
   );
 }
 
+function resolveAbsoluteBase() {
+  // appConfig.apiRoot may be relative (e.g. "/api/v1"), absolute (e.g. "https://host/api/v1"),
+  // or empty. `new URL(x, base)` requires an absolute base, so coerce here.
+  const root = appConfig.apiRoot;
+  if (!root) {
+    return window.location.origin;
+  }
+  try {
+    // Will throw if `root` is relative; in that case fall through to absolutize it.
+    return new URL(root).toString();
+  } catch {
+    try {
+      return new URL(root, window.location.origin).toString();
+    } catch {
+      return window.location.origin;
+    }
+  }
+}
+
 function resolveWorkspaceAssetUrl(assetUrl) {
   if (!assetUrl) {
     return null;
   }
-  return new URL(assetUrl, appConfig.apiRoot || window.location.origin).toString();
+  return new URL(assetUrl, resolveAbsoluteBase()).toString();
 }
 
 function isTerminalReviewStage(stage) {
@@ -2850,7 +3062,7 @@ function SplitReviewCard({ child, index, reviewState, onUpdate }) {
 
 function SplitSymbolPreview({ child, variant = false }) {
   const resolvedPreviewUrl = child.previewUrl
-    ? new URL(child.previewUrl, appConfig.apiRoot || window.location.origin).toString()
+    ? new URL(child.previewUrl, resolveAbsoluteBase()).toString()
     : null;
   const [imageUnavailable, setImageUnavailable] = useState(!resolvedPreviewUrl);
 

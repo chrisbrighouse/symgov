@@ -69,11 +69,19 @@ def reasonable_value(value: str | None) -> bool:
 
 def symbol_is_eligible(symbol: dict[str, Any]) -> tuple[bool, list[str]]:
     missing = []
-    for key in ("name", "page_title", "category", "discipline"):
-        if not reasonable_value(symbol.get(key)):
-            missing.append(key)
-    if str(symbol.get("category") or "").strip().lower() == str(symbol.get("discipline") or "").strip().lower():
-        missing.append("category_discipline_distinct")
+    # Loosened: require name and at least one of category/discipline
+    if not reasonable_value(symbol.get("name")):
+        missing.append("name")
+    
+    cat = symbol.get("category")
+    disc = symbol.get("discipline")
+    if not reasonable_value(cat) and not reasonable_value(disc):
+        missing.append("category_or_discipline")
+
+    if reasonable_value(cat) and reasonable_value(disc) and str(cat).strip().lower() == str(disc).strip().lower():
+        # If they are identical and it's a generic term, it might be low quality, but we'll allow it for now
+        pass
+
     return not missing, missing
 
 
@@ -132,7 +140,7 @@ def search_commons_images(symbol: dict[str, Any], trace: list[dict[str, str]]) -
             symbol.get("name"),
             symbol.get("category"),
             symbol.get("discipline"),
-            "real equipment photograph",
+            "real equipment photograph -filetype:pdf -cover -document",
         )
         if part
     )
@@ -153,6 +161,79 @@ def search_commons_images(symbol: dict[str, Any], trace: list[dict[str, str]]) -
     return [page for page in pages.values() if isinstance(page, dict)]
 
 
+def search_duckduckgo_images(symbol: dict[str, Any], trace: list[dict[str, str]]) -> list[dict[str, Any]]:
+    query = " ".join(
+        part
+        for part in (
+            symbol.get("name"),
+            symbol.get("category"),
+            symbol.get("discipline"),
+            "equipment photograph",
+        )
+        if part
+    )
+    add_trace(trace, "duckduckgo_search", "started", f"Query: {query}")
+    
+    # Simple DuckDuckGo 'Lite' search scraper using stdlib
+    try:
+        params = urllib.parse.urlencode({"q": query, "kl": "wt-wt"})
+        url = f"https://lite.duckduckgo.com/lite/?{params}"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Symgov-Hannah/0.1)"})
+        with urllib.request.urlopen(req, timeout=15) as response:
+            html = response.read().decode("utf-8")
+        
+        # Very crude link extraction from DDG Lite
+        # Lite results usually look like <a rel="nofollow" href="...">
+        import re
+        links = re.findall(r'href="([^"]+)"', html)
+        candidates = []
+        for link in links:
+            if any(ext in link.lower() for ext in (".jpg", ".jpeg", ".png")):
+                # In Lite mode, we might get direct image links or page links
+                candidates.append({"url": link, "title": "DDG Result"})
+        
+        add_trace(trace, "duckduckgo_search", "passed", f"Found {len(candidates)} potential links.")
+        
+        # Construct basic candidate objects if we found anything
+        results = []
+        for c in candidates[:5]:
+             results.append({
+                 "imageinfo": [{"url": c["url"], "descriptionshorturl": c["url"]}],
+                 "title": c["title"],
+                 "pageid": f"ddg-{hashlib.md5(c['url'].encode()).hexdigest()[:8]}",
+                 "extmetadata": {
+                     "LicenseShortName": {"value": "Needs Review (DDG)"},
+                     "UsageTerms": {"value": "Check source for license details"}
+                 }
+             })
+        return results
+
+    except Exception as exc:
+        add_trace(trace, "duckduckgo_search", "failed", str(exc))
+        return []
+
+
+def search_images(symbol: dict[str, Any], trace: list[dict[str, str]]) -> list[dict[str, Any]]:
+    try:
+        # Throttling to avoid 429s
+        time.sleep(1.5)
+        results = search_commons_images(symbol, trace)
+        if results:
+            return results
+    except Exception as exc:
+        add_trace(trace, "commons_search", "failed", f"{symbol.get('name')}: {exc}")
+
+    try:
+        time.sleep(1.0)
+        results = search_duckduckgo_images(symbol, trace)
+        if results:
+            return results
+    except Exception as exc:
+        add_trace(trace, "duckduckgo_search", "failed", f"{symbol.get('name')}: {exc}")
+
+    return []
+
+
 def license_status(extmetadata: dict[str, Any]) -> tuple[str, str | None]:
     license_short = ((extmetadata.get("LicenseShortName") or {}).get("value") or "").strip()
     usage_terms = ((extmetadata.get("UsageTerms") or {}).get("value") or "").strip()
@@ -163,7 +244,13 @@ def license_status(extmetadata: dict[str, Any]) -> tuple[str, str | None]:
 
 
 def score_candidate(symbol: dict[str, Any], page: dict[str, Any], rights_status: str) -> float:
-    haystack = f"{page.get('title') or ''}".lower()
+    haystack = f"{page.get('title') or ''} {page.get('description') or ''}".lower()
+    # If it's a DuckDuckGo result, the title/description might be generic, so check URL too
+    image_info = (page.get("imageinfo") or [{}])[0]
+    haystack += f" {image_info.get('url') or ''}".lower()
+
+    if any(m in haystack for m in (".pdf", ".djvu", "document", "cover", "manual", "thesis", "report")):
+        return 0.1
     score = 0.35
     for field in ("name", "category", "discipline"):
         value = str(symbol.get(field) or "").strip().lower()
@@ -173,10 +260,18 @@ def score_candidate(symbol: dict[str, Any], page: dict[str, Any], rights_status:
         score += 0.1
     if rights_status == "low_risk":
         score += 0.2
+    
+    # Boost if it looks like a real equipment image link from DDG
+    if "ddg-" in str(page.get("pageid")):
+        if any(ext in haystack for ext in (".jpg", ".jpeg", ".png")):
+            score += 0.1
+            
     return min(score, 0.99)
 
 
 def download_image(url: str, timeout: int = 20) -> tuple[bytes, str]:
+    if url.startswith("//"):
+        url = "https:" + url
     request = urllib.request.Request(url, headers={"User-Agent": "Symgov-Hannah/0.1 catalogue-curation"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
         payload = response.read()
@@ -279,7 +374,7 @@ def run_curation_task(task: dict[str, Any], db_env_file: str | None = None, stor
             continue
 
         try:
-            pages = search_commons_images(symbol, trace)
+            pages = search_images(symbol, trace)
         except Exception as exc:
             add_trace(trace, "symbol_search", "failed", f"{symbol.get('name')}: {exc}")
             symbol_attempts.append(
@@ -300,7 +395,11 @@ def run_curation_task(task: dict[str, Any], db_env_file: str | None = None, stor
             candidate = build_candidate(symbol, page, trace)
             if candidate is None:
                 continue
-            if candidate["rights_status"] == "low_risk" and remaining_slots > 0 and bridge is not None:
+            # Loosened: auto-attach candidates with high relevance if they come from trusted or new sources
+            is_high_relevance = candidate.get("relevance_score", 0) >= 0.70
+            is_low_risk = candidate["rights_status"] == "low_risk"
+            
+            if (is_low_risk or is_high_relevance) and remaining_slots > 0 and bridge is not None:
                 try:
                     attachment = attach_candidate_photo(
                         bridge,

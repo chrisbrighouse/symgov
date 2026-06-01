@@ -330,6 +330,18 @@ class WorkspaceHannahPhotoCandidateListResponse(BaseModel):
     hasMore: bool
 
 
+class WorkspaceHannahCleanupActionRequest(BaseModel):
+    message: str = Field(min_length=3, max_length=600)
+
+
+class WorkspaceHannahCleanupActionResponse(BaseModel):
+    action: str
+    recordRef: str
+    status: str
+    detail: str
+    changes: dict[str, Any] = Field(default_factory=dict)
+
+
 class WorkspaceWhitneyDemandScanStartRequest(BaseModel):
     durationSeconds: int = Field(default=120, ge=30, le=300)
     focus: str | None = Field(default=None, max_length=120)
