@@ -25,6 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from .db import create_session_factory, read_env_file
+from .property_options import remember_property_option
 from .models import (
     AgentDefinition,
     AgentOutputArtifact,
@@ -43,6 +44,7 @@ from .models import (
     PublishedPage,
     ReviewCase,
     ReviewSplitItem,
+    ReviewSymbolPropertyOption,
     ScottSourceDiscoverySite,
     ControlException,
     SourcePackage,
@@ -234,6 +236,77 @@ def coerce_numeric(value: float | int | str | None) -> Decimal | None:
     if value is None:
         return None
     return Decimal(str(value))
+
+
+def resolve_hannah_symbol_curation_state(
+    session,
+    symbol_states: dict[uuid.UUID, HannahSymbolCurationState],
+    symbol_id: uuid.UUID,
+    completed_at: datetime,
+) -> HannahSymbolCurationState:
+    """Resolve or create a Hannah symbol state once per symbol per transaction.
+
+    A Hannah run can emit more than one attempt for the same symbol, especially
+    when published records have duplicate slugs/labels. SQLAlchemy queries may
+    not reliably de-duplicate pending inserts before flush, so keep an explicit
+    in-memory map for the current durable report to avoid violating the unique
+    symbol_id constraint.
+    """
+    state = symbol_states.get(symbol_id)
+    if state is not None:
+        return state
+
+    state = session.query(HannahSymbolCurationState).filter_by(symbol_id=symbol_id).one_or_none()
+    if state is None:
+        state = HannahSymbolCurationState(
+            id=uuid.uuid4(),
+            symbol_id=symbol_id,
+            created_at=completed_at,
+        )
+        session.add(state)
+    symbol_states[symbol_id] = state
+    return state
+
+
+
+def resolve_hannah_photo_candidate_record(
+    session,
+    candidate_payload: dict[str, Any],
+    symbol_id: uuid.UUID,
+    image_url: str,
+    completed_at: datetime,
+) -> HannahPhotoCandidate:
+    """Resolve or create a Hannah photo candidate without reusing colliding IDs.
+
+    Hannah runner payload IDs can be deterministic source-result IDs. The same
+    source image can be proposed for more than one published symbol, so a
+    payload ID may already exist for a different (symbol_id, image_url) pair.
+    In that case, do not mutate the existing row and do not insert with the
+    conflicting primary key; create a fresh row and rely on the unique
+    (symbol_id, image_url) lookup for idempotence on later runs.
+    """
+    candidate_id = coerce_uuid(candidate_payload.get("id"))
+    if candidate_id is not None:
+        record = session.get(HannahPhotoCandidate, candidate_id)
+        if record is not None and record.symbol_id == symbol_id and record.image_url == image_url:
+            return record
+
+    record = session.query(HannahPhotoCandidate).filter_by(symbol_id=symbol_id, image_url=image_url).one_or_none()
+    if record is not None:
+        return record
+
+    record_id = candidate_id
+    if record_id is not None and session.get(HannahPhotoCandidate, record_id) is not None:
+        record_id = None
+
+    record = HannahPhotoCandidate(
+        id=record_id or uuid.uuid4(),
+        symbol_id=symbol_id,
+        image_url=image_url,
+        first_seen_at=completed_at,
+    )
+    session.add(record)
+    return record
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -583,6 +656,27 @@ class RuntimePersistenceBridge:
                 session.rollback()
                 raise
 
+    def list_review_symbol_property_options(self) -> dict[str, list[str]]:
+        with self.session_scope() as session:
+            rows = (
+                session.query(ReviewSymbolPropertyOption)
+                .order_by(
+                    ReviewSymbolPropertyOption.field_name.asc(),
+                    ReviewSymbolPropertyOption.use_count.desc(),
+                    ReviewSymbolPropertyOption.display_value.asc(),
+                )
+                .all()
+            )
+            result: dict[str, list[str]] = {"category": [], "discipline": []}
+            for row in rows:
+                result.setdefault(row.field_name, []).append(row.display_value)
+            return result
+
+    def remember_review_symbol_property_option(self, *, field_name: str, value: str | None) -> str | None:
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        with self.session_scope() as session:
+            return remember_property_option(session, field_name=field_name, value=value, now=now)
+
     def seed_agent_definitions(self) -> list[dict[str, str]]:
         operations: list[dict[str, str]] = []
         now = datetime.now(timezone.utc).replace(microsecond=0)
@@ -677,27 +771,14 @@ class RuntimePersistenceBridge:
         metadata_results: list[dict[str, Any]] = []
 
         with self.session_scope() as session:
+            symbol_states: dict[uuid.UUID, HannahSymbolCurationState] = {}
             for attempt in durable_record.get("symbol_attempts") or []:
                 symbol_id = coerce_uuid(attempt.get("symbol_id"))
                 if symbol_id is None:
                     continue
                 photo_count = int(attempt.get("photo_count") or 0)
-                state = session.query(HannahSymbolCurationState).filter_by(symbol_id=symbol_id).one_or_none()
-                if state is None:
-                    state = HannahSymbolCurationState(
-                        id=uuid.uuid4(),
-                        symbol_id=symbol_id,
-                        status=attempt.get("status") or "attempted",
-                        attempt_count=0,
-                        photo_count=photo_count,
-                        last_attempt_at=completed_at,
-                        last_success_at=completed_at if photo_count else None,
-                        notes_json=attempt.get("notes") or {},
-                        created_at=completed_at,
-                        updated_at=completed_at,
-                    )
-                    session.add(state)
-                state.status = attempt.get("status") or state.status
+                state = resolve_hannah_symbol_curation_state(session, symbol_states, symbol_id, completed_at)
+                state.status = attempt.get("status") or state.status or "attempted"
                 state.attempt_count = int(state.attempt_count or 0) + 1
                 state.photo_count = photo_count
                 state.last_attempt_at = completed_at
@@ -1799,18 +1880,12 @@ class RuntimePersistenceBridge:
                     record.last_session_queue_item_id = queue_item_id
             elif durable_kind == "hannah_curation_report":
                 completed_at = parse_timestamp(durable_record["completed_at"])
+                symbol_states: dict[uuid.UUID, HannahSymbolCurationState] = {}
                 for attempt in durable_record.get("symbol_attempts") or []:
                     symbol_id = coerce_uuid(attempt.get("symbol_id"))
                     if symbol_id is None:
                         continue
-                    state = session.query(HannahSymbolCurationState).filter_by(symbol_id=symbol_id).one_or_none()
-                    if state is None:
-                        state = HannahSymbolCurationState(
-                            id=uuid.uuid4(),
-                            symbol_id=symbol_id,
-                            created_at=completed_at,
-                        )
-                        session.add(state)
+                    state = resolve_hannah_symbol_curation_state(session, symbol_states, symbol_id, completed_at)
                     state.status = attempt.get("status") or "attempted"
                     state.attempt_count = int(state.attempt_count or 0) + 1
                     state.photo_count = int(attempt.get("photo_count") or 0)
@@ -1855,15 +1930,13 @@ class RuntimePersistenceBridge:
                     image_url = str(candidate_payload.get("image_url") or "").strip()
                     if symbol_id is None or not image_url:
                         continue
-                    record = session.query(HannahPhotoCandidate).filter_by(symbol_id=symbol_id, image_url=image_url).one_or_none()
-                    if record is None:
-                        record = HannahPhotoCandidate(
-                            id=coerce_uuid(candidate_payload.get("id")) or uuid.uuid4(),
-                            symbol_id=symbol_id,
-                            image_url=image_url,
-                            first_seen_at=completed_at,
-                        )
-                        session.add(record)
+                    record = resolve_hannah_photo_candidate_record(
+                        session,
+                        candidate_payload,
+                        symbol_id,
+                        image_url,
+                        completed_at,
+                    )
                     record.symbol_revision_id = coerce_uuid(candidate_payload.get("symbol_revision_id"))
                     record.published_page_id = coerce_uuid(candidate_payload.get("published_page_id"))
                     record.queue_item_id = queue_item_id

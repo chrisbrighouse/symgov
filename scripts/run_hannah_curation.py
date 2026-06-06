@@ -36,6 +36,61 @@ MAX_DURATION_SECONDS = 300
 MAX_PHOTOS_PER_SYMBOL = 2
 PLACEHOLDER_VALUES = {"", "unknown", "tbd", "todo", "pending", "uncategorized", "general", "n/a", "na", "none"}
 LOW_RISK_LICENSE_MARKERS = ("cc0", "public domain", "cc by", "cc-by", "creative commons attribution")
+BAD_CANDIDATE_MARKERS = (
+    ".pdf",
+    ".djvu",
+    "document",
+    "cover",
+    "manual",
+    "thesis",
+    "report",
+    "war crimes",
+    "russian military",
+    "president of ukraine",
+    "zelensky",
+    "terrorism",
+    "political speech",
+    "news conference",
+    "address by the president",
+)
+GENERIC_SYMBOL_TOKENS = {
+    "symbol",
+    "symbols",
+    "general",
+    "process",
+    "instrumentation",
+    "mechanical",
+    "piping",
+    "position",
+    "normally",
+    "closed",
+    "open",
+    "fail",
+    "common",
+    "equipment",
+    "photograph",
+    "photo",
+    "real",
+}
+EQUIPMENT_PHOTO_MARKERS = (
+    "equipment",
+    "industrial",
+    "plant",
+    "factory",
+    "installed",
+    "installation",
+    "machinery",
+    "machine",
+    "valve",
+    "pump",
+    "motor",
+    "pipe",
+    "piping",
+    "instrument",
+    "photograph",
+    "photo",
+)
+AUTO_ATTACH_MIN_SCORE = 0.72
 
 
 def utc_now() -> str:
@@ -243,29 +298,103 @@ def license_status(extmetadata: dict[str, Any]) -> tuple[str, str | None]:
     return "needs_review", license_short or usage_terms or None
 
 
-def score_candidate(symbol: dict[str, Any], page: dict[str, Any], rights_status: str) -> float:
-    haystack = f"{page.get('title') or ''} {page.get('description') or ''}".lower()
-    # If it's a DuckDuckGo result, the title/description might be generic, so check URL too
+def candidate_text(page: dict[str, Any]) -> str:
     image_info = (page.get("imageinfo") or [{}])[0]
-    haystack += f" {image_info.get('url') or ''}".lower()
+    extmetadata = image_info.get("extmetadata") or {}
+    metadata_values = " ".join(
+        str((value or {}).get("value") or "")
+        for value in extmetadata.values()
+        if isinstance(value, dict)
+    )
+    return " ".join(
+        str(part or "")
+        for part in (
+            page.get("title"),
+            page.get("description"),
+            image_info.get("url"),
+            image_info.get("thumburl"),
+            image_info.get("descriptionurl"),
+            image_info.get("descriptionshorturl"),
+            image_info.get("mime"),
+            metadata_values,
+        )
+    ).lower()
 
-    if any(m in haystack for m in (".pdf", ".djvu", "document", "cover", "manual", "thesis", "report")):
-        return 0.1
-    score = 0.35
-    for field in ("name", "category", "discipline"):
+
+def meaningful_symbol_terms(symbol: dict[str, Any]) -> set[str]:
+    import re
+
+    terms: set[str] = set()
+    for field in ("name", "category"):
+        value = str(symbol.get(field) or "").lower()
+        for token in re.findall(r"[a-z0-9]+", value):
+            normalized = token[:-1] if len(token) > 4 and token.endswith("s") else token
+            if len(normalized) >= 3 and normalized not in GENERIC_SYMBOL_TOKENS:
+                terms.add(normalized)
+    return terms
+
+
+def candidate_quality_reasons(symbol: dict[str, Any], page: dict[str, Any]) -> list[str]:
+    haystack = candidate_text(page)
+    image_info = (page.get("imageinfo") or [{}])[0]
+    image_url = str(image_info.get("thumburl") or image_info.get("url") or "")
+    source_url = str(image_info.get("descriptionurl") or image_info.get("descriptionshorturl") or image_url)
+    source_domain = urllib.parse.urlparse("https:" + source_url if source_url.startswith("//") else source_url).netloc.lower()
+    title = str(page.get("title") or "").strip().lower()
+    reasons: list[str] = []
+
+    if source_domain.endswith("duckduckgo.com") and ("/assets/icons/" in image_url.lower() or title == "ddg result"):
+        reasons.append("duckduckgo_asset_or_generic_result")
+    if any(marker in haystack for marker in BAD_CANDIDATE_MARKERS):
+        reasons.append("blocked_noise_marker")
+    if not any(ext in image_url.lower().split("?", 1)[0] for ext in (".jpg", ".jpeg", ".png", ".webp")):
+        reasons.append("not_direct_raster_image")
+
+    terms = meaningful_symbol_terms(symbol)
+    matched_terms = {term for term in terms if term in haystack}
+    if not matched_terms:
+        reasons.append("no_meaningful_symbol_match")
+    if not any(marker in haystack for marker in EQUIPMENT_PHOTO_MARKERS):
+        reasons.append("no_equipment_photo_context")
+    return reasons
+
+
+def candidate_is_quality_acceptable(symbol: dict[str, Any], page: dict[str, Any]) -> bool:
+    return not candidate_quality_reasons(symbol, page)
+
+
+def candidate_is_auto_attachable(candidate: dict[str, Any]) -> bool:
+    return (
+        candidate.get("rights_status") == "low_risk"
+        and float(candidate.get("relevance_score") or 0) >= AUTO_ATTACH_MIN_SCORE
+        and not candidate.get("quality_reasons")
+    )
+
+
+def score_candidate(symbol: dict[str, Any], page: dict[str, Any], rights_status: str) -> float:
+    haystack = candidate_text(page)
+
+    if any(m in haystack for m in BAD_CANDIDATE_MARKERS):
+        return 0.05
+    score = 0.25
+    terms = meaningful_symbol_terms(symbol)
+    matched_terms = {term for term in terms if term in haystack}
+    score += min(0.30, 0.15 * len(matched_terms))
+    for field in ("name", "category"):
         value = str(symbol.get(field) or "").strip().lower()
         if value and value in haystack:
             score += 0.16
+    if any(marker in haystack for marker in EQUIPMENT_PHOTO_MARKERS):
+        score += 0.15
     if "photograph" in haystack or "photo" in haystack:
         score += 0.1
     if rights_status == "low_risk":
-        score += 0.2
-    
-    # Boost if it looks like a real equipment image link from DDG
-    if "ddg-" in str(page.get("pageid")):
-        if any(ext in haystack for ext in (".jpg", ".jpeg", ".png")):
-            score += 0.1
-            
+        score += 0.12
+
+    # Small DDG boost only after quality checks have removed DDG chrome/icons.
+    if "ddg-" in str(page.get("pageid")) and matched_terms:
+        score += 0.05
+
     return min(score, 0.99)
 
 
@@ -319,6 +448,15 @@ def build_candidate(symbol: dict[str, Any], page: dict[str, Any], trace: list[di
     source_url = image_info.get("descriptionurl") or image_info.get("descriptionshorturl") or image_url
     if not image_url or not source_url:
         return None
+    quality_reasons = candidate_quality_reasons(symbol, page)
+    if quality_reasons:
+        add_trace(
+            trace,
+            "candidate_quality_filter",
+            "rejected",
+            f"{symbol.get('name')}: {page.get('title') or image_url}: {', '.join(quality_reasons)}",
+        )
+        return None
     extmetadata = image_info.get("extmetadata") or {}
     rights_status, license_label = license_status(extmetadata)
     score = score_candidate(symbol, page, rights_status)
@@ -338,6 +476,7 @@ def build_candidate(symbol: dict[str, Any], page: dict[str, Any], trace: list[di
         "license_label": license_label,
         "status": "candidate",
         "relevance_score": round(score, 4),
+        "quality_reasons": [],
         "evidence": {
             "source": "Wikimedia Commons API",
             "commons_page_id": page.get("pageid"),
@@ -395,11 +534,7 @@ def run_curation_task(task: dict[str, Any], db_env_file: str | None = None, stor
             candidate = build_candidate(symbol, page, trace)
             if candidate is None:
                 continue
-            # Loosened: auto-attach candidates with high relevance if they come from trusted or new sources
-            is_high_relevance = candidate.get("relevance_score", 0) >= 0.70
-            is_low_risk = candidate["rights_status"] == "low_risk"
-            
-            if (is_low_risk or is_high_relevance) and remaining_slots > 0 and bridge is not None:
+            if candidate_is_auto_attachable(candidate) and remaining_slots > 0 and bridge is not None:
                 try:
                     attachment = attach_candidate_photo(
                         bridge,

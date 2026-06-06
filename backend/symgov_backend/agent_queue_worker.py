@@ -40,6 +40,7 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
         "runner_path": Path("/data/.openclaw/workspaces/libby/run_libby_classification.py"),
         "module": "symgov_libby_runner_worker",
         "persist_db": True,
+        "storage": True,
     },
     "daisy": {
         "runtime_root": Path("/data/.openclaw/workspaces/daisy/runtime"),

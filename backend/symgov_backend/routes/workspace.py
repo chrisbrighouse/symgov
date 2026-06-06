@@ -8,7 +8,6 @@ import sys
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
-from difflib import SequenceMatcher
 from pathlib import Path
 from urllib.parse import quote
 
@@ -44,6 +43,7 @@ from ..models import (
     WhitneyDemandSignal,
 )
 from ..publication_handoff import execute_publication_handoff
+from ..property_options import remember_property_option
 from ..review_followup_handoff import execute_review_followup_handoff
 from ..runtime import coerce_uuid, download_object_bytes
 from ..schemas import (
@@ -790,8 +790,6 @@ def compact_text(value: str | None, limit: int) -> str:
     return text_value[:limit]
 
 
-PROPERTY_OPTION_FIELDS = {"category", "discipline"}
-PROPERTY_OPTION_FUZZY_MATCH_THRESHOLD = 0.92
 FORMAT_LABELS = {
     "dxf": "DXF",
     "jpeg": "JPEG",
@@ -808,17 +806,6 @@ CONTENT_TYPE_FORMATS = {
     "image/png": "PNG",
     "image/svg+xml": "SVG",
 }
-
-
-def normalize_property_option_value(value: str | None) -> str | None:
-    text_value = re.sub(r"\s+", " ", str(value or "").strip())
-    if not text_value:
-        return None
-    return " ".join(word.capitalize() for word in text_value.lower().split(" "))
-
-
-def property_option_key(value: str | None) -> str:
-    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
 
 
 def normalize_symbol_format(value: str | None) -> str | None:
@@ -864,80 +851,6 @@ def resolve_symbol_format(
         if symbol_format:
             return symbol_format
     return None
-
-
-def find_similar_property_option(
-    session: Session,
-    *,
-    field_name: str,
-    normalized_key: str,
-) -> ReviewSymbolPropertyOption | None:
-    if len(normalized_key) < 5:
-        return None
-    options = (
-        session.query(ReviewSymbolPropertyOption)
-        .filter(ReviewSymbolPropertyOption.field_name == field_name)
-        .all()
-    )
-    best_option = None
-    best_ratio = 0.0
-    for option in options:
-        ratio = SequenceMatcher(None, normalized_key, option.normalized_key).ratio()
-        if ratio > best_ratio:
-            best_option = option
-            best_ratio = ratio
-    if best_option is not None and best_ratio >= PROPERTY_OPTION_FUZZY_MATCH_THRESHOLD:
-        return best_option
-    return None
-
-
-def remember_property_option(
-    session: Session,
-    *,
-    field_name: str,
-    value: str | None,
-    now: datetime,
-) -> str | None:
-    if field_name not in PROPERTY_OPTION_FIELDS:
-        return normalize_property_option_value(value)
-
-    display_value = normalize_property_option_value(value)
-    if display_value is None:
-        return None
-
-    normalized_key = property_option_key(display_value)
-    if not normalized_key:
-        return None
-
-    option = (
-        session.query(ReviewSymbolPropertyOption)
-        .filter(
-            ReviewSymbolPropertyOption.field_name == field_name,
-            ReviewSymbolPropertyOption.normalized_key == normalized_key,
-        )
-        .one_or_none()
-    )
-    if option is None:
-        option = find_similar_property_option(session, field_name=field_name, normalized_key=normalized_key)
-
-    if option is None:
-        option = ReviewSymbolPropertyOption(
-            id=coerce_uuid(f"review-symbol-property-option:{field_name}:{normalized_key}"),
-            field_name=field_name,
-            display_value=display_value,
-            normalized_key=normalized_key,
-            use_count=1,
-            created_at=now,
-            updated_at=now,
-            last_used_at=now,
-        )
-    else:
-        option.use_count = int(option.use_count or 0) + 1
-        option.updated_at = now
-        option.last_used_at = now
-
-    session.add(option)
-    return option.display_value
 
 
 def build_symbol_properties_response(properties: ReviewSymbolProperty) -> WorkspaceReviewSymbolPropertiesResponse:
