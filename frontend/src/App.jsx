@@ -113,6 +113,13 @@ const WORKSPACE_QUEUE_COLUMNS = [
     tone: 'curation'
   },
   {
+    id: 'control_audit',
+    title: 'Reggie',
+    subtitle: 'Audit / Control',
+    agentId: 'reggie',
+    tone: 'control'
+  },
+  {
     id: 'market_intelligence',
     title: 'Whitney',
     subtitle: 'Demand',
@@ -183,7 +190,7 @@ const WHITNEY_SIGNAL_COLUMNS = [
 ];
 const WORKSPACE_MONITOR_SCREENS = {
   pipeline: ['intake', 'validation', 'provenance', 'classification', 'review_coordination', 'human_review', 'publication'],
-  intelligence: ['curation', 'market_intelligence', 'ux_feedback']
+  intelligence: ['curation', 'control_audit', 'market_intelligence', 'ux_feedback']
 };
 const WORKSPACE_MONITOR_SCREEN_SEQUENCE = ['pipeline', 'intelligence'];
 

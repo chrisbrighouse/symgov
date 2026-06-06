@@ -913,6 +913,10 @@ a {
   background: #eef6ea;
 }
 
+.monitor-control .monitor-column-header {
+  background: #f1edf8;
+}
+
 .monitor-intelligence .monitor-column-header {
   background: #e9f4f4;
 }

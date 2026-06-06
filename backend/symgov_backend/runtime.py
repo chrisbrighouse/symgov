@@ -127,6 +127,14 @@ AGENT_DEFINITION_SEEDS = (
         "queue_family": "curation",
     },
     {
+        "slug": "reggie",
+        "display_name": "Reggie",
+        "role": "audit, compliance, and control-room agent",
+        "model": "ollama/gemma4:e4b",
+        "status": "active",
+        "queue_family": "control_audit",
+    },
+    {
         "slug": "whitney",
         "display_name": "Whitney",
         "role": "market intelligence and demand sensing agent",
