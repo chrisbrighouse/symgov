@@ -672,6 +672,25 @@ def mark_split_item_duplicate_pending_for_decision(
     return str(split_item.id)
 
 
+def publication_duplicate_override_for_decision(decision: HumanReviewDecision) -> dict[str, Any] | None:
+    """Return a human false-duplicate override recorded by Daisy/SME review, if present."""
+    payload = decision.decision_payload_json if isinstance(decision.decision_payload_json, dict) else {}
+    override = payload.get("duplicate_gate_override") if isinstance(payload, dict) else None
+    if not isinstance(override, dict):
+        return None
+    outcome = str(override.get("outcome") or "").strip()
+    if outcome != "false_duplicate":
+        return None
+    return {
+        "outcome": outcome,
+        "reason": str(override.get("reason") or "Human reviewer confirmed this is not a duplicate.").strip(),
+        "review_split_item_id": override.get("review_split_item_id"),
+        "reviewed_by": override.get("reviewed_by"),
+        "reviewed_at": override.get("reviewed_at"),
+        "source": "daisy_duplicate_exception_review",
+    }
+
+
 def build_pack_metadata(context: dict[str, Any], review_case: ReviewCase) -> tuple[str, str]:
     source_file = source_file_from_intake(context["intake_record"])
     source_stem = slugify_public_code(Path(source_file).stem) if source_file else str(review_case.id)[:8]
@@ -995,7 +1014,8 @@ def execute_publication_handoff(
             decision=decision,
             context=context,
         )
-        duplicate_matches = detect_graphical_duplicates(session, revisions=revisions)
+        duplicate_override = publication_duplicate_override_for_decision(decision)
+        duplicate_matches = [] if duplicate_override else detect_graphical_duplicates(session, revisions=revisions)
         if duplicate_matches:
             return queue_libby_duplicate_followup(
                 session,
@@ -1030,6 +1050,7 @@ def execute_publication_handoff(
                 "standards_visibility": "public",
                 "release_area": None,
                 "source_review_case_summary": decision.decision_summary,
+                "duplicate_gate_override": duplicate_override,
             },
             "confidence": None,
             "escalation_reason": None,
@@ -1042,6 +1063,7 @@ def execute_publication_handoff(
             "symbol_revision_ids": revision_ids,
             "rupert_queue_item_id": queue_id,
             "publication_pack_code": pack_code,
+            "duplicate_gate_override": duplicate_override,
         }
         session.commit()
 

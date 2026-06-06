@@ -83,6 +83,7 @@ class WorkspaceReviewChildResponse(BaseModel):
     processedAt: str | None = None
     downstreamAgentSlug: str | None = None
     downstreamQueueItemId: str | None = None
+    duplicateReview: dict[str, Any] | None = None
 
 
 class WorkspaceReviewSymbolPropertiesResponse(BaseModel):

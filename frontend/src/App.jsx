@@ -2697,7 +2697,11 @@ function ReviewsPage() {
                 <div className="queue-card-topline">
                   <strong>{displaySymbolId(item)}</strong>
                   <span className={`review-status review-${item.splitChildStatus || item.status || 'pending'}`}>
-                    {item.splitChildStatus === 'returned_for_review' ? 'Returned' : 'New'}
+                    {item.splitChildStatus === 'returned_for_review'
+                      ? 'Returned'
+                      : item.splitChildStatus === 'duplicate_exception'
+                        ? 'Duplicate exception'
+                        : 'New'}
                   </span>
                 </div>
                 <p>{item.title}</p>
@@ -2756,14 +2760,18 @@ function ReviewsPage() {
                         </button>
                       ))}
                     </div>
-                    {activeSingleChildReview?.action === 'request_changes' ? (
+                    {['request_changes', 'duplicate', 'rename_classify', 'more_evidence', 'defer'].includes(activeSingleChildReview?.action) ? (
                       <label className="field request-field">
-                        <span>Requested changes</span>
+                        <span>{activeSingleChildReview?.action === 'duplicate' ? 'Duplicate decision detail' : 'Requested changes'}</span>
                         <textarea
                           rows="4"
                           value={activeSingleChildReview.requestDetails}
                           onChange={(event) => updateChildReview(activeSingleChild.id, { requestDetails: event.target.value })}
-                          placeholder="Describe the changes needed before this symbol can be approved."
+                          placeholder={
+                            activeSingleChildReview?.action === 'duplicate'
+                              ? 'Confirm why this should not be published as a separate symbol.'
+                              : 'Describe the changes, evidence, or classification detail needed before this symbol can be approved.'
+                          }
                         />
                       </label>
                     ) : null}

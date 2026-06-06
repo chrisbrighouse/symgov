@@ -106,7 +106,64 @@ HANNAH_STORAGE_ENV_FILE = Path("/data/.openclaw/workspace/symgov/.env.backend.st
 WHITNEY_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/whitney/runtime")
 WHITNEY_RUNNER = Path("/data/.openclaw/workspaces/whitney/run_whitney_market_intelligence.py")
 WHITNEY_DB_ENV_FILE = SCOTT_DB_ENV_FILE
-OPEN_SPLIT_ITEM_STATUSES = ("awaiting_decision", "returned_for_review")
+REVIEW_SPLIT_STATUS_GROUPS: dict[str, frozenset[str]] = {
+    "active_review": frozenset({"awaiting_decision", "returned_for_review", "duplicate_exception"}),
+    "active_downstream": frozenset({"queued_rupert", "queued_libby", "duplicate_pending"}),
+    "terminal_publication": frozenset({"published"}),
+    "terminal_duplicate": frozenset({"duplicate_resolved"}),
+    "terminal_non_publication": frozenset({"deleted", "rejected", "blocked", "deferred"}),
+}
+OPEN_SPLIT_ITEM_STATUSES = tuple(sorted(REVIEW_SPLIT_STATUS_GROUPS["active_review"]))
+DURABLE_SPLIT_ITEM_STATUSES = frozenset().union(
+    REVIEW_SPLIT_STATUS_GROUPS["active_downstream"],
+    REVIEW_SPLIT_STATUS_GROUPS["terminal_publication"],
+    REVIEW_SPLIT_STATUS_GROUPS["terminal_duplicate"],
+    REVIEW_SPLIT_STATUS_GROUPS["terminal_non_publication"],
+)
+TERMINAL_SPLIT_ITEM_STATUSES = frozenset().union(
+    REVIEW_SPLIT_STATUS_GROUPS["terminal_publication"],
+    REVIEW_SPLIT_STATUS_GROUPS["terminal_duplicate"],
+    REVIEW_SPLIT_STATUS_GROUPS["terminal_non_publication"],
+)
+
+
+def split_item_status_group(status: str | None) -> str:
+    """Return the lifecycle group for a ReviewSplitItem status.
+
+    Keep status grouping explicit so workspace counts, Daisy review lanes, and
+    downstream handoff reconciliation cannot silently diverge as new states are added.
+    """
+    normalized = (status or "").strip()
+    for group, statuses in REVIEW_SPLIT_STATUS_GROUPS.items():
+        if normalized in statuses:
+            return group
+    return "unknown"
+
+
+def is_open_split_item_status(status: str | None) -> bool:
+    """Whether a split item still needs a human/Daisy review decision."""
+    return split_item_status_group(status) == "active_review"
+
+
+def is_terminal_split_item_status(status: str | None) -> bool:
+    """Whether a split item has reached a no-further-automation terminal state."""
+    return (status or "").strip() in TERMINAL_SPLIT_ITEM_STATUSES
+
+
+def split_item_status_after_handoff(item: ReviewSplitItem | None, *, is_approval: bool) -> tuple[str, str | None]:
+    """Choose the displayed split-item state after downstream handoff has run.
+
+    Publication handoff may synchronously move an approved item to `published` or
+    `duplicate_pending`; Libby follow-up may synchronously return, reject, or delete an item.
+    Do not overwrite these more-specific lifecycle states with stale queued markers.
+    """
+    fallback_status = "queued_rupert" if is_approval else "queued_libby"
+    fallback_agent = "rupert" if is_approval else "libby"
+    if item is None:
+        return fallback_status, fallback_agent
+    if item.status in DURABLE_SPLIT_ITEM_STATUSES or is_open_split_item_status(item.status):
+        return item.status, item.downstream_agent_slug
+    return fallback_status, fallback_agent
 
 
 def _load_hannah_runner_module():
@@ -1141,6 +1198,8 @@ def build_split_item_workspace_item(
     due = opened_at + timedelta(days=2)
     preview_url = build_preview_url(str(review_case.id), split_item.attachment_object_key)
     item_package_id, item_sequence, item_display_name = split_item_display_parts(split_item)
+    payload = split_item.payload_json if isinstance(split_item.payload_json, dict) else {}
+    duplicate_review = payload.get("libby_duplicate_resolution") if isinstance(payload.get("libby_duplicate_resolution"), dict) else None
     child = WorkspaceReviewChildResponse(
         id=split_item.child_key,
         proposedSymbolId=split_item.proposed_symbol_id,
@@ -1160,6 +1219,7 @@ def build_split_item_workspace_item(
         processedAt=isoformat_utc(split_item.processed_at) if split_item.processed_at else None,
         downstreamAgentSlug=split_item.downstream_agent_slug,
         downstreamQueueItemId=split_item.downstream_queue_item_id,
+        duplicateReview=duplicate_review,
     )
     symbol_properties = get_or_create_symbol_properties(
         session,
@@ -1189,7 +1249,11 @@ def build_split_item_workspace_item(
         "pages": 1,
         "packs": 0,
         "status": split_item.status.replace("_", " ").title(),
-        "summary": f"{split_item.proposed_symbol_name} from {source_file_name} is awaiting its own human review decision.",
+        "summary": (
+            f"{split_item.proposed_symbol_name} needs Daisy duplicate-exception review. Confirm duplicate, approve as a false duplicate, or route for metadata changes."
+            if split_item.status == "duplicate_exception"
+            else f"{split_item.proposed_symbol_name} from {source_file_name} is awaiting its own human review decision."
+        ),
         "clarifications": build_review_notes(validation_report, 1),
         "currentStage": split_item.status,
         "escalationLevel": review_case.escalation_level,
@@ -2982,7 +3046,7 @@ def process_workspace_split_review_decisions(
         item = item_lookup.get(child.childId) or item_lookup.get(child.proposedSymbolId or "")
         if item is None:
             raise HTTPException(status_code=422, detail=f"Unknown split child item: {child.childId}.")
-        if item.status not in {"awaiting_decision", "returned_for_review"}:
+        if not is_open_split_item_status(item.status):
             continue
         payload = child.model_dump()
         payload["originalAction"] = payload["action"]
@@ -2995,7 +3059,7 @@ def process_workspace_split_review_decisions(
     if not child_decisions:
         raise HTTPException(status_code=422, detail="No pending split child decisions were provided.")
 
-    total_open_before = len([item for item in split_items if item.status in {"awaiting_decision", "returned_for_review"}])
+    total_open_before = len([item for item in split_items if is_open_split_item_status(item.status)])
     now = datetime.now(timezone.utc).replace(microsecond=0)
     processed_items: list[WorkspaceSplitReviewProcessItemResponse] = []
 
@@ -3003,9 +3067,15 @@ def process_workspace_split_review_decisions(
         action_code = child_payload["action"]
         transition = DECISION_TRANSITIONS[action_code]
         is_approval = action_code == "approve"
-        target_agent_slug = "rupert" if is_approval else "libby"
-        target_stage = "publication_staging" if is_approval else transition["target_stage"]
-        followup_action_code = "prepare_publication_handoff" if is_approval else "route_review_follow_up_to_libby"
+        is_duplicate_exception = item.status == "duplicate_exception"
+        duplicate_exception_confirmed = is_duplicate_exception and action_code == "duplicate"
+        target_agent_slug = None if duplicate_exception_confirmed else ("rupert" if is_approval else "libby")
+        target_stage = None if duplicate_exception_confirmed else ("publication_staging" if is_approval else transition["target_stage"])
+        followup_action_code = (
+            "resolve_duplicate_exception"
+            if duplicate_exception_confirmed
+            else ("prepare_publication_handoff" if is_approval else "route_review_follow_up_to_libby")
+        )
         decision = HumanReviewDecision(
             review_case_id=review_case.id,
             decision_code=action_code,
@@ -3022,6 +3092,19 @@ def process_workspace_split_review_decisions(
                 "review_case_id": str(review_case.id),
                 "split_child_key": item.child_key,
                 "split_child_item_id": str(item.id),
+                **(
+                    {
+                        "duplicate_gate_override": {
+                            "outcome": "false_duplicate",
+                            "reason": child_payload.get("details") or child_payload.get("note") or request.caseComment or "Human reviewer confirmed this duplicate exception is a false positive.",
+                            "review_split_item_id": str(item.id),
+                            "reviewed_by": request.deciderName,
+                            "reviewed_at": isoformat_utc(now),
+                        }
+                    }
+                    if is_duplicate_exception and is_approval
+                    else {}
+                ),
             },
             created_at=now,
         )
@@ -3075,6 +3158,39 @@ def process_workspace_split_review_decisions(
                 decision_id=decision.id,
                 close_review_case=False,
             )
+        elif duplicate_exception_confirmed:
+            item.status = "duplicate_resolved"
+            item.latest_action = "duplicate_confirmed"
+            item.latest_note = child_payload.get("note") or "duplicate confirmed"
+            item.latest_details = child_payload.get("details") or request.caseComment or "Human reviewer confirmed the duplicate."
+            item.downstream_agent_slug = None
+            item.downstream_queue_item_id = None
+            item.processed_at = datetime.now(timezone.utc).replace(microsecond=0)
+            item.updated_at = item.processed_at
+            action.action_status = "completed"
+            action.completed_at = item.processed_at
+            action.action_payload_json = {
+                **(action.action_payload_json or {}),
+                "duplicate_exception_outcome": "duplicate_confirmed",
+                "review_split_item_id": str(item.id),
+            }
+            session.add(item)
+            session.add(action)
+            session.add(
+                AuditEvent(
+                    entity_type="review_split_item",
+                    entity_id=item.id,
+                    action="duplicate_exception_confirmed",
+                    actor_id=None,
+                    payload_json={
+                        "review_case_id": str(review_case.id),
+                        "decision_id": str(decision.id),
+                        "reason": item.latest_details,
+                    },
+                    created_at=item.processed_at,
+                )
+            )
+            session.commit()
         else:
             execute_review_followup_handoff(
                 session,
@@ -3094,10 +3210,12 @@ def process_workspace_split_review_decisions(
             action_payload = refreshed_action.action_payload_json or {}
             downstream_queue_item_id = action_payload.get("rupert_queue_item_id") or action_payload.get("libby_queue_item_id")
         if item is not None:
-            item.status = "queued_rupert" if is_approval else "queued_libby"
-            item.downstream_queue_item_id = downstream_queue_item_id
-            item.processed_at = datetime.now(timezone.utc).replace(microsecond=0)
-            item.updated_at = item.processed_at
+            final_status, final_target_agent_slug = split_item_status_after_handoff(item, is_approval=is_approval)
+            item.status = final_status
+            item.downstream_agent_slug = final_target_agent_slug
+            item.downstream_queue_item_id = downstream_queue_item_id if final_status not in {"published", "duplicate_pending", "duplicate_resolved"} else item.downstream_queue_item_id
+            item.processed_at = item.processed_at or datetime.now(timezone.utc).replace(microsecond=0)
+            item.updated_at = item.updated_at or item.processed_at
             session.add(item)
         session.commit()
 
@@ -3115,7 +3233,7 @@ def process_workspace_split_review_decisions(
     remaining_open_count = (
         session.query(ReviewSplitItem)
         .filter(ReviewSplitItem.review_case_id == review_case.id)
-        .filter(ReviewSplitItem.status.in_(("awaiting_decision", "returned_for_review")))
+        .filter(ReviewSplitItem.status.in_(OPEN_SPLIT_ITEM_STATUSES))
         .count()
     )
     if remaining_open_count == 0:
