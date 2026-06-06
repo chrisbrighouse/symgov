@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import sys
+import importlib.util
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -106,6 +107,17 @@ WHITNEY_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/whitney/runtime")
 WHITNEY_RUNNER = Path("/data/.openclaw/workspaces/whitney/run_whitney_market_intelligence.py")
 WHITNEY_DB_ENV_FILE = SCOTT_DB_ENV_FILE
 OPEN_SPLIT_ITEM_STATUSES = ("awaiting_decision", "returned_for_review")
+
+
+def _load_hannah_runner_module():
+    spec = importlib.util.spec_from_file_location("symgov_hannah_runner_routes", HANNAH_RUNNER)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load Hannah runner from {HANNAH_RUNNER}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 DECISION_TRANSITIONS = {
     "approve": {
         "to_stage": "ready_for_publication_handoff",
@@ -1928,114 +1940,24 @@ def start_hannah_curation_search(
     request: WorkspaceHannahCurationSearchStartRequest,
     session: Session = Depends(get_db_session),
 ) -> WorkspaceHannahCurationSearchStartResponse:
-    active_statuses = ("queued", "running", "searching")
+    """Convert the old broad-search button into bounded Hannah card seeding."""
     hannah_definition = session.query(AgentDefinition).filter_by(slug="hannah").one_or_none()
     if hannah_definition is None:
         raise HTTPException(status_code=500, detail="Hannah agent definition is missing.")
 
-    active_item = (
-        session.query(AgentQueueItem)
-        .filter(AgentQueueItem.agent_id == hannah_definition.id)
-        .filter(AgentQueueItem.source_type == "published_symbol_photo_search")
-        .filter(AgentQueueItem.status.in_(active_statuses))
-        .order_by(AgentQueueItem.created_at.desc())
-        .first()
-    )
-    if active_item is not None:
-        expected_completed_at = (active_item.started_at or active_item.created_at) + timedelta(
-            seconds=int((active_item.payload_json or {}).get("duration_seconds") or request.durationSeconds)
-        )
-        return WorkspaceHannahCurationSearchStartResponse(
-            queueItemId=str(active_item.id),
-            status=active_item.status,
-            durationSeconds=int((active_item.payload_json or {}).get("duration_seconds") or request.durationSeconds),
-            startedAt=isoformat_utc(active_item.started_at or active_item.created_at),
-            expectedCompletedAt=isoformat_utc(expected_completed_at),
-        )
-
     started_at = datetime.now(timezone.utc).replace(microsecond=0)
-    expected_completed_at = started_at + timedelta(seconds=request.durationSeconds)
-    queue_item_id = uuid.uuid4()
-    source_id = uuid.uuid4()
-    payload = {
-        "task_type": "published_symbol_photo_search",
-        "display_name": "Published symbol photo search",
-        "stage": "Catalogue curation",
-        "duration_seconds": request.durationSeconds,
-        "started_by": "admin",
-        "expected_completed_at": isoformat_utc(expected_completed_at),
-        "minimum_fields": ["name", "title", "category", "discipline"],
-        "max_photos_per_symbol": 2,
-    }
-    queue_item = AgentQueueItem(
-        id=queue_item_id,
-        agent_id=hannah_definition.id,
-        source_type="published_symbol_photo_search",
-        source_id=source_id,
-        status="searching",
-        priority="medium",
-        payload_json=payload,
-        confidence=None,
-        escalation_reason=None,
-        created_at=started_at,
-        started_at=started_at,
-        completed_at=None,
+    runner = _load_hannah_runner_module()
+    seed_result = runner.seed_hannah_symbol_queue_cards(
+        db_env_file=str(HANNAH_DB_ENV_FILE),
+        runtime_root=HANNAH_RUNTIME_ROOT,
     )
-    session.add(queue_item)
-    session.commit()
-
-    queue_record = {
-        "id": str(queue_item_id),
-        "agent_id": "hannah",
-        "source_type": "published_symbol_photo_search",
-        "source_id": str(source_id),
-        "status": "searching",
-        "priority": "medium",
-        "payload_json": payload,
-        "created_at": isoformat_utc(started_at),
-        "started_at": isoformat_utc(started_at),
-        "completed_at": None,
-    }
-    queue_dir = HANNAH_RUNTIME_ROOT / "agent_queue_items"
-    log_dir = HANNAH_RUNTIME_ROOT / "curation_logs"
-    queue_dir.mkdir(parents=True, exist_ok=True)
-    log_dir.mkdir(parents=True, exist_ok=True)
-    queue_path = queue_dir / f"{queue_item_id}.json"
-    queue_path.write_text(json.dumps(queue_record, indent=2) + "\n", encoding="utf-8")
-
-    log_path = log_dir / f"{queue_item_id}.log"
-    with log_path.open("a", encoding="utf-8") as log_handle:
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                str(HANNAH_RUNNER),
-                "--queue-item",
-                str(queue_path),
-                "--runtime-root",
-                str(HANNAH_RUNTIME_ROOT),
-                "--persist-db",
-                "--db-env-file",
-                str(HANNAH_DB_ENV_FILE),
-                "--storage-env-file",
-                str(HANNAH_STORAGE_ENV_FILE),
-            ],
-            stdout=log_handle,
-            stderr=log_handle,
-            close_fds=True,
-            start_new_session=True,
-        )
-
-    payload["process_pid"] = process.pid
-    payload["process_group_id"] = process.pid
-    queue_item.payload_json = payload
-    queue_record["payload_json"] = payload
-    queue_path.write_text(json.dumps(queue_record, indent=2) + "\n", encoding="utf-8")
-    session.add(queue_item)
-    session.commit()
+    first_created = (seed_result.get("created") or [{}])[0].get("queue_item_id")
+    queue_item_id = first_created or f"hannah-seed-{started_at.strftime('%Y%m%d%H%M%S')}"
+    expected_completed_at = started_at + timedelta(seconds=request.durationSeconds)
 
     return WorkspaceHannahCurationSearchStartResponse(
         queueItemId=str(queue_item_id),
-        status="searching",
+        status="queued" if first_created else "completed",
         durationSeconds=request.durationSeconds,
         startedAt=isoformat_utc(started_at),
         expectedCompletedAt=isoformat_utc(expected_completed_at),

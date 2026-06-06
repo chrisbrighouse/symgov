@@ -609,6 +609,69 @@ def revision_display_ids(revisions: list[SymbolRevision]) -> list[str]:
     return values
 
 
+def mark_split_items_published_for_revisions(
+    session: Session,
+    *,
+    revisions: list[SymbolRevision],
+    downstream_queue_item_id: str,
+    completed_at: datetime,
+) -> list[str]:
+    """Close split-review rows that Rupert has successfully published.
+
+    Split children are moved to `queued_rupert` as soon as a reviewer approves them.  Rupert's
+    publication handoff creates the governed symbol and publication records, so the split child
+    must be moved to `published` in the same transaction; otherwise the Workspace keeps showing
+    stale publication work even though Rupert completed successfully.
+    """
+    published_split_item_ids: list[str] = []
+    for revision in revisions:
+        payload = revision.payload_json if isinstance(revision.payload_json, dict) else {}
+        lineage = payload.get("lineage") if isinstance(payload, dict) else None
+        split_item_id = lineage.get("review_split_item_id") if isinstance(lineage, dict) else None
+        if not split_item_id:
+            continue
+        try:
+            split_uuid = uuid.UUID(str(split_item_id))
+        except ValueError:
+            continue
+        split_item = session.get(ReviewSplitItem, split_uuid)
+        if split_item is None:
+            continue
+        split_item.status = "published"
+        split_item.downstream_agent_slug = "rupert"
+        split_item.downstream_queue_item_id = downstream_queue_item_id
+        split_item.processed_at = completed_at
+        split_item.updated_at = completed_at
+        published_split_item_ids.append(str(split_item.id))
+    return published_split_item_ids
+
+
+def mark_split_item_duplicate_pending_for_decision(
+    session: Session,
+    *,
+    decision: HumanReviewDecision,
+    downstream_queue_item_id: str,
+    updated_at: datetime,
+) -> str | None:
+    """Move a split child out of `queued_rupert` when publication is blocked by duplicate gate."""
+    payload = decision.decision_payload_json if isinstance(decision.decision_payload_json, dict) else {}
+    split_item_id = payload.get("split_child_item_id")
+    if not split_item_id:
+        return None
+    try:
+        split_uuid = uuid.UUID(str(split_item_id))
+    except ValueError:
+        return None
+    split_item = session.get(ReviewSplitItem, split_uuid)
+    if split_item is None:
+        return None
+    split_item.status = "duplicate_pending"
+    split_item.downstream_agent_slug = "libby"
+    split_item.downstream_queue_item_id = downstream_queue_item_id
+    split_item.updated_at = updated_at
+    return str(split_item.id)
+
+
 def build_pack_metadata(context: dict[str, Any], review_case: ReviewCase) -> tuple[str, str]:
     source_file = source_file_from_intake(context["intake_record"])
     source_stem = slugify_public_code(Path(source_file).stem) if source_file else str(review_case.id)[:8]
@@ -835,6 +898,12 @@ def queue_libby_duplicate_followup(
 
     review_case.current_stage = "duplicate_resolution"
     review_case.closed_at = None
+    duplicate_split_item_id = mark_split_item_duplicate_pending_for_decision(
+        session,
+        decision=decision,
+        downstream_queue_item_id=queue_id,
+        updated_at=now,
+    )
 
     action.action_status = "completed"
     action.completed_at = now
@@ -842,6 +911,7 @@ def queue_libby_duplicate_followup(
         **(action.action_payload_json or {}),
         "libby_queue_item_id": queue_id,
         "publication_blocked_reason": "graphical_duplicate_detected",
+        "duplicate_split_item_id": duplicate_split_item_id,
         "duplicate_gate": {
             "status": "detected",
             "reviewer_message": reviewer_message,
@@ -861,6 +931,7 @@ def queue_libby_duplicate_followup(
                 "decision_id": str(decision.id),
                 "review_case_action_id": str(action.id),
                 "libby_queue_item_id": queue_id,
+                "duplicate_split_item_id": duplicate_split_item_id,
                 "duplicate_evidence": duplicates,
                 "reviewer_message": reviewer_message,
             },
@@ -977,12 +1048,19 @@ def execute_publication_handoff(
         queue_path = write_rupert_queue_item(queue_item)
         result = run_rupert(queue_path)
         completed_at = utc_now()
+        published_split_item_ids = mark_split_items_published_for_revisions(
+            session,
+            revisions=revisions,
+            downstream_queue_item_id=queue_id,
+            completed_at=completed_at,
+        )
         action.action_status = "completed"
         action.completed_at = completed_at
         action.action_payload_json = {
             **(action.action_payload_json or {}),
             "rupert_result": result,
             "published_symbol_revision_ids": revision_ids,
+            "published_split_item_ids": published_split_item_ids,
         }
         if close_review_case:
             review_case.current_stage = "published"

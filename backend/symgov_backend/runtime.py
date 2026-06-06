@@ -43,6 +43,7 @@ from .models import (
     PublicationPack,
     PublishedPage,
     ReviewCase,
+    ReviewCaseAction,
     ReviewSplitItem,
     ReviewSymbolPropertyOption,
     ScottSourceDiscoverySite,
@@ -1341,6 +1342,112 @@ class RuntimePersistenceBridge:
                 "review_case_id": str(row.review_case_id),
                 "child_key": row.child_key,
                 "status": row.status,
+            }
+
+    def resolve_duplicate_review_split_item(
+        self,
+        *,
+        review_case_id: str | uuid.UUID,
+        duplicate_resolution: dict[str, Any],
+        queue_item_id: str | None = None,
+        review_decision_id: str | uuid.UUID | None = None,
+    ) -> dict[str, str]:
+        outcome = str(duplicate_resolution.get("outcome") or "").strip()
+        if outcome not in {"duplicate_confirmed", "needs_human_review"}:
+            raise RuntimeError(f"Unsupported Libby duplicate-resolution outcome: {outcome or 'missing'}.")
+
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        split_item_id = duplicate_resolution.get("duplicate_split_item_id")
+        candidate_revision_id = duplicate_resolution.get("candidate_revision_id")
+        with self.session_scope() as session:
+            query = session.query(ReviewSplitItem).filter(ReviewSplitItem.review_case_id == coerce_uuid(review_case_id))
+            if split_item_id:
+                row = query.filter(ReviewSplitItem.id == coerce_uuid(split_item_id)).one_or_none()
+            elif review_decision_id:
+                row = query.filter(ReviewSplitItem.latest_decision_id == coerce_uuid(review_decision_id)).one_or_none()
+            elif candidate_revision_id:
+                row = (
+                    query.filter(ReviewSplitItem.payload_json["published_symbol_revision_id"].astext == str(candidate_revision_id))
+                    .one_or_none()
+                )
+            else:
+                row = None
+            if row is None:
+                raise RuntimeError(f"Missing review_split_items row for Libby duplicate resolution in case {review_case_id}.")
+
+            if outcome == "duplicate_confirmed":
+                row.status = "duplicate_resolved"
+                row.latest_action = "duplicate_confirmed"
+                row.downstream_agent_slug = None
+                row.downstream_queue_item_id = None
+                row.processed_at = now
+                audit_action = "libby_duplicate_confirmed"
+            else:
+                row.status = "duplicate_exception"
+                row.latest_action = "needs_human_review"
+                row.downstream_agent_slug = "daisy"
+                row.downstream_queue_item_id = None
+                row.processed_at = None
+                audit_action = "libby_duplicate_exception_escalated"
+
+            row.latest_note = duplicate_resolution.get("recommended_action")
+            row.latest_details = duplicate_resolution.get("reason")
+            row.updated_at = now
+            row.payload_json = {
+                **(row.payload_json or {}),
+                "libby_duplicate_resolution": {
+                    **duplicate_resolution,
+                    "queue_item_id": queue_item_id,
+                    "review_decision_id": str(review_decision_id) if review_decision_id else None,
+                    "recorded_at": now.isoformat().replace("+00:00", "Z"),
+                },
+            }
+            if review_decision_id:
+                row.latest_decision_id = coerce_uuid(review_decision_id)
+
+            action_id = uuid.uuid4()
+            session.add(
+                ReviewCaseAction(
+                    id=action_id,
+                    review_case_id=coerce_uuid(review_case_id),
+                    decision_id=coerce_uuid(review_decision_id) if review_decision_id else None,
+                    action_code=audit_action,
+                    action_status="completed" if outcome == "duplicate_confirmed" else "queued",
+                    assigned_to=None,
+                    target_agent_slug=None if outcome == "duplicate_confirmed" else "daisy",
+                    target_stage=None if outcome == "duplicate_confirmed" else "duplicate_exception_review",
+                    action_payload_json={
+                        "queue_item_id": queue_item_id,
+                        "review_split_item_id": str(row.id),
+                        "duplicate_resolution": duplicate_resolution,
+                    },
+                    created_by_type="agent",
+                    created_by_id=None,
+                    created_at=now,
+                    started_at=now,
+                    completed_at=now if outcome == "duplicate_confirmed" else None,
+                )
+            )
+            session.add(
+                AuditEvent(
+                    entity_type="review_split_item",
+                    entity_id=row.id,
+                    action=audit_action,
+                    actor_id=None,
+                    payload_json={
+                        "review_case_id": str(row.review_case_id),
+                        "queue_item_id": queue_item_id,
+                        "duplicate_resolution": duplicate_resolution,
+                    },
+                    created_at=now,
+                )
+            )
+            return {
+                "id": str(row.id),
+                "review_case_id": str(row.review_case_id),
+                "child_key": row.child_key,
+                "status": row.status,
+                "action_id": str(action_id),
             }
 
     def create_control_exception(

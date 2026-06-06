@@ -13,7 +13,7 @@ import urllib.request
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1] / "backend"
@@ -33,7 +33,12 @@ SCHEMA_VERSION = "hannah-curation-v1"
 PROMPT_VERSION = "hannah-curation-2026-05-19"
 DEFAULT_DURATION_SECONDS = 120
 MAX_DURATION_SECONDS = 300
+CARD_DURATION_SECONDS = 60
 MAX_PHOTOS_PER_SYMBOL = 2
+CURATION_COOLDOWN_DAYS = 7
+HANNAH_CARD_SOURCE_TYPE = "published_symbol_photo_enrichment"
+LEGACY_SEARCH_SOURCE_TYPE = "published_symbol_photo_search"
+TERMINAL_CARD_STATUSES = {"success", "completed", "candidate", "blocked", "retry_later", "cancelled", "stopped"}
 PLACEHOLDER_VALUES = {"", "unknown", "tbd", "todo", "pending", "uncategorized", "general", "n/a", "na", "none"}
 LOW_RISK_LICENSE_MARKERS = ("cc0", "public domain", "cc by", "cc-by", "creative commons attribution")
 BAD_CANDIDATE_MARKERS = (
@@ -127,7 +132,7 @@ def symbol_is_eligible(symbol: dict[str, Any]) -> tuple[bool, list[str]]:
     # Loosened: require name and at least one of category/discipline
     if not reasonable_value(symbol.get("name")):
         missing.append("name")
-    
+
     cat = symbol.get("category")
     disc = symbol.get("discipline")
     if not reasonable_value(cat) and not reasonable_value(disc):
@@ -138,6 +143,86 @@ def symbol_is_eligible(symbol: dict[str, Any]) -> tuple[bool, list[str]]:
         pass
 
     return not missing, missing
+
+
+def build_symbol_curation_queue_item(
+    symbol: dict[str, Any],
+    *,
+    hannah_agent_id: str,
+    created_at: str | None = None,
+    queue_item_id: str | None = None,
+) -> dict[str, Any]:
+    """Build one traceable Hannah queue card for a single published symbol."""
+    created_at = created_at or utc_now()
+    queue_item_id = queue_item_id or str(uuid.uuid4())
+    payload = {
+        "task_type": HANNAH_CARD_SOURCE_TYPE,
+        "display_name": f"Hannah photo curation: {symbol.get('name') or symbol.get('symbol_slug')}",
+        "stage": "Catalogue curation",
+        "duration_seconds": CARD_DURATION_SECONDS,
+        "started_by": "hannah_seeder",
+        "symbol_id": str(symbol["symbol_id"]),
+        "symbol_slug": symbol.get("symbol_slug"),
+        "symbol_revision_id": str(symbol.get("symbol_revision_id") or ""),
+        "published_page_id": str(symbol.get("published_page_id") or ""),
+        "page_title": symbol.get("page_title"),
+        "name": symbol.get("name"),
+        "category": symbol.get("category"),
+        "discipline": symbol.get("discipline"),
+        "current_photo_count": int(symbol.get("photo_count") or 0),
+        "max_photos_per_symbol": MAX_PHOTOS_PER_SYMBOL,
+        "cooldown_days": CURATION_COOLDOWN_DAYS,
+        "symbol": dict(symbol),
+    }
+    return {
+        "id": queue_item_id,
+        "agent_id": "hannah",
+        "agent_definition_id": str(hannah_agent_id),
+        "source_type": HANNAH_CARD_SOURCE_TYPE,
+        "source_id": str(symbol["symbol_id"]),
+        "status": "queued",
+        "priority": "medium",
+        "payload_json": payload,
+        "created_at": created_at,
+        "started_at": None,
+        "completed_at": None,
+    }
+
+
+def select_task_symbols(task: dict[str, Any], fallback_loader: Callable[[], list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Return the exact symbol for a card task, or fall back to legacy broad loading."""
+    symbol = task.get("symbol")
+    if isinstance(symbol, dict) and symbol.get("symbol_id"):
+        return [symbol]
+    symbol_id = str(task.get("symbol_id") or "").strip()
+    if symbol_id:
+        return [
+            {
+                "symbol_id": symbol_id,
+                "symbol_slug": task.get("symbol_slug"),
+                "symbol_revision_id": task.get("symbol_revision_id"),
+                "published_page_id": task.get("published_page_id"),
+                "page_title": task.get("page_title"),
+                "name": task.get("name"),
+                "category": task.get("category"),
+                "discipline": task.get("discipline"),
+                "photo_count": task.get("current_photo_count") or 0,
+            }
+        ]
+    return fallback_loader()
+
+
+def final_queue_status_for_artifact(artifact: dict[str, Any]) -> str:
+    if int(artifact.get("attached_count") or 0) > 0:
+        return "success"
+    if int(artifact.get("candidate_count") or 0) > 0:
+        return "candidate"
+    attempts = artifact.get("symbol_attempts") or []
+    if any((attempt.get("status") or "") == "search_failed" for attempt in attempts):
+        return "retry_later"
+    if any((attempt.get("status") or "") == "not_eligible" for attempt in attempts):
+        return "blocked"
+    return "completed"
 
 
 def load_eligible_symbols(db_env_file: str | None, limit: int = 200) -> list[dict[str, Any]]:
@@ -167,15 +252,92 @@ def load_eligible_symbols(db_env_file: str | None, limit: int = 200) -> list[dic
                 WHERE pk.status = 'published'
                     AND pk.audience = 'public'
                     AND sr.lifecycle_state = 'published'
+                    AND (hs.status IS NULL OR hs.status NOT IN ('blocked', 'unsuitable'))
+                    AND (hs.last_attempt_at IS NULL OR hs.last_attempt_at < NOW() - (:cooldown_days * INTERVAL '1 day'))
                 GROUP BY gs.id, gs.slug, gs.canonical_name, gs.category, gs.discipline, sr.id, pp.id, pp.title, hs.attempt_count, hs.last_attempt_at
                 HAVING count(hp.id) FILTER (WHERE hp.status = 'attached' AND hp.object_key IS NOT NULL) < :max_photos
                 ORDER BY hs.last_attempt_at NULLS FIRST, COALESCE(hs.attempt_count, 0), gs.canonical_name
                 LIMIT :limit
                 """
             ),
-            {"max_photos": MAX_PHOTOS_PER_SYMBOL, "limit": limit},
+            {"max_photos": MAX_PHOTOS_PER_SYMBOL, "limit": limit, "cooldown_days": CURATION_COOLDOWN_DAYS},
         ).mappings().all()
     return [dict(row) for row in rows]
+
+
+def seed_hannah_symbol_queue_cards(
+    *,
+    db_env_file: str | None,
+    runtime_root: str | Path,
+    limit: int = 200,
+) -> dict[str, Any]:
+    """Create one queued Hannah card per eligible published symbol, idempotently."""
+    runtime_root = Path(runtime_root)
+    queue_dir = runtime_root / "agent_queue_items"
+    queue_dir.mkdir(parents=True, exist_ok=True)
+    created_at = utc_now()
+    bridge = RuntimePersistenceBridge(env_file=db_env_file)
+    symbols = load_eligible_symbols(db_env_file, limit=limit)
+    created: list[dict[str, Any]] = []
+    skipped: list[dict[str, str]] = []
+
+    with bridge.session_scope() as session:
+        hannah_agent_id = session.execute(text("SELECT id::text FROM agent_definitions WHERE slug = 'hannah' LIMIT 1")).scalar()
+        if hannah_agent_id is None:
+            raise RuntimeError("Hannah agent definition is missing.")
+
+        for symbol in symbols:
+            eligible, missing = symbol_is_eligible(symbol)
+            symbol_id = str(symbol["symbol_id"])
+            if not eligible:
+                skipped.append({"symbol_id": symbol_id, "reason": ",".join(missing)})
+                continue
+            active_count = session.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM agent_queue_items
+                    WHERE agent_id = :agent_id
+                      AND source_type = :source_type
+                      AND source_id = :symbol_id
+                      AND status NOT IN ('success', 'completed', 'candidate', 'blocked', 'retry_later', 'cancelled', 'stopped')
+                    """
+                ),
+                {"agent_id": hannah_agent_id, "source_type": HANNAH_CARD_SOURCE_TYPE, "symbol_id": symbol_id},
+            ).scalar()
+            if int(active_count or 0) > 0:
+                skipped.append({"symbol_id": symbol_id, "reason": "active_card_exists"})
+                continue
+
+            card = build_symbol_curation_queue_item(symbol, hannah_agent_id=hannah_agent_id, created_at=created_at)
+            session.execute(
+                text(
+                    """
+                    INSERT INTO agent_queue_items (
+                        id, agent_id, source_type, source_id, status, priority, payload_json,
+                        confidence, escalation_reason, created_at, started_at, completed_at
+                    ) VALUES (
+                        :id, :agent_id, :source_type, :source_id, :status, :priority, CAST(:payload_json AS jsonb),
+                        NULL, NULL, :created_at, NULL, NULL
+                    )
+                    ON CONFLICT (id) DO NOTHING
+                    """
+                ),
+                {
+                    "id": card["id"],
+                    "agent_id": hannah_agent_id,
+                    "source_type": card["source_type"],
+                    "source_id": card["source_id"],
+                    "status": card["status"],
+                    "priority": card["priority"],
+                    "payload_json": json.dumps(card["payload_json"]),
+                    "created_at": created_at,
+                },
+            )
+            write_json(queue_dir / f"{card['id']}.json", card)
+            created.append({"queue_item_id": card["id"], "symbol_id": symbol_id})
+
+    return {"createdCount": len(created), "skippedCount": len(skipped), "created": created, "skipped": skipped}
 
 
 def commons_api(params: dict[str, str], timeout: int = 18) -> dict[str, Any]:
@@ -494,7 +656,7 @@ def run_curation_task(task: dict[str, Any], db_env_file: str | None = None, stor
     symbol_attempts: list[dict[str, Any]] = []
     candidates: list[dict[str, Any]] = []
     bridge = RuntimePersistenceBridge(env_file=db_env_file) if db_env_file else None
-    symbols = load_eligible_symbols(db_env_file)
+    symbols = select_task_symbols(task, lambda: load_eligible_symbols(db_env_file))
 
     for symbol in symbols:
         if time.monotonic() >= deadline:
@@ -568,8 +730,12 @@ def run_curation_task(task: dict[str, Any], db_env_file: str | None = None, stor
         "queue_item_id": task.get("queue_item_id") or "untracked",
         "agent": "hannah",
         "schema_version": SCHEMA_VERSION,
-        "task_type": "published_symbol_photo_search",
-        "decision": "progress_saved",
+        "task_type": task.get("task_type") or LEGACY_SEARCH_SOURCE_TYPE,
+        "decision": final_queue_status_for_artifact({
+            "attached_count": len([candidate for candidate in candidates if candidate.get("status") == "attached"]),
+            "candidate_count": len(candidates),
+            "symbol_attempts": symbol_attempts,
+        }),
         "duration_seconds": duration_seconds,
         "elapsed_seconds": elapsed_seconds,
         "symbols_considered": len(symbol_attempts),
@@ -604,7 +770,7 @@ def process_queue_item(queue_item_path: str | Path, runtime_root: str | Path, pe
 
     artifact = run_curation_task(queue_item_payload_to_task(queue_item), db_env_file=db_env_file, storage_env_file=storage_env_file)
     completed_at = utc_now()
-    queue_item["status"] = "progress_saved"
+    queue_item["status"] = artifact.get("decision") or final_queue_status_for_artifact(artifact)
     queue_item["confidence"] = None
     queue_item["escalation_reason"] = None
     queue_item["payload_json"] = {

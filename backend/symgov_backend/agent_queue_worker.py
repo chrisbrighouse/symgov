@@ -318,7 +318,18 @@ def process_agent_queue_once(agent: str, config: AgentQueueWorkerConfig) -> dict
     processed = []
     errors = []
 
-    for queue_path in queued_item_paths(runtime_root, agent, config.limit):
+    if agent == "hannah" and runner is not None and config.db_env_file:
+        try:
+            runner.seed_hannah_symbol_queue_cards(
+                db_env_file=str(config.db_env_file),
+                runtime_root=runtime_root,
+                limit=config.limit,
+            )
+        except Exception as exc:  # pragma: no cover - seeding must not stop other workers
+            errors.append({"queueItemPath": "hannah_seed", "error": str(exc)})
+
+    per_agent_limit = 1 if agent == "hannah" else config.limit
+    for queue_path in queued_item_paths(runtime_root, agent, per_agent_limit):
         try:
             if config.agent_runtime == "hermes":
                 result = process_agent_queue_item_with_hermes(agent, queue_path, runtime_root, config)
@@ -382,6 +393,34 @@ def process_agent_queues_once(config: AgentQueueWorkerConfig) -> dict[str, Any]:
 
 
 def drain_agent_queues(config: AgentQueueWorkerConfig, max_cycles: int = 50) -> dict[str, Any]:
+    # Hannah is intentionally card-throttled: even when global drain mode is on,
+    # she may seed cards but process only one symbol card per worker tick.
+    if "hannah" in config.agents:
+        non_hannah_agents = tuple(agent for agent in config.agents if agent != "hannah")
+        non_hannah_result = (
+            drain_agent_queues(AgentQueueWorkerConfig(**{**config.__dict__, "agents": non_hannah_agents}), max_cycles=max_cycles)
+            if non_hannah_agents
+            else {"cycleCount": 0, "processedCount": 0, "errorCount": 0, "cycles": []}
+        )
+        hannah_result = process_agent_queue_once("hannah", AgentQueueWorkerConfig(**{**config.__dict__, "agents": ("hannah",)}))
+        cycles = list(non_hannah_result.get("cycles") or [])
+        cycles.append(
+            {
+                "cycle": len(cycles) + 1,
+                "agents": ["hannah"],
+                "processedCount": hannah_result["processedCount"],
+                "errorCount": hannah_result["errorCount"],
+                "results": [hannah_result],
+            }
+        )
+        return {
+            "agents": list(config.agents),
+            "cycleCount": len(cycles),
+            "processedCount": int(non_hannah_result.get("processedCount") or 0) + hannah_result["processedCount"],
+            "errorCount": int(non_hannah_result.get("errorCount") or 0) + hannah_result["errorCount"],
+            "cycles": cycles,
+        }
+
     cycles = []
     for cycle in range(1, max_cycles + 1):
         result = process_agent_queues_once(config)
