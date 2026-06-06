@@ -345,6 +345,30 @@ class AgentQueueItem(Base):
     completed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class AgentFeedbackEvent(Base):
+    __tablename__ = "agent_feedback_events"
+    __table_args__ = (
+        Index("ix_agent_feedback_events_agent_created", "agent_slug", "created_at"),
+        Index("ix_agent_feedback_events_source", "source_entity_type", "source_entity_id", "created_at"),
+        Index("ix_agent_feedback_events_type_created", "feedback_type", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_slug: Mapped[str] = mapped_column(Text, nullable=False)
+    feedback_type: Mapped[str] = mapped_column(Text, nullable=False)
+    source_entity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    source_entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    original_value_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    corrected_value_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewer_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewer_role: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    applied_to_rules_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    applied_to_prompt_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ScottSourceDiscoverySite(Base):
     __tablename__ = "scott_source_discovery_sites"
     __table_args__ = (

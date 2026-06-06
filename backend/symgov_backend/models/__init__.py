@@ -1,6 +1,7 @@
 from .base import Base
 from .schema import (
     AgentDefinition,
+    AgentFeedbackEvent,
     AgentOutputArtifact,
     AgentQueueItem,
     AgentRun,
@@ -44,6 +45,7 @@ from .schema import (
 
 __all__ = [
     "AgentDefinition",
+    "AgentFeedbackEvent",
     "AgentOutputArtifact",
     "AgentQueueItem",
     "AgentRun",

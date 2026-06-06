@@ -9,16 +9,46 @@ from .agent_queue_worker import AGENT_SPECS, DEFAULT_AGENT_ORDER
 from .models import AgentDefinition, AgentQueueItem
 from .runtime import RuntimePersistenceBridge, coerce_uuid
 
-ACTIVE_STATUSES = {"queued", "running", "processing", "searching", "sensing"}
-TERMINAL_STATUSES = {
-    "cancelled",
-    "completed",
-    "escalated",
-    "failed",
-    "progress_saved",
-    "published",
-    "signals_recorded",
+QUEUE_STATUS_GROUPS: dict[str, frozenset[str]] = {
+    "active": frozenset({"queued", "running", "processing", "searching", "sensing", "in_progress"}),
+    "waiting_operator": frozenset({"escalated", "candidate", "needs_review", "duplicate_pending"}),
+    "terminal": frozenset(
+        {
+            "blocked",
+            "cancelled",
+            "completed",
+            "deleted",
+            "duplicate_resolved",
+            "failed",
+            "progress_saved",
+            "published",
+            "rejected",
+            "signals_recorded",
+        }
+    ),
 }
+ACTIVE_STATUSES = set(QUEUE_STATUS_GROUPS["active"])
+TERMINAL_STATUSES = set(QUEUE_STATUS_GROUPS["terminal"])
+WAITING_OPERATOR_STATUSES = set(QUEUE_STATUS_GROUPS["waiting_operator"])
+KNOWN_QUEUE_STATUSES = set().union(*QUEUE_STATUS_GROUPS.values())
+
+
+def queue_status_group(status: str | None) -> str:
+    """Return the explicit lifecycle group for an agent_queue_items status."""
+
+    normalized = (status or "").strip()
+    for group, statuses in QUEUE_STATUS_GROUPS.items():
+        if normalized in statuses:
+            return group
+    return "unknown"
+
+
+def is_active_queue_status(status: str | None) -> bool:
+    return queue_status_group(status) == "active"
+
+
+def is_terminal_queue_status(status: str | None) -> bool:
+    return queue_status_group(status) == "terminal"
 
 
 @dataclass(frozen=True)
@@ -38,6 +68,107 @@ class QueueRuntimeRecord:
     @property
     def status(self) -> str:
         return str(self.payload.get("status") or "")
+
+
+def _coerce_optional_uuid(value: Any):
+    parsed = coerce_uuid(value)
+    return parsed if parsed is not None else coerce_uuid("00000000-0000-0000-0000-000000000000")
+
+
+def _queue_suggestion(
+    *,
+    rule_code: str,
+    severity: str,
+    queue_item_id: str | None,
+    detail: str,
+    suggested_remediation: str,
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "source_type": "agent_queue_item",
+        "source_id": _coerce_optional_uuid(queue_item_id),
+        "severity": severity,
+        "rule_code": rule_code,
+        "detail": detail,
+        "status": "open",
+        "suggested_remediation": suggested_remediation,
+        "observational_only": True,
+        "evidence": evidence,
+    }
+
+
+def build_reggie_queue_control_suggestions(
+    *,
+    missing_runtime: list[dict[str, Any]],
+    skipped: list[dict[str, Any]],
+    runtime_orphans: list[dict[str, Any]],
+    changes: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Convert reconciliation findings into Reggie suggestions, not auto-fixes.
+
+    Reggie's first control-room role is observational: identify DB/runtime
+    ambiguity and suggest a remediation path for an operator. This function does
+    not mutate queue rows, runtime JSON, prompts, or control exception tables.
+    """
+
+    suggestions: list[dict[str, Any]] = []
+    for row in missing_runtime:
+        status_group = queue_status_group(row.get("db_status"))
+        suggestions.append(
+            _queue_suggestion(
+                rule_code="agent_queue_active_db_missing_runtime",
+                severity="warning" if status_group == "active" else "info",
+                queue_item_id=row.get("queue_item_id"),
+                detail=(
+                    f"{row.get('agent')} queue item {row.get('queue_item_id')} is {row.get('db_status')} in DB "
+                    "but has no matching runtime JSON record."
+                ),
+                suggested_remediation="Inspect the agent runtime directory and either restore/requeue the work item or mark the DB row with an explicit terminal status after operator review.",
+                evidence={**row, "db_status_group": status_group},
+            )
+        )
+
+    for row in changes or []:
+        suggestions.append(
+            _queue_suggestion(
+                rule_code="agent_queue_db_runtime_terminal_mismatch",
+                severity="info",
+                queue_item_id=row.get("queue_item_id"),
+                detail=(
+                    f"{row.get('agent')} queue item {row.get('queue_item_id')} is {row.get('db_status')} in DB "
+                    f"but runtime terminal status is {row.get('runtime_status')}."
+                ),
+                suggested_remediation="Review the runtime terminal status and, if valid, run the explicit reconciliation apply path to update the DB row.",
+                evidence={**row, "runtime_status_group": queue_status_group(row.get("runtime_status"))},
+            )
+        )
+
+    for row in skipped:
+        suggestions.append(
+            _queue_suggestion(
+                rule_code="agent_queue_db_runtime_mismatch_skipped",
+                severity="warning",
+                queue_item_id=row.get("queue_item_id"),
+                detail=f"Queue item {row.get('queue_item_id')} could not be reconciled automatically: {', '.join(row.get('reasons') or [])}.",
+                suggested_remediation="Inspect DB row and runtime JSON manually before applying any state change.",
+                evidence=row,
+            )
+        )
+
+    for row in runtime_orphans:
+        suggestions.append(
+            _queue_suggestion(
+                rule_code="agent_queue_runtime_without_db_mirror",
+                severity="warning",
+                queue_item_id=row.get("queue_item_id"),
+                detail=(
+                    f"Runtime queue record {row.get('queue_item_id')} for {row.get('agent')} has no DB mirror."
+                ),
+                suggested_remediation="Inspect the runtime JSON and decide whether to backfill a DB mirror row or archive the stale runtime record.",
+                evidence={**row, "runtime_status_group": queue_status_group(row.get("runtime_status"))},
+            )
+        )
+    return suggestions
 
 
 def _load_json(path: Path) -> dict[str, Any] | None:
@@ -94,6 +225,8 @@ def reconcile_agent_queue_state(
     changes = []
     skipped = []
     missing_runtime = []
+    runtime_orphans = []
+    db_queue_ids = set()
 
     with bridge.session_scope() as session:
         rows = (
@@ -104,6 +237,7 @@ def reconcile_agent_queue_state(
             .all()
         )
         for row, agent_slug in rows:
+            db_queue_ids.add(row.id)
             db_status = row.status
             if active_only and db_status not in ACTIVE_STATUSES:
                 continue
@@ -153,6 +287,26 @@ def reconcile_agent_queue_state(
                 bridge.upsert_agent_queue_item(runtime_payload)
             changes.append({**record, "applied": apply})
 
+    for runtime in runtime_records:
+        runtime_id = runtime.queue_item_id
+        if runtime_id is None or runtime_id in db_queue_ids:
+            continue
+        runtime_orphans.append(
+            {
+                "queue_item_id": str(runtime_id),
+                "agent": runtime.agent,
+                "runtime_path": str(runtime.path),
+                "runtime_status": runtime.status,
+            }
+        )
+
+    control_suggestions = build_reggie_queue_control_suggestions(
+        missing_runtime=missing_runtime,
+        skipped=skipped,
+        runtime_orphans=runtime_orphans,
+        changes=changes,
+    )
+
     return {
         "dry_run": not apply,
         "agents": list(agents),
@@ -161,8 +315,12 @@ def reconcile_agent_queue_state(
         "db_active_rows_inspected": len(inspected),
         "change_count": len(changes),
         "missing_runtime_count": len(missing_runtime),
+        "runtime_orphan_count": len(runtime_orphans),
         "skipped_count": len(skipped),
+        "control_suggestion_count": len(control_suggestions),
         "changes": changes,
         "missing_runtime": missing_runtime,
+        "runtime_orphans": runtime_orphans,
         "skipped": skipped,
+        "control_suggestions": control_suggestions,
     }

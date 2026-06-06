@@ -43,6 +43,11 @@ from ..models import (
     ValidationReport,
     WhitneyDemandSignal,
 )
+from ..agent_feedback import (
+    add_agent_feedback_events,
+    build_duplicate_decision_feedback_events,
+    build_symbol_property_feedback_events,
+)
 from ..publication_handoff import execute_publication_handoff
 from ..property_options import remember_property_option
 from ..review_followup_handoff import execute_review_followup_handoff
@@ -2762,7 +2767,31 @@ def update_workspace_review_symbol_properties(
     properties.source = "reviewer"
     properties.updated_by = request.updatedBy or "Human"
     properties.updated_at = now
+    updated_payload = {
+        "name": properties.name,
+        "description": properties.description,
+        "category": properties.category,
+        "discipline": properties.discipline,
+        "format": properties.format,
+    }
     session.add(properties)
+    add_agent_feedback_events(
+        session,
+        build_symbol_property_feedback_events(
+            source_entity_type="review_symbol_property",
+            source_entity_id=properties.id,
+            previous=previous_payload,
+            updated=updated_payload,
+            reviewer_name=properties.updated_by,
+            reviewer_role="reviewer",
+            reason="Human reviewer updated symbol properties.",
+            evidence={
+                "review_case_id": str(review_case.id),
+                "review_split_item_id": str(split_item.id) if split_item is not None else None,
+            },
+        ),
+        created_at=now,
+    )
     session.add(
         AuditEvent(
             entity_type="review_symbol_property",
@@ -3110,6 +3139,23 @@ def process_workspace_split_review_decisions(
         )
         session.add(decision)
         session.flush()
+        if is_duplicate_exception and action_code in {"approve", "duplicate"}:
+            add_agent_feedback_events(
+                session,
+                build_duplicate_decision_feedback_events(
+                    split_item=item,
+                    action_code=action_code,
+                    reviewer_name=request.deciderName,
+                    reviewer_role=request.deciderRole,
+                    reason=child_payload.get("details") or child_payload.get("note") or request.caseComment,
+                    evidence={
+                        "review_case_id": str(review_case.id),
+                        "decision_id": str(decision.id),
+                        "split_child_key": item.child_key,
+                    },
+                ),
+                created_at=now,
+            )
         action = create_review_action(
             review_case=review_case,
             decision=decision,
