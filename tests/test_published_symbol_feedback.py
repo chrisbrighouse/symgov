@@ -12,6 +12,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 from symgov_backend.routes.published import (
     MAX_PUBLISHED_SYMBOL_COMMAND_SELECTION,
     normalize_published_symbol_command_request,
+    published_symbol_display_id,
     published_symbol_row,
 )
 from symgov_backend.routes.workspace import build_published_symbol_workspace_item, queue_item_display_parts
@@ -82,6 +83,47 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         self.assertIsNone(sequence)
         self.assertEqual(display_name, "0002-12")
 
+    def test_ed_queue_display_uses_symbol_revision_short_id_when_payload_has_name(self) -> None:
+        symbol_id = UUID("11111111-1111-1111-1111-111111111111")
+        revision_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        queue_item = SimpleNamespace(
+            payload_json={
+                "task_type": "published_symbol_review_request",
+                "display_name": "Check valve",
+                "workspace_display_name": "Check valve",
+                "symbol_slug": "4-way-valve",
+                "published_display_id": "4-way-valve",
+                "symbol_name": "Check valve",
+            },
+            source_type="published_symbol_review_request",
+            source_id=symbol_id,
+            id=UUID("22222222-2222-2222-2222-222222222222"),
+        )
+
+        class FakeSession:
+            def get(self, model, key):
+                if model.__name__ == "GovernedSymbol" and key == symbol_id:
+                    return SimpleNamespace(current_revision_id=revision_id)
+                if model.__name__ == "SymbolRevision" and key == revision_id:
+                    return SimpleNamespace(payload_json={"package_display_id": "0001", "package_symbol_sequence": 3})
+                return None
+
+        package_id, sequence, display_name = queue_item_display_parts(FakeSession(), queue_item)
+
+        self.assertIsNone(package_id)
+        self.assertIsNone(sequence)
+        self.assertEqual(display_name, "0001-3")
+
+    def test_published_symbol_display_id_prefers_pack_code_and_sequence(self) -> None:
+        row = SimpleNamespace(
+            slug="4-way-valve",
+            pack_code="0001",
+            sort_order=3,
+            payload_json={"display_name": "4-way-valve", "package_display_id": "0001", "package_symbol_sequence": 3},
+        )
+
+        self.assertEqual(published_symbol_display_id(row), "0001-3")
+
     def test_published_symbol_row_exposes_comment_indicator_fields(self) -> None:
         row = SimpleNamespace(
             symbol_id=UUID("11111111-1111-1111-1111-111111111111"),
@@ -92,7 +134,7 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
             symbol_revision_id=UUID("22222222-2222-2222-2222-222222222222"),
             revision_label="Rev 1",
             revision_created_at=None,
-            payload_json={"display_name": "0002-32", "name": "Check valve"},
+            payload_json={"display_name": "0002-32", "name": "Check valve", "package_display_id": "0002", "package_symbol_sequence": 32},
             rationale="",
             page_id=UUID("33333333-3333-3333-3333-333333333333"),
             page_code="PID-0002-32",
@@ -108,6 +150,7 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
 
         payload = published_symbol_row(row, comment_counts_by_symbol={str(row.symbol_id): 2})
 
+        self.assertEqual(payload["displayName"], "0002-32")
         self.assertTrue(payload["hasComments"])
         self.assertEqual(payload["commentCount"], 2)
 

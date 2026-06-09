@@ -488,16 +488,48 @@ def queue_item_display_parts(session: Session, queue_item: AgentQueueItem) -> tu
     payload = queue_item.payload_json or {}
     if isinstance(payload, dict):
         if queue_item.source_type == "published_symbol_review_request":
-            published_display_name = (
-                payload.get("published_display_id")
-                or payload.get("symbol_display_id")
-                or payload.get("symbol_slug")
-                or payload.get("workspace_display_name")
-                or payload.get("display_name")
-                or payload.get("displayName")
-            )
-            if published_display_name:
-                return None, None, str(published_display_name)
+            def _is_short_symbol_id(value: object) -> bool:
+                return bool(re.fullmatch(r"\d{4}-\d+", str(value or "").strip()))
+
+            payload_candidates = [
+                payload.get("published_display_id"),
+                payload.get("symbol_display_id"),
+                payload.get("display_name"),
+                payload.get("workspace_display_name"),
+                payload.get("displayName"),
+                payload.get("symbol_slug"),
+            ]
+            for candidate in payload_candidates:
+                if _is_short_symbol_id(candidate):
+                    return None, None, str(candidate).strip()
+
+            if session is not None:
+                symbol_uuid = coerce_uuid(queue_item.source_id)
+                symbol = session.get(GovernedSymbol, symbol_uuid) if symbol_uuid is not None else None
+                revision = (
+                    session.get(SymbolRevision, symbol.current_revision_id)
+                    if symbol is not None and symbol.current_revision_id is not None
+                    else None
+                )
+                revision_payload = revision.payload_json if revision is not None else {}
+                if isinstance(revision_payload, dict):
+                    package_id = revision_payload.get("package_display_id")
+                    sequence = revision_payload.get("package_symbol_sequence")
+                    if package_id and sequence is not None:
+                        try:
+                            return None, None, f"{package_id}-{int(sequence)}"
+                        except (TypeError, ValueError):
+                            pass
+                    for candidate in (
+                        revision_payload.get("display_name"),
+                        revision_payload.get("workspace_display_name"),
+                    ):
+                        if _is_short_symbol_id(candidate):
+                            return None, None, str(candidate).strip()
+
+            for candidate in payload_candidates:
+                if candidate:
+                    return None, None, str(candidate).strip()
 
         direct_display_name = (
             payload.get("display_name")

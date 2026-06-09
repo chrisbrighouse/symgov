@@ -1770,19 +1770,31 @@ function resolveQueueItemTitle(queueItem) {
   const packageId = queueItem.packageDisplayId || payload.package_display_id || payload.packageDisplayId;
   const packageSequence =
     queueItem.packageSymbolSequence ?? payload.package_symbol_sequence ?? payload.packageSymbolSequence;
-  const readableSymbolId =
+  const packageDisplay = packageId && packageSequence != null ? `${packageId}-${packageSequence}` : packageId;
+  const isShortSymbolId = (value) => /^\d{4}-\d+$/.test(String(value || '').trim());
+  const shortIdCandidate = [
+    queueItem.displayName,
+    queueItem.publishedSymbolId,
+    payload.published_display_id,
+    payload.symbol_display_id,
+    payload.display_name,
+    payload.workspace_display_name,
+    payload.displayName,
+    packageDisplay,
+    payload.symbol_slug
+  ].find((value) => isShortSymbolId(value));
+
+  return (
+    shortIdCandidate ||
+    queueItem.displayName ||
     queueItem.publishedSymbolId ||
     payload.published_display_id ||
     payload.symbol_display_id ||
-    payload.symbol_slug ||
-    (packageId && packageSequence != null ? `${packageId}-${packageSequence}` : '') ||
-    packageId;
-
-  return (
-    readableSymbolId ||
-    queueItem.displayName ||
     payload.display_name ||
     payload.workspace_display_name ||
+    payload.displayName ||
+    packageDisplay ||
+    payload.symbol_slug ||
     (Array.isArray(payload.symbol_display_ids) && payload.symbol_display_ids.length === 1 ? payload.symbol_display_ids[0] : '') ||
     payload.candidate_title ||
     payload.original_filename ||

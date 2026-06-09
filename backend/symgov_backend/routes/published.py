@@ -72,6 +72,28 @@ PUBLISHED_SYMBOLS_SQL = """
 """
 
 
+def published_symbol_display_id(row) -> str:
+    payload = row.payload_json or {}
+    package_id = payload.get("package_display_id") or getattr(row, "pack_code", None)
+    sequence = payload.get("package_symbol_sequence")
+    if sequence is None:
+        sequence = getattr(row, "sort_order", None)
+
+    if package_id and sequence is not None:
+        try:
+            sequence_value = int(sequence)
+            return f"{package_id}-{sequence_value}"
+        except (TypeError, ValueError):
+            pass
+
+    return (
+        payload.get("display_name")
+        or payload.get("workspace_display_name")
+        or payload.get("symbol_display_id")
+        or row.slug
+    )
+
+
 def published_symbol_row(
     row,
     supplemental_photos_by_symbol: dict[str, list[dict]] | None = None,
@@ -88,10 +110,12 @@ def published_symbol_row(
     supplemental_photos = (supplemental_photos_by_symbol or {}).get(str(row.symbol_id), [])
     comment_count = int((comment_counts_by_symbol or {}).get(str(row.symbol_id), 0))
 
+    symbol_display_id = published_symbol_display_id(row)
+
     return {
         "id": row.slug,
         "symbolId": row.symbol_id,
-        "displayName": payload.get("display_name") or payload.get("workspace_display_name"),
+        "displayName": symbol_display_id,
         "packageDisplayId": payload.get("package_display_id"),
         "packageSymbolSequence": payload.get("package_symbol_sequence"),
         "slug": row.slug,
@@ -342,6 +366,7 @@ async def run_published_symbol_command(request: Request, session: Session = Depe
     seen_symbols: set[str] = set()
     for row in rows:
         symbol_uuid = uuid.UUID(str(row.symbol_id))
+        symbol_display_id = published_symbol_display_id(row)
         if str(symbol_uuid) in seen_symbols:
             continue
         seen_symbols.add(str(symbol_uuid))
@@ -395,6 +420,7 @@ async def run_published_symbol_command(request: Request, session: Session = Depe
                 action_payload_json={
                     "comment": normalized["comment"],
                     "symbol_slug": row.slug,
+                    "symbol_display_id": symbol_display_id,
                     "symbol_name": row.canonical_name,
                     "published_page_id": str(page_uuid),
                     "managed_by": "ed",
@@ -416,9 +442,10 @@ async def run_published_symbol_command(request: Request, session: Session = Depe
                     "symbol_id": str(symbol_uuid),
                     "symbol_slug": row.slug,
                     "symbol_name": row.canonical_name,
-                    "display_name": row.slug,
-                    "workspace_display_name": row.slug,
-                    "published_display_id": row.slug,
+                    "symbol_display_id": symbol_display_id,
+                    "display_name": symbol_display_id,
+                    "workspace_display_name": symbol_display_id,
+                    "published_display_id": symbol_display_id,
                     "comment": normalized["comment"],
                     "managed_by": "ed",
                     "next_stage": "daisy_human_review_coordination",
@@ -446,7 +473,7 @@ async def run_published_symbol_command(request: Request, session: Session = Depe
         results.append(
             {
                 "symbolId": str(symbol_uuid),
-                "displayId": row.slug,
+                "displayId": symbol_display_id,
                 "name": row.canonical_name,
                 "commentId": str(comment_record.id),
                 "reviewCaseId": str(review_case.id) if review_case is not None else None,
