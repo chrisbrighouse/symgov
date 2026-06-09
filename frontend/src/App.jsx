@@ -1767,8 +1767,19 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
 
 function resolveQueueItemTitle(queueItem) {
   const payload = queueItem.payload || {};
+  const packageId = queueItem.packageDisplayId || payload.package_display_id || payload.packageDisplayId;
+  const packageSequence =
+    queueItem.packageSymbolSequence ?? payload.package_symbol_sequence ?? payload.packageSymbolSequence;
+  const readableSymbolId =
+    queueItem.publishedSymbolId ||
+    payload.published_display_id ||
+    payload.symbol_display_id ||
+    payload.symbol_slug ||
+    (packageId && packageSequence != null ? `${packageId}-${packageSequence}` : '') ||
+    packageId;
 
   return (
+    readableSymbolId ||
     queueItem.displayName ||
     payload.display_name ||
     payload.workspace_display_name ||

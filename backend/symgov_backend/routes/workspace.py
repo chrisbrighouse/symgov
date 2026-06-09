@@ -487,7 +487,26 @@ def split_item_display_parts(split_item: ReviewSplitItem) -> tuple[str | None, i
 def queue_item_display_parts(session: Session, queue_item: AgentQueueItem) -> tuple[str | None, int | None, str | None]:
     payload = queue_item.payload_json or {}
     if isinstance(payload, dict):
-        direct_display_name = payload.get("display_name") or payload.get("workspace_display_name") or payload.get("displayName")
+        if queue_item.source_type == "published_symbol_review_request":
+            published_display_name = (
+                payload.get("published_display_id")
+                or payload.get("symbol_display_id")
+                or payload.get("symbol_slug")
+                or payload.get("workspace_display_name")
+                or payload.get("display_name")
+                or payload.get("displayName")
+            )
+            if published_display_name:
+                return None, None, str(published_display_name)
+
+        direct_display_name = (
+            payload.get("display_name")
+            or payload.get("workspace_display_name")
+            or payload.get("displayName")
+            or payload.get("published_display_id")
+            or payload.get("symbol_display_id")
+            or payload.get("symbol_slug")
+        )
         direct_package_id = payload.get("package_display_id") or payload.get("packageDisplayId")
         direct_sequence = payload.get("package_symbol_sequence") or payload.get("packageSymbolSequence")
         if direct_display_name:

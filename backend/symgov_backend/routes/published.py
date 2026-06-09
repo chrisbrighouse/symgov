@@ -416,6 +416,8 @@ async def run_published_symbol_command(request: Request, session: Session = Depe
                     "symbol_id": str(symbol_uuid),
                     "symbol_slug": row.slug,
                     "symbol_name": row.canonical_name,
+                    "display_name": row.slug,
+                    "workspace_display_name": row.slug,
                     "published_display_id": row.slug,
                     "comment": normalized["comment"],
                     "managed_by": "ed",

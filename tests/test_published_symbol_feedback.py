@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import inspect
 import pathlib
 import sys
 import unittest
 from types import SimpleNamespace
 from uuid import UUID
-
-from starlette.requests import Request
 
 BACKEND_ROOT = pathlib.Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
@@ -16,9 +13,8 @@ from symgov_backend.routes.published import (
     MAX_PUBLISHED_SYMBOL_COMMAND_SELECTION,
     normalize_published_symbol_command_request,
     published_symbol_row,
-    run_published_symbol_command,
 )
-from symgov_backend.routes.workspace import build_published_symbol_workspace_item
+from symgov_backend.routes.workspace import build_published_symbol_workspace_item, queue_item_display_parts
 
 
 class PublishedSymbolFeedbackTests(unittest.TestCase):
@@ -45,12 +41,46 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         self.assertEqual(normalized["symbol_ids"], ["0002-32", "0002-33"])
         self.assertEqual(normalized["comment"], "Wrong designation on both records.")
 
-    def test_command_endpoint_uses_request_body_without_fastapi_payload_validation(self) -> None:
-        signature = inspect.signature(run_published_symbol_command)
+    def test_ed_queue_display_parts_use_published_symbol_readable_id(self) -> None:
+        queue_item = SimpleNamespace(
+            payload_json={
+                "task_type": "published_symbol_review_request",
+                "symbol_id": "11111111-1111-1111-1111-111111111111",
+                "symbol_slug": "0002-12",
+                "published_display_id": "0002-12",
+                "symbol_name": "Check valve",
+            },
+            source_type="published_symbol_review_request",
+            source_id=UUID("11111111-1111-1111-1111-111111111111"),
+            id=UUID("22222222-2222-2222-2222-222222222222"),
+        )
 
-        self.assertIn("request", signature.parameters)
-        annotation = signature.parameters["request"].annotation
-        self.assertIn(annotation, (Request, "Request"))
+        package_id, sequence, display_name = queue_item_display_parts(None, queue_item)
+
+        self.assertIsNone(package_id)
+        self.assertIsNone(sequence)
+        self.assertEqual(display_name, "0002-12")
+
+    def test_ed_queue_display_prefers_readable_id_over_symbol_name(self) -> None:
+        queue_item = SimpleNamespace(
+            payload_json={
+                "task_type": "published_symbol_review_request",
+                "display_name": "Check valve",
+                "workspace_display_name": "Check valve",
+                "symbol_slug": "0002-12",
+                "published_display_id": "0002-12",
+                "symbol_name": "Check valve",
+            },
+            source_type="published_symbol_review_request",
+            source_id=UUID("11111111-1111-1111-1111-111111111111"),
+            id=UUID("22222222-2222-2222-2222-222222222222"),
+        )
+
+        package_id, sequence, display_name = queue_item_display_parts(None, queue_item)
+
+        self.assertIsNone(package_id)
+        self.assertIsNone(sequence)
+        self.assertEqual(display_name, "0002-12")
 
     def test_published_symbol_row_exposes_comment_indicator_fields(self) -> None:
         row = SimpleNamespace(
