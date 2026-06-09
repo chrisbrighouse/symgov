@@ -13,6 +13,7 @@ from symgov_backend.agent_queue_reconciliation import (
     build_reggie_queue_control_suggestions,
     queue_status_group,
 )
+from symgov_backend.routes.workspace import _build_reggie_queue_control_response
 
 
 class AgentQueueStateMachineTests(unittest.TestCase):
@@ -94,6 +95,43 @@ class AgentQueueStateMachineTests(unittest.TestCase):
         self.assertEqual(suggestions[0]["rule_code"], "agent_queue_runtime_without_db_mirror")
         self.assertEqual(suggestions[0]["severity"], "warning")
         self.assertTrue(suggestions[0]["observational_only"])
+
+    def test_reggie_endpoint_response_is_observational_and_camel_case(self) -> None:
+        queue_id = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+        payload = {
+            "dry_run": True,
+            "active_only": True,
+            "agents": ["scott"],
+            "runtime_records_seen": 3,
+            "db_active_rows_inspected": 0,
+            "change_count": 0,
+            "missing_runtime_count": 1,
+            "runtime_orphan_count": 0,
+            "skipped_count": 0,
+            "control_suggestion_count": 1,
+            "control_suggestions": build_reggie_queue_control_suggestions(
+                missing_runtime=[
+                    {
+                        "queue_item_id": str(queue_id),
+                        "agent": "scott",
+                        "db_status": "queued",
+                        "source_type": "external_submission",
+                    }
+                ],
+                skipped=[],
+                runtime_orphans=[],
+            ),
+        }
+
+        response = _build_reggie_queue_control_response(payload)
+        dumped = response.model_dump()
+
+        self.assertTrue(dumped["dryRun"])
+        self.assertEqual(dumped["runtimeRecordsSeen"], 3)
+        self.assertEqual(dumped["controlSuggestionCount"], 1)
+        self.assertEqual(dumped["items"][0]["sourceId"], str(queue_id))
+        self.assertEqual(dumped["items"][0]["ruleCode"], "agent_queue_active_db_missing_runtime")
+        self.assertTrue(dumped["items"][0]["observationalOnly"])
 
 
 if __name__ == "__main__":

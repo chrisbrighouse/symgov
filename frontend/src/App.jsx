@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  fetchReggieQueueControls,
   fetchScottSourceSites,
   fetchHannahPhotoCandidates,
   fetchWhitneyDemandSignals,
@@ -19,6 +20,7 @@ import {
   stopWhitneyDemandScan,
   submitWorkspaceReviewDecision,
   submitExternalSubmission,
+  submitPublishedSymbolCommand,
   updateScottSourceSiteIncludeNextRun,
   updateScottSourceSitePrompt,
   updateScottSourceSiteStatus,
@@ -129,6 +131,7 @@ const WORKSPACE_QUEUE_COLUMNS = [
 ];
 
 const WORKSPACE_REFRESH_INTERVAL_MS = 5000;
+const PUBLISHED_SYMBOL_SELECTION_LIMIT = 5;
 const DEFAULT_HIDDEN_WORKSPACE_STATUSES = new Set(['completed']);
 const SCOTT_SOURCE_SITE_PAGE_SIZE = 50;
 const SCOTT_SOURCE_SEARCH_DURATION_SECONDS = 120;
@@ -167,6 +170,7 @@ const HANNAH_CANDIDATE_COLUMNS = [
   ['licenseLabel', 'License'],
   ['sourceDomain', 'Domain'],
   ['title', 'Title'],
+  ['description', 'Feedback'],
   ['sourceUrl', 'Source URL'],
   ['imageUrl', 'Image URL'],
   ['category', 'Category'],
@@ -291,6 +295,11 @@ function StandardsPage() {
   const [columnFilters, setColumnFilters] = useState({});
   const [facetFilters, setFacetFilters] = useState({});
   const [activeId, setActiveId] = useState('');
+  const [selectedSymbolIds, setSelectedSymbolIds] = useState([]);
+  const [commandDialog, setCommandDialog] = useState(null);
+  const [commandComment, setCommandComment] = useState('');
+  const [commandStatus, setCommandStatus] = useState({ mode: '', message: '' });
+  const [submittingCommand, setSubmittingCommand] = useState(false);
   const [displayCount, setDisplayCount] = useState(60);
   const [standardsState, setStandardsState] = useState({
     loading: true,
@@ -306,6 +315,7 @@ function StandardsPage() {
     ['name', 'Name'],
     ['lastUpdatedAt', 'Last update'],
     ['photoStatus', 'Photos'],
+    ['commentStatus', 'Comments'],
     ['category', 'Category'],
     ['discipline', 'Discipline'],
     ['pack', 'Pack'],
@@ -389,6 +399,10 @@ function StandardsPage() {
   }, [standardsSymbols, query, columnFilters, facetFilters, sortState]);
 
   const visibleSymbols = filteredSymbols.slice(0, displayCount);
+  const selectedSymbols = selectedSymbolIds
+    .map((symbolId) => standardsSymbols.find((symbol) => symbol.id === symbolId || symbol.symbolId === symbolId))
+    .filter(Boolean);
+  const selectionLimitReached = selectedSymbolIds.length >= PUBLISHED_SYMBOL_SELECTION_LIMIT;
 
   useEffect(() => {
     let cancelled = false;
@@ -428,6 +442,11 @@ function StandardsPage() {
   }, [filteredSymbols, activeId]);
 
   useEffect(() => {
+    const available = new Set(standardsSymbols.map((symbol) => symbol.id));
+    setSelectedSymbolIds((current) => current.filter((symbolId) => available.has(symbolId)));
+  }, [standardsSymbols]);
+
+  useEffect(() => {
     if (!requestedSymbolId || !standardsSymbols.length) {
       return;
     }
@@ -462,6 +481,73 @@ function StandardsPage() {
       }
       return next;
     }, { replace: true });
+  }
+
+  function toggleSymbolSelection(symbolId) {
+    setCommandStatus({ mode: '', message: '' });
+    setSelectedSymbolIds((current) => {
+      if (current.includes(symbolId)) {
+        return current.filter((value) => value !== symbolId);
+      }
+      if (current.length >= PUBLISHED_SYMBOL_SELECTION_LIMIT) {
+        setCommandStatus({ mode: 'error', message: `Select no more than ${PUBLISHED_SYMBOL_SELECTION_LIMIT} symbols at a time.` });
+        return current;
+      }
+      return [...current, symbolId];
+    });
+  }
+
+  function openPublishedCommandDialog(command) {
+    if (!selectedSymbols.length) {
+      return;
+    }
+    setCommandDialog(command);
+    setCommandComment('');
+    setCommandStatus({ mode: '', message: '' });
+  }
+
+  function closePublishedCommandDialog() {
+    if (submittingCommand) {
+      return;
+    }
+    setCommandDialog(null);
+    setCommandComment('');
+  }
+
+  async function handleSubmitPublishedCommand() {
+    if (!commandDialog || submittingCommand) {
+      return;
+    }
+    const comment = commandComment.trim();
+    if (!comment) {
+      setCommandStatus({ mode: 'error', message: 'Add a comment before submitting.' });
+      return;
+    }
+    setSubmittingCommand(true);
+    setCommandStatus({ mode: '', message: '' });
+    try {
+      const result = await submitPublishedSymbolCommand({
+        command: commandDialog,
+        symbolIds: selectedSymbols.map((symbol) => symbol.id),
+        comment
+      });
+      setStandardsState((current) => ({
+        ...current,
+        items: current.items.map((symbol) =>
+          selectedSymbolIds.includes(symbol.id)
+            ? { ...symbol, hasComments: true, commentCount: Number(symbol.commentCount || 0) + 1 }
+            : symbol
+        )
+      }));
+      setCommandStatus({ mode: 'success', message: result?.message || 'Published symbol command submitted.' });
+      setCommandDialog(null);
+      setCommandComment('');
+      setSelectedSymbolIds([]);
+    } catch (error) {
+      setCommandStatus({ mode: 'error', message: error instanceof Error ? error.message : 'Published symbol command failed.' });
+    } finally {
+      setSubmittingCommand(false);
+    }
   }
 
   function handleStandardsGridKeyDown(event) {
@@ -630,6 +716,33 @@ function StandardsPage() {
             <strong>{filteredSymbols.length} approved symbols</strong>
             <span>{visibleSymbols.length < filteredSymbols.length ? `Showing ${visibleSymbols.length}; scroll for more` : 'All visible'}</span>
           </div>
+          <div className="published-command-bar">
+            <div>
+              <strong>{selectedSymbols.length} selected</strong>
+              <span>Select up to {PUBLISHED_SYMBOL_SELECTION_LIMIT} published symbols.</span>
+            </div>
+            <div className="command-button-row">
+              <button
+                type="button"
+                className="action-button secondary compact"
+                disabled={!selectedSymbols.length}
+                onClick={() => openPublishedCommandDialog('comment')}
+              >
+                Comment
+              </button>
+              <button
+                type="button"
+                className="action-button compact"
+                disabled={!selectedSymbols.length}
+                onClick={() => openPublishedCommandDialog('send_for_review')}
+              >
+                Send for Review
+              </button>
+            </div>
+          </div>
+          {commandStatus.message ? (
+            <p className={`inline-status ${commandStatus.mode || 'info'}`}>{commandStatus.message}</p>
+          ) : null}
           <div
             className="approved-symbol-grid"
             ref={standardsGridRef}
@@ -642,6 +755,7 @@ function StandardsPage() {
             <table>
               <thead>
                 <tr>
+                  <th aria-label="Select symbols" className="select-column">Select</th>
                   <th>Preview</th>
                   {standardsColumns.map(([key, label]) => (
                     <th key={key}>
@@ -677,6 +791,15 @@ function StandardsPage() {
                       }
                     }}
                   >
+                    <td className="select-column" onClick={(event) => event.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${displaySymbolId(symbol)}`}
+                        checked={selectedSymbolIds.includes(symbol.id)}
+                        disabled={!selectedSymbolIds.includes(symbol.id) && selectionLimitReached}
+                        onChange={() => toggleSymbolSelection(symbol.id)}
+                      />
+                    </td>
                     <td className="preview-cell">
                       <div className="preview-indicator-wrapper">
                         <PublishedSymbolPreview symbol={symbol} />
@@ -688,7 +811,27 @@ function StandardsPage() {
                       </div>
                     </td>
                     {standardsColumns.map(([key]) => (
-                      <td key={`${symbol.id}-${key}`}>{getSymbolField(symbol, key) || 'Pending'}</td>
+                      <td key={`${symbol.id}-${key}`}>
+                        {key === 'photoStatus' ? (
+                          <span
+                            className={`table-icon-indicator ${Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? 'positive' : 'muted'}`}
+                            title={Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? `${symbol.supplementalPhotos.length} photo(s)` : 'No photos yet'}
+                            aria-label={Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? `${symbol.supplementalPhotos.length} photo(s)` : 'No photos yet'}
+                          >
+                            📷
+                          </span>
+                        ) : key === 'commentStatus' ? (
+                          <span
+                            className={`table-icon-indicator ${symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? 'positive' : 'muted'}`}
+                            title={symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? `${symbol.commentCount || 1} comment(s)` : 'No comments yet'}
+                            aria-label={symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? `${symbol.commentCount || 1} comment(s)` : 'No comments yet'}
+                          >
+                            💬
+                          </span>
+                        ) : (
+                          getSymbolField(symbol, key) || 'Pending'
+                        )}
+                      </td>
                     ))}
                   </tr>
                 ))}
@@ -745,6 +888,46 @@ function StandardsPage() {
           </aside>
         ) : null}
       </div>
+      {commandDialog ? (
+        <div className="modal-backdrop" role="presentation" onClick={closePublishedCommandDialog}>
+          <div className="modal-card published-command-dialog" role="dialog" aria-modal="true" aria-labelledby="published-command-title" onClick={(event) => event.stopPropagation()}>
+            <div className="detail-heading">
+              <div>
+                <p className="eyebrow">Published symbol command</p>
+                <h3 id="published-command-title">{commandDialog === 'comment' ? 'Comment' : 'Send for Review'}</h3>
+              </div>
+              <button type="button" className="action-button secondary compact" onClick={closePublishedCommandDialog} disabled={submittingCommand}>
+                Cancel
+              </button>
+            </div>
+            <ul className="selected-symbol-list">
+              {selectedSymbols.map((symbol) => (
+                <li key={symbol.id}>
+                  <strong>{displaySymbolId(symbol)}</strong>
+                  <span>{displaySymbolName(symbol)}</span>
+                </li>
+              ))}
+            </ul>
+            <label className="field comment-field">
+              <span>Comment</span>
+              <textarea
+                value={commandComment}
+                onChange={(event) => setCommandComment(event.target.value)}
+                placeholder="Describe what needs addressing. Ed will manage follow-up."
+                rows={5}
+              />
+            </label>
+            <div className="dialog-actions">
+              <button type="button" className="action-button secondary" onClick={closePublishedCommandDialog} disabled={submittingCommand}>
+                Cancel
+              </button>
+              <button type="button" className="action-button" onClick={handleSubmitPublishedCommand} disabled={submittingCommand || !commandComment.trim()}>
+                {submittingCommand ? 'Sending…' : commandDialog === 'comment' ? 'Post' : 'Send'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -764,7 +947,10 @@ function getSymbolField(symbol, key) {
   }
   if (key === 'photoStatus') {
     const count = Array.isArray(symbol.supplementalPhotos) ? symbol.supplementalPhotos.length : 0;
-    return count ? `${count} added` : 'None yet';
+    return count ? `${count} added` : '';
+  }
+  if (key === 'commentStatus') {
+    return Number(symbol.commentCount || 0) > 0 || symbol.hasComments ? `${symbol.commentCount || 1} comment${Number(symbol.commentCount || 1) === 1 ? '' : 's'}` : '';
   }
   if (key === 'lastUpdatedAt' || key === 'effectiveDate' || key === 'revisionCreatedAt') {
     return formatPublishedDate(symbol[key]);
@@ -893,6 +1079,12 @@ function WorkspacePage() {
     message: appConfig.apiRoot ? 'Loading live queue items...' : 'No API root configured. Showing seeded queue activity.',
     items: appConfig.apiRoot ? [] : processingActivity
   });
+  const [reggieState, setReggieState] = useState({
+    loading: true,
+    mode: appConfig.apiRoot ? 'loading' : 'seeded',
+    message: appConfig.apiRoot ? 'Loading Reggie controls...' : 'No API root configured. Reggie controls unavailable.',
+    items: []
+  });
   const [stoppedSourceSearches, setStoppedSourceSearches] = useState({});
   const [lastWorkspaceRefresh, setLastWorkspaceRefresh] = useState(null);
   const {
@@ -988,7 +1180,7 @@ function WorkspacePage() {
         return;
       }
 
-      Promise.all([fetchWorkspaceQueueItems(), fetchWorkspaceReviewCases(), fetchWorkspaceDaisyReports()]).then(([queueResult, reviewResult, daisyResult]) => {
+      Promise.all([fetchWorkspaceQueueItems(), fetchWorkspaceReviewCases(), fetchWorkspaceDaisyReports(), fetchReggieQueueControls()]).then(([queueResult, reviewResult, daisyResult, reggieResult]) => {
         if (cancelled) {
           return;
         }
@@ -1024,6 +1216,14 @@ function WorkspacePage() {
               : 'No live Daisy coordination reports are available yet.'
             : `${daisyResult.message} Showing seeded coordination.`,
           items: daisyResult.ok ? daisyResult.items : daisyCoordinationReports
+        });
+
+        setReggieState({
+          loading: false,
+          mode: reggieResult.ok ? 'live' : 'seeded',
+          message: reggieResult.ok ? reggieResult.message : `${reggieResult.message} Reggie controls unavailable.`,
+          items: reggieResult.ok ? reggieResult.items : [],
+          summary: reggieResult.summary || null
         });
 
         setLastWorkspaceRefresh(new Date());
@@ -1094,23 +1294,24 @@ function WorkspacePage() {
       : 'Awaiting first refresh';
 
     if (queueState.mode === 'live' || reviewState.mode === 'live') {
-      return `${refreshLabel} · Auto-refresh 5s · ${queueState.message} · ${reviewState.message}`;
+      return `${refreshLabel} · Auto-refresh 5s · ${queueState.message} · ${reviewState.message} · ${reggieState.message}`;
     }
 
-    return `${refreshLabel} · ${queueState.message} · ${reviewState.message}`;
+    return `${refreshLabel} · ${queueState.message} · ${reviewState.message} · ${reggieState.message}`;
   }, [
     lastWorkspaceRefresh,
     queueState.loading,
     queueState.message,
     queueState.mode,
+    reggieState.message,
     reviewState.loading,
     reviewState.message,
     reviewState.mode
   ]);
 
   const monitorItems = useMemo(
-    () => buildWorkspaceMonitorItems(queueState.items, queueState.mode, reviewState.items, daisyState.items, stoppedSourceSearches),
-    [queueState.items, queueState.mode, reviewState.items, daisyState.items, stoppedSourceSearches]
+    () => buildWorkspaceMonitorItems(queueState.items, queueState.mode, reviewState.items, daisyState.items, stoppedSourceSearches, reggieState.items),
+    [queueState.items, queueState.mode, reviewState.items, daisyState.items, stoppedSourceSearches, reggieState.items]
   );
   const monitorScreenColumns = useMemo(() => {
     const columnById = new Map(monitorItems.map((column) => [column.id, column]));
@@ -1391,7 +1592,7 @@ function WorkspacePage() {
   );
 }
 
-function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyItems, stoppedSourceSearches = {}) {
+function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyItems, stoppedSourceSearches = {}, reggieSuggestions = []) {
   const columns = WORKSPACE_QUEUE_COLUMNS.map((column) => ({ ...column, items: [] }));
   const byId = Object.fromEntries(columns.map((column) => [column.id, column]));
 
@@ -1528,6 +1729,34 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
         report.escalationTarget
       ].join(' '),
       detail: report.coordinationSummary
+    });
+  });
+
+  (reggieSuggestions || []).forEach((suggestion) => {
+    const evidence = suggestion.evidence || {};
+    byId.control_audit.items.push({
+      id: suggestion.id,
+      label: suggestion.severity || 'info',
+      title: compactTitle(suggestion.detail || suggestion.ruleCode || 'Queue control suggestion'),
+      meta: suggestion.ruleCode || suggestion.sourceType || 'Reggie control',
+      status: suggestion.status || 'open',
+      priority: suggestion.severity || 'info',
+      searchText: [
+        suggestion.id,
+        suggestion.ruleCode,
+        suggestion.severity,
+        suggestion.status,
+        suggestion.detail,
+        suggestion.suggestedRemediation,
+        suggestion.sourceType,
+        suggestion.sourceId,
+        evidence.agent,
+        evidence.db_status,
+        evidence.runtime_status,
+        evidence.runtime_path,
+        JSON.stringify(evidence)
+      ].join(' '),
+      detail: suggestion.suggestedRemediation || 'Observational only; inspect before applying any remediation.'
     });
   });
 
@@ -3199,6 +3428,9 @@ function hannahCurationStatusText(curationState) {
   }
   if (curationState.result.queueItemId === 'starting') {
     return 'Starting Hannah curation search.';
+  }
+  if (curationState.result.message) {
+    return curationState.result.message;
   }
   const statusLabel = curationState.remainingSeconds > 0 ? 'Searching' : 'Progress Saved';
   return `Hannah queue item ${curationState.result.queueItemId} is ${statusLabel}.`;

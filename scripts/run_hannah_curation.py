@@ -109,7 +109,7 @@ def stamp_id(prefix: str, seed: str) -> str:
 
 def write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -378,52 +378,165 @@ def search_commons_images(symbol: dict[str, Any], trace: list[dict[str, str]]) -
     return [page for page in pages.values() if isinstance(page, dict)]
 
 
-def search_duckduckgo_images(symbol: dict[str, Any], trace: list[dict[str, str]]) -> list[dict[str, Any]]:
-    query = " ".join(
+def hannah_query(symbol: dict[str, Any], suffix: str = "equipment photograph") -> str:
+    return " ".join(
         part
         for part in (
             symbol.get("name"),
             symbol.get("category"),
             symbol.get("discipline"),
-            "equipment photograph",
+            suffix,
         )
         if part
     )
+
+
+def image_page(
+    *,
+    source: str,
+    image_url: str,
+    source_url: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    license_label: str = "Needs Review",
+    pageid_seed: str | None = None,
+    mime: str = "image/jpeg",
+) -> dict[str, Any]:
+    return {
+        "pageid": f"{source}-{hashlib.md5((pageid_seed or image_url).encode()).hexdigest()[:10]}",
+        "title": title or source_url or image_url,
+        "description": description or "",
+        "imageinfo": [
+            {
+                "url": image_url,
+                "thumburl": image_url,
+                "descriptionurl": source_url or image_url,
+                "descriptionshorturl": source_url or image_url,
+                "mime": mime,
+                "extmetadata": {
+                    "LicenseShortName": {"value": license_label},
+                    "UsageTerms": {"value": "Check source for licence and reuse terms"},
+                    "ImageDescription": {"value": description or title or ""},
+                },
+            }
+        ],
+        "source_name": source,
+    }
+
+
+def search_commons_media_search(symbol: dict[str, Any], trace: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Use Commons' newer MediaSearch endpoint as a fallback to generator=search."""
+    query = hannah_query(symbol, "industrial equipment photograph")
+    params = urllib.parse.urlencode({"q": query, "type": "image", "limit": "8"})
+    request = urllib.request.Request(
+        f"https://commons.wikimedia.org/w/rest.php/v1/search/image?{params}",
+        headers={"User-Agent": "Symgov-Hannah/0.1 catalogue-curation"},
+    )
+    with urllib.request.urlopen(request, timeout=18) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    pages = []
+    for item in payload.get("pages") or []:
+        thumb = ((item.get("thumbnail") or {}).get("url") or "").strip()
+        title = str(item.get("title") or "").strip()
+        page_url = f"https://commons.wikimedia.org/wiki/{urllib.parse.quote(title.replace(' ', '_'))}" if title else thumb
+        if thumb:
+            pages.append(
+                image_page(
+                    source="commons_media_search",
+                    image_url=thumb,
+                    source_url=page_url,
+                    title=title,
+                    description=item.get("description") or item.get("excerpt") or "Commons MediaSearch result",
+                    license_label="Needs Review (Commons MediaSearch)",
+                )
+            )
+    add_trace(trace, "commons_media_search", "passed", f"{query}: {len(pages)} candidate images.")
+    return pages
+
+
+def search_wikipedia_page_images(symbol: dict[str, Any], trace: list[dict[str, str]]) -> list[dict[str, Any]]:
+    """Search encyclopaedia pages and use their lead thumbnails for equipment photos."""
+    query = hannah_query(symbol, "industrial equipment")
+    params = urllib.parse.urlencode(
+        {
+            "format": "json",
+            "action": "query",
+            "generator": "search",
+            "gsrlimit": "6",
+            "gsrsearch": query,
+            "prop": "pageimages|extracts|info",
+            "piprop": "thumbnail|name|original",
+            "pithumbsize": "512",
+            "exintro": "1",
+            "explaintext": "1",
+            "inprop": "url",
+        }
+    )
+    request = urllib.request.Request(
+        f"https://en.wikipedia.org/w/api.php?{params}",
+        headers={"User-Agent": "Symgov-Hannah/0.1 catalogue-curation"},
+    )
+    with urllib.request.urlopen(request, timeout=18) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    pages = []
+    for item in (payload.get("query") or {}).get("pages", {}).values():
+        thumb = ((item.get("thumbnail") or {}).get("source") or "").strip()
+        source_url = item.get("fullurl") or f"https://en.wikipedia.org/?curid={item.get('pageid')}"
+        if thumb:
+            pages.append(
+                image_page(
+                    source="wikipedia_page_image",
+                    image_url=thumb,
+                    source_url=source_url,
+                    title=item.get("title"),
+                    description=item.get("extract") or "Wikipedia lead image result",
+                    license_label="Needs Review (Wikipedia/Commons)",
+                    pageid_seed=str(item.get("pageid") or thumb),
+                )
+            )
+    add_trace(trace, "wikipedia_page_image_search", "passed", f"{query}: {len(pages)} lead-image candidates.")
+    return pages
+
+
+def search_duckduckgo_images(symbol: dict[str, Any], trace: list[dict[str, str]]) -> list[dict[str, Any]]:
+    query = hannah_query(symbol)
     add_trace(trace, "duckduckgo_search", "started", f"Query: {query}")
-    
-    # Simple DuckDuckGo 'Lite' search scraper using stdlib
+
+    # Simple DuckDuckGo 'Lite' search scraper using stdlib. It is intentionally
+    # used only as a fallback and every result remains rights-review required.
     try:
+        import html
+        import re
+
         params = urllib.parse.urlencode({"q": query, "kl": "wt-wt"})
         url = f"https://lite.duckduckgo.com/lite/?{params}"
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Symgov-Hannah/0.1)"})
         with urllib.request.urlopen(req, timeout=15) as response:
-            html = response.read().decode("utf-8")
-        
-        # Very crude link extraction from DDG Lite
-        # Lite results usually look like <a rel="nofollow" href="...">
-        import re
-        links = re.findall(r'href="([^"]+)"', html)
-        candidates = []
-        for link in links:
-            if any(ext in link.lower() for ext in (".jpg", ".jpeg", ".png")):
-                # In Lite mode, we might get direct image links or page links
-                candidates.append({"url": link, "title": "DDG Result"})
-        
-        add_trace(trace, "duckduckgo_search", "passed", f"Found {len(candidates)} potential links.")
-        
-        # Construct basic candidate objects if we found anything
+            body = response.read().decode("utf-8", errors="ignore")
+
+        links = [html.unescape(link) for link in re.findall(r'href="([^"]+)"', body)]
         results = []
-        for c in candidates[:5]:
-             results.append({
-                 "imageinfo": [{"url": c["url"], "descriptionshorturl": c["url"]}],
-                 "title": c["title"],
-                 "pageid": f"ddg-{hashlib.md5(c['url'].encode()).hexdigest()[:8]}",
-                 "extmetadata": {
-                     "LicenseShortName": {"value": "Needs Review (DDG)"},
-                     "UsageTerms": {"value": "Check source for license details"}
-                 }
-             })
-        return results
+        for link in links:
+            parsed = urllib.parse.urlparse(link)
+            if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
+                query_values = urllib.parse.parse_qs(parsed.query)
+                link = query_values.get("uddg", [link])[0]
+            parsed_link = urllib.parse.urlparse(link if not link.startswith("//") else f"https:{link}")
+            if parsed_link.netloc.endswith("duckduckgo.com") and "/assets/icons/" in parsed_link.path:
+                continue
+            if any(ext in link.lower().split("?", 1)[0] for ext in (".jpg", ".jpeg", ".png", ".webp")):
+                results.append(
+                    image_page(
+                        source="duckduckgo_lite",
+                        image_url=link,
+                        source_url=link,
+                        title="DuckDuckGo direct image result",
+                        description=f"DuckDuckGo Lite result for {query}",
+                        license_label="Needs Review (DuckDuckGo)",
+                    )
+                )
+        add_trace(trace, "duckduckgo_search", "passed", f"Found {len(results)} direct image links.")
+        return results[:8]
 
     except Exception as exc:
         add_trace(trace, "duckduckgo_search", "failed", str(exc))
@@ -431,24 +544,27 @@ def search_duckduckgo_images(symbol: dict[str, Any], trace: list[dict[str, str]]
 
 
 def search_images(symbol: dict[str, Any], trace: list[dict[str, str]]) -> list[dict[str, Any]]:
-    try:
-        # Throttling to avoid 429s
-        time.sleep(1.5)
-        results = search_commons_images(symbol, trace)
-        if results:
-            return results
-    except Exception as exc:
-        add_trace(trace, "commons_search", "failed", f"{symbol.get('name')}: {exc}")
-
-    try:
-        time.sleep(1.0)
-        results = search_duckduckgo_images(symbol, trace)
-        if results:
-            return results
-    except Exception as exc:
-        add_trace(trace, "duckduckgo_search", "failed", f"{symbol.get('name')}: {exc}")
-
-    return []
+    search_steps = (
+        ("commons_search", 1.5, search_commons_images),
+        ("commons_media_search", 1.0, search_commons_media_search),
+        ("wikipedia_page_image_search", 0.5, search_wikipedia_page_images),
+        ("duckduckgo_search", 1.0, search_duckduckgo_images),
+    )
+    combined: list[dict[str, Any]] = []
+    seen_urls: set[str] = set()
+    for step_name, delay_seconds, search_fn in search_steps:
+        try:
+            time.sleep(delay_seconds)
+            results = search_fn(symbol, trace)
+            for page in results:
+                image_info = (page.get("imageinfo") or [{}])[0]
+                image_url = str(image_info.get("thumburl") or image_info.get("url") or "").strip()
+                if image_url and image_url not in seen_urls:
+                    combined.append(page)
+                    seen_urls.add(image_url)
+        except Exception as exc:
+            add_trace(trace, step_name, "failed", f"{symbol.get('name')}: {exc}")
+    return combined[:24]
 
 
 def license_status(extmetadata: dict[str, Any]) -> tuple[str, str | None]:
@@ -604,6 +720,40 @@ def attach_candidate_photo(
     return {"attachment_id": attachment["id"], "object_key": object_key}
 
 
+def build_feedback_candidate(
+    symbol: dict[str, Any],
+    *,
+    status: str,
+    source_url: str,
+    title: str,
+    description: str,
+    evidence: dict[str, Any],
+    image_url: str | None = None,
+    relevance_score: float = 0.0,
+    rights_status: str = "not_applicable",
+    license_label: str | None = None,
+) -> dict[str, Any]:
+    feedback_image_url = image_url or source_url
+    candidate_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"hannah-feedback:{symbol['symbol_id']}:{status}:{feedback_image_url}"))
+    return {
+        "id": candidate_id,
+        "symbol_id": symbol["symbol_id"],
+        "symbol_revision_id": symbol["symbol_revision_id"],
+        "published_page_id": symbol["published_page_id"],
+        "source_url": source_url,
+        "image_url": feedback_image_url,
+        "source_domain": urllib.parse.urlparse(source_url).netloc or "hannah.feedback",
+        "title": title[:300],
+        "description": description[:1000],
+        "rights_status": rights_status,
+        "license_label": license_label,
+        "status": status,
+        "relevance_score": round(relevance_score, 4),
+        "quality_reasons": evidence.get("quality_reasons") or [],
+        "evidence": evidence,
+    }
+
+
 def build_candidate(symbol: dict[str, Any], page: dict[str, Any], trace: list[dict[str, str]]) -> dict[str, Any] | None:
     image_info = (page.get("imageinfo") or [{}])[0]
     image_url = image_info.get("thumburl") or image_info.get("url")
@@ -640,7 +790,7 @@ def build_candidate(symbol: dict[str, Any], page: dict[str, Any], trace: list[di
         "relevance_score": round(score, 4),
         "quality_reasons": [],
         "evidence": {
-            "source": "Wikimedia Commons API",
+            "source": page.get("source_name") or "Wikimedia Commons API",
             "commons_page_id": page.get("pageid"),
             "mime": image_info.get("mime"),
             "matched_symbol": symbol.get("name"),
@@ -690,11 +840,57 @@ def run_curation_task(task: dict[str, Any], db_env_file: str | None = None, stor
 
         current_photo_count = int(symbol.get("photo_count") or 0)
         remaining_slots = max(0, MAX_PHOTOS_PER_SYMBOL - current_photo_count)
+        candidate_count_before_symbol = len(candidates)
+        if not pages:
+            query = hannah_query(symbol)
+            query_url = f"https://commons.wikimedia.org/w/index.php?search={urllib.parse.quote(query)}"
+            candidates.append(
+                build_feedback_candidate(
+                    symbol,
+                    status="no_candidate_found",
+                    source_url=query_url,
+                    title=f"No acceptable image candidates found for {symbol.get('name')}",
+                    description="Hannah searched the configured sources but did not receive any image-like results to score.",
+                    evidence={
+                        "source": "hannah_search_summary",
+                        "feedback_type": "no_candidate_found",
+                        "query": query,
+                        "searched_sources": ["Wikimedia Commons", "Commons MediaSearch", "Wikipedia lead images", "DuckDuckGo Lite"],
+                    },
+                )
+            )
+        rejected_feedback_count = 0
         for page in pages:
             if time.monotonic() >= deadline:
                 break
             candidate = build_candidate(symbol, page, trace)
             if candidate is None:
+                if rejected_feedback_count < 5:
+                    image_info = (page.get("imageinfo") or [{}])[0]
+                    image_url = image_info.get("thumburl") or image_info.get("url")
+                    source_url = image_info.get("descriptionurl") or image_info.get("descriptionshorturl") or image_url
+                    reasons = candidate_quality_reasons(symbol, page)
+                    if image_url and source_url:
+                        candidates.append(
+                            build_feedback_candidate(
+                                symbol,
+                                status="rejected",
+                                source_url=source_url,
+                                image_url=image_url,
+                                title=f"Rejected candidate: {page.get('title') or source_url}",
+                                description="Hannah found this image-like result but rejected it: " + ", ".join(reasons or ["quality_filter"]),
+                                relevance_score=0.05,
+                                rights_status="needs_review",
+                                license_label="Rejected by quality filter",
+                                evidence={
+                                    "source": page.get("source_name") or "search_result",
+                                    "quality_reasons": reasons,
+                                    "feedback_type": "rejected_candidate",
+                                    "matched_symbol": symbol.get("name"),
+                                },
+                            )
+                        )
+                        rejected_feedback_count += 1
                 continue
             if candidate_is_auto_attachable(candidate) and remaining_slots > 0 and bridge is not None:
                 try:
@@ -716,12 +912,18 @@ def run_curation_task(task: dict[str, Any], db_env_file: str | None = None, stor
                     candidate["evidence"]["attachment_error"] = str(exc)
             candidates.append(candidate)
 
+        symbol_candidate_count = len([item for item in candidates if item["symbol_id"] == symbol["symbol_id"] and item.get("status") == "candidate"])
+        symbol_feedback_count = len(candidates) - candidate_count_before_symbol - symbol_candidate_count
         symbol_attempts.append(
             {
                 "symbol_id": symbol["symbol_id"],
                 "status": "photos_attached" if attached_for_symbol else "candidates_recorded",
                 "photo_count": current_photo_count + attached_for_symbol,
-                "notes": {"candidate_count": len([item for item in candidates if item["symbol_id"] == symbol["symbol_id"]])},
+                "notes": {
+                    "candidate_count": symbol_candidate_count,
+                    "feedback_count": max(0, symbol_feedback_count),
+                    "sources": ["Wikimedia Commons", "Commons MediaSearch", "Wikipedia lead images", "DuckDuckGo Lite"],
+                },
             }
         )
 

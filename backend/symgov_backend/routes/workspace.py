@@ -24,6 +24,7 @@ from ..models import (
     Attachment,
     AuditEvent,
     ClassificationRecord,
+    ClarificationRecord,
     HumanReviewDecision,
     HannahPhotoCandidate,
     HannahSymbolCurationState,
@@ -48,6 +49,7 @@ from ..agent_feedback import (
     build_duplicate_decision_feedback_events,
     build_symbol_property_feedback_events,
 )
+from ..agent_queue_reconciliation import reconcile_agent_queue_state
 from ..publication_handoff import execute_publication_handoff
 from ..property_options import remember_property_option
 from ..review_followup_handoff import execute_review_followup_handoff
@@ -69,6 +71,8 @@ from ..schemas import (
     WorkspaceReviewDecisionResponse,
     WorkspaceReviewSymbolPropertyOptionListResponse,
     WorkspaceReviewSymbolPropertyOptionResponse,
+    WorkspaceReggieQueueControlListResponse,
+    WorkspaceReggieQueueControlSuggestionResponse,
     WorkspaceReviewSymbolPropertiesResponse,
     WorkspaceReviewSymbolPropertiesUpdateRequest,
     WorkspaceScottSourceSiteIncludeNextRunUpdateRequest,
@@ -111,13 +115,14 @@ HANNAH_STORAGE_ENV_FILE = Path("/data/.openclaw/workspace/symgov/.env.backend.st
 WHITNEY_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/whitney/runtime")
 WHITNEY_RUNNER = Path("/data/.openclaw/workspaces/whitney/run_whitney_market_intelligence.py")
 WHITNEY_DB_ENV_FILE = SCOTT_DB_ENV_FILE
-REVIEW_SPLIT_STATUS_GROUPS: dict[str, frozenset[str]] = {
+REVIEW_SPLIT_STATUS_GROUPS = {
     "active_review": frozenset({"awaiting_decision", "returned_for_review", "duplicate_exception"}),
     "active_downstream": frozenset({"queued_rupert", "queued_libby", "duplicate_pending"}),
     "terminal_publication": frozenset({"published"}),
     "terminal_duplicate": frozenset({"duplicate_resolved"}),
     "terminal_non_publication": frozenset({"deleted", "rejected", "blocked", "deferred"}),
 }
+HUMAN_VISIBLE_REVIEW_CASE_STAGES = frozenset({"classification_review", "raster_split_review"})
 OPEN_SPLIT_ITEM_STATUSES = tuple(sorted(REVIEW_SPLIT_STATUS_GROUPS["active_review"]))
 DURABLE_SPLIT_ITEM_STATUSES = frozenset().union(
     REVIEW_SPLIT_STATUS_GROUPS["active_downstream"],
@@ -130,6 +135,7 @@ TERMINAL_SPLIT_ITEM_STATUSES = frozenset().union(
     REVIEW_SPLIT_STATUS_GROUPS["terminal_duplicate"],
     REVIEW_SPLIT_STATUS_GROUPS["terminal_non_publication"],
 )
+IMMEDIATE_TERMINAL_SPLIT_ACTION_STATUSES: dict[str, str] = {}
 
 
 def split_item_status_group(status: str | None) -> str:
@@ -153,6 +159,16 @@ def is_open_split_item_status(status: str | None) -> bool:
 def is_terminal_split_item_status(status: str | None) -> bool:
     """Whether a split item has reached a no-further-automation terminal state."""
     return (status or "").strip() in TERMINAL_SPLIT_ITEM_STATUSES
+
+
+def immediate_terminal_split_status_for_action(action_code: str | None) -> str | None:
+    """Return the terminal split-item status for reviewer actions that finish locally."""
+    return IMMEDIATE_TERMINAL_SPLIT_ACTION_STATUSES.get((action_code or "").strip())
+
+
+def is_human_visible_review_case_stage(stage: str | None) -> bool:
+    """Whether a review case stage should still appear in the human review queue."""
+    return (stage or "").strip() in HUMAN_VISIBLE_REVIEW_CASE_STAGES
 
 
 def split_item_status_after_handoff(item: ReviewSplitItem | None, *, is_approval: bool) -> tuple[str, str | None]:
@@ -1344,6 +1360,57 @@ def build_provenance_workspace_item(
     return response
 
 
+def build_published_symbol_workspace_item(
+    review_case: ReviewCase,
+    symbol: GovernedSymbol,
+    comment: str = "",
+) -> WorkspaceReviewCaseResponse:
+    opened_at = review_case.opened_at if isinstance(review_case.opened_at, datetime) else datetime.now(timezone.utc)
+    due = opened_at + timedelta(days=2)
+    display_name = symbol.slug or str(symbol.id)
+    symbol_name = symbol.canonical_name or display_name
+    summary = (
+        f"Published symbol {display_name} ({symbol_name}) has been sent back for review. Comment: {comment}"
+        if comment
+        else f"Published symbol {display_name} ({symbol_name}) has been sent back for review."
+    )
+    return WorkspaceReviewCaseResponse(
+        id=str(review_case.id),
+        reviewItemType="published_symbol",
+        symbolId=display_name,
+        displayName=display_name,
+        packageDisplayId=None,
+        packageSymbolSequence=None,
+        title=f"Review published symbol {display_name}",
+        owner="Ed",
+        due=due.date().isoformat(),
+        priority=review_case.escalation_level.title(),
+        risk="Medium" if review_case.escalation_level.lower() == "medium" else review_case.escalation_level.title(),
+        pages=1,
+        packs=0,
+        status=review_case.current_stage.replace("_", " ").title(),
+        summary=summary,
+        clarifications=[comment] if comment else [],
+        currentStage=review_case.current_stage,
+        escalationLevel=review_case.escalation_level,
+        openedAt=isoformat_utc(opened_at),
+        validationStatus="published_symbol_feedback",
+        defectCount=1,
+        sourceFileName=symbol_name,
+        sourceObjectKey=None,
+        sourcePreviewUrl=f"/api/v1/published/symbols/{quote(display_name)}/preview",
+        intakeRecordId=str(symbol.id),
+        childCount=0,
+        classificationStatus="published_feedback",
+        classificationConfidence=None,
+        engineeringDiscipline=symbol.discipline,
+        format=None,
+        symbolFamily=symbol.category,
+        classificationSummary=comment or None,
+        children=[],
+    )
+
+
 @router.get(
     "/agent-queue-items",
     response_model=WorkspaceAgentQueueItemListResponse,
@@ -1407,6 +1474,78 @@ def list_workspace_agent_queue_items(
         ))
 
     return WorkspaceAgentQueueItemListResponse(items=items)
+
+
+def _build_reggie_queue_control_response(payload: dict[str, object]) -> WorkspaceReggieQueueControlListResponse:
+    generated_at = datetime.now(timezone.utc)
+    suggestions = []
+    for index, suggestion in enumerate(payload.get("control_suggestions") or [], start=1):
+        if not isinstance(suggestion, dict):
+            continue
+        rule_code = str(suggestion.get("rule_code") or "queue_control_suggestion")
+        source_id = suggestion.get("source_id")
+        source_id_text = str(source_id) if source_id is not None else None
+        suggestions.append(
+            WorkspaceReggieQueueControlSuggestionResponse(
+                id=f"reggie-{rule_code}-{source_id_text or index}",
+                sourceType=str(suggestion.get("source_type") or "agent_queue_item"),
+                sourceId=source_id_text,
+                severity=str(suggestion.get("severity") or "info"),
+                ruleCode=rule_code,
+                detail=str(suggestion.get("detail") or "Queue control suggestion."),
+                status=str(suggestion.get("status") or "open"),
+                suggestedRemediation=str(suggestion.get("suggested_remediation") or "Inspect manually before changing state."),
+                observationalOnly=bool(suggestion.get("observational_only", True)),
+                evidence=suggestion.get("evidence") if isinstance(suggestion.get("evidence"), dict) else {},
+            )
+        )
+
+    return WorkspaceReggieQueueControlListResponse(
+        generatedAt=isoformat_utc(generated_at),
+        dryRun=bool(payload.get("dry_run", True)),
+        activeOnly=bool(payload.get("active_only", True)),
+        agents=[str(agent) for agent in (payload.get("agents") or [])],
+        runtimeRecordsSeen=int(payload.get("runtime_records_seen") or 0),
+        dbActiveRowsInspected=int(payload.get("db_active_rows_inspected") or 0),
+        changeCount=int(payload.get("change_count") or 0),
+        missingRuntimeCount=int(payload.get("missing_runtime_count") or 0),
+        runtimeOrphanCount=int(payload.get("runtime_orphan_count") or 0),
+        skippedCount=int(payload.get("skipped_count") or 0),
+        controlSuggestionCount=int(payload.get("control_suggestion_count") or len(suggestions)),
+        items=suggestions,
+    )
+
+
+@router.get(
+    "/reggie/queue-controls",
+    response_model=WorkspaceReggieQueueControlListResponse,
+    responses={500: {"description": "Server error"}},
+)
+@legacy_router.get(
+    "/workspace/reggie/queue-controls",
+    response_model=WorkspaceReggieQueueControlListResponse,
+    include_in_schema=False,
+)
+def list_reggie_queue_control_suggestions(
+    activeOnly: bool = Query(default=True),
+) -> WorkspaceReggieQueueControlListResponse:
+    """Expose Reggie's observational queue reconciliation suggestions.
+
+    This is deliberately dry-run/observational-only: it scans DB/runtime queue
+    state and returns suggestions for an operator surface without applying any
+    remediation or writing control exception rows.
+    """
+
+    try:
+        payload = reconcile_agent_queue_state(
+            db_env_file=SCOTT_DB_ENV_FILE,
+            apply=False,
+            active_only=activeOnly,
+        )
+    except Exception as exc:  # pragma: no cover - exercised as API 500 in production
+        raise HTTPException(status_code=500, detail=f"Reggie queue controls could not be loaded: {exc}") from exc
+
+    return _build_reggie_queue_control_response(payload)
 
 
 @router.post(
@@ -2020,9 +2159,17 @@ def start_hannah_curation_search(
         db_env_file=str(HANNAH_DB_ENV_FILE),
         runtime_root=HANNAH_RUNTIME_ROOT,
     )
+    created_count = int(seed_result.get("createdCount") or 0)
+    skipped_count = int(seed_result.get("skippedCount") or 0)
     first_created = (seed_result.get("created") or [{}])[0].get("queue_item_id")
     queue_item_id = first_created or f"hannah-seed-{started_at.strftime('%Y%m%d%H%M%S')}"
     expected_completed_at = started_at + timedelta(seconds=request.durationSeconds)
+    if created_count:
+        message = f"Seeded {created_count} Hannah curation cards; {skipped_count} symbols skipped."
+    elif skipped_count:
+        message = f"No Hannah cards were seeded; {skipped_count} symbols were skipped or still inside the curation cooldown."
+    else:
+        message = "No Hannah cards were seeded because no public published symbols are currently eligible outside the curation cooldown."
 
     return WorkspaceHannahCurationSearchStartResponse(
         queueItemId=str(queue_item_id),
@@ -2030,6 +2177,9 @@ def start_hannah_curation_search(
         durationSeconds=request.durationSeconds,
         startedAt=isoformat_utc(started_at),
         expectedCompletedAt=isoformat_utc(expected_completed_at),
+        createdCount=created_count,
+        skippedCount=skipped_count,
+        message=message,
     )
 
 
@@ -2128,6 +2278,7 @@ HANNAH_PHOTO_SORT_COLUMNS = {
     "sourceUrl": HannahPhotoCandidate.source_url,
     "sourceDomain": HannahPhotoCandidate.source_domain,
     "title": HannahPhotoCandidate.title,
+    "description": HannahPhotoCandidate.description,
     "rightsStatus": HannahPhotoCandidate.rights_status,
     "licenseLabel": HannahPhotoCandidate.license_label,
     "status": HannahPhotoCandidate.status,
@@ -2188,6 +2339,7 @@ def list_hannah_photo_candidates(
     sourceUrl: str | None = Query(default=None),
     sourceDomain: str | None = Query(default=None),
     title: str | None = Query(default=None),
+    description: str | None = Query(default=None),
     rightsStatus: str | None = Query(default=None),
     licenseLabel: str | None = Query(default=None),
     status: str | None = Query(default=None),
@@ -2212,6 +2364,7 @@ def list_hannah_photo_candidates(
         "sourceUrl": sourceUrl,
         "sourceDomain": sourceDomain,
         "title": title,
+        "description": description,
         "rightsStatus": rightsStatus,
         "licenseLabel": licenseLabel,
         "status": status,
@@ -2586,6 +2739,7 @@ def list_workspace_review_cases(
     review_cases = session.execute(
         select(ReviewCase)
         .where(ReviewCase.closed_at.is_(None))
+        .where(ReviewCase.current_stage.in_(HUMAN_VISIBLE_REVIEW_CASE_STAGES))
         .order_by(ReviewCase.opened_at.desc())
     ).scalars().all()
     split_intake_ids = open_split_review_intake_ids(session)
@@ -2652,6 +2806,32 @@ def list_workspace_review_cases(
                 attach_latest_decision(
                     session,
                     build_provenance_workspace_item(session, review_case, provenance_assessment, intake_record, classification_record),
+                )
+            )
+            continue
+
+        if review_case.source_entity_type == "published_symbol":
+            symbol = session.get(GovernedSymbol, review_case.source_entity_id)
+            if symbol is None:
+                continue
+            comment_row = (
+                session.execute(
+                    select(ClarificationRecord)
+                    .where(ClarificationRecord.symbol_id == symbol.id)
+                    .order_by(ClarificationRecord.created_at.desc())
+                    .limit(1)
+                )
+                .scalars()
+                .one_or_none()
+            )
+            items.append(
+                attach_latest_decision(
+                    session,
+                    build_published_symbol_workspace_item(
+                        review_case,
+                        symbol,
+                        comment=comment_row.detail if comment_row is not None else "",
+                    ),
                 )
             )
 
@@ -3098,13 +3278,25 @@ def process_workspace_split_review_decisions(
         is_approval = action_code == "approve"
         is_duplicate_exception = item.status == "duplicate_exception"
         duplicate_exception_confirmed = is_duplicate_exception and action_code == "duplicate"
-        target_agent_slug = None if duplicate_exception_confirmed else ("rupert" if is_approval else "libby")
-        target_stage = None if duplicate_exception_confirmed else ("publication_staging" if is_approval else transition["target_stage"])
+        terminal_split_status = immediate_terminal_split_status_for_action(action_code)
+        is_terminal_disposition = terminal_split_status is not None
+        if duplicate_exception_confirmed or is_terminal_disposition:
+            target_agent_slug = None
+            target_stage = None
+        else:
+            target_agent_slug = "rupert" if is_approval else "libby"
+            target_stage = "publication_staging" if is_approval else transition["target_stage"]
+
         followup_action_code = (
             "resolve_duplicate_exception"
             if duplicate_exception_confirmed
-            else ("prepare_publication_handoff" if is_approval else "route_review_follow_up_to_libby")
+            else (
+                "record_terminal_split_disposition"
+                if is_terminal_disposition
+                else ("prepare_publication_handoff" if is_approval else "route_review_follow_up_to_libby")
+            )
         )
+        action_status = "completed" if is_terminal_disposition else "pending"
         decision = HumanReviewDecision(
             review_case_id=review_case.id,
             decision_code=action_code,
@@ -3160,7 +3352,7 @@ def process_workspace_split_review_decisions(
             review_case=review_case,
             decision=decision,
             action_code=followup_action_code,
-            action_status="pending",
+            action_status=action_status,
             payload={
                 "decision_code": action_code,
                 "decision_note": decision.decision_note,
@@ -3171,6 +3363,8 @@ def process_workspace_split_review_decisions(
             target_agent_slug=target_agent_slug,
             target_stage=target_stage,
         )
+        if is_terminal_disposition:
+            action.completed_at = now
         session.add(action)
         session.add(
             AuditEvent(
@@ -3193,6 +3387,10 @@ def process_workspace_split_review_decisions(
         item.latest_decision_id = decision.id
         item.latest_action_id = action.id
         item.downstream_agent_slug = target_agent_slug
+        if is_terminal_disposition:
+            item.status = terminal_split_status
+            item.downstream_queue_item_id = None
+            item.processed_at = now
         item.updated_at = now
         session.flush()
         session.commit()
@@ -3204,6 +3402,23 @@ def process_workspace_split_review_decisions(
                 decision_id=decision.id,
                 close_review_case=False,
             )
+        elif is_terminal_disposition:
+            session.add(
+                AuditEvent(
+                    entity_type="review_split_item",
+                    entity_id=item.id,
+                    action="split_child_terminal_disposition_recorded",
+                    actor_id=None,
+                    payload_json={
+                        "review_case_id": str(review_case.id),
+                        "decision_id": str(decision.id),
+                        "decision_code": action_code,
+                        "status": terminal_split_status,
+                    },
+                    created_at=now,
+                )
+            )
+            session.commit()
         elif duplicate_exception_confirmed:
             item.status = "duplicate_resolved"
             item.latest_action = "duplicate_confirmed"

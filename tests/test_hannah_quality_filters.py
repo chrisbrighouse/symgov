@@ -7,7 +7,7 @@ SCRIPTS_ROOT = pathlib.Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(BACKEND_ROOT))
 sys.path.insert(0, str(SCRIPTS_ROOT))
 
-from run_hannah_curation import build_candidate, candidate_is_auto_attachable
+from run_hannah_curation import build_candidate, build_feedback_candidate, candidate_is_auto_attachable, search_images
 
 
 class HannahQualityFilterTests(unittest.TestCase):
@@ -105,6 +105,79 @@ class HannahQualityFilterTests(unittest.TestCase):
         }
 
         self.assertFalse(candidate_is_auto_attachable(candidate))
+
+    def test_feedback_candidate_records_search_failures_for_ui(self):
+        symbol = {
+            "symbol_id": "symbol-4",
+            "symbol_revision_id": "revision-4",
+            "published_page_id": "page-4",
+            "symbol_slug": "gate-valve",
+            "name": "Gate Valve",
+            "category": "Valves",
+            "discipline": "Piping",
+        }
+
+        feedback = build_feedback_candidate(
+            symbol,
+            status="no_candidate_found",
+            source_url="https://commons.wikimedia.org/w/index.php?search=Gate%20Valve",
+            title="No acceptable image candidates found for Gate Valve",
+            description="Hannah searched the configured sources but did not receive any image-like results to score.",
+            evidence={"feedback_type": "no_candidate_found", "searched_sources": ["Commons MediaSearch"]},
+        )
+
+        self.assertEqual(feedback["status"], "no_candidate_found")
+        self.assertEqual(feedback["source_domain"], "commons.wikimedia.org")
+        self.assertEqual(feedback["evidence"]["feedback_type"], "no_candidate_found")
+
+    def test_search_images_combines_all_source_strategies(self):
+        import run_hannah_curation as hannah
+
+        symbol = {"name": "Gate Valve", "category": "Valves", "discipline": "Piping"}
+        calls = []
+
+        def empty_commons(symbol, trace):
+            calls.append("commons")
+            return []
+
+        def one_media(symbol, trace):
+            calls.append("media")
+            return [hannah.image_page(source="media", image_url="https://example.com/media.jpg")]
+
+        def one_wikipedia(symbol, trace):
+            calls.append("wikipedia")
+            return [hannah.image_page(source="wikipedia", image_url="https://example.com/wiki.jpg")]
+
+        def duplicate_duckduckgo(symbol, trace):
+            calls.append("duckduckgo")
+            return [hannah.image_page(source="ddg", image_url="https://example.com/wiki.jpg")]
+
+        original = (
+            hannah.search_commons_images,
+            hannah.search_commons_media_search,
+            hannah.search_wikipedia_page_images,
+            hannah.search_duckduckgo_images,
+            hannah.time.sleep,
+        )
+        try:
+            hannah.search_commons_images = empty_commons
+            hannah.search_commons_media_search = one_media
+            hannah.search_wikipedia_page_images = one_wikipedia
+            hannah.search_duckduckgo_images = duplicate_duckduckgo
+            hannah.time.sleep = lambda seconds: None
+
+            results = search_images(symbol, [])
+        finally:
+            (
+                hannah.search_commons_images,
+                hannah.search_commons_media_search,
+                hannah.search_wikipedia_page_images,
+                hannah.search_duckduckgo_images,
+                hannah.time.sleep,
+            ) = original
+
+        self.assertEqual(calls, ["commons", "media", "wikipedia", "duckduckgo"])
+        self.assertEqual([item["imageinfo"][0]["url"] for item in results], ["https://example.com/media.jpg", "https://example.com/wiki.jpg"])
 
 
 if __name__ == "__main__":

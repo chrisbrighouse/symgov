@@ -209,6 +209,34 @@ class WorkspaceAgentQueueItemListResponse(BaseModel):
     items: list[WorkspaceAgentQueueItemResponse]
 
 
+class WorkspaceReggieQueueControlSuggestionResponse(BaseModel):
+    id: str
+    sourceType: str
+    sourceId: str | None = None
+    severity: str
+    ruleCode: str
+    detail: str
+    status: str
+    suggestedRemediation: str
+    observationalOnly: bool = True
+    evidence: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkspaceReggieQueueControlListResponse(BaseModel):
+    generatedAt: str
+    dryRun: bool = True
+    activeOnly: bool = True
+    agents: list[str]
+    runtimeRecordsSeen: int = 0
+    dbActiveRowsInspected: int = 0
+    changeCount: int = 0
+    missingRuntimeCount: int = 0
+    runtimeOrphanCount: int = 0
+    skippedCount: int = 0
+    controlSuggestionCount: int = 0
+    items: list[WorkspaceReggieQueueControlSuggestionResponse]
+
+
 class WorkspaceScottSourceSearchStartRequest(BaseModel):
     durationSeconds: int = Field(default=120, ge=30, le=300)
     seedQuery: str | None = Field(default=None, max_length=200)
@@ -290,6 +318,9 @@ class WorkspaceHannahCurationSearchStartResponse(BaseModel):
     durationSeconds: int
     startedAt: str
     expectedCompletedAt: str
+    createdCount: int = 0
+    skippedCount: int = 0
+    message: str | None = None
 
 
 class WorkspaceHannahCurationSearchStopResponse(BaseModel):

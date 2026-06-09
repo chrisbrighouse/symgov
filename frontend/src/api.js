@@ -157,6 +157,42 @@ export async function fetchWorkspaceQueueItems() {
   }
 }
 
+export async function fetchReggieQueueControls() {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
+  }
+
+  try {
+    const response = await fetch(workspaceUrl('/workspace/reggie/queue-controls'), { cache: 'no-store' });
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Reggie queue controls could not be loaded.',
+        items: []
+      };
+    }
+
+    const count = Number(payload?.controlSuggestionCount || 0);
+    return {
+      ok: true,
+      mode: 'live',
+      message: count ? `Reggie found ${count} queue control suggestion${count === 1 ? '' : 's'}.` : 'Reggie queue controls clear.',
+      items: Array.isArray(payload?.items) ? payload.items : [],
+      summary: payload
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'offline',
+      message: error instanceof Error ? error.message : 'Reggie queue controls could not be loaded.',
+      items: []
+    };
+  }
+}
+
 export async function startScottSourceSearch({ durationSeconds = 120, seedQuery = '' } = {}) {
   if (!appConfig.apiRoot) {
     throw new Error('API root is not configured.');
@@ -777,6 +813,26 @@ export async function fetchPublishedSymbols() {
       items: []
     };
   }
+}
+
+export async function submitPublishedSymbolCommand({ command, symbolIds, comment }) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+
+  const response = await fetch(`${appConfig.apiRoot}/published/symbols/commands`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ payload: { command, symbolIds, comment } })
+  });
+  const payload = await parseJson(response);
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Published symbol command failed.');
+  }
+
+  return payload;
 }
 
 export async function fetchPublishedPacks() {

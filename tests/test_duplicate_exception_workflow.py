@@ -10,7 +10,10 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from symgov_backend.publication_handoff import publication_duplicate_override_for_decision
 from symgov_backend.routes.workspace import (
+    HUMAN_VISIBLE_REVIEW_CASE_STAGES,
     OPEN_SPLIT_ITEM_STATUSES,
+    immediate_terminal_split_status_for_action,
+    is_human_visible_review_case_stage,
     is_open_split_item_status,
     is_terminal_split_item_status,
     split_item_status_after_handoff,
@@ -75,6 +78,17 @@ class DuplicateExceptionWorkflowTests(unittest.TestCase):
         self.assertEqual(split_item_status_after_handoff(returned, is_approval=False), ("returned_for_review", None))
         self.assertEqual(split_item_status_after_handoff(deleted, is_approval=False), ("deleted", None))
         self.assertEqual(split_item_status_after_handoff(queued, is_approval=False), ("queued_libby", "libby"))
+
+    def test_deleted_child_action_routes_to_libby_disposition_not_local_terminal(self) -> None:
+        self.assertIsNone(immediate_terminal_split_status_for_action("deleted"))
+        self.assertIsNone(immediate_terminal_split_status_for_action("reject"))
+
+    def test_only_human_actionable_case_stages_are_visible_in_review_queue(self) -> None:
+        self.assertEqual(HUMAN_VISIBLE_REVIEW_CASE_STAGES, {"classification_review", "raster_split_review"})
+        self.assertTrue(is_human_visible_review_case_stage("classification_review"))
+        self.assertTrue(is_human_visible_review_case_stage("raster_split_review"))
+        self.assertFalse(is_human_visible_review_case_stage("libby_deletion_review"))
+        self.assertFalse(is_human_visible_review_case_stage("changes_requested"))
 
 
 if __name__ == "__main__":
