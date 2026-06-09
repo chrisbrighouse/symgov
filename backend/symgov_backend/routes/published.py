@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import uuid
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import Text, bindparam, cast, func, text
 from sqlalchemy.orm import Session
 
@@ -307,7 +307,14 @@ def get_published_symbol(symbol_id: str, session: Session = Depends(get_db_sessi
 
 @router.post("/symbols/commands")
 @legacy_router.post("/published/symbols/commands", include_in_schema=False)
-def run_published_symbol_command(payload: dict = Body(..., embed=False), session: Session = Depends(get_db_session)) -> dict:
+async def run_published_symbol_command(request: Request, session: Session = Depends(get_db_session)) -> dict:
+    try:
+        request_body = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Request body must be valid JSON.") from exc
+    if not isinstance(request_body, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    payload = request_body.get("payload") if isinstance(request_body.get("payload"), dict) else request_body
     try:
         normalized = normalize_published_symbol_command_request(payload or {})
     except ValueError as exc:

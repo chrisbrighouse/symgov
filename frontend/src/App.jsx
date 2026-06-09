@@ -524,24 +524,26 @@ function StandardsPage() {
       return;
     }
     setSubmittingCommand(true);
-    setCommandStatus({ mode: '', message: '' });
+    setCommandStatus({ mode: 'info', message: commandDialog === 'comment' ? 'Posting comment…' : 'Sending selected symbol(s) for review…' });
+    const submittedCommand = commandDialog;
+    const submittedSymbolIds = selectedSymbols.map((symbol) => symbol.id);
+    setCommandDialog(null);
+    setCommandComment('');
     try {
       const result = await submitPublishedSymbolCommand({
-        command: commandDialog,
-        symbolIds: selectedSymbols.map((symbol) => symbol.id),
+        command: submittedCommand,
+        symbolIds: submittedSymbolIds,
         comment
       });
       setStandardsState((current) => ({
         ...current,
         items: current.items.map((symbol) =>
-          selectedSymbolIds.includes(symbol.id)
+          submittedSymbolIds.includes(symbol.id)
             ? { ...symbol, hasComments: true, commentCount: Number(symbol.commentCount || 0) + 1 }
             : symbol
         )
       }));
       setCommandStatus({ mode: 'success', message: result?.message || 'Published symbol command submitted.' });
-      setCommandDialog(null);
-      setCommandComment('');
       setSelectedSymbolIds([]);
     } catch (error) {
       setCommandStatus({ mode: 'error', message: error instanceof Error ? error.message : 'Published symbol command failed.' });

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import inspect
 import pathlib
 import sys
 import unittest
 from types import SimpleNamespace
 from uuid import UUID
+
+from starlette.requests import Request
 
 BACKEND_ROOT = pathlib.Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
@@ -13,6 +16,7 @@ from symgov_backend.routes.published import (
     MAX_PUBLISHED_SYMBOL_COMMAND_SELECTION,
     normalize_published_symbol_command_request,
     published_symbol_row,
+    run_published_symbol_command,
 )
 from symgov_backend.routes.workspace import build_published_symbol_workspace_item
 
@@ -40,6 +44,13 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         self.assertEqual(normalized["command"], "send_for_review")
         self.assertEqual(normalized["symbol_ids"], ["0002-32", "0002-33"])
         self.assertEqual(normalized["comment"], "Wrong designation on both records.")
+
+    def test_command_endpoint_uses_request_body_without_fastapi_payload_validation(self) -> None:
+        signature = inspect.signature(run_published_symbol_command)
+
+        self.assertIn("request", signature.parameters)
+        annotation = signature.parameters["request"].annotation
+        self.assertIn(annotation, (Request, "Request"))
 
     def test_published_symbol_row_exposes_comment_indicator_fields(self) -> None:
         row = SimpleNamespace(
