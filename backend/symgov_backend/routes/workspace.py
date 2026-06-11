@@ -484,13 +484,52 @@ def split_item_display_parts(split_item: ReviewSplitItem) -> tuple[str | None, i
     return package_id, sequence, display_name
 
 
+def is_short_symbol_display_id(value: object) -> bool:
+    return bool(re.fullmatch(r"\d{4}-\d+", str(value or "").strip()))
+
+
+def symbol_revision_display_id(revision: SymbolRevision | None) -> str | None:
+    revision_payload = revision.payload_json if revision is not None else {}
+    if not isinstance(revision_payload, dict):
+        return None
+
+    package_id = revision_payload.get("package_display_id")
+    sequence = revision_payload.get("package_symbol_sequence")
+    if package_id and sequence is not None:
+        try:
+            return f"{package_id}-{int(sequence)}"
+        except (TypeError, ValueError):
+            pass
+
+    for candidate in (
+        revision_payload.get("published_display_id"),
+        revision_payload.get("symbol_display_id"),
+        revision_payload.get("display_name"),
+        revision_payload.get("workspace_display_name"),
+    ):
+        if is_short_symbol_display_id(candidate):
+            return str(candidate).strip()
+    return None
+
+
+def governed_symbol_display_id(session: Session, symbol: GovernedSymbol) -> str:
+    revision = (
+        session.get(SymbolRevision, symbol.current_revision_id)
+        if symbol is not None and symbol.current_revision_id is not None
+        else None
+    )
+    revision_display_id = symbol_revision_display_id(revision)
+    if revision_display_id:
+        return revision_display_id
+    if is_short_symbol_display_id(symbol.slug):
+        return str(symbol.slug).strip()
+    return symbol.slug or str(symbol.id)
+
+
 def queue_item_display_parts(session: Session, queue_item: AgentQueueItem) -> tuple[str | None, int | None, str | None]:
     payload = queue_item.payload_json or {}
     if isinstance(payload, dict):
         if queue_item.source_type == "published_symbol_review_request":
-            def _is_short_symbol_id(value: object) -> bool:
-                return bool(re.fullmatch(r"\d{4}-\d+", str(value or "").strip()))
-
             payload_candidates = [
                 payload.get("published_display_id"),
                 payload.get("symbol_display_id"),
@@ -500,7 +539,7 @@ def queue_item_display_parts(session: Session, queue_item: AgentQueueItem) -> tu
                 payload.get("symbol_slug"),
             ]
             for candidate in payload_candidates:
-                if _is_short_symbol_id(candidate):
+                if is_short_symbol_display_id(candidate):
                     return None, None, str(candidate).strip()
 
             if session is not None:
@@ -511,32 +550,45 @@ def queue_item_display_parts(session: Session, queue_item: AgentQueueItem) -> tu
                     if symbol is not None and symbol.current_revision_id is not None
                     else None
                 )
-                revision_payload = revision.payload_json if revision is not None else {}
-                if isinstance(revision_payload, dict):
-                    package_id = revision_payload.get("package_display_id")
-                    sequence = revision_payload.get("package_symbol_sequence")
-                    if package_id and sequence is not None:
-                        try:
-                            return None, None, f"{package_id}-{int(sequence)}"
-                        except (TypeError, ValueError):
-                            pass
-                    for candidate in (
-                        revision_payload.get("display_name"),
-                        revision_payload.get("workspace_display_name"),
-                    ):
-                        if _is_short_symbol_id(candidate):
-                            return None, None, str(candidate).strip()
+                revision_display_id = symbol_revision_display_id(revision)
+                if revision_display_id:
+                    return None, None, revision_display_id
 
             for candidate in payload_candidates:
                 if candidate:
                     return None, None, str(candidate).strip()
 
+        short_id_candidates = [
+            payload.get("published_display_id"),
+            payload.get("symbol_display_id"),
+            payload.get("display_name"),
+            payload.get("workspace_display_name"),
+            payload.get("displayName"),
+            payload.get("symbol_slug"),
+        ]
+        for candidate in short_id_candidates:
+            if is_short_symbol_display_id(candidate):
+                return None, None, str(candidate).strip()
+
+        if session is not None:
+            raw_symbol_id = payload.get("symbol_id") or payload.get("published_symbol_id") or queue_item.source_id
+            symbol_uuid = coerce_uuid(raw_symbol_id) if raw_symbol_id is not None else None
+            symbol = session.get(GovernedSymbol, symbol_uuid) if symbol_uuid is not None else None
+            revision = (
+                session.get(SymbolRevision, symbol.current_revision_id)
+                if symbol is not None and symbol.current_revision_id is not None
+                else None
+            )
+            revision_display_id = symbol_revision_display_id(revision)
+            if revision_display_id:
+                return None, None, revision_display_id
+
         direct_display_name = (
-            payload.get("display_name")
-            or payload.get("workspace_display_name")
-            or payload.get("displayName")
-            or payload.get("published_display_id")
+            payload.get("published_display_id")
             or payload.get("symbol_display_id")
+            or payload.get("workspace_display_name")
+            or payload.get("display_name")
+            or payload.get("displayName")
             or payload.get("symbol_slug")
         )
         direct_package_id = payload.get("package_display_id") or payload.get("packageDisplayId")
@@ -1412,34 +1464,36 @@ def build_provenance_workspace_item(
 
 
 def build_published_symbol_workspace_item(
+    session: Session,
     review_case: ReviewCase,
     symbol: GovernedSymbol,
     comment: str = "",
 ) -> WorkspaceReviewCaseResponse:
     opened_at = review_case.opened_at if isinstance(review_case.opened_at, datetime) else datetime.now(timezone.utc)
     due = opened_at + timedelta(days=2)
-    display_name = symbol.slug or str(symbol.id)
+    display_name = governed_symbol_display_id(session, symbol)
     symbol_name = symbol.canonical_name or display_name
     summary = (
-        f"Published symbol {display_name} ({symbol_name}) has been sent back for review. Comment: {comment}"
+        f"Published symbol {display_name} ({symbol_name}) has been returned for review. Comment: {comment}"
         if comment
-        else f"Published symbol {display_name} ({symbol_name}) has been sent back for review."
+        else f"Published symbol {display_name} ({symbol_name}) has been returned for review."
     )
     return WorkspaceReviewCaseResponse(
         id=str(review_case.id),
         reviewItemType="published_symbol",
+        splitChildStatus="returned_for_review",
         symbolId=display_name,
         displayName=display_name,
         packageDisplayId=None,
         packageSymbolSequence=None,
-        title=f"Review published symbol {display_name}",
+        title=f"Review returned symbol {display_name}",
         owner="Ed",
         due=due.date().isoformat(),
         priority=review_case.escalation_level.title(),
         risk="Medium" if review_case.escalation_level.lower() == "medium" else review_case.escalation_level.title(),
         pages=1,
         packs=0,
-        status=review_case.current_stage.replace("_", " ").title(),
+        status="Returned",
         summary=summary,
         clarifications=[comment] if comment else [],
         currentStage=review_case.current_stage,
@@ -1449,7 +1503,7 @@ def build_published_symbol_workspace_item(
         defectCount=1,
         sourceFileName=symbol_name,
         sourceObjectKey=None,
-        sourcePreviewUrl=f"/api/v1/published/symbols/{quote(display_name)}/preview",
+        sourcePreviewUrl=f"/api/v1/published/symbols/{quote(symbol.slug or str(symbol.id))}/preview",
         intakeRecordId=str(symbol.id),
         childCount=0,
         classificationStatus="published_feedback",
@@ -1527,8 +1581,63 @@ def list_workspace_agent_queue_items(
     return WorkspaceAgentQueueItemListResponse(items=items)
 
 
-def _build_reggie_queue_control_response(payload: dict[str, object]) -> WorkspaceReggieQueueControlListResponse:
+def _reggie_queue_item_display_lookup(
+    session: Session | None,
+    payload: dict[str, object],
+) -> dict[str, str]:
+    if session is None:
+        return {}
+    queue_item_ids = []
+    raw_suggestions = payload.get("control_suggestions")
+    suggestions_iterable = raw_suggestions if isinstance(raw_suggestions, list) else []
+    for suggestion in suggestions_iterable:
+        if not isinstance(suggestion, dict):
+            continue
+        source_id = coerce_uuid(suggestion.get("source_id"))
+        if source_id is not None:
+            queue_item_ids.append(source_id)
+    if not queue_item_ids:
+        return {}
+
+    lookup: dict[str, str] = {}
+    rows = session.execute(
+        select(AgentQueueItem).where(AgentQueueItem.id.in_(queue_item_ids))
+    ).scalars().all()
+    for queue_item in rows:
+        _package_id, _package_sequence, display_name = queue_item_display_parts(session, queue_item)
+        if display_name:
+            lookup[str(queue_item.id)] = display_name
+    return lookup
+
+
+def _reggie_detail_with_display_label(
+    *,
+    rule_code: str,
+    detail: str,
+    source_id_text: str | None,
+    display_label: str | None,
+) -> str:
+    if not source_id_text or not display_label or display_label == source_id_text:
+        return detail
+    if rule_code == "agent_queue_active_db_missing_runtime":
+        return detail.replace(f"queue item {source_id_text}", f"queue item {display_label} ({source_id_text})")
+    if rule_code == "agent_queue_db_runtime_terminal_mismatch":
+        return detail.replace(f"queue item {source_id_text}", f"queue item {display_label} ({source_id_text})")
+    if rule_code == "agent_queue_db_runtime_mismatch_skipped":
+        return detail.replace(f"Queue item {source_id_text}", f"Queue item {display_label} ({source_id_text})")
+    if rule_code == "agent_queue_runtime_without_db_mirror":
+        return detail.replace(f"Runtime queue record {source_id_text}", f"Runtime queue record {display_label} ({source_id_text})")
+    return f"{display_label} ({source_id_text}): {detail}"
+
+
+def _build_reggie_queue_control_response(
+    payload: dict[str, object],
+    *,
+    session: Session | None = None,
+    queue_display_lookup: dict[str, str] | None = None,
+) -> WorkspaceReggieQueueControlListResponse:
     generated_at = datetime.now(timezone.utc)
+    display_lookup = queue_display_lookup if queue_display_lookup is not None else _reggie_queue_item_display_lookup(session, payload)
     suggestions = []
     for index, suggestion in enumerate(payload.get("control_suggestions") or [], start=1):
         if not isinstance(suggestion, dict):
@@ -1536,6 +1645,18 @@ def _build_reggie_queue_control_response(payload: dict[str, object]) -> Workspac
         rule_code = str(suggestion.get("rule_code") or "queue_control_suggestion")
         source_id = suggestion.get("source_id")
         source_id_text = str(source_id) if source_id is not None else None
+        display_label = display_lookup.get(source_id_text or "")
+        raw_evidence = suggestion.get("evidence")
+        evidence = dict(raw_evidence) if isinstance(raw_evidence, dict) else {}
+        if display_label:
+            evidence.setdefault("display_name", display_label)
+            evidence.setdefault("symbol_display_id", display_label)
+        detail = _reggie_detail_with_display_label(
+            rule_code=rule_code,
+            detail=str(suggestion.get("detail") or "Queue control suggestion."),
+            source_id_text=source_id_text,
+            display_label=display_label,
+        )
         suggestions.append(
             WorkspaceReggieQueueControlSuggestionResponse(
                 id=f"reggie-{rule_code}-{source_id_text or index}",
@@ -1543,11 +1664,11 @@ def _build_reggie_queue_control_response(payload: dict[str, object]) -> Workspac
                 sourceId=source_id_text,
                 severity=str(suggestion.get("severity") or "info"),
                 ruleCode=rule_code,
-                detail=str(suggestion.get("detail") or "Queue control suggestion."),
+                detail=detail,
                 status=str(suggestion.get("status") or "open"),
                 suggestedRemediation=str(suggestion.get("suggested_remediation") or "Inspect manually before changing state."),
                 observationalOnly=bool(suggestion.get("observational_only", True)),
-                evidence=suggestion.get("evidence") if isinstance(suggestion.get("evidence"), dict) else {},
+                evidence=evidence,
             )
         )
 
@@ -1579,6 +1700,7 @@ def _build_reggie_queue_control_response(payload: dict[str, object]) -> Workspac
 )
 def list_reggie_queue_control_suggestions(
     activeOnly: bool = Query(default=True),
+    session: Session = Depends(get_db_session),
 ) -> WorkspaceReggieQueueControlListResponse:
     """Expose Reggie's observational queue reconciliation suggestions.
 
@@ -1596,7 +1718,7 @@ def list_reggie_queue_control_suggestions(
     except Exception as exc:  # pragma: no cover - exercised as API 500 in production
         raise HTTPException(status_code=500, detail=f"Reggie queue controls could not be loaded: {exc}") from exc
 
-    return _build_reggie_queue_control_response(payload)
+    return _build_reggie_queue_control_response(payload, session=session)
 
 
 @router.post(
@@ -2879,6 +3001,7 @@ def list_workspace_review_cases(
                 attach_latest_decision(
                     session,
                     build_published_symbol_workspace_item(
+                        session,
                         review_case,
                         symbol,
                         comment=comment_row.detail if comment_row is not None else "",

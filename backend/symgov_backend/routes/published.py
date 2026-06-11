@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
+from pathlib import Path
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -33,6 +35,7 @@ MAX_PUBLISHED_SYMBOL_COMMAND_SELECTION = 5
 PUBLISHED_SYMBOL_COMMANDS = {"comment", "send_for_review"}
 SYSTEM_ED_EMAIL = "ed@symgov.local"
 SYSTEM_ED_NAME = "Ed"
+ED_RUNTIME_QUEUE_DIR = Path("/data/.openclaw/workspaces/ed/runtime/agent_queue_items")
 
 
 PUBLISHED_SYMBOLS_SQL = """
@@ -162,6 +165,36 @@ def load_comment_counts(session: Session, rows) -> dict[str, int]:
     return {str(symbol_id): int(count) for symbol_id, count in comment_rows}
 
 
+def published_symbol_comment_item(comment: ClarificationRecord, *, submitter_name: str | None = None) -> dict:
+    return {
+        "id": str(comment.id),
+        "kind": comment.kind,
+        "status": comment.status,
+        "source": comment.source,
+        "detail": comment.detail,
+        "submittedBy": submitter_name or "Unknown",
+        "createdAt": comment.created_at.isoformat() if comment.created_at else None,
+        "updatedAt": comment.updated_at.isoformat() if comment.updated_at else None,
+    }
+
+
+def load_comment_history(session: Session, symbol_id: uuid.UUID) -> list[dict]:
+    rows = (
+        session.query(ClarificationRecord, User.display_name, User.email)
+        .outerjoin(User, ClarificationRecord.submitted_by == User.id)
+        .filter(ClarificationRecord.symbol_id == symbol_id)
+        .order_by(ClarificationRecord.created_at.desc(), ClarificationRecord.id.desc())
+        .all()
+    )
+    return [
+        published_symbol_comment_item(
+            comment,
+            submitter_name=display_name or email,
+        )
+        for comment, display_name, email in rows
+    ]
+
+
 def normalize_published_symbol_command_request(payload: dict) -> dict:
     command = str(payload.get("command") or "").strip().lower().replace("-", "_")
     if command not in PUBLISHED_SYMBOL_COMMANDS:
@@ -202,8 +235,9 @@ def create_ed_queue_item(session: Session, *, source_type: str, source_id: uuid.
     if ed_definition is None:
         return None
     now = datetime.now(timezone.utc).replace(microsecond=0)
+    queue_item_id = uuid.uuid4()
     queue_item = AgentQueueItem(
-        id=uuid.uuid4(),
+        id=queue_item_id,
         agent_id=ed_definition.id,
         source_type=source_type,
         source_id=source_id,
@@ -218,6 +252,26 @@ def create_ed_queue_item(session: Session, *, source_type: str, source_id: uuid.
     )
     session.add(queue_item)
     session.flush()
+
+    runtime_payload = {
+        "id": str(queue_item_id),
+        "agent_id": "ed",
+        "source_type": source_type,
+        "source_id": str(source_id),
+        "status": "queued",
+        "priority": priority,
+        "payload_json": payload,
+        "confidence": None,
+        "escalation_reason": None,
+        "created_at": now.isoformat().replace("+00:00", "Z"),
+        "started_at": None,
+        "completed_at": None,
+    }
+    ED_RUNTIME_QUEUE_DIR.mkdir(parents=True, exist_ok=True)
+    (ED_RUNTIME_QUEUE_DIR / f"{queue_item_id}.json").write_text(
+        json.dumps(runtime_payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
     return queue_item
 
 
@@ -329,6 +383,32 @@ def get_published_symbol(symbol_id: str, session: Session = Depends(get_db_sessi
     return {"item": published_symbol_row(rows[0], supplemental, comment_counts)}
 
 
+@router.get("/symbols/{symbol_id}/comments")
+@legacy_router.get("/published/symbols/{symbol_id}/comments", include_in_schema=False)
+def get_published_symbol_comments(symbol_id: str, session: Session = Depends(get_db_session)) -> dict:
+    rows = session.execute(
+        text(
+            PUBLISHED_SYMBOLS_SQL
+            + """
+            AND (gs.slug = :symbol_id OR gs.id::text = :symbol_id)
+            ORDER BY pp.effective_date DESC, pk.effective_date DESC
+            LIMIT 1
+            """
+        ),
+        {"symbol_id": symbol_id},
+    ).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Published symbol was not found.")
+    symbol_uuid = uuid.UUID(str(rows[0].symbol_id))
+    items = load_comment_history(session, symbol_uuid)
+    return {
+        "symbolId": str(symbol_uuid),
+        "displayId": published_symbol_display_id(rows[0]),
+        "commentCount": len(items),
+        "items": items,
+    }
+
+
 @router.post("/symbols/commands")
 @legacy_router.post("/published/symbols/commands", include_in_schema=False)
 async def run_published_symbol_command(request: Request, session: Session = Depends(get_db_session)) -> dict:
@@ -389,6 +469,11 @@ async def run_published_symbol_command(request: Request, session: Session = Depe
         review_case = None
         queue_item = None
         if normalized["command"] == "send_for_review":
+            # Unpublish the current symbol revision
+            current_revision = session.get(SymbolRevision, row.symbol_revision_id)
+            if current_revision is not None:
+                current_revision.lifecycle_state = "review"
+
             review_case = (
                 session.query(ReviewCase)
                 .filter_by(source_entity_type="published_symbol", source_entity_id=symbol_uuid)
@@ -400,7 +485,7 @@ async def run_published_symbol_command(request: Request, session: Session = Depe
                     id=uuid.uuid4(),
                     source_entity_type="published_symbol",
                     source_entity_id=symbol_uuid,
-                    current_stage="classification_review",
+                    current_stage="ux_feedback_coordination",
                     owner_id=ed_user.id,
                     escalation_level="medium",
                     opened_at=now,
@@ -408,6 +493,9 @@ async def run_published_symbol_command(request: Request, session: Session = Depe
                 )
                 session.add(review_case)
                 session.flush()
+            else:
+                review_case.current_stage = "ux_feedback_coordination"
+
             action = ReviewCaseAction(
                 id=uuid.uuid4(),
                 review_case_id=review_case.id,
@@ -416,7 +504,7 @@ async def run_published_symbol_command(request: Request, session: Session = Depe
                 action_status="queued",
                 assigned_to=ed_user.id,
                 target_agent_slug="ed",
-                target_stage="classification_review",
+                target_stage="ux_feedback_coordination",
                 action_payload_json={
                     "comment": normalized["comment"],
                     "symbol_slug": row.slug,
@@ -448,7 +536,11 @@ async def run_published_symbol_command(request: Request, session: Session = Depe
                     "published_display_id": symbol_display_id,
                     "comment": normalized["comment"],
                     "managed_by": "ed",
-                    "next_stage": "daisy_human_review_coordination",
+                    # Ed performs the operator-feedback coordination, then the
+                    # returned published symbol must land in a human-visible
+                    # review stage. The review queue intentionally only lists
+                    # human-actionable stages such as classification_review.
+                    "next_stage": "classification_review",
                 },
                 priority="medium",
             )

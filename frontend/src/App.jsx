@@ -6,6 +6,7 @@ import {
   fetchHannahPhotoCandidates,
   fetchWhitneyDemandSignals,
   fetchHealth,
+  fetchPublishedSymbolComments,
   fetchPublishedSymbols,
   fetchWorkspaceDaisyReports,
   fetchWorkspaceQueueItems,
@@ -28,6 +29,12 @@ import {
 } from './api.js';
 import { appConfig } from './config.js';
 import { changeQueue, daisyCoordinationReports, processingActivity, submissionPresets, symbols } from './data.js';
+import {
+  DEFAULT_AGENT_RUN_DURATION_SECONDS,
+  durationSecondsToParts,
+  formatCountdown,
+  setDurationPart
+} from './timerControls.js';
 
 const REVIEW_ITEM_ACTION_OPTIONS = [
   ['approve', 'Approve'],
@@ -103,7 +110,7 @@ const WORKSPACE_QUEUE_COLUMNS = [
   {
     id: 'ux_feedback',
     title: 'Ed',
-    subtitle: 'UX feedback',
+    subtitle: 'Catalog feedback',
     agentId: 'ed',
     tone: 'feedback'
   },
@@ -134,11 +141,11 @@ const WORKSPACE_REFRESH_INTERVAL_MS = 5000;
 const PUBLISHED_SYMBOL_SELECTION_LIMIT = 5;
 const DEFAULT_HIDDEN_WORKSPACE_STATUSES = new Set(['completed']);
 const SCOTT_SOURCE_SITE_PAGE_SIZE = 50;
-const SCOTT_SOURCE_SEARCH_DURATION_SECONDS = 120;
+const SCOTT_SOURCE_SEARCH_DURATION_SECONDS = DEFAULT_AGENT_RUN_DURATION_SECONDS;
 const HANNAH_CANDIDATE_PAGE_SIZE = 50;
 const HANNAH_CURATION_SEARCH_DURATION_SECONDS = 120;
 const WHITNEY_SIGNAL_PAGE_SIZE = 50;
-const WHITNEY_DEMAND_SCAN_DURATION_SECONDS = 120;
+const WHITNEY_DEMAND_SCAN_DURATION_SECONDS = DEFAULT_AGENT_RUN_DURATION_SECONDS;
 const SCOTT_SOURCE_COLUMNS = [
   ['url', 'URL'],
   ['status', 'Status'],
@@ -241,7 +248,7 @@ function Header() {
           Reviews
         </NavLink>
         <NavLink to="/standards" end className={({ isActive }) => navClass(isActive)}>
-          Standards
+          Catalog
         </NavLink>
         <NavLink to="/support" className={({ isActive }) => navClass(isActive)}>
           Support
@@ -288,6 +295,41 @@ function CogIcon() {
   );
 }
 
+function DurationStepper({ ariaLabel, durationSeconds, disabled = false, onChange }) {
+  const { minutes, seconds } = durationSecondsToParts(durationSeconds);
+
+  return (
+    <div className="duration-stepper" role="group" aria-label={ariaLabel}>
+      <label className="duration-stepper-part">
+        <span>Min</span>
+        <input
+          type="number"
+          min="0"
+          step="1"
+          inputMode="numeric"
+          value={minutes}
+          disabled={disabled}
+          onChange={(event) => onChange('minutes', event.target.value)}
+        />
+      </label>
+      <span className="duration-stepper-separator" aria-hidden="true">:</span>
+      <label className="duration-stepper-part">
+        <span>Sec</span>
+        <input
+          type="number"
+          min="0"
+          max="59"
+          step="1"
+          inputMode="numeric"
+          value={seconds}
+          disabled={disabled}
+          onChange={(event) => onChange('seconds', event.target.value)}
+        />
+      </label>
+    </div>
+  );
+}
+
 function StandardsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
@@ -300,6 +342,8 @@ function StandardsPage() {
   const [commandComment, setCommandComment] = useState('');
   const [commandStatus, setCommandStatus] = useState({ mode: '', message: '' });
   const [submittingCommand, setSubmittingCommand] = useState(false);
+  const [activeDetailTab, setActiveDetailTab] = useState('details');
+  const [commentHistoryState, setCommentHistoryState] = useState({ symbolId: '', loading: false, mode: '', message: '', items: [] });
   const [displayCount, setDisplayCount] = useState(60);
   const [standardsState, setStandardsState] = useState({
     loading: true,
@@ -469,6 +513,40 @@ function StandardsPage() {
   }, [query, columnFilters, facetFilters, sortState]);
 
   const activeSymbol = filteredSymbols.find((symbol) => symbol.id === activeId) || null;
+
+  useEffect(() => {
+    if (!activeSymbol || activeDetailTab !== 'comments') {
+      return;
+    }
+    let cancelled = false;
+    const symbolKey = activeSymbol.id || activeSymbol.symbolId;
+    setCommentHistoryState({ symbolId: symbolKey, loading: true, mode: 'loading', message: 'Loading comment history…', items: [] });
+    fetchPublishedSymbolComments(symbolKey).then((result) => {
+      if (cancelled) {
+        return;
+      }
+      setCommentHistoryState({
+        symbolId: symbolKey,
+        loading: false,
+        mode: result.ok ? 'live' : result.mode,
+        message: result.ok ? (result.items.length ? result.message : 'No comments have been recorded for this symbol yet.') : result.message,
+        items: result.items || []
+      });
+      if (result.ok) {
+        setStandardsState((current) => ({
+          ...current,
+          items: current.items.map((symbol) =>
+            symbol.id === activeSymbol.id || symbol.symbolId === activeSymbol.symbolId
+              ? { ...symbol, hasComments: Number(result.commentCount || result.items.length || 0) > 0, commentCount: Number(result.commentCount || result.items.length || 0) }
+              : symbol
+          )
+        }));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSymbol?.id, activeSymbol?.symbolId, activeSymbol?.commentCount, activeDetailTab]);
 
   function selectSymbol(symbolId) {
     setActiveId(symbolId);
@@ -820,7 +898,7 @@ function StandardsPage() {
                             title={Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? `${symbol.supplementalPhotos.length} photo(s)` : 'No photos yet'}
                             aria-label={Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? `${symbol.supplementalPhotos.length} photo(s)` : 'No photos yet'}
                           >
-                            📷
+                            {Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? '📷' : '—'}
                           </span>
                         ) : key === 'commentStatus' ? (
                           <span
@@ -828,7 +906,7 @@ function StandardsPage() {
                             title={symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? `${symbol.commentCount || 1} comment(s)` : 'No comments yet'}
                             aria-label={symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? `${symbol.commentCount || 1} comment(s)` : 'No comments yet'}
                           >
-                            💬
+                            {symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? '💬' : '—'}
                           </span>
                         ) : (
                           getSymbolField(symbol, key) || 'Pending'
@@ -860,32 +938,58 @@ function StandardsPage() {
                 Close
               </button>
             </div>
-            <div className="symbol-stage">
-              <PublishedSymbolPreview symbol={activeSymbol} large />
+            <div className="published-detail-tabs" role="tablist" aria-label="Published symbol detail sections">
+              <button
+                type="button"
+                className={activeDetailTab === 'details' ? 'active' : ''}
+                role="tab"
+                aria-selected={activeDetailTab === 'details'}
+                onClick={() => setActiveDetailTab('details')}
+              >
+                Image & properties
+              </button>
+              <button
+                type="button"
+                className={activeDetailTab === 'comments' ? 'active' : ''}
+                role="tab"
+                aria-selected={activeDetailTab === 'comments'}
+                onClick={() => setActiveDetailTab('comments')}
+              >
+                Comments ({Number(activeSymbol.commentCount || 0)})
+              </button>
             </div>
-            <SupplementalPhotoStrip photos={activeSymbol.supplementalPhotos || []} />
-            <div className="fact-grid detail-list">
-              <Fact label="Status" value={activeSymbol.status || 'Published'} />
-              <Fact label="Revision" value={activeSymbol.revision} />
-              <Fact label="Last update" value={formatPublishedDate(activeSymbol.lastUpdatedAt || activeSymbol.revisionCreatedAt)} />
-              <Fact label="Effective" value={formatPublishedDate(activeSymbol.effectiveDate)} />
-              <Fact label="Published Page" value={activeSymbol.pageCode} />
-              <Fact label="Pack" value={activeSymbol.pack} />
-              <Fact label="Category" value={activeSymbol.category} />
-              <Fact label="Discipline" value={activeSymbol.discipline} />
-              <Fact label="Format" value={activeSymbol.format || activeSymbol.contentType || 'Pending'} />
-            </div>
-            <div className="copy-block">
-              <h4>Governance rationale</h4>
-              <p>{activeSymbol.rationale || 'No rationale has been published for this symbol yet.'}</p>
-            </div>
-            <div className="tag-row">
-              {(activeSymbol.downloads || ['Download options coming later']).map((download) => (
-                <span key={download} className="tag-chip">
-                  {download}
-                </span>
-              ))}
-            </div>
+            {activeDetailTab === 'details' ? (
+              <>
+                <div className="symbol-stage">
+                  <PublishedSymbolPreview symbol={activeSymbol} large />
+                </div>
+                <SupplementalPhotoStrip photos={activeSymbol.supplementalPhotos || []} />
+                <div className="fact-grid detail-list">
+                  <Fact label="Status" value={activeSymbol.status || 'Published'} />
+                  <Fact label="Revision" value={activeSymbol.revision} />
+                  <Fact label="Last update" value={formatPublishedDate(activeSymbol.lastUpdatedAt || activeSymbol.revisionCreatedAt)} />
+                  <Fact label="Effective" value={formatPublishedDate(activeSymbol.effectiveDate)} />
+                  <Fact label="Published Page" value={activeSymbol.pageCode} />
+                  <Fact label="Pack" value={activeSymbol.pack} />
+                  <Fact label="Category" value={activeSymbol.category} />
+                  <Fact label="Discipline" value={activeSymbol.discipline} />
+                  <Fact label="Format" value={activeSymbol.format || activeSymbol.contentType || 'Pending'} />
+                </div>
+                <div className="copy-block">
+                  <h4>Governance rationale</h4>
+                  <p>{activeSymbol.rationale || 'No rationale has been published for this symbol yet.'}</p>
+                </div>
+                <div className="tag-row">
+                  {(activeSymbol.downloads || ['Download options coming later']).map((download) => (
+                    <span key={download} className="tag-chip">
+                      {download}
+                    </span>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <PublishedSymbolCommentHistory state={commentHistoryState} />
+            )}
             </section>
           </aside>
         ) : null}
@@ -974,6 +1078,15 @@ const PUBLISHED_DATE_FORMATTER = new Intl.DateTimeFormat('en-GB', {
   year: 'numeric'
 });
 
+const PUBLISHED_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Europe/London',
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit'
+});
+
 function formatPublishedDate(value) {
   if (!value) {
     return '';
@@ -983,6 +1096,17 @@ function formatPublishedDate(value) {
     return String(value || '');
   }
   return PUBLISHED_DATE_FORMATTER.format(date).replace(',', '');
+}
+
+function formatPublishedDateTime(value) {
+  if (!value) {
+    return '';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return String(value || '');
+  }
+  return PUBLISHED_DATE_TIME_FORMATTER.format(date).replace(',', '');
 }
 
 function displaySymbolName(record) {
@@ -1006,15 +1130,35 @@ function displaySymbolId(record) {
   }
   const packageId = record.packageDisplayId || record.package_display_id;
   const sequence = record.packageSymbolSequence ?? record.package_symbol_sequence;
+  const packageDisplay = packageId && sequence != null ? `${packageId}-${sequence}` : '';
+  const candidates = [
+    record.publishedDisplayId,
+    record.published_display_id,
+    record.symbolDisplayId,
+    record.symbol_display_id,
+    record.displayName,
+    record.display_name,
+    record.workspaceDisplayName,
+    record.workspace_display_name,
+    packageDisplay,
+    record.symbolId,
+    record.proposedSymbolId,
+    record.symbol_slug,
+    record.slug
+  ];
+  const shortId = candidates.find((value) => /^\d{4}-\d+$/.test(String(value || '').trim()));
   return (
+    shortId ||
+    record.symbolDisplayId ||
+    record.symbol_display_id ||
+    record.publishedDisplayId ||
+    record.published_display_id ||
     record.displayName ||
     record.display_name ||
     record.workspaceDisplayName ||
     record.workspace_display_name ||
-    (packageId && sequence != null ? `${packageId}-${sequence}` : '') ||
+    packageDisplay ||
     packageId ||
-    record.symbolDisplayId ||
-    record.symbol_display_id ||
     record.symbolId ||
     record.proposedSymbolId ||
     record.id ||
@@ -1089,6 +1233,8 @@ function WorkspacePage() {
   });
   const [stoppedSourceSearches, setStoppedSourceSearches] = useState({});
   const [lastWorkspaceRefresh, setLastWorkspaceRefresh] = useState(null);
+  const [scottSearchDurationSeconds, setScottSearchDurationSeconds] = useState(SCOTT_SOURCE_SEARCH_DURATION_SECONDS);
+  const [whitneyDemandScanDurationSeconds, setWhitneyDemandScanDurationSeconds] = useState(WHITNEY_DEMAND_SCAN_DURATION_SECONDS);
   const {
     searchState,
     sourcesSort,
@@ -1105,6 +1251,7 @@ function WorkspacePage() {
   } = useScottSourceDiscoveryControls({
     enabled: Boolean(appConfig.apiRoot),
     sourcesActive: activeWorkspaceTab === 'sources',
+    configuredDurationSeconds: scottSearchDurationSeconds,
     onSearchStarted: (queueItemId) => {
       setStoppedSourceSearches((current) => {
         if (!queueItemId || !current[queueItemId]) {
@@ -1131,6 +1278,9 @@ function WorkspacePage() {
   const searchIsRunning = Boolean(searchState.result && searchState.remainingSeconds > 0 && searchState.result.status === 'searching');
   const searchDisabled = searchState.pending || searchIsRunning || searchState.stopping || !appConfig.apiRoot;
   const searchStatusText = scottSearchStatusText(searchState);
+  const handleScottSearchDurationChange = (part, value) => {
+    setScottSearchDurationSeconds((current) => setDurationPart(current, part, value));
+  };
   const {
     curationState,
     candidatesSort,
@@ -1160,11 +1310,15 @@ function WorkspacePage() {
     handleWhitneySignalsScroll
   } = useWhitneyDemandSensingControls({
     enabled: Boolean(appConfig.apiRoot),
-    intelligenceActive: activeWorkspaceTab === 'intelligence'
+    intelligenceActive: activeWorkspaceTab === 'intelligence',
+    configuredDurationSeconds: whitneyDemandScanDurationSeconds
   });
   const scanIsRunning = Boolean(scanState.result && scanState.remainingSeconds > 0 && scanState.result.status === 'sensing');
   const scanDisabled = scanState.pending || scanIsRunning || scanState.stopping || !appConfig.apiRoot;
   const scanStatusText = whitneyDemandScanStatusText(scanState);
+  const handleWhitneyDemandScanDurationChange = (part, value) => {
+    setWhitneyDemandScanDurationSeconds((current) => setDurationPart(current, part, value));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -1481,6 +1635,12 @@ function WorkspacePage() {
             </div>
             <div className="workspace-content-tools">
               {searchStatusText ? <span className="search-inline-status">{searchStatusText}</span> : null}
+              <DurationStepper
+                ariaLabel="Scott search duration"
+                durationSeconds={scottSearchDurationSeconds}
+                disabled={searchDisabled}
+                onChange={handleScottSearchDurationChange}
+              />
               <button type="button" className="action-button primary compact" disabled={searchDisabled} onClick={handleStartScottSearch}>
                 {searchState.pending ? 'Searching...' : 'Start search'}
               </button>
@@ -1495,7 +1655,7 @@ function WorkspacePage() {
                 </button>
               ) : null}
               <span className="search-countdown">
-                {formatScottSearchTimer(searchState)}
+                {formatScottSearchTimer(searchState, scottSearchDurationSeconds)}
               </span>
             </div>
           </div>
@@ -1560,6 +1720,12 @@ function WorkspacePage() {
             </div>
             <div className="workspace-content-tools">
               {scanStatusText ? <span className="search-inline-status">{scanStatusText}</span> : null}
+              <DurationStepper
+                ariaLabel="Whitney scan duration"
+                durationSeconds={whitneyDemandScanDurationSeconds}
+                disabled={scanDisabled}
+                onChange={handleWhitneyDemandScanDurationChange}
+              />
               <button type="button" className="action-button primary compact" disabled={scanDisabled} onClick={handleStartWhitneyDemandScan}>
                 {scanState.pending ? 'Sensing...' : 'Start scan'}
               </button>
@@ -1574,7 +1740,7 @@ function WorkspacePage() {
                 </button>
               ) : null}
               <span className="search-countdown">
-                {formatWhitneyDemandScanTimer(scanState)}
+                {formatWhitneyDemandScanTimer(scanState, whitneyDemandScanDurationSeconds)}
               </span>
             </div>
           </div>
@@ -2069,7 +2235,7 @@ function WorkspaceQueueColumn({ column, statusOptions, statusFilter, onStatusTog
               key={item.id}
               item={item}
               onOpen={
-                column.id === 'human_review'
+                ['human_review', 'ux_feedback'].includes(column.id)
                   ? onReviewOpen
                   : column.id === 'publication'
                     ? onPublishedOpen
@@ -2225,6 +2391,39 @@ function SupplementalPhotoStrip({ photos }) {
         ))}
       </div>
     </section>
+  );
+}
+
+function PublishedSymbolCommentHistory({ state }) {
+  if (state.loading) {
+    return <p className="inline-status info">Loading comment history…</p>;
+  }
+
+  if (!state.items?.length) {
+    return (
+      <div className="empty-state compact">
+        <h4>No comments yet</h4>
+        <p>{state.message || 'Comments added from the Catalog command bar will appear here.'}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="comment-history-list" aria-live="polite">
+      {state.items.map((comment) => (
+        <article key={comment.id} className="comment-history-card">
+          <div className="comment-history-meta">
+            <strong>{comment.submittedBy || 'Unknown'}</strong>
+            <span>{formatPublishedDateTime(comment.createdAt)}</span>
+          </div>
+          <p>{comment.detail}</p>
+          <div className="tag-row compact">
+            <span className="tag-chip">{comment.kind === 'review_request' ? 'Review request' : 'Comment'}</span>
+            <span className="tag-chip">{comment.status || 'open'}</span>
+          </div>
+        </article>
+      ))}
+    </div>
   );
 }
 
@@ -3401,16 +3600,9 @@ function fileFormatLabel(file) {
   return extension || file.type || 'Unknown';
 }
 
-function formatCountdown(seconds) {
-  const safeSeconds = Math.max(0, Math.ceil(seconds));
-  const minutes = Math.floor(safeSeconds / 60);
-  const remainder = safeSeconds % 60;
-  return `${minutes}:${String(remainder).padStart(2, '0')}`;
-}
-
-function formatScottSearchTimer(searchState) {
+function formatScottSearchTimer(searchState, configuredDurationSeconds = SCOTT_SOURCE_SEARCH_DURATION_SECONDS) {
   if (!searchState.result) {
-    return formatCountdown(SCOTT_SOURCE_SEARCH_DURATION_SECONDS);
+    return formatCountdown(configuredDurationSeconds);
   }
   if (searchState.remainingSeconds > 0) {
     return formatCountdown(searchState.remainingSeconds);
@@ -3461,9 +3653,9 @@ function hannahCurationStatusText(curationState) {
   return `Hannah queue item ${curationState.result.queueItemId} is ${statusLabel}.`;
 }
 
-function formatWhitneyDemandScanTimer(scanState) {
+function formatWhitneyDemandScanTimer(scanState, configuredDurationSeconds = WHITNEY_DEMAND_SCAN_DURATION_SECONDS) {
   if (!scanState.result) {
-    return formatCountdown(WHITNEY_DEMAND_SCAN_DURATION_SECONDS);
+    return formatCountdown(configuredDurationSeconds);
   }
   if (scanState.remainingSeconds > 0) {
     return formatCountdown(scanState.remainingSeconds);
@@ -3482,7 +3674,7 @@ function whitneyDemandScanStatusText(scanState) {
   return `Whitney queue item ${scanState.result.queueItemId} is ${statusLabel}.`;
 }
 
-function useWhitneyDemandSensingControls({ enabled = true, intelligenceActive = false } = {}) {
+function useWhitneyDemandSensingControls({ enabled = true, intelligenceActive = false, configuredDurationSeconds = WHITNEY_DEMAND_SCAN_DURATION_SECONDS } = {}) {
   const stopRequestedRef = useRef(false);
   const [scanState, setScanState] = useState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
   const [signalsSort, setSignalsSort] = useState({ key: 'lastSeenAt', direction: 'desc' });
@@ -3599,7 +3791,7 @@ function useWhitneyDemandSensingControls({ enabled = true, intelligenceActive = 
       return;
     }
 
-    const durationSeconds = WHITNEY_DEMAND_SCAN_DURATION_SECONDS;
+    const durationSeconds = configuredDurationSeconds;
     stopRequestedRef.current = false;
     const startedAt = new Date();
     const expectedCompletedAt = new Date(startedAt.getTime() + durationSeconds * 1000).toISOString();
@@ -3628,7 +3820,7 @@ function useWhitneyDemandSensingControls({ enabled = true, intelligenceActive = 
         stopping: false,
         result: payload,
         error: '',
-        remainingSeconds: payload.durationSeconds || WHITNEY_DEMAND_SCAN_DURATION_SECONDS
+        remainingSeconds: payload.durationSeconds || configuredDurationSeconds
       });
     }).catch((scanError) => {
       setScanState({
@@ -3858,7 +4050,7 @@ function useHannahCurationControls({ enabled = true, curationActive = false } = 
   };
 }
 
-function useScottSourceDiscoveryControls({ enabled = true, sourcesActive = false, onSearchStarted, onSearchStopped } = {}) {
+function useScottSourceDiscoveryControls({ enabled = true, sourcesActive = false, configuredDurationSeconds = SCOTT_SOURCE_SEARCH_DURATION_SECONDS, onSearchStarted, onSearchStopped } = {}) {
   const stopRequestedRef = useRef(false);
   const [searchState, setSearchState] = useState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
   const [sourcesSort, setSourcesSort] = useState({ key: 'lastSeenAt', direction: 'desc' });
@@ -3997,7 +4189,7 @@ function useScottSourceDiscoveryControls({ enabled = true, sourcesActive = false
     }
 
     stopRequestedRef.current = false;
-    const durationSeconds = SCOTT_SOURCE_SEARCH_DURATION_SECONDS;
+    const durationSeconds = configuredDurationSeconds;
     const startedAt = new Date();
     const expectedCompletedAt = new Date(startedAt.getTime() + durationSeconds * 1000).toISOString();
     setSearchState({
@@ -4021,7 +4213,7 @@ function useScottSourceDiscoveryControls({ enabled = true, sourcesActive = false
       if (stopRequestedRef.current) {
         onSearchStopped?.({
           queueItemId: payload.queueItemId,
-          remainingSeconds: SCOTT_SOURCE_SEARCH_DURATION_SECONDS
+          remainingSeconds: durationSeconds
         });
         setSearchState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
         return stopScottSourceSearch(payload.queueItemId).catch(() => {});
@@ -4033,7 +4225,7 @@ function useScottSourceDiscoveryControls({ enabled = true, sourcesActive = false
         stopping: false,
         result: payload,
         error: '',
-        remainingSeconds: payload.durationSeconds || SCOTT_SOURCE_SEARCH_DURATION_SECONDS
+        remainingSeconds: payload.durationSeconds || configuredDurationSeconds
       });
     }).catch((searchError) => {
       setSearchState({
@@ -4053,7 +4245,7 @@ function useScottSourceDiscoveryControls({ enabled = true, sourcesActive = false
     }
 
     stopRequestedRef.current = true;
-    const stoppedRemainingSeconds = searchState.remainingSeconds || SCOTT_SOURCE_SEARCH_DURATION_SECONDS;
+    const stoppedRemainingSeconds = searchState.remainingSeconds || configuredDurationSeconds;
     onSearchStopped?.({ queueItemId, remainingSeconds: stoppedRemainingSeconds });
     setSearchState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
 

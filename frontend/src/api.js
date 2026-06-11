@@ -815,6 +815,41 @@ export async function fetchPublishedSymbols() {
   }
 }
 
+export async function fetchPublishedSymbolComments(symbolId) {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
+  }
+
+  try {
+    const response = await fetch(workspaceUrl(`/published/symbols/${encodeURIComponent(symbolId)}/comments`), { cache: 'no-store' });
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Published symbol comments load failed.',
+        items: []
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: 'Live comment history loaded.',
+      commentCount: Number(payload?.commentCount || 0),
+      items: Array.isArray(payload?.items) ? payload.items : []
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'offline',
+      message: error instanceof Error ? error.message : 'Published symbol comments load failed.',
+      items: []
+    };
+  }
+}
+
 export async function submitPublishedSymbolCommand({ command, symbolIds, comment }) {
   if (!appConfig.apiRoot) {
     throw new Error('API root is not configured.');

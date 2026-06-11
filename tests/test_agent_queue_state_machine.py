@@ -133,6 +133,43 @@ class AgentQueueStateMachineTests(unittest.TestCase):
         self.assertEqual(dumped["items"][0]["ruleCode"], "agent_queue_active_db_missing_runtime")
         self.assertTrue(dumped["items"][0]["observationalOnly"])
 
+    def test_reggie_response_prefers_symbol_display_id_in_operator_detail(self) -> None:
+        queue_id = UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+        payload = {
+            "dry_run": True,
+            "active_only": True,
+            "agents": ["ed"],
+            "runtime_records_seen": 0,
+            "db_active_rows_inspected": 0,
+            "change_count": 0,
+            "missing_runtime_count": 1,
+            "runtime_orphan_count": 0,
+            "skipped_count": 0,
+            "control_suggestion_count": 1,
+            "control_suggestions": build_reggie_queue_control_suggestions(
+                missing_runtime=[
+                    {
+                        "queue_item_id": str(queue_id),
+                        "agent": "ed",
+                        "db_status": "queued",
+                        "source_type": "published_symbol_review_request",
+                    }
+                ],
+                skipped=[],
+                runtime_orphans=[],
+            ),
+        }
+
+        response = _build_reggie_queue_control_response(
+            payload,
+            queue_display_lookup={str(queue_id): "0009-18"},
+        )
+        item = response.model_dump()["items"][0]
+
+        self.assertIn("ed queue item 0009-18", item["detail"])
+        self.assertIn(str(queue_id), item["detail"])
+        self.assertEqual(item["evidence"]["symbol_display_id"], "0009-18")
+
 
 if __name__ == "__main__":
     unittest.main()

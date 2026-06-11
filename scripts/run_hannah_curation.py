@@ -155,9 +155,14 @@ def build_symbol_curation_queue_item(
     """Build one traceable Hannah queue card for a single published symbol."""
     created_at = created_at or utc_now()
     queue_item_id = queue_item_id or str(uuid.uuid4())
+    symbol_display_id = symbol.get("symbol_display_id") or symbol.get("workspace_display_name")
     payload = {
         "task_type": HANNAH_CARD_SOURCE_TYPE,
-        "display_name": f"Hannah photo curation: {symbol.get('name') or symbol.get('symbol_slug')}",
+        "display_name": symbol_display_id or f"Hannah photo curation: {symbol.get('name') or symbol.get('symbol_slug')}",
+        "workspace_display_name": symbol_display_id,
+        "symbol_display_id": symbol_display_id,
+        "package_display_id": symbol.get("package_display_id"),
+        "package_symbol_sequence": symbol.get("package_symbol_sequence"),
         "stage": "Catalogue curation",
         "duration_seconds": CARD_DURATION_SECONDS,
         "started_by": "hannah_seeder",
@@ -240,11 +245,18 @@ def load_eligible_symbols(db_env_file: str | None, limit: int = 200) -> list[dic
                     sr.id::text AS symbol_revision_id,
                     pp.id::text AS published_page_id,
                     pp.title AS page_title,
+                    COALESCE(sr.payload_json->>'package_display_id', pk.pack_code) AS package_display_id,
+                    COALESCE((NULLIF(sr.payload_json->>'package_symbol_sequence', ''))::int, pe.sort_order) AS package_symbol_sequence,
+                    CONCAT(COALESCE(sr.payload_json->>'package_display_id', pk.pack_code), '-', COALESCE((NULLIF(sr.payload_json->>'package_symbol_sequence', ''))::int, pe.sort_order)) AS symbol_display_id,
+                    CONCAT(COALESCE(sr.payload_json->>'package_display_id', pk.pack_code), '-', COALESCE((NULLIF(sr.payload_json->>'package_symbol_sequence', ''))::int, pe.sort_order)) AS workspace_display_name,
                     COALESCE(hs.attempt_count, 0) AS attempt_count,
                     hs.last_attempt_at,
                     count(hp.id) FILTER (WHERE hp.status = 'attached' AND hp.object_key IS NOT NULL) AS photo_count
                 FROM published_pages pp
                 JOIN publication_packs pk ON pk.id = pp.pack_id
+                JOIN pack_entries pe ON pe.pack_id = pk.id
+                    AND pe.published_page_id = pp.id
+                    AND pe.symbol_revision_id = pp.current_symbol_revision_id
                 JOIN symbol_revisions sr ON sr.id = pp.current_symbol_revision_id
                 JOIN governed_symbols gs ON gs.id = sr.symbol_id
                 LEFT JOIN hannah_symbol_curation_states hs ON hs.symbol_id = gs.id
@@ -254,7 +266,7 @@ def load_eligible_symbols(db_env_file: str | None, limit: int = 200) -> list[dic
                     AND sr.lifecycle_state = 'published'
                     AND (hs.status IS NULL OR hs.status NOT IN ('blocked', 'unsuitable'))
                     AND (hs.last_attempt_at IS NULL OR hs.last_attempt_at < NOW() - (:cooldown_days * INTERVAL '1 day'))
-                GROUP BY gs.id, gs.slug, gs.canonical_name, gs.category, gs.discipline, sr.id, pp.id, pp.title, hs.attempt_count, hs.last_attempt_at
+                GROUP BY gs.id, gs.slug, gs.canonical_name, gs.category, gs.discipline, sr.id, sr.payload_json, pp.id, pp.title, pk.pack_code, pe.sort_order, hs.attempt_count, hs.last_attempt_at
                 HAVING count(hp.id) FILTER (WHERE hp.status = 'attached' AND hp.object_key IS NOT NULL) < :max_photos
                 ORDER BY hs.last_attempt_at NULLS FIRST, COALESCE(hs.attempt_count, 0), gs.canonical_name
                 LIMIT :limit

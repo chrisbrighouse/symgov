@@ -58,7 +58,7 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
         "runtime_root": Path("/data/.openclaw/workspaces/ed/runtime"),
         "runner_path": Path("/data/.openclaw/workspaces/ed/run_ed_feedback.py"),
         "module": "symgov_ed_runner_worker",
-        "persist_db": False,
+        "persist_db": True,
     },
     "hannah": {
         "runtime_root": Path("/data/.openclaw/workspaces/hannah/runtime"),

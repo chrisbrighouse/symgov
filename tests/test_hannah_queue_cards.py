@@ -20,6 +20,10 @@ class HannahQueueCardTests(unittest.TestCase):
             "published_page_id": "33333333-3333-3333-3333-333333333333",
             "page_title": "Gate Valve",
             "photo_count": 1,
+            "package_display_id": "0004",
+            "package_symbol_sequence": 12,
+            "symbol_display_id": "0004-12",
+            "workspace_display_name": "0004-12",
         }
 
         card = build_symbol_curation_queue_item(
@@ -34,6 +38,11 @@ class HannahQueueCardTests(unittest.TestCase):
         self.assertEqual(card["status"], "queued")
         self.assertEqual(card["payload_json"]["symbol_id"], symbol["symbol_id"])
         self.assertEqual(card["payload_json"]["symbol_slug"], "gate-valve")
+        self.assertEqual(card["payload_json"]["display_name"], "0004-12")
+        self.assertEqual(card["payload_json"]["workspace_display_name"], "0004-12")
+        self.assertEqual(card["payload_json"]["symbol_display_id"], "0004-12")
+        self.assertEqual(card["payload_json"]["package_display_id"], "0004")
+        self.assertEqual(card["payload_json"]["package_symbol_sequence"], 12)
         self.assertEqual(card["payload_json"]["max_photos_per_symbol"], 2)
         self.assertEqual(card["payload_json"]["cooldown_days"], 7)
 

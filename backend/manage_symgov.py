@@ -203,7 +203,7 @@ def main():
             apply=args.apply,
             active_only=not args.include_terminal_db_rows,
         )
-        print(json.dumps(result, indent=2))
+        print(json.dumps(result, indent=2, default=str))
         return
 
     if args.command == "evaluate-automation-gates":

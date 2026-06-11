@@ -412,6 +412,45 @@ a {
   min-width: 0;
 }
 
+.duration-stepper {
+  display: inline-flex;
+  align-items: end;
+  gap: 0.45rem;
+  padding: 0.42rem 0.55rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.duration-stepper-part {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.duration-stepper-part span {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.duration-stepper-part input {
+  width: 4.3rem;
+  padding: 0.42rem 0.5rem;
+  border: 1px solid var(--stroke);
+  border-radius: 0.55rem;
+  font-weight: 800;
+  text-align: center;
+}
+
+.duration-stepper-separator {
+  align-self: center;
+  margin-bottom: 0.1rem;
+  font-weight: 900;
+  color: var(--text-soft);
+}
+
 .search-inline-status {
   max-width: min(42rem, 44vw);
   overflow: hidden;
@@ -1967,6 +2006,69 @@ a {
 .standards-detail-drawer {
   max-height: calc(100vh - 14rem);
   overflow: auto;
+}
+
+.published-detail-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.45rem;
+  margin: 1rem 0;
+  padding: 0.25rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  background: rgba(238, 246, 251, 0.58);
+}
+
+.published-detail-tabs button {
+  border: 0;
+  border-radius: 0.55rem;
+  padding: 0.65rem 0.75rem;
+  background: transparent;
+  color: var(--text-soft);
+  font-weight: 900;
+}
+
+.published-detail-tabs button.active {
+  background: #ffffff;
+  color: var(--text-main);
+  box-shadow: 0 1px 4px rgba(30, 58, 75, 0.12);
+}
+
+.comment-history-list {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.comment-history-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.comment-history-card p {
+  margin: 0;
+  line-height: 1.55;
+  color: var(--text-main);
+}
+
+.comment-history-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+}
+
+.comment-history-meta strong {
+  color: var(--text-main);
+}
+
+.tag-row.compact {
+  margin-top: 0;
 }
 
 .detail-list {
