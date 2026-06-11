@@ -53,7 +53,7 @@ from ..agent_queue_reconciliation import reconcile_agent_queue_state
 from ..publication_handoff import execute_publication_handoff
 from ..property_options import remember_property_option
 from ..review_followup_handoff import execute_review_followup_handoff
-from ..runtime import coerce_uuid, download_object_bytes
+from ..runtime import SCOTT_SOURCE_DISCOVERY_DEFAULT_SEED_QUERY, coerce_uuid, download_object_bytes
 from ..schemas import (
     WorkspaceAgentQueueItemListResponse,
     WorkspaceAgentQueueItemResponse,
@@ -983,6 +983,43 @@ def compact_text(value: str | None, limit: int) -> str:
     return text_value[:limit]
 
 
+def is_package_identifier(value: str | None) -> bool:
+    text_value = str(value or "").strip()
+    return bool(re.fullmatch(r"\d{3,4}[A-Z]?", text_value, flags=re.IGNORECASE) or re.fullmatch(r"\d{4}-\d+", text_value))
+
+
+def humanize_symbol_name(value: str | None) -> str:
+    text_value = str(value or "").strip()
+    if not text_value:
+        return ""
+    stem = Path(text_value).stem if Path(text_value).suffix else text_value
+    parts = [part for part in re.split(r"[^A-Za-z0-9]+", stem) if part]
+    while parts and parts[-1].lower() in {"a11y", "accessible", "accessibility"}:
+        parts.pop()
+    if not parts:
+        return ""
+    return " ".join(part.capitalize() for part in parts)
+
+
+def default_review_symbol_name(
+    *,
+    package_id: str | None,
+    primary_symbol_id: str | None,
+    classification_record: ClassificationRecord | None = None,
+) -> str:
+    candidates = []
+    if classification_record is not None:
+        candidates.extend([classification_record.symbol_key, classification_record.origin_file_name])
+    candidates.append(primary_symbol_id)
+    for candidate in candidates:
+        if not candidate or is_package_identifier(candidate):
+            continue
+        name = humanize_symbol_name(candidate)
+        if name and not is_package_identifier(name):
+            return compact_text(name, 50)
+    return compact_text(package_id or primary_symbol_id, 50)
+
+
 FORMAT_LABELS = {
     "dxf": "DXF",
     "jpeg": "JPEG",
@@ -1288,7 +1325,11 @@ def build_validation_workspace_item(
                 session,
                 review_case=review_case,
                 classification_record=classification_record,
-                default_name=package_id or primary_symbol_id,
+                default_name=default_review_symbol_name(
+                    package_id=package_id,
+                    primary_symbol_id=primary_symbol_id,
+                    classification_record=classification_record,
+                ),
                 default_description=build_review_summary(validation_report, len(children), source_file_name),
                 default_format=symbol_format,
             )
@@ -1794,7 +1835,7 @@ def start_scott_source_search(
         "display_name": "Source discovery search",
         "stage": "Web source discovery",
         "duration_seconds": request.durationSeconds,
-        "seed_query": request.seedQuery or "commons.wikimedia.org P&ID symbols",
+        "seed_query": request.seedQuery or SCOTT_SOURCE_DISCOVERY_DEFAULT_SEED_QUERY,
         "memory_site_count": memory_count,
         "preferred_sites": preferred_sites,
         "ignored_domains": ignored_domains,

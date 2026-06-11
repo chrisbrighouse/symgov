@@ -144,22 +144,299 @@ AGENT_DEFINITION_SEEDS = (
     },
 )
 
+SCOTT_SOURCE_DISCOVERY_DEFAULT_SEED_QUERY = (
+    "ProjectMaterials P&ID symbols ISA-5.1 ISO 14617 IEC 60617 NECA 100 QElectroTech GD&T"
+)
+
 SCOTT_SOURCE_DISCOVERY_SITE_SEEDS = (
+    {
+        "domain": "projectmaterials.com",
+        "url": "https://projectmaterials.com/pid-symbols/",
+        "title": "ProjectMaterials P&ID symbols",
+        "description": (
+            "Broad, practical P&ID symbol list grouped around real engineering categories. "
+            "Use as an immediate seed source, then map candidates back to ISA-5.1 and ISO 14617."
+        ),
+        "industry": "piping and instrumentation",
+        "process": "P&ID symbol intake",
+        "organization_type": "practical engineering reference",
+        "source_prompt": (
+            "Inspect ProjectMaterials first for broad P&ID category coverage. Treat the site as an intake/reference "
+            "source, not the authority; map every candidate symbol back to ISA-5.1 and/or ISO 14617 before validation."
+        ),
+        "include_next_run": True,
+        "symbol_formats_json": ["web", "image", "P&ID"],
+        "evidence_json": {
+            "recommended_use": "immediate_seed_source",
+            "authority_role": "candidate_source_only",
+            "map_back_to": ["ISA-5.1", "ISO 14617"],
+            "rights_note": "Check rights, reuse terms, provenance, and standard alignment before reuse.",
+        },
+        "status": "recommended",
+        "relevance_score": Decimal("0.9900"),
+    },
+    {
+        "domain": "vistaprojects.com",
+        "url": "https://www.vistaprojects.com/",
+        "title": "Vista Projects P&ID resources",
+        "description": "Practical engineering articles and P&ID references useful for intake and validation context.",
+        "industry": "piping and instrumentation",
+        "process": "P&ID symbol intake and validation",
+        "organization_type": "engineering reference publisher",
+        "source_prompt": (
+            "Use Vista Projects as a practical P&ID reference source. Extract candidate categories cautiously and "
+            "cross-check against ISA-5.1 / ISO 14617 before creating governed records."
+        ),
+        "include_next_run": True,
+        "symbol_formats_json": ["web", "P&ID"],
+        "evidence_json": {
+            "recommended_use": "candidate_source",
+            "map_back_to": ["ISA-5.1", "ISO 14617"],
+            "rights_note": "Reference/intake only until provenance and reuse terms are checked.",
+        },
+        "status": "recommended",
+        "relevance_score": Decimal("0.9400"),
+    },
+    {
+        "domain": "qelectrotech.org",
+        "url": "https://qelectrotech.org/",
+        "title": "QElectroTech",
+        "description": "Open electrical diagram editor with symbol collections useful for electrical candidate intake.",
+        "industry": "electrical",
+        "process": "electrical symbol intake",
+        "organization_type": "open-source symbol library",
+        "source_prompt": (
+            "Use QElectroTech for electrical candidate symbols and file references. Map candidates back to IEC 60617 "
+            "and NECA 100 where applicable; verify licence/provenance before reuse."
+        ),
+        "include_next_run": True,
+        "symbol_formats_json": ["QET", "XML", "SVG", "electrical"],
+        "evidence_json": {
+            "recommended_use": "candidate_source",
+            "map_back_to": ["IEC 60617", "NECA 100"],
+            "rights_note": "Check licence, provenance, and standard alignment before importing downloadable symbols.",
+        },
+        "status": "recommended",
+        "relevance_score": Decimal("0.9300"),
+    },
+    {
+        "domain": "necanet.org",
+        "url": "https://www.necanet.org/",
+        "title": "NECA 100",
+        "description": "Electrical symbols standard/reference to use alongside IEC 60617 for electrical taxonomy alignment.",
+        "industry": "electrical",
+        "process": "electrical taxonomy alignment",
+        "organization_type": "standards body",
+        "source_prompt": (
+            "Use NECA 100 as an electrical standards/taxonomy reference with IEC 60617. Do not treat website excerpts "
+            "as reusable symbol artwork unless rights are explicitly checked."
+        ),
+        "include_next_run": True,
+        "symbol_formats_json": ["standard", "electrical"],
+        "evidence_json": {
+            "recommended_use": "standards_backbone",
+            "authority_role": "taxonomy_alignment",
+            "pair_with": ["IEC 60617"],
+            "rights_note": "Standards references guide taxonomy; symbol reuse still requires rights/provenance checks.",
+        },
+        "status": "recommended",
+        "relevance_score": Decimal("0.9200"),
+    },
+    {
+        "domain": "webstore.iec.ch",
+        "url": "https://webstore.iec.ch/en/publication/602",
+        "title": "IEC 60617 graphical symbols",
+        "description": "Authoritative electrical graphical-symbol taxonomy backbone.",
+        "industry": "electrical",
+        "process": "standards taxonomy alignment",
+        "organization_type": "standards catalogue",
+        "source_prompt": (
+            "Use IEC 60617 as the authoritative electrical taxonomy backbone. Use public metadata for alignment; "
+            "do not copy protected standard content or artwork without rights clearance."
+        ),
+        "include_next_run": True,
+        "symbol_formats_json": ["standard", "electrical"],
+        "evidence_json": {
+            "recommended_use": "authoritative_taxonomy_backbone",
+            "applies_to": ["electrical"],
+            "rights_note": "Use for classification/alignment; protected standard content is not intake artwork.",
+        },
+        "status": "recommended",
+        "relevance_score": Decimal("0.9800"),
+    },
+    {
+        "domain": "isa.org",
+        "url": "https://www.isa.org/standards-and-publications/isa-standards",
+        "title": "ISA-5.1 instrumentation symbols",
+        "description": "Authoritative instrumentation/P&ID symbol taxonomy backbone.",
+        "industry": "piping and instrumentation",
+        "process": "P&ID taxonomy alignment",
+        "organization_type": "standards body",
+        "source_prompt": (
+            "Use ISA-5.1 as the authoritative P&ID/instrumentation taxonomy reference. Candidate symbols from "
+            "ProjectMaterials or Vista Projects must be mapped back to ISA-5.1 / ISO 14617."
+        ),
+        "include_next_run": True,
+        "symbol_formats_json": ["standard", "P&ID", "instrumentation"],
+        "evidence_json": {
+            "recommended_use": "authoritative_taxonomy_backbone",
+            "applies_to": ["P&ID", "instrumentation"],
+            "rights_note": "Use for taxonomy alignment; do not copy protected standard content without clearance.",
+        },
+        "status": "recommended",
+        "relevance_score": Decimal("0.9800"),
+    },
+    {
+        "domain": "iso.org",
+        "url": "https://www.iso.org/standard/81532.html",
+        "title": "ISO 14617 / ISO 1101 graphical symbol standards",
+        "description": "Authoritative ISO backbone for diagram symbols and GD&T/geometrical tolerancing references.",
+        "industry": "cross-industry",
+        "process": "standards taxonomy alignment",
+        "organization_type": "standards catalogue",
+        "source_prompt": (
+            "Use ISO 14617 as an authoritative graphical-symbol taxonomy backbone and ISO 1101 for GD&T alignment. "
+            "Use public metadata only unless rights to standard content are confirmed."
+        ),
+        "include_next_run": True,
+        "symbol_formats_json": ["standard", "P&ID", "mechanical", "GD&T"],
+        "evidence_json": {
+            "recommended_use": "authoritative_taxonomy_backbone",
+            "standards": ["ISO 14617", "ISO 1101"],
+            "rights_note": "Standards guide taxonomy/alignment; protected content is not an intake asset.",
+        },
+        "status": "recommended",
+        "relevance_score": Decimal("0.9700"),
+    },
+    {
+        "domain": "asme.org",
+        "url": "https://www.asme.org/codes-standards/find-codes-standards/y14-5-dimensioning-tolerancing",
+        "title": "ASME Y14.5 GD&T",
+        "description": "Authoritative GD&T/geometrical tolerancing reference for mechanical symbol taxonomy.",
+        "industry": "mechanical",
+        "process": "GD&T taxonomy alignment",
+        "organization_type": "standards body",
+        "source_prompt": (
+            "Use ASME Y14.5 with ISO 1101 for mechanical/GD&T taxonomy alignment. Use accessible metadata and "
+            "secondary descriptions for intake; do not copy protected standard diagrams without clearance."
+        ),
+        "include_next_run": True,
+        "symbol_formats_json": ["standard", "mechanical", "GD&T"],
+        "evidence_json": {
+            "recommended_use": "authoritative_taxonomy_backbone",
+            "pair_with": ["ISO 1101", "Keyence", "GD&T Basics"],
+            "rights_note": "Use for classification/alignment only until reuse rights are cleared.",
+        },
+        "status": "recommended",
+        "relevance_score": Decimal("0.9600"),
+    },
+    {
+        "domain": "keyence.com",
+        "url": "https://www.keyence.com/ss/products/measure-sys/gd-and-t/",
+        "title": "Keyence GD&T explanations",
+        "description": "Readable GD&T descriptions useful for mechanical symbol descriptions and validation context.",
+        "industry": "mechanical",
+        "process": "GD&T description support",
+        "organization_type": "manufacturer reference",
+        "source_prompt": (
+            "Use Keyence for readable GD&T explanations, not as the authority. Map terms back to ASME Y14.5 / ISO 1101 "
+            "and avoid reusing diagrams unless rights are clear."
+        ),
+        "include_next_run": True,
+        "symbol_formats_json": ["web", "mechanical", "GD&T"],
+        "evidence_json": {
+            "recommended_use": "readable_description_source",
+            "map_back_to": ["ASME Y14.5", "ISO 1101"],
+            "rights_note": "Reference/intake only until reuse terms and provenance are checked.",
+        },
+        "status": "recommended",
+        "relevance_score": Decimal("0.9000"),
+    },
+    {
+        "domain": "gdandtbasics.com",
+        "url": "https://www.gdandtbasics.com/gdt-symbols/",
+        "title": "GD&T Basics symbols",
+        "description": "Readable GD&T symbol descriptions for mechanical intake and operator-friendly explanations.",
+        "industry": "mechanical",
+        "process": "GD&T description support",
+        "organization_type": "educational reference",
+        "source_prompt": (
+            "Use GD&T Basics for readable descriptions and candidate terminology. Map candidates back to ASME Y14.5 / "
+            "ISO 1101; treat site diagrams as reference only unless reuse rights are clear."
+        ),
+        "include_next_run": True,
+        "symbol_formats_json": ["web", "mechanical", "GD&T"],
+        "evidence_json": {
+            "recommended_use": "readable_description_source",
+            "map_back_to": ["ASME Y14.5", "ISO 1101"],
+            "rights_note": "Reference/intake only until reuse terms and provenance are checked.",
+        },
+        "status": "recommended",
+        "relevance_score": Decimal("0.8900"),
+    },
+    {
+        "domain": "freecad.org",
+        "url": "https://www.freecad.org/",
+        "title": "FreeCAD resources",
+        "description": "Open CAD ecosystem and symbol/reference material useful for intake context, with rights checks required.",
+        "industry": "mechanical",
+        "process": "CAD reference intake",
+        "organization_type": "open-source CAD project",
+        "source_prompt": (
+            "Use FreeCAD resources as reference/intake only. Downloadable CAD libraries must not be promoted to reusable "
+            "assets until licence, provenance, rights, and standard alignment have been checked."
+        ),
+        "include_next_run": False,
+        "symbol_formats_json": ["CAD", "SVG", "mechanical"],
+        "evidence_json": {
+            "recommended_use": "candidate_reference_source",
+            "rights_note": "Downloadable CAD libraries are reference/intake only until rights and provenance are checked.",
+        },
+        "status": "candidate",
+        "relevance_score": Decimal("0.7800"),
+    },
+    {
+        "domain": "traceparts.com",
+        "url": "https://www.traceparts.com/",
+        "title": "Manufacturer CAD libraries",
+        "description": "Representative manufacturer CAD-library aggregator for candidate/reference intake only.",
+        "industry": "cross-industry",
+        "process": "manufacturer CAD reference intake",
+        "organization_type": "manufacturer CAD library aggregator",
+        "source_prompt": (
+            "Treat manufacturer CAD libraries as reference/intake only. Do not reuse or publish downloaded CAD "
+            "symbols until rights, reuse terms, provenance, and alignment to IEC/ISO/ISA/ASME standards are checked."
+        ),
+        "include_next_run": False,
+        "symbol_formats_json": ["CAD", "manufacturer"],
+        "evidence_json": {
+            "recommended_use": "candidate_reference_source",
+            "rights_note": "Reference/intake only until rights, reuse terms, provenance, and standard alignment are checked.",
+        },
+        "status": "candidate",
+        "relevance_score": Decimal("0.7600"),
+    },
     {
         "domain": "commons.wikimedia.org",
         "url": "https://commons.wikimedia.org/w/index.php?search=P%26ID+symbols&title=Special%3AMediaSearch&type=image",
         "title": "Wikimedia Commons",
-        "description": "Useful source of symbol imagery, especially for P&ID symbol discovery.",
+        "description": "Supplemental public media repository; useful after priority standards and practical engineering sources.",
         "industry": "cross-industry",
-        "process": "symbol discovery",
+        "process": "supplemental symbol discovery",
         "organization_type": "public media repository",
+        "source_prompt": (
+            "Use only as supplemental discovery after ProjectMaterials/Vista/QElectroTech/standards-backed sources. "
+            "Verify licence, provenance, and standard alignment before reuse."
+        ),
+        "include_next_run": False,
         "symbol_formats_json": ["image"],
         "evidence_json": {
-            "example_search": "P&ID symbols MediaSearch",
-            "note": "Approved as a good source of symbol information.",
+            "recommended_use": "supplemental_source",
+            "note": "No longer the primary seed source; prioritise standards-backed sources first.",
+            "rights_note": "Check licence, provenance, and standard alignment before reuse.",
         },
-        "status": "recommended",
-        "relevance_score": Decimal("0.9900"),
+        "status": "candidate",
+        "relevance_score": Decimal("0.6500"),
     },
     {
         "domain": "linecad.com",
@@ -169,21 +446,8 @@ SCOTT_SOURCE_DISCOVERY_SITE_SEEDS = (
         "industry": "cross-industry",
         "process": "symbol discovery",
         "organization_type": "website",
-        "symbol_formats_json": [],
-        "evidence_json": {
-            "note": "Explicitly ignored.",
-        },
-        "status": "ignored",
-        "relevance_score": Decimal("0.0000"),
-    },
-    {
-        "domain": "freecads.com",
-        "url": "https://freecads.com",
-        "title": "freecads.com",
-        "description": "Ignored for Scott source discovery per operator guidance.",
-        "industry": "cross-industry",
-        "process": "symbol discovery",
-        "organization_type": "website",
+        "source_prompt": None,
+        "include_next_run": False,
         "symbol_formats_json": [],
         "evidence_json": {
             "note": "Explicitly ignored.",
@@ -199,6 +463,8 @@ SCOTT_SOURCE_DISCOVERY_SITE_SEEDS = (
         "industry": "cross-industry",
         "process": "symbol discovery",
         "organization_type": "website",
+        "source_prompt": None,
+        "include_next_run": False,
         "symbol_formats_json": [],
         "evidence_json": {
             "note": "Explicitly ignored.",
@@ -214,6 +480,8 @@ SCOTT_SOURCE_DISCOVERY_SITE_SEEDS = (
         "industry": "cross-industry",
         "process": "symbol discovery",
         "organization_type": "website",
+        "source_prompt": None,
+        "include_next_run": False,
         "symbol_formats_json": [],
         "evidence_json": {
             "note": "Explicitly ignored.",
@@ -222,7 +490,6 @@ SCOTT_SOURCE_DISCOVERY_SITE_SEEDS = (
         "relevance_score": Decimal("0.0000"),
     },
 )
-
 
 def parse_timestamp(value: str | None) -> datetime:
     if not value:
@@ -750,12 +1017,16 @@ class RuntimePersistenceBridge:
                     "industry",
                     "process",
                     "organization_type",
+                    "source_prompt",
                     "status",
                 ):
                     if getattr(row, field) != spec[field]:
                         setattr(row, field, spec[field])
                         changed = True
 
+                if bool(row.include_next_run) != bool(spec.get("include_next_run", False)):
+                    row.include_next_run = bool(spec.get("include_next_run", False))
+                    changed = True
                 if list(row.symbol_formats_json or []) != list(spec["symbol_formats_json"]):
                     row.symbol_formats_json = list(spec["symbol_formats_json"])
                     changed = True

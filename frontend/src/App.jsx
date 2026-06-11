@@ -4208,7 +4208,7 @@ function useScottSourceDiscoveryControls({ enabled = true, sourcesActive = false
 
     startScottSourceSearch({
       durationSeconds,
-      seedQuery: 'commons.wikimedia.org P&ID symbols'
+      seedQuery: 'ProjectMaterials P&ID symbols ISA-5.1 ISO 14617 IEC 60617 NECA 100 QElectroTech GD&T'
     }).then((payload) => {
       if (stopRequestedRef.current) {
         onSearchStopped?.({
