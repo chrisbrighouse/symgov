@@ -238,8 +238,9 @@ class WorkspaceReggieQueueControlListResponse(BaseModel):
 
 
 class WorkspaceScottSourceSearchStartRequest(BaseModel):
-    durationSeconds: int = Field(default=120, ge=30, le=300)
-    seedQuery: str | None = Field(default=None, max_length=200)
+    durationSeconds: int
+    seedQuery: str | None = None
+    mode: str = "discovery"  # "discovery" or "download"
 
 
 class WorkspaceScottSourceSearchStartResponse(BaseModel):
@@ -248,6 +249,7 @@ class WorkspaceScottSourceSearchStartResponse(BaseModel):
     durationSeconds: int
     startedAt: str
     expectedCompletedAt: str
+    availableSeedQueries: list[str] = []
 
 
 class WorkspaceScottSourceSearchStopResponse(BaseModel):
@@ -269,6 +271,9 @@ class WorkspaceScottSourceSiteResponse(BaseModel):
     organizationType: str | None = None
     sourcePrompt: str | None = None
     includeNextRun: bool = False
+    requiresAuth: bool = False
+    authStatus: str = "no_auth"
+    authSecretKey: str | None = None
     symbolFormats: list[Any] = Field(default_factory=list)
     evidence: dict[str, Any] = Field(default_factory=dict)
     relevanceScore: float | None = None
@@ -283,6 +288,12 @@ class WorkspaceScottSourceSitePromptUpdateRequest(BaseModel):
 
 class WorkspaceScottSourceSiteIncludeNextRunUpdateRequest(BaseModel):
     includeNextRun: bool
+
+
+class WorkspaceScottSourceSiteAuthUpdateRequest(BaseModel):
+    requiresAuth: bool | None = None
+    authStatus: str | None = None
+    authSecretKey: str | None = Field(default=None, max_length=100)
 
 
 class WorkspaceScottSourceSiteStatusUpdateRequest(BaseModel):

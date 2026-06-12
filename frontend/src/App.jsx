@@ -150,6 +150,9 @@ const SCOTT_SOURCE_COLUMNS = [
   ['url', 'URL'],
   ['status', 'Status'],
   ['includeNextRun', 'Next run'],
+  ['requiresAuth', 'Auth required'],
+  ['authStatus', 'Auth status'],
+  ['authSecretKey', 'Auth secret'],
   ['sourcePrompt', 'Scott prompt'],
   ['relevanceScore', 'Score'],
   ['title', 'Title'],
@@ -1234,6 +1237,15 @@ function WorkspacePage() {
   const [stoppedSourceSearches, setStoppedSourceSearches] = useState({});
   const [lastWorkspaceRefresh, setLastWorkspaceRefresh] = useState(null);
   const [scottSearchDurationSeconds, setScottSearchDurationSeconds] = useState(SCOTT_SOURCE_SEARCH_DURATION_SECONDS);
+  const [scottSearchMode, setScottSearchMode] = useState('discovery'); // 'discovery' or 'download'
+  const [scottSeedQuery, setScottSeedQuery] = useState('ProjectMaterials P&ID symbols ISA-5.1 ISO 14617 IEC 60617 NECA 100 QElectroTech GD&T');
+  const [scottAvailableSeedQueries, setScottAvailableSeedQueries] = useState([
+    'ProjectMaterials P&ID symbols ISA-5.1 ISO 14617 IEC 60617 NECA 100 QElectroTech GD&T',
+    'Free engineering symbol library for P&ID',
+    'Process control valve P&ID symbols SVG library',
+    'Electrical substation single line diagram symbols IEC 60617 download',
+    'Fire alarm system plan symbols CAD blocks'
+  ]);
   const [whitneyDemandScanDurationSeconds, setWhitneyDemandScanDurationSeconds] = useState(WHITNEY_DEMAND_SCAN_DURATION_SECONDS);
   const {
     searchState,
@@ -1252,6 +1264,8 @@ function WorkspacePage() {
     enabled: Boolean(appConfig.apiRoot),
     sourcesActive: activeWorkspaceTab === 'sources',
     configuredDurationSeconds: scottSearchDurationSeconds,
+    configuredMode: scottSearchMode,
+    seedQuery: scottSeedQuery,
     onSearchStarted: (queueItemId) => {
       setStoppedSourceSearches((current) => {
         if (!queueItemId || !current[queueItemId]) {
@@ -1635,6 +1649,47 @@ function WorkspacePage() {
             </div>
             <div className="workspace-content-tools">
               {searchStatusText ? <span className="search-inline-status">{searchStatusText}</span> : null}
+              <div className="search-mode-toggle" style={{ marginRight: '1rem', display: 'flex', gap: '0.25rem', padding: '0.2rem', background: 'rgba(29, 43, 54, 0.05)', border: '1px solid var(--stroke)', borderRadius: 'var(--radius-md)', height: '2.35rem', alignItems: 'center' }}>
+                <button
+                  type="button"
+                  className={`action-button compact ${scottSearchMode === 'discovery' ? 'primary' : 'ghost'}`}
+                  style={scottSearchMode === 'discovery' ? {} : { background: 'transparent', border: 'none', color: 'var(--text-soft)', boxShadow: 'none' }}
+                  onClick={() => setScottSearchMode('discovery')}
+                >
+                  Discovery
+                </button>
+                <button
+                  type="button"
+                  className={`action-button compact ${scottSearchMode === 'download' ? 'primary' : 'ghost'}`}
+                  style={scottSearchMode === 'download' ? {} : { background: 'transparent', border: 'none', color: 'var(--text-soft)', boxShadow: 'none' }}
+                  onClick={() => setScottSearchMode('download')}
+                >
+                  Download
+                </button>
+              </div>
+              <div className="seed-query-selector" style={{ marginRight: '1rem' }}>
+                <select 
+                  className="field compact" 
+                  style={{ 
+                    background: '#ffffff', 
+                    color: 'var(--text-main)', 
+                    border: '1px solid var(--stroke)', 
+                    borderRadius: 'var(--radius-md)', 
+                    padding: '0.42rem 0.75rem',
+                    height: '2.35rem',
+                    fontSize: '0.82rem',
+                    fontWeight: '600',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                  value={scottSeedQuery}
+                  onChange={(e) => setScottSeedQuery(e.target.value)}
+                >
+                  {scottAvailableSeedQueries.map((q) => (
+                    <option key={q} value={q} style={{ background: '#ffffff', color: 'var(--text-main)' }}>{q}</option>
+                  ))}
+                </select>
+              </div>
               <DurationStepper
                 ariaLabel="Scott search duration"
                 durationSeconds={scottSearchDurationSeconds}
@@ -4050,7 +4105,15 @@ function useHannahCurationControls({ enabled = true, curationActive = false } = 
   };
 }
 
-function useScottSourceDiscoveryControls({ enabled = true, sourcesActive = false, configuredDurationSeconds = SCOTT_SOURCE_SEARCH_DURATION_SECONDS, onSearchStarted, onSearchStopped } = {}) {
+function useScottSourceDiscoveryControls({ 
+  enabled = true, 
+  sourcesActive = false, 
+  configuredDurationSeconds = SCOTT_SOURCE_SEARCH_DURATION_SECONDS, 
+  configuredMode = 'discovery',
+  seedQuery = 'ProjectMaterials P&ID symbols ISA-5.1 ISO 14617 IEC 60617 NECA 100 QElectroTech GD&T',
+  onSearchStarted, 
+  onSearchStopped 
+} = {}) {
   const stopRequestedRef = useRef(false);
   const [searchState, setSearchState] = useState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
   const [sourcesSort, setSourcesSort] = useState({ key: 'lastSeenAt', direction: 'desc' });
@@ -4208,7 +4271,8 @@ function useScottSourceDiscoveryControls({ enabled = true, sourcesActive = false
 
     startScottSourceSearch({
       durationSeconds,
-      seedQuery: 'ProjectMaterials P&ID symbols ISA-5.1 ISO 14617 IEC 60617 NECA 100 QElectroTech GD&T'
+      mode: configuredMode,
+      seedQuery: seedQuery
     }).then((payload) => {
       if (stopRequestedRef.current) {
         onSearchStopped?.({
@@ -4542,6 +4606,29 @@ function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onPro
                       <option value="true">Checked</option>
                       <option value="false">Unchecked</option>
                     </select>
+                  ) : key === 'requiresAuth' ? (
+                    <select
+                      value={filters[key] || ''}
+                      onChange={(event) => onFilterChange(key, event.target.value)}
+                      aria-label={`Filter ${label}`}
+                    >
+                      <option value="">All</option>
+                      <option value="true">Required</option>
+                      <option value="false">No auth</option>
+                    </select>
+                  ) : key === 'authStatus' ? (
+                    <select
+                      value={filters[key] || ''}
+                      onChange={(event) => onFilterChange(key, event.target.value)}
+                      aria-label={`Filter ${label}`}
+                    >
+                      <option value="">All</option>
+                      <option value="no_auth">No auth</option>
+                      <option value="gated_detected">Gated detected</option>
+                      <option value="auth_configured">Auth configured</option>
+                      <option value="auth_verified">Auth verified</option>
+                      <option value="auth_failed">Auth failed</option>
+                    </select>
                   ) : (
                     <input
                       type="search"
@@ -4719,6 +4806,12 @@ function formatScottSourceValue(site, key) {
   }
   if (key === 'relevanceScore') {
     return value == null ? '' : Number(value).toFixed(4);
+  }
+  if (key === 'requiresAuth') {
+    return value ? 'Required' : 'No auth';
+  }
+  if (key === 'authStatus') {
+    return String(value || 'no_auth').replaceAll('_', ' ');
   }
   if (key === 'firstSeenAt' || key === 'lastSeenAt') {
     return value ? new Date(value).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '';

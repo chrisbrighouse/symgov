@@ -53,7 +53,12 @@ from ..agent_queue_reconciliation import reconcile_agent_queue_state
 from ..publication_handoff import execute_publication_handoff
 from ..property_options import remember_property_option
 from ..review_followup_handoff import execute_review_followup_handoff
-from ..runtime import SCOTT_SOURCE_DISCOVERY_DEFAULT_SEED_QUERY, coerce_uuid, download_object_bytes
+from ..runtime import (
+    SCOTT_SOURCE_DISCOVERY_DEFAULT_SEED_QUERY,
+    SCOTT_SOURCE_DISCOVERY_SEED_QUERIES,
+    coerce_uuid,
+    download_object_bytes,
+)
 from ..schemas import (
     WorkspaceAgentQueueItemListResponse,
     WorkspaceAgentQueueItemResponse,
@@ -78,6 +83,7 @@ from ..schemas import (
     WorkspaceScottSourceSiteIncludeNextRunUpdateRequest,
     WorkspaceScottSourceSiteListResponse,
     WorkspaceScottSourceSitePromptUpdateRequest,
+    WorkspaceScottSourceSiteAuthUpdateRequest,
     WorkspaceScottSourceSiteResponse,
     WorkspaceScottSourceSiteStatusUpdateRequest,
     WorkspaceScottSourceSearchStopResponse,
@@ -294,13 +300,31 @@ def scott_source_include_next_run_column_exists(session: Session) -> bool:
     return "include_next_run" in scott_source_site_columns(session)
 
 
-def scott_source_site_query(session: Session, prompt_column_exists: bool, include_next_run_column_exists: bool):
+def scott_source_auth_columns_exist(session: Session) -> bool:
+    available = scott_source_site_columns(session)
+    return {"requires_auth", "auth_status", "auth_secret_key"}.issubset(available)
+
+
+def scott_source_site_query(
+    session: Session,
+    prompt_column_exists: bool,
+    include_next_run_column_exists: bool,
+    auth_columns_exist: bool,
+):
     query = session.query(ScottSourceDiscoverySite)
     load_columns = list(SCOTT_SOURCE_SITE_BASE_LOAD_COLUMNS)
     if prompt_column_exists:
         load_columns.append(ScottSourceDiscoverySite.source_prompt)
     if include_next_run_column_exists:
         load_columns.append(ScottSourceDiscoverySite.include_next_run)
+    if auth_columns_exist:
+        load_columns.extend(
+            [
+                ScottSourceDiscoverySite.requires_auth,
+                ScottSourceDiscoverySite.auth_status,
+                ScottSourceDiscoverySite.auth_secret_key,
+            ]
+        )
     query = query.options(load_only(*load_columns))
     return query
 CHILD_ACTION_ALIASES = {
@@ -1784,7 +1808,7 @@ def start_scott_source_search(
     active_item = (
         session.query(AgentQueueItem)
         .filter(AgentQueueItem.agent_id == scott_definition.id)
-        .filter(AgentQueueItem.source_type == "source_discovery_search")
+        .filter(AgentQueueItem.source_type.in_(("source_discovery_search", "source_download_intake")))
         .filter(AgentQueueItem.status.in_(active_statuses))
         .order_by(AgentQueueItem.created_at.desc())
         .first()
@@ -1799,6 +1823,7 @@ def start_scott_source_search(
             durationSeconds=int((active_item.payload_json or {}).get("duration_seconds") or request.durationSeconds),
             startedAt=isoformat_utc(active_item.started_at or active_item.created_at),
             expectedCompletedAt=isoformat_utc(expected_completed_at),
+            availableSeedQueries=SCOTT_SOURCE_DISCOVERY_SEED_QUERIES,
         )
 
     started_at = datetime.now(timezone.utc).replace(microsecond=0)
@@ -1808,7 +1833,13 @@ def start_scott_source_search(
     available_columns = scott_source_site_columns(session)
     prompt_column_exists = "source_prompt" in available_columns
     include_next_run_column_exists = "include_next_run" in available_columns
-    discovered_sites = scott_source_site_query(session, prompt_column_exists, include_next_run_column_exists).order_by(
+    auth_columns_exist = {"requires_auth", "auth_status", "auth_secret_key"}.issubset(available_columns)
+    discovered_sites = scott_source_site_query(
+        session,
+        prompt_column_exists,
+        include_next_run_column_exists,
+        auth_columns_exist,
+    ).order_by(
         ScottSourceDiscoverySite.last_seen_at.desc()
     ).all()
     memory_count = len(discovered_sites)
@@ -1830,10 +1861,19 @@ def start_scott_source_search(
         for site in discovered_sites
         if (site.status or "").strip().lower() in {"ignored", "ignore"}
     ]
+    source_type = "source_download_intake" if request.mode == "download" else "source_discovery_search"
+    task_type = source_type
+    display_name = "Source intake (download)" if request.mode == "download" else "Source discovery search"
+    stage = "Source artifact intake" if request.mode == "download" else "Web source discovery"
+
     payload = {
-        "task_type": "source_discovery_search",
-        "display_name": "Source discovery search",
-        "stage": "Web source discovery",
+        "task_type": task_type,
+        "mode": request.mode,
+        "display_name": display_name,
+        "stage": stage,
+        "source_ref": f"scott-{request.mode}-{queue_item_id.hex[:8]}",
+        "submitted_by": "scott-agent",
+        "submission_kind": "imported_symbol_library",
         "duration_seconds": request.durationSeconds,
         "seed_query": request.seedQuery or SCOTT_SOURCE_DISCOVERY_DEFAULT_SEED_QUERY,
         "memory_site_count": memory_count,
@@ -1845,7 +1885,7 @@ def start_scott_source_search(
     queue_item = AgentQueueItem(
         id=queue_item_id,
         agent_id=scott_definition.id,
-        source_type="source_discovery_search",
+        source_type=source_type,
         source_id=source_id,
         status="searching",
         priority="medium",
@@ -1862,7 +1902,7 @@ def start_scott_source_search(
     queue_record = {
         "id": str(queue_item_id),
         "agent_id": "scott",
-        "source_type": "source_discovery_search",
+        "source_type": source_type,
         "source_id": str(source_id),
         "status": "searching",
         "priority": "medium",
@@ -1912,6 +1952,7 @@ def start_scott_source_search(
         durationSeconds=request.durationSeconds,
         startedAt=isoformat_utc(started_at),
         expectedCompletedAt=isoformat_utc(expected_completed_at),
+        availableSeedQueries=SCOTT_SOURCE_DISCOVERY_SEED_QUERIES,
     )
 
 
@@ -2016,6 +2057,9 @@ SCOTT_SOURCE_SITE_SORT_COLUMNS = {
     "organizationType": ScottSourceDiscoverySite.organization_type,
     "sourcePrompt": ScottSourceDiscoverySite.source_prompt,
     "includeNextRun": ScottSourceDiscoverySite.include_next_run,
+    "requiresAuth": ScottSourceDiscoverySite.requires_auth,
+    "authStatus": ScottSourceDiscoverySite.auth_status,
+    "authSecretKey": ScottSourceDiscoverySite.auth_secret_key,
     "symbolFormats": cast(ScottSourceDiscoverySite.symbol_formats_json, Text),
     "evidence": cast(ScottSourceDiscoverySite.evidence_json, Text),
     "relevanceScore": ScottSourceDiscoverySite.relevance_score,
@@ -2029,6 +2073,9 @@ SCOTT_SOURCE_SITE_FILTER_COLUMNS = {
     "organization_type": ScottSourceDiscoverySite.organization_type,
     "source_prompt": ScottSourceDiscoverySite.source_prompt,
     "include_next_run": ScottSourceDiscoverySite.include_next_run,
+    "requires_auth": ScottSourceDiscoverySite.requires_auth,
+    "auth_status": ScottSourceDiscoverySite.auth_status,
+    "auth_secret_key": ScottSourceDiscoverySite.auth_secret_key,
     "symbol_formats": cast(ScottSourceDiscoverySite.symbol_formats_json, Text),
     "relevance_score": ScottSourceDiscoverySite.relevance_score,
     "first_seen_at": ScottSourceDiscoverySite.first_seen_at,
@@ -2041,6 +2088,7 @@ def scott_source_site_response(
     site: ScottSourceDiscoverySite,
     include_source_prompt: bool = True,
     include_next_run_available: bool = True,
+    include_auth_available: bool = True,
 ) -> WorkspaceScottSourceSiteResponse:
     return WorkspaceScottSourceSiteResponse(
         id=str(site.id),
@@ -2054,6 +2102,9 @@ def scott_source_site_response(
         organizationType=site.organization_type,
         sourcePrompt=site.source_prompt if include_source_prompt else None,
         includeNextRun=bool(site.include_next_run) if include_next_run_available else False,
+        requiresAuth=bool(site.requires_auth) if include_auth_available else False,
+        authStatus=site.auth_status if include_auth_available else "no_auth",
+        authSecretKey=site.auth_secret_key if include_auth_available else None,
         symbolFormats=site.symbol_formats_json or [],
         evidence=site.evidence_json or {},
         relevanceScore=float(site.relevance_score) if site.relevance_score is not None else None,
@@ -2094,6 +2145,9 @@ def list_scott_source_sites(
     lastSessionQueueItemId: str | None = Query(default=None),
     sourcePrompt: str | None = Query(default=None),
     includeNextRun: str | None = Query(default=None),
+    requiresAuth: str | None = Query(default=None),
+    authStatus: str | None = Query(default=None),
+    authSecretKey: str | None = Query(default=None),
 ) -> WorkspaceScottSourceSiteListResponse:
     filters = {
         "url": url,
@@ -2112,12 +2166,16 @@ def list_scott_source_sites(
         "lastSessionQueueItemId": lastSessionQueueItemId,
         "sourcePrompt": sourcePrompt,
         "includeNextRun": includeNextRun,
+        "requiresAuth": requiresAuth,
+        "authStatus": authStatus,
+        "authSecretKey": authSecretKey,
     }
 
     available_columns = scott_source_site_columns(session)
     prompt_column_exists = "source_prompt" in available_columns
     include_next_run_column_exists = "include_next_run" in available_columns
-    query = scott_source_site_query(session, prompt_column_exists, include_next_run_column_exists)
+    auth_columns_exist = {"requires_auth", "auth_status", "auth_secret_key"}.issubset(available_columns)
+    query = scott_source_site_query(session, prompt_column_exists, include_next_run_column_exists, auth_columns_exist)
     for key, raw_value in filters.items():
         value = (raw_value or "").strip()
         if not value:
@@ -2132,6 +2190,28 @@ def list_scott_source_sites(
                 query = query.filter(ScottSourceDiscoverySite.include_next_run.is_(True))
             elif normalized in {"false", "0", "no", "unchecked"}:
                 query = query.filter(ScottSourceDiscoverySite.include_next_run.is_(False))
+            continue
+        if key == "requiresAuth":
+            if not auth_columns_exist:
+                continue
+            normalized = value.lower()
+            if normalized in {"true", "1", "yes", "required"}:
+                query = query.filter(ScottSourceDiscoverySite.requires_auth.is_(True))
+            elif normalized in {"false", "0", "no", "none"}:
+                query = query.filter(ScottSourceDiscoverySite.requires_auth.is_(False))
+            continue
+        if key == "authStatus":
+            if not auth_columns_exist:
+                continue
+            normalized_auth_statuses = [
+                auth_status.strip().lower().replace("-", "_").replace(" ", "_")
+                for auth_status in value.split(",")
+                if auth_status.strip()
+            ]
+            if normalized_auth_statuses:
+                query = query.filter(func.lower(ScottSourceDiscoverySite.auth_status).in_(normalized_auth_statuses))
+            continue
+        if key == "authSecretKey" and not auth_columns_exist:
             continue
         if key == "status":
             status_values = [
@@ -2149,7 +2229,11 @@ def list_scott_source_sites(
     total = query.count()
     sort_column = (
         ScottSourceDiscoverySite.last_seen_at
-        if (sort == "sourcePrompt" and not prompt_column_exists) or (sort == "includeNextRun" and not include_next_run_column_exists)
+        if (
+            (sort == "sourcePrompt" and not prompt_column_exists)
+            or (sort == "includeNextRun" and not include_next_run_column_exists)
+            or (sort in {"requiresAuth", "authStatus", "authSecretKey"} and not auth_columns_exist)
+        )
         else SCOTT_SOURCE_SITE_SORT_COLUMNS.get(sort, ScottSourceDiscoverySite.last_seen_at)
     )
     ordered_column = sort_column.asc() if direction == "asc" else sort_column.desc()
@@ -2161,6 +2245,7 @@ def list_scott_source_sites(
                 site,
                 include_source_prompt=prompt_column_exists,
                 include_next_run_available=include_next_run_column_exists,
+                include_auth_available=auth_columns_exist,
             )
             for site in rows
         ],
@@ -2198,7 +2283,10 @@ def update_scott_source_site_prompt(
     session.add(site)
     session.commit()
     session.refresh(site)
-    return scott_source_site_response(site)
+    return scott_source_site_response(
+        site,
+        include_auth_available=scott_source_auth_columns_exist(session),
+    )
 
 
 @router.patch(
@@ -2230,6 +2318,7 @@ def update_scott_source_site_include_next_run(
         site,
         include_source_prompt="source_prompt" in available_columns,
         include_next_run_available=True,
+        include_auth_available={"requires_auth", "auth_status", "auth_secret_key"}.issubset(available_columns),
     )
 
 
@@ -2262,6 +2351,60 @@ def update_scott_source_site_status(
         site,
         include_source_prompt="source_prompt" in available_columns,
         include_next_run_available="include_next_run" in available_columns,
+        include_auth_available={"requires_auth", "auth_status", "auth_secret_key"}.issubset(available_columns),
+    )
+
+
+@router.patch(
+    "/scott/source-sites/{source_site_id}/auth",
+    response_model=WorkspaceScottSourceSiteResponse,
+)
+@legacy_router.patch(
+    "/workspace/scott/source-sites/{source_site_id}/auth",
+    response_model=WorkspaceScottSourceSiteResponse,
+    include_in_schema=False,
+)
+def update_scott_source_site_auth(
+    source_site_id: uuid.UUID,
+    request: WorkspaceScottSourceSiteAuthUpdateRequest,
+    session: Session = Depends(get_db_session),
+) -> WorkspaceScottSourceSiteResponse:
+    available_columns = scott_source_site_columns(session)
+    required_columns = {"requires_auth", "auth_status", "auth_secret_key"}
+    if not required_columns.issubset(available_columns):
+        raise HTTPException(status_code=503, detail="Scott auth flags are not available until the auth migration is applied.")
+
+    site = session.query(ScottSourceDiscoverySite).filter_by(id=source_site_id).one_or_none()
+    if site is None:
+        raise HTTPException(status_code=404, detail="Scott source site not found.")
+
+    allowed_auth_statuses = {"no_auth", "gated_detected", "auth_configured", "auth_verified", "auth_failed"}
+
+    if request.requiresAuth is not None:
+        site.requires_auth = bool(request.requiresAuth)
+
+    if request.authStatus is not None:
+        normalized_auth_status = request.authStatus.strip().lower().replace("-", "_").replace(" ", "_")
+        if normalized_auth_status not in allowed_auth_statuses:
+            raise HTTPException(status_code=422, detail=f"Unsupported Scott auth status: {request.authStatus}")
+        site.auth_status = normalized_auth_status
+
+    if request.authSecretKey is not None:
+        normalized_secret_key = request.authSecretKey.strip().upper()
+        site.auth_secret_key = normalized_secret_key or None
+
+    if not site.requires_auth:
+        site.auth_status = "no_auth"
+        site.auth_secret_key = None
+
+    session.add(site)
+    session.commit()
+    session.refresh(site)
+    return scott_source_site_response(
+        site,
+        include_source_prompt="source_prompt" in available_columns,
+        include_next_run_available="include_next_run" in available_columns,
+        include_auth_available=True,
     )
 
 

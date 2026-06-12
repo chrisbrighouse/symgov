@@ -148,6 +148,14 @@ SCOTT_SOURCE_DISCOVERY_DEFAULT_SEED_QUERY = (
     "ProjectMaterials P&ID symbols ISA-5.1 ISO 14617 IEC 60617 NECA 100 QElectroTech GD&T"
 )
 
+SCOTT_SOURCE_DISCOVERY_SEED_QUERIES = [
+    SCOTT_SOURCE_DISCOVERY_DEFAULT_SEED_QUERY,
+    "Free engineering symbol library for P&ID",
+    "Process control valve P&ID symbols SVG library",
+    "Electrical substation single line diagram symbols IEC 60617 download",
+    "Fire alarm system plan symbols CAD blocks",
+]
+
 SCOTT_SOURCE_DISCOVERY_SITE_SEEDS = (
     {
         "domain": "projectmaterials.com",
@@ -2261,6 +2269,17 @@ class RuntimePersistenceBridge:
                     record.symbol_formats_json = site_payload.get("symbol_formats") or []
                     record.evidence_json = site_payload.get("evidence") or {}
                     record.status = normalize_scott_source_discovery_status(site_payload)
+                    detected_requires_auth = bool(site_payload.get("requires_auth"))
+                    record.requires_auth = bool(record.requires_auth) or detected_requires_auth
+                    incoming_auth_status = str(site_payload.get("auth_status") or ("gated_detected" if detected_requires_auth else "no_auth")).strip().lower()
+                    if incoming_auth_status not in {"no_auth", "gated_detected", "auth_configured", "auth_verified", "auth_failed"}:
+                        incoming_auth_status = "gated_detected" if detected_requires_auth else "no_auth"
+                    if incoming_auth_status == "no_auth" and record.requires_auth and str(record.auth_status or "").strip().lower() in {"gated_detected", "auth_configured", "auth_verified", "auth_failed"}:
+                        incoming_auth_status = str(record.auth_status or "gated_detected").strip().lower()
+                    record.auth_status = incoming_auth_status
+                    secret_key = str(site_payload.get("auth_secret_key") or "").strip().upper()
+                    if secret_key:
+                        record.auth_secret_key = secret_key
                     record.relevance_score = coerce_numeric(site_payload.get("relevance_score"))
                     record.last_seen_at = completed_at
                     record.last_session_queue_item_id = queue_item_id
