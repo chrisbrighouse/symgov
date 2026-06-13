@@ -58,7 +58,7 @@
 - Worker preservation update:
   - repo-managed runner: `/data/symgov/scripts/run_scott_intake.py`
   - live runtime runner was copied from the same content: `/data/.openclaw/workspaces/scott/run_scott_intake.py`
-  - backend `SCOTT_RUNNER` now points at the repo-managed script so source-discovery runs use the preserved version.
+  - backend route `SCOTT_RUNNER` now points at the repo-managed script so source-discovery runs use the preserved version.
 
 ## Next actions
 1. Push the committed repo changes so `/data/symgov/scripts/run_scott_intake.py` and the backend pointer are preserved remotely.
