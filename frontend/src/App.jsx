@@ -25,6 +25,7 @@ import {
   updateScottSourceSiteIncludeNextRun,
   updateScottSourceSitePrompt,
   updateScottSourceSiteStatus,
+  updateScottSourceSiteAuth,
   updateWorkspaceReviewSymbolProperties
 } from './api.js';
 import { appConfig } from './config.js';
@@ -1725,6 +1726,7 @@ function WorkspacePage() {
             onPromptSaved={updateSourceSitePrompt}
             onIncludeNextRunSaved={updateSourceSiteIncludeNextRun}
             onStatusSaved={updateSourceSiteStatus}
+            onAuthSaved={updateSourceSiteStatus}
             onScroll={handleScottSourcesScroll}
           />
         </div>
@@ -4503,11 +4505,13 @@ function SubmissionPage() {
   );
 }
 
-function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onPromptSaved, onIncludeNextRunSaved, onStatusSaved, onScroll }) {
+function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onPromptSaved, onIncludeNextRunSaved, onStatusSaved, onAuthSaved, onScroll }) {
   const [promptDrafts, setPromptDrafts] = useState({});
   const [promptSaves, setPromptSaves] = useState({});
   const [includeNextRunSaves, setIncludeNextRunSaves] = useState({});
   const [statusSaves, setStatusSaves] = useState({});
+  const [authSecretDrafts, setAuthSecretDrafts] = useState({});
+  const [authSaves, setAuthSaves] = useState({});
 
   function handlePromptChange(siteId, value) {
     setPromptDrafts((current) => ({ ...current, [siteId]: value }));
@@ -4562,6 +4566,33 @@ function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onPro
         [site.id]: {
           pending: false,
           error: error instanceof Error ? error.message : 'Status could not be saved.'
+        }
+      }));
+    });
+  }
+
+  function handleAuthSecretDraftChange(siteId, value) {
+    setAuthSecretDrafts((current) => ({ ...current, [siteId]: value }));
+  }
+
+  function handleAuthUpdate(site, authPatch) {
+    setAuthSaves((current) => ({ ...current, [site.id]: { pending: true, error: '' } }));
+    updateScottSourceSiteAuth(site.id, authPatch).then((updatedSite) => {
+      onAuthSaved?.(site.id, updatedSite);
+      if (authPatch.authSecretKey !== undefined) {
+        setAuthSecretDrafts((current) => {
+          const next = { ...current };
+          delete next[site.id];
+          return next;
+        });
+      }
+      setAuthSaves((current) => ({ ...current, [site.id]: { pending: false, error: '' } }));
+    }).catch((error) => {
+      setAuthSaves((current) => ({
+        ...current,
+        [site.id]: {
+          pending: false,
+          error: error instanceof Error ? error.message : 'Auth settings could not be saved.'
         }
       }));
     });
@@ -4657,6 +4688,26 @@ function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onPro
                         site={site}
                         saveState={includeNextRunSaves[site.id]}
                         onChange={handleIncludeNextRunChange}
+                      />
+                    ) : key === 'requiresAuth' ? (
+                      <ScottSourceRequiresAuthCell
+                        site={site}
+                        saveState={authSaves[site.id]}
+                        onChange={(nextValue) => handleAuthUpdate(site, { requiresAuth: nextValue })}
+                      />
+                    ) : key === 'authStatus' ? (
+                      <ScottSourceAuthStatusCell
+                        site={site}
+                        saveState={authSaves[site.id]}
+                        onChange={(nextValue) => handleAuthUpdate(site, { authStatus: nextValue })}
+                      />
+                    ) : key === 'authSecretKey' ? (
+                      <ScottSourceAuthSecretCell
+                        site={site}
+                        draftValue={authSecretDrafts[site.id]}
+                        saveState={authSaves[site.id]}
+                        onChange={handleAuthSecretDraftChange}
+                        onSave={(sourceSite, nextValue) => handleAuthUpdate(sourceSite, { authSecretKey: nextValue })}
                       />
                     ) : key === 'sourcePrompt' ? (
                       <ScottSourcePromptCell
@@ -4758,6 +4809,73 @@ function ScottSourceIncludeNextRunCell({ site, saveState, onChange }) {
       <span>{saveState?.pending ? 'Saving' : site?.includeNextRun ? 'Checked' : 'Off'}</span>
       {saveState?.error ? <span className="source-prompt-error">{saveState.error}</span> : null}
     </label>
+  );
+}
+
+function ScottSourceRequiresAuthCell({ site, saveState, onChange }) {
+  return (
+    <label className="source-next-run-toggle">
+      <input
+        type="checkbox"
+        checked={Boolean(site?.requiresAuth)}
+        disabled={Boolean(saveState?.pending)}
+        onChange={(event) => onChange(event.target.checked)}
+        aria-label={`Auth required for ${site.domain || site.url}`}
+      />
+      <span>{saveState?.pending ? 'Saving' : site?.requiresAuth ? 'Required' : 'No auth'}</span>
+      {saveState?.error ? <span className="source-prompt-error">{saveState.error}</span> : null}
+    </label>
+  );
+}
+
+function ScottSourceAuthStatusCell({ site, saveState, onChange }) {
+  const value = String(site?.authStatus || (site?.requiresAuth ? 'gated_detected' : 'no_auth'));
+  return (
+    <div className="source-status-editor">
+      <select
+        value={value}
+        disabled={Boolean(saveState?.pending) || !site?.requiresAuth}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label={`Auth status for ${site.domain || site.url}`}
+      >
+        <option value="no_auth">No auth</option>
+        <option value="gated_detected">Gated detected</option>
+        <option value="auth_configured">Auth configured</option>
+        <option value="auth_verified">Auth verified</option>
+        <option value="auth_failed">Auth failed</option>
+      </select>
+      {saveState?.error ? <span className="source-prompt-error">{saveState.error}</span> : null}
+    </div>
+  );
+}
+
+function ScottSourceAuthSecretCell({ site, draftValue, saveState, onChange, onSave }) {
+  const value = draftValue ?? site?.authSecretKey ?? '';
+  const pending = Boolean(saveState?.pending);
+  const isDirty = value !== (site?.authSecretKey ?? '');
+  return (
+    <div className="source-prompt-editor">
+      <input
+        type="text"
+        value={value}
+        maxLength="100"
+        disabled={pending || !site?.requiresAuth}
+        onChange={(event) => onChange(site.id, event.target.value.toUpperCase())}
+        placeholder="Env key (e.g. SCOTT_IEC_AUTH)"
+        aria-label={`Auth secret key for ${site.domain || site.url}`}
+      />
+      <div className="source-prompt-actions">
+        <button
+          type="button"
+          className="mini-action-button"
+          disabled={pending || !isDirty || !site?.requiresAuth}
+          onClick={() => onSave(site, value)}
+        >
+          {pending ? 'Saving...' : 'Save'}
+        </button>
+        {saveState?.error ? <span className="source-prompt-error">{saveState.error}</span> : null}
+      </div>
+    </div>
   );
 }
 

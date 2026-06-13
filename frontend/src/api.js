@@ -401,6 +401,43 @@ export async function updateScottSourceSiteStatus(sourceSiteId, status) {
   return payload;
 }
 
+export async function updateScottSourceSiteAuth(sourceSiteId, { requiresAuth, authStatus, authSecretKey }) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+  if (!sourceSiteId) {
+    throw new Error('Source site is not available.');
+  }
+
+  const authPayload = {};
+  if (requiresAuth !== undefined) authPayload.requiresAuth = requiresAuth;
+  if (authStatus !== undefined) authPayload.authStatus = authStatus;
+  if (authSecretKey !== undefined) authPayload.authSecretKey = authSecretKey;
+
+  const patchAuth = async (payload, wrapped = false) => {
+    const response = await fetch(workspaceUrl(`/workspace/scott/source-sites/${encodeURIComponent(sourceSiteId)}/auth`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(wrapped ? { request: payload } : payload)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await patchAuth(authPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await patchAuth(authPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Scott auth settings could not be updated.');
+  }
+
+  return payload;
+}
+
 export async function startHannahCurationSearch({ durationSeconds = 120 } = {}) {
   if (!appConfig.apiRoot) {
     throw new Error('API root is not configured.');
