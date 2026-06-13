@@ -5,7 +5,7 @@ import importlib.util
 from pathlib import Path
 
 
-SCOTT_RUNNER_PATH = Path("/data/.openclaw/workspaces/scott/run_scott_intake.py")
+SCOTT_RUNNER_PATH = Path(__file__).resolve().parents[1] / "scripts" / "run_scott_intake.py"
 
 
 spec = importlib.util.spec_from_file_location("scott_runner", SCOTT_RUNNER_PATH)

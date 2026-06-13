@@ -1,7 +1,7 @@
 # Restart notes: Scott auth-wall rollout Phase 2
 
 ## Status
-- Implemented Scott auth-aware fetch logic in `/data/.openclaw/workspaces/scott/run_scott_intake.py`.
+- Implemented Scott auth-aware fetch logic in `/data/.openclaw/workspaces/scott/run_scott_intake.py`, then preserved the worker as repo-managed `/data/symgov/scripts/run_scott_intake.py`.
   - `fetch_text_url(...)` now accepts `auth_secret_key` and resolves secrets from runtime environment or env file.
   - Header injection supports `Authorization` (`Bearer`/`Basic`), synthesized Basic auth from `user:pass`, `Cookie`, and `X-Api-Key` fallback.
   - `inspect_candidate_site(...)` now accepts auth context and sets auth outcomes (`auth_verified`, `auth_failed`, fallback `gated_detected`/`no_auth`).
@@ -55,14 +55,15 @@
   - modified: `frontend/src/api.js`
   - new: `tests/test_scott_auth_verification.py`
   - new/updated: `docs/plans/2026-06-12-scott-auth-wall-phase2-progress-restart.md`
-- Additional non-repo runtime change:
-  - modified: `/data/.openclaw/workspaces/scott/run_scott_intake.py`
+- Worker preservation update:
+  - repo-managed runner: `/data/symgov/scripts/run_scott_intake.py`
+  - live runtime runner was copied from the same content: `/data/.openclaw/workspaces/scott/run_scott_intake.py`
+  - backend `SCOTT_RUNNER` now points at the repo-managed script so source-discovery runs use the preserved version.
 
 ## Next actions
-1. Decide whether to publish the latest frontend build with `npm run publish:static` (the build succeeded; publishing was not repeated after the 2026-06-13 test-only/runner fix).
-2. If the auth editor UX feels sufficient, commit `/data/symgov` changes.
-3. Separately snapshot/deploy the updated Scott runner script from `/data/.openclaw/workspaces/scott/run_scott_intake.py`; this file is outside the Git repo but is part of the live direct-worker path.
-4. Optional small UX polish: add an explicit clear-secret affordance and success indicator for auth saves.
+1. Push the committed repo changes so `/data/symgov/scripts/run_scott_intake.py` and the backend pointer are preserved remotely.
+2. Optional small UX polish: add an explicit clear-secret affordance and success indicator for auth saves.
+3. If running API workers should use the repo-managed runner immediately, reload the API service after this preservation commit is deployed.
 
 ## Restart prompt
-Continue from `/data/symgov` and `/data/.openclaw/workspaces/scott`. Read `docs/plans/2026-06-12-scott-auth-wall-phase2-progress-restart.md`, run `git status --short --branch` in `/data/symgov`, confirm `/data/.openclaw/workspaces/scott/run_scott_intake.py` still contains the redirect-only `auth_redirect` heuristic in `detect_auth_wall(...)`, then either publish/commit the Phase 2 frontend+test changes or snapshot the external Scott runner update.
+Continue from `/data/symgov`. Read `docs/plans/2026-06-12-scott-auth-wall-phase2-progress-restart.md`, run `git status --short --branch`, confirm `scripts/run_scott_intake.py` still contains the redirect-only `auth_redirect` heuristic in `detect_auth_wall(...)`, and push the Phase 2 commits when ready.
