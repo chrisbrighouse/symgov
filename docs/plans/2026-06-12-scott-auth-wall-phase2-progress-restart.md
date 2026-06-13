@@ -49,21 +49,30 @@
   - removed temporary runtime queue files for both verification queue items.
   - DB queue rows remain as historical `progress_saved` records, but no active runtime files remain and `httpbin.org` is no longer in source-site memory.
 
-## Uncommitted state
-- `/data/symgov` has uncommitted changes:
-  - modified: `frontend/src/App.jsx`
-  - modified: `frontend/src/api.js`
-  - new: `tests/test_scott_auth_verification.py`
-  - new/updated: `docs/plans/2026-06-12-scott-auth-wall-phase2-progress-restart.md`
+## Current repository and deployment state
+- Phase 2 repository preservation commits were pushed to `origin/main` on 2026-06-13:
+  - `3032926 Add Scott source auth verification controls`
+  - `1a03c51 Preserve Scott worker runner in repo`
+  - `c493dc3 Point Scott route worker to repo runner`
 - Worker preservation update:
   - repo-managed runner: `/data/symgov/scripts/run_scott_intake.py`
   - live runtime runner was copied from the same content: `/data/.openclaw/workspaces/scott/run_scott_intake.py`
   - backend route `SCOTT_RUNNER` now points at the repo-managed script so source-discovery runs use the preserved version.
+- API reload/restart verification is complete:
+  - `symgov-hermes-api` health check passed.
+  - active `SCOTT_RUNNER` resolves to `/data/symgov/scripts/run_scott_intake.py` and exists.
+- UX polish added after the Phase 2 push:
+  - auth secret cells now have an explicit `Clear` action that saves an empty secret key;
+  - auth saves now show a `Saved` success indicator after successful persistence.
+- Verification after UX polish:
+  - `npm run build` → Vite build succeeded, producing `dist/assets/index-X0fVBUgo.css` and `dist/assets/index-pRXN_LCl.js`.
+  - `uv run --with pytest --with-requirements backend/requirements.txt pytest tests/test_scott_auth_verification.py -q` → `6 passed`.
+  - `npm run publish:static` → published from `/data/symgov/dist` to `/data/symgov` and `/data/.openclaw/workspace/symgov`.
+  - Public bundle marker check found both `Clear` and `Saved` in `https://apps.chrisbrighouse.com/assets/index-pRXN_LCl.js`.
 
 ## Next actions
-1. Push the committed repo changes so `/data/symgov/scripts/run_scott_intake.py` and the backend pointer are preserved remotely.
-2. Optional small UX polish: add an explicit clear-secret affordance and success indicator for auth saves.
-3. If running API workers should use the repo-managed runner immediately, reload the API service after this preservation commit is deployed.
+1. Commit and push the UX-polish/restart-note follow-up so the live frontend matches the repo.
+2. Optional: add a browser/UI smoke check for the auth-secret clear/save flow against a non-production fixture row before using it on real source-site secrets.
 
 ## Restart prompt
-Continue from `/data/symgov`. Read `docs/plans/2026-06-12-scott-auth-wall-phase2-progress-restart.md`, run `git status --short --branch`, confirm `scripts/run_scott_intake.py` still contains the redirect-only `auth_redirect` heuristic in `detect_auth_wall(...)`, and push the Phase 2 commits when ready.
+Continue from `/data/symgov`. Read `docs/plans/2026-06-12-scott-auth-wall-phase2-progress-restart.md`, run `git status --short --branch`, confirm `scripts/run_scott_intake.py` still contains the redirect-only `auth_redirect` heuristic in `detect_auth_wall(...)`, and verify `origin/main` contains the Scott auth Phase 2 commits plus any UX-polish follow-up commit.

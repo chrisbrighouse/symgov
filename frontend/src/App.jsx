@@ -4576,7 +4576,7 @@ function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onPro
   }
 
   function handleAuthUpdate(site, authPatch) {
-    setAuthSaves((current) => ({ ...current, [site.id]: { pending: true, error: '' } }));
+    setAuthSaves((current) => ({ ...current, [site.id]: { pending: true, error: '', success: false } }));
     updateScottSourceSiteAuth(site.id, authPatch).then((updatedSite) => {
       onAuthSaved?.(site.id, updatedSite);
       if (authPatch.authSecretKey !== undefined) {
@@ -4586,13 +4586,14 @@ function ScottSourcesPanel({ state, sort, filters, onSort, onFilterChange, onPro
           return next;
         });
       }
-      setAuthSaves((current) => ({ ...current, [site.id]: { pending: false, error: '' } }));
+      setAuthSaves((current) => ({ ...current, [site.id]: { pending: false, error: '', success: true } }));
     }).catch((error) => {
       setAuthSaves((current) => ({
         ...current,
         [site.id]: {
           pending: false,
-          error: error instanceof Error ? error.message : 'Auth settings could not be saved.'
+          error: error instanceof Error ? error.message : 'Auth settings could not be saved.',
+          success: false
         }
       }));
     });
@@ -4851,15 +4852,17 @@ function ScottSourceAuthStatusCell({ site, saveState, onChange }) {
 
 function ScottSourceAuthSecretCell({ site, draftValue, saveState, onChange, onSave }) {
   const value = draftValue ?? site?.authSecretKey ?? '';
+  const currentValue = site?.authSecretKey ?? '';
   const pending = Boolean(saveState?.pending);
-  const isDirty = value !== (site?.authSecretKey ?? '');
+  const isDirty = value !== currentValue;
+  const canEdit = Boolean(site?.requiresAuth) && !pending;
   return (
     <div className="source-prompt-editor">
       <input
         type="text"
         value={value}
         maxLength="100"
-        disabled={pending || !site?.requiresAuth}
+        disabled={!canEdit}
         onChange={(event) => onChange(site.id, event.target.value.toUpperCase())}
         placeholder="Env key (e.g. SCOTT_IEC_AUTH)"
         aria-label={`Auth secret key for ${site.domain || site.url}`}
@@ -4868,11 +4871,21 @@ function ScottSourceAuthSecretCell({ site, draftValue, saveState, onChange, onSa
         <button
           type="button"
           className="mini-action-button"
-          disabled={pending || !isDirty || !site?.requiresAuth}
+          disabled={!canEdit || !isDirty}
           onClick={() => onSave(site, value)}
         >
           {pending ? 'Saving...' : 'Save'}
         </button>
+        <button
+          type="button"
+          className="mini-action-button mini-action-button-secondary"
+          disabled={!canEdit || (!value && !currentValue)}
+          onClick={() => onSave(site, '')}
+          aria-label={`Clear auth secret key for ${site.domain || site.url}`}
+        >
+          Clear
+        </button>
+        {saveState?.success && !saveState?.error && !isDirty ? <span className="source-prompt-success">Saved</span> : null}
         {saveState?.error ? <span className="source-prompt-error">{saveState.error}</span> : null}
       </div>
     </div>

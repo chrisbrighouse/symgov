@@ -1725,6 +1725,11 @@ a {
   opacity: 0.48;
 }
 
+.mini-action-button-secondary {
+  background: rgba(23, 49, 61, 0.05);
+  color: var(--text-muted);
+}
+
 .source-prompt-disabled {
   color: var(--text-muted);
   font-weight: 800;
@@ -1734,6 +1739,12 @@ a {
   color: #a13d32;
   font-size: 0.74rem;
   font-weight: 800;
+}
+
+.source-prompt-success {
+  color: #2f7d4c;
+  font-size: 0.74rem;
+  font-weight: 900;
 }
 
 .scott-sources-grid td {
