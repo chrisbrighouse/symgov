@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import Text, bindparam, cast, func, text
 from sqlalchemy.orm import Session
 
+from ..asset_manifest import choose_preview_asset, list_download_assets
 from ..dependencies import get_db_session
 from ..models import (
     AgentDefinition,
@@ -97,6 +98,34 @@ def published_symbol_display_id(row) -> str:
     )
 
 
+def _published_fallback_source_asset(payload: dict | None) -> dict:
+    payload = payload or {}
+    return {
+        "object_key": payload.get("source_object_key") or payload.get("raw_object_key") or payload.get("origin_object_key"),
+        "filename": payload.get("source_file_name") or payload.get("filename"),
+        "content_type": payload.get("source_content_type") or payload.get("content_type"),
+        "format": payload.get("source_format") or payload.get("format"),
+        "role": "source",
+    }
+
+
+def choose_published_preview_asset(payload: dict | None) -> dict | None:
+    payload = payload or {}
+    return choose_preview_asset(payload, fallback_source_asset=_published_fallback_source_asset(payload))
+
+
+def published_download_labels(downloads: list) -> list[str]:
+    labels: list[str] = []
+    for download in downloads:
+        if isinstance(download, str):
+            labels.append(download)
+        elif isinstance(download, dict):
+            label = download.get("label") or download.get("filename") or download.get("format") or download.get("object_key")
+            if label:
+                labels.append(str(label))
+    return labels
+
+
 def published_symbol_row(
     row,
     supplemental_photos_by_symbol: dict[str, list[dict]] | None = None,
@@ -114,6 +143,7 @@ def published_symbol_row(
     comment_count = int((comment_counts_by_symbol or {}).get(str(row.symbol_id), 0))
 
     symbol_display_id = published_symbol_display_id(row)
+    preview_asset = choose_published_preview_asset(payload)
 
     return {
         "id": row.slug,
@@ -140,11 +170,11 @@ def published_symbol_row(
         "packCode": row.pack_code,
         "pack": row.pack_title,
         "keywords": keywords,
-        "downloads": downloads,
+        "downloads": published_download_labels(downloads),
+        "downloadAssets": list_download_assets(payload, fallback_source_asset=_published_fallback_source_asset(payload)),
         "sortOrder": row.sort_order,
-        "previewUrl": f"/api/v1/published/symbols/{row.slug}/preview"
-        if payload.get("source_object_key")
-        else None,
+        "previewUrl": f"/api/v1/published/symbols/{row.slug}/preview" if preview_asset else None,
+        "previewAsset": preview_asset,
         "supplementalPhotos": supplemental_photos,
         "hasComments": comment_count > 0,
         "commentCount": comment_count,
@@ -605,7 +635,8 @@ def get_published_symbol_preview(symbol_id: str, session: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Published symbol was not found.")
 
     payload_json = rows[0].payload_json or {}
-    object_key = payload_json.get("source_object_key")
+    preview_asset = choose_published_preview_asset(payload_json)
+    object_key = preview_asset.get("object_key") if preview_asset else None
     if not object_key:
         raise HTTPException(status_code=404, detail="Published symbol preview was not found.")
 

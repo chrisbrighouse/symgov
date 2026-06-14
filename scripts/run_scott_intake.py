@@ -31,6 +31,7 @@ SUPPORTED_FORMATS = {
     ".png": "png",
     ".jpg": "jpeg",
     ".jpeg": "jpeg",
+    ".dxf": "dxf",
 }
 DEFAULT_ENV_PATH = Path("/data/.openclaw/workspace/symgov/.env.backend.database")
 BACKEND_ROOT = Path("/data/.openclaw/workspace/symgov/backend")
@@ -850,7 +851,7 @@ def build_routing(decision, eligibility_status, guessed_format, queue_priority):
         recommendation["route_to_agents"] = ["tracy"]
         recommendation["next_queue_families"] = ["provenance"]
         recommendation["reason_codes"].append("SCOTT-ROUTE-ACCEPTED")
-        if guessed_format in {"svg", "png", "jpeg"}:
+        if guessed_format in {"svg", "png", "jpeg", "dxf"}:
             recommendation["route_to_agents"].insert(0, "vlad")
             recommendation["next_queue_families"].insert(0, "validation")
             recommendation["reason_codes"].append(f"SCOTT-ROUTE-{guessed_format.upper()}")
@@ -891,6 +892,8 @@ def run_intake_task(task):
     attachment_id = task.get("attachment_id")
     attachment_ids = ensure_list(task.get("attachment_ids"))
     raw_object_key = task.get("raw_object_key")
+    visual_assets = task.get("visual_assets") if isinstance(task.get("visual_assets"), dict) else None
+    companion_files = ensure_list(task.get("companion_files"))
 
     defects = []
     evidence_trace = []
@@ -927,6 +930,8 @@ def run_intake_task(task):
         "attachment_id": attachment_id,
         "attachment_ids": attachment_ids,
         "raw_object_key": raw_object_key,
+        "visual_assets": copy.deepcopy(visual_assets) if visual_assets else None,
+        "companion_files": copy.deepcopy(companion_files),
         "standards_source_refs": standards_source_refs,
         "rights_documents": rights_documents,
         "evidence_links": evidence_links,
@@ -1060,6 +1065,8 @@ def run_intake_task(task):
 
     if guessed_format == "svg" and decision == "accepted":
         eligibility_flags.append("technical_validation_candidate")
+    if guessed_format == "dxf" and decision == "accepted":
+        eligibility_flags.append("dxf_validation_candidate")
     if guessed_format in {"png", "jpeg"} and decision == "accepted":
         eligibility_flags.append("raster_sheet_analysis_candidate")
     if submission_kind == "imported_symbol_library" and guessed_format == "json" and decision == "accepted":

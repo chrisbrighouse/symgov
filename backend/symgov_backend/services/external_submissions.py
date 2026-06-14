@@ -45,6 +45,8 @@ def guess_declared_format(filename: str) -> str:
         return "jpeg"
     if suffix == ".json":
         return "json"
+    if suffix == ".dxf":
+        return "dxf"
     return "unknown"
 
 
@@ -116,6 +118,7 @@ class ExternalSubmissionService:
 
         queue_items: list[dict[str, Any]] = []
         attachment_ids: list[str] = []
+        uploaded_files: list[dict[str, Any]] = []
 
         for index, item in enumerate(files, start=1):
             if not isinstance(item, dict):
@@ -159,10 +162,61 @@ class ExternalSubmissionService:
                 env_file=self.storage_env_file,
             )
             attachment_ids.append(attachment["id"])
+            uploaded_files.append(
+                {
+                    "index": index,
+                    "file_name": file_name,
+                    "file_note": file_note,
+                    "content_type": content_type,
+                    "format": guess_declared_format(file_name),
+                    "object_key": object_key,
+                    "stored_path": str(stored_path),
+                    "attachment": attachment,
+                    "storage_result": storage_result,
+                }
+            )
 
-            source_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{batch_id}:{index}:{file_name}"))
-            queue_item_id = f"aqi-scott-ext-{batch_token}-{index:02d}"
+        grouped_files: dict[str, list[dict[str, Any]]] = {}
+        group_order: list[str] = []
+        for uploaded in uploaded_files:
+            group_key = Path(uploaded["file_name"]).stem.strip().lower() or uploaded["file_name"].lower()
+            if group_key not in grouped_files:
+                grouped_files[group_key] = []
+                group_order.append(group_key)
+            grouped_files[group_key].append(uploaded)
+
+        def asset_entry(uploaded: dict[str, Any], role: str, downloadable: bool = True) -> dict[str, Any]:
+            return {
+                "object_key": uploaded["object_key"],
+                "filename": uploaded["file_name"],
+                "content_type": uploaded["content_type"],
+                "format": uploaded["format"],
+                "role": role,
+                "downloadable": downloadable,
+                "attachment_id": uploaded["attachment"]["id"],
+                "attachment_object_key": uploaded["attachment"]["object_key"],
+            }
+
+        for symbol_index, group_key in enumerate(group_order, start=1):
+            group = grouped_files[group_key]
+            primary = next((item for item in group if item["format"] == "dxf"), group[0])
+            companion_preview = next(
+                (item for item in group if item is not primary and item["format"] in {"png", "jpeg"}),
+                None,
+            )
+            source_assets = [asset_entry(item, "source") for item in group]
+            visual_assets: dict[str, Any] = {"source_assets": source_assets}
+            if companion_preview is not None:
+                visual_assets["preview"] = asset_entry(companion_preview, "companion_preview")
+
+            group_attachment_ids = [item["attachment"]["id"] for item in group]
+            source_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{batch_id}:{symbol_index}:{primary['file_name']}"))
+            queue_item_id = f"aqi-scott-ext-{batch_token}-{symbol_index:02d}"
             queue_item_path = self.scott_runtime_root / "agent_queue_items" / f"{queue_item_id}.json"
+            combined_note = primary["file_note"] or overall_description
+            if len(group) > 1:
+                grouped_names = ", ".join(item["file_name"] for item in group)
+                combined_note = f"{combined_note}\nCompanion files in this symbol submission: {grouped_names}".strip()
 
             payload_json = {
                 "submission_kind": "contributor_submission",
@@ -170,22 +224,34 @@ class ExternalSubmissionService:
                 "submitted_by": f"{submitter_name} <{submitter_email}>",
                 "submitter_name": submitter_name,
                 "submitter_email": submitter_email,
-                "raw_input_path": str(stored_path),
-                "original_filename": file_name,
-                "declared_format": guess_declared_format(file_name),
-                "candidate_symbol_id": candidate_symbol_id(file_name),
-                "candidate_title": candidate_title(file_name),
+                "raw_input_path": primary["stored_path"],
+                "original_filename": primary["file_name"],
+                "declared_format": primary["format"],
+                "candidate_symbol_id": candidate_symbol_id(primary["file_name"]),
+                "candidate_title": candidate_title(primary["file_name"]),
                 "contributor_name": submitter_name,
                 "contributor_org": "",
                 "contributor_declaration": overall_description,
-                "source_notes": file_note or overall_description,
+                "source_notes": combined_note,
                 "submission_batch_id": batch_id,
                 "submission_batch_summary": overall_description,
-                "file_note": file_note,
+                "file_note": primary["file_note"],
                 "external_submitter_id": submitter["id"],
-                "attachment_id": attachment["id"],
-                "attachment_ids": [attachment["id"]],
-                "raw_object_key": object_key,
+                "attachment_id": primary["attachment"]["id"],
+                "attachment_ids": group_attachment_ids,
+                "raw_object_key": primary["object_key"],
+                "visual_assets": visual_assets,
+                "companion_files": [
+                    {
+                        "file_name": item["file_name"],
+                        "object_key": item["object_key"],
+                        "content_type": item["content_type"],
+                        "format": item["format"],
+                        "attachment_id": item["attachment"]["id"],
+                    }
+                    for item in group
+                    if item is not primary
+                ],
                 "rights_documents": [],
                 "evidence_links": [],
                 "standards_source_refs": [],
@@ -210,15 +276,15 @@ class ExternalSubmissionService:
             queue_items.append(
                 {
                     "id": queue_item_id,
-                    "fileName": file_name,
-                    "fileNote": file_note,
+                    "fileName": primary["file_name"],
+                    "fileNote": primary["file_note"],
                     "batchSummary": overall_description,
                     "status": "queued",
                     "routes": [],
                     "payload": payload_json,
-                    "attachmentId": attachment["id"],
-                    "attachmentObjectKey": attachment["object_key"],
-                    "attachmentStorage": storage_result,
+                    "attachmentId": primary["attachment"]["id"],
+                    "attachmentObjectKey": primary["attachment"]["object_key"],
+                    "attachmentStorage": primary["storage_result"],
                     "scottQueueItemPath": str(queue_item_path),
                     "intakeRecordId": None,
                     "intakeStatus": "pending",

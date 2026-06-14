@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import Text, and_, cast, func, inspect as inspect_database, select
 from sqlalchemy.orm import Session, load_only
 
+from ..asset_manifest import choose_preview_asset
 from ..dependencies import get_db_session
 from ..models import (
     AgentDefinition,
@@ -44,6 +45,7 @@ from ..models import (
     ValidationReport,
     WhitneyDemandSignal,
 )
+from .published import choose_published_preview_asset
 from ..agent_feedback import (
     add_agent_feedback_events,
     build_duplicate_decision_feedback_events,
@@ -463,6 +465,90 @@ def build_source_preview_url(review_case_id: str, object_key: str | None) -> str
     if not object_key:
         return None
     return f"/api/v1/workspace/review-cases/{review_case_id}/source/preview"
+
+
+def merge_workspace_visual_assets(intake_payload: dict, validation_payload: dict) -> dict | None:
+    intake_visual = intake_payload.get("visual_assets") if isinstance(intake_payload, dict) else None
+    validation_visual = validation_payload.get("visual_assets") if isinstance(validation_payload, dict) else None
+    intake_visual = intake_visual if isinstance(intake_visual, dict) else {}
+    validation_visual = validation_visual if isinstance(validation_visual, dict) else {}
+    if not intake_visual and not validation_visual:
+        return None
+
+    merged: dict = {}
+
+    def merged_list(key: str) -> list:
+        items: list = []
+        seen: set[str] = set()
+        for visual in (intake_visual, validation_visual):
+            values = visual.get(key)
+            if not isinstance(values, list):
+                continue
+            for item in values:
+                if not isinstance(item, dict):
+                    continue
+                object_key = str(item.get("object_key") or item.get("key") or "").strip()
+                if object_key and object_key in seen:
+                    continue
+                if object_key:
+                    seen.add(object_key)
+                items.append(item)
+        return items
+
+    # Prefer an uploaded contributor companion preview over generated validation
+    # derivatives so DXF+JPG submissions show the supplied visual companion in
+    # review. Single-file DXFs still fall through to validation's generated SVG.
+    preview = intake_visual.get("preview") or validation_visual.get("preview")
+    if isinstance(preview, dict):
+        merged["preview"] = preview
+
+    for key in ("source_assets", "derivatives"):
+        items = merged_list(key)
+        if items:
+            merged[key] = items
+
+    validation_preview = validation_visual.get("preview")
+    if isinstance(validation_preview, dict) and validation_preview is not preview:
+        derivatives = merged.setdefault("derivatives", [])
+        validation_preview_key = str(validation_preview.get("object_key") or validation_preview.get("key") or "").strip()
+        if not validation_preview_key or not any(
+            isinstance(item, dict)
+            and str(item.get("object_key") or item.get("key") or "").strip() == validation_preview_key
+            for item in derivatives
+        ):
+            derivatives.append(validation_preview)
+
+    for key in ("downloads",):
+        items = merged_list(key)
+        if items:
+            merged[key] = items
+
+    return merged or None
+
+
+def choose_workspace_source_preview_asset(
+    *,
+    validation_report: ValidationReport | None = None,
+    intake_record: IntakeRecord | None = None,
+    source_file_name: str | None = None,
+    source_object_key: str | None = None,
+) -> dict | None:
+    validation_payload = validation_report.normalized_payload_json if validation_report is not None else {}
+    validation_payload = validation_payload or {}
+    intake_payload = intake_record.normalized_submission_json if intake_record is not None else {}
+    intake_payload = intake_payload or {}
+    payload = {**intake_payload, **validation_payload}
+    merged_visual_assets = merge_workspace_visual_assets(intake_payload, validation_payload)
+    if merged_visual_assets is not None:
+        payload["visual_assets"] = merged_visual_assets
+    fallback_source_asset = {
+        "object_key": source_object_key,
+        "filename": source_file_name or payload.get("source_file_name") or payload.get("filename"),
+        "content_type": payload.get("source_content_type") or payload.get("content_type"),
+        "format": payload.get("source_format") or payload.get("format") or payload.get("file_format"),
+        "role": "source",
+    }
+    return choose_preview_asset(payload, fallback_source_asset=fallback_source_asset)
 
 
 def resolve_source_object_key(validation_report: ValidationReport) -> str | None:
@@ -1311,6 +1397,12 @@ def build_validation_workspace_item(
         source_file_name=source_file_name,
         source_object_key=source_object_key,
     )
+    source_preview_asset = choose_workspace_source_preview_asset(
+        validation_report=validation_report,
+        intake_record=intake_record,
+        source_file_name=source_file_name,
+        source_object_key=source_object_key,
+    )
     children = build_children(session, review_case, validation_report, str(review_case.id), source_file_name)
     package_id = package_display_id(session, intake_record)
     primary_symbol_id = children[0].proposedSymbolId if children else str(
@@ -1341,7 +1433,9 @@ def build_validation_workspace_item(
         "defectCount": validation_report.defect_count,
         "sourceFileName": source_file_name,
         "sourceObjectKey": source_object_key,
-        "sourcePreviewUrl": build_source_preview_url(str(review_case.id), source_object_key),
+        "sourcePreviewUrl": build_source_preview_url(
+            str(review_case.id), source_preview_asset.get("object_key") if source_preview_asset else None
+        ),
         "intakeRecordId": str(intake_record.id),
         "childCount": len(children),
         "symbolProperties": build_symbol_properties_response(
@@ -1463,6 +1557,19 @@ def build_split_item_workspace_item(
     return response
 
 
+def latest_validation_report_for_intake(session: Session, intake_record_id: uuid.UUID) -> ValidationReport | None:
+    return (
+        session.execute(
+            select(ValidationReport)
+            .where(ValidationReport.source_type == "intake_record")
+            .where(ValidationReport.source_id == intake_record_id)
+            .order_by(ValidationReport.created_at.desc())
+        )
+        .scalars()
+        .first()
+    )
+
+
 def build_provenance_workspace_item(
     session: Session,
     review_case: ReviewCase,
@@ -1475,6 +1582,13 @@ def build_provenance_workspace_item(
     normalized = intake_record.normalized_submission_json or {}
     symbol_format = resolve_symbol_format(
         classification_record=classification_record,
+        intake_record=intake_record,
+        source_file_name=source_file_name,
+        source_object_key=source_object_key,
+    )
+    latest_validation_report = latest_validation_report_for_intake(session, intake_record.id)
+    source_preview_asset = choose_workspace_source_preview_asset(
+        validation_report=latest_validation_report,
         intake_record=intake_record,
         source_file_name=source_file_name,
         source_object_key=source_object_key,
@@ -1507,7 +1621,9 @@ def build_provenance_workspace_item(
         "defectCount": len(((provenance_assessment.report_json or {}).get("defects") or [])),
         "sourceFileName": source_file_name,
         "sourceObjectKey": source_object_key,
-        "sourcePreviewUrl": build_source_preview_url(str(review_case.id), source_object_key),
+        "sourcePreviewUrl": build_source_preview_url(
+            str(review_case.id), source_preview_asset.get("object_key") if source_preview_asset else None
+        ),
         "intakeRecordId": str(intake_record.id),
         "childCount": 0,
         "symbolProperties": build_symbol_properties_response(
@@ -1538,6 +1654,8 @@ def build_published_symbol_workspace_item(
     due = opened_at + timedelta(days=2)
     display_name = governed_symbol_display_id(session, symbol)
     symbol_name = symbol.canonical_name or display_name
+    revision = session.get(SymbolRevision, symbol.current_revision_id) if symbol.current_revision_id else None
+    preview_asset = choose_published_preview_asset(revision.payload_json if revision is not None else None)
     summary = (
         f"Published symbol {display_name} ({symbol_name}) has been returned for review. Comment: {comment}"
         if comment
@@ -1568,7 +1686,9 @@ def build_published_symbol_workspace_item(
         defectCount=1,
         sourceFileName=symbol_name,
         sourceObjectKey=None,
-        sourcePreviewUrl=f"/api/v1/published/symbols/{quote(symbol.slug or str(symbol.id))}/preview",
+        sourcePreviewUrl=(
+            f"/api/v1/published/symbols/{quote(symbol.slug or str(symbol.id))}/preview" if preview_asset else None
+        ),
         intakeRecordId=str(symbol.id),
         childCount=0,
         classificationStatus="published_feedback",
@@ -3959,11 +4079,32 @@ def get_workspace_review_source_preview(
     object_key = None
     if review_case.source_entity_type == "validation_report":
         validation_report = session.get(ValidationReport, review_case.source_entity_id)
-        object_key = resolve_source_object_key(validation_report) if validation_report is not None else None
+        if validation_report is not None:
+            source_file_name = resolve_source_file_name(validation_report)
+            source_object_key = resolve_source_object_key(validation_report)
+            intake_record = None
+            if validation_report.source_type == "intake_record" and validation_report.source_id is not None:
+                intake_record = session.get(IntakeRecord, validation_report.source_id)
+            preview_asset = choose_workspace_source_preview_asset(
+                validation_report=validation_report,
+                intake_record=intake_record,
+                source_file_name=source_file_name,
+                source_object_key=source_object_key,
+            )
+            object_key = preview_asset.get("object_key") if preview_asset else None
     elif review_case.source_entity_type == "provenance_assessment":
         provenance_assessment = session.get(ProvenanceAssessment, review_case.source_entity_id)
         intake_record = session.get(IntakeRecord, provenance_assessment.intake_record_id) if provenance_assessment is not None else None
-        object_key = resolve_source_object_key_from_intake(intake_record) if intake_record is not None else None
+        if intake_record is not None:
+            source_file_name = resolve_source_file_name_from_intake(intake_record)
+            source_object_key = resolve_source_object_key_from_intake(intake_record)
+            preview_asset = choose_workspace_source_preview_asset(
+                validation_report=latest_validation_report_for_intake(session, intake_record.id),
+                intake_record=intake_record,
+                source_file_name=source_file_name,
+                source_object_key=source_object_key,
+            )
+            object_key = preview_asset.get("object_key") if preview_asset else None
 
     if not object_key:
         raise HTTPException(status_code=404, detail="Review source preview not found.")

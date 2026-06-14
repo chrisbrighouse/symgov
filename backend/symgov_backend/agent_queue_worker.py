@@ -24,7 +24,7 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
     },
     "vlad": {
         "runtime_root": Path("/data/.openclaw/workspaces/vlad/runtime"),
-        "runner_path": Path("/data/.openclaw/workspaces/vlad/run_vlad_validation.py"),
+        "runner_path": Path("/data/symgov/scripts/run_vlad_validation.py"),
         "module": "symgov_vlad_runner_worker",
         "persist_db": True,
         "storage": True,

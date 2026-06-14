@@ -11,6 +11,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from symgov_backend.routes.published import (
     MAX_PUBLISHED_SYMBOL_COMMAND_SELECTION,
+    choose_published_preview_asset,
     normalize_published_symbol_command_request,
     published_symbol_comment_item,
     published_symbol_display_id,
@@ -175,6 +176,91 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         self.assertTrue(payload["hasComments"])
         self.assertEqual(payload["commentCount"], 2)
 
+    def test_published_symbol_row_uses_manifest_preview_not_raw_dxf(self) -> None:
+        row = SimpleNamespace(
+            symbol_id=UUID("11111111-1111-1111-1111-111111111111"),
+            slug="0002-33",
+            canonical_name="Pump",
+            category="Pump",
+            discipline="Piping",
+            symbol_revision_id=UUID("22222222-2222-2222-2222-222222222222"),
+            revision_label="Rev 1",
+            revision_created_at=None,
+            payload_json={
+                "display_name": "0002-33",
+                "package_display_id": "0002",
+                "package_symbol_sequence": 33,
+                "source_object_key": "symbols/pump.dxf",
+                "downloads": [{"object_key": "symbols/pump.dxf", "filename": "pump.dxf", "format": "dxf"}],
+                "visual_assets": {
+                    "source_assets": [
+                        {"object_key": "symbols/pump.dxf", "filename": "pump.dxf", "content_type": "application/dxf", "format": "dxf"}
+                    ],
+                    "derivatives": [
+                        {"object_key": "symbols/pump.svg", "filename": "pump.svg", "content_type": "image/svg+xml", "format": "svg", "role": "generated_preview"}
+                    ],
+                },
+            },
+            rationale="",
+            page_id=UUID("33333333-3333-3333-3333-333333333333"),
+            page_code="PID-0002-33",
+            page_title="Pump",
+            effective_date=SimpleNamespace(isoformat=lambda: "2026-06-09"),
+            last_updated_at=None,
+            pack_id=UUID("44444444-4444-4444-4444-444444444444"),
+            pack_code="0002",
+            pack_title="Piping symbols",
+            audience="public",
+            sort_order=33,
+        )
+
+        payload = published_symbol_row(row)
+
+        self.assertEqual(payload["previewUrl"], "/api/v1/published/symbols/0002-33/preview")
+        self.assertEqual(payload["previewAsset"]["object_key"], "symbols/pump.svg")
+        self.assertEqual(payload["downloads"], ["pump.dxf"])
+        self.assertEqual([asset["object_key"] for asset in payload["downloadAssets"]], ["symbols/pump.dxf"])
+        self.assertEqual(choose_published_preview_asset(row.payload_json)["object_key"], "symbols/pump.svg")
+
+    def test_published_symbol_row_hides_preview_when_only_raw_dxf_exists(self) -> None:
+        row = SimpleNamespace(
+            symbol_id=UUID("11111111-1111-1111-1111-111111111111"),
+            slug="0002-34",
+            canonical_name="Valve",
+            category="Valve",
+            discipline="Piping",
+            symbol_revision_id=UUID("22222222-2222-2222-2222-222222222222"),
+            revision_label="Rev 1",
+            revision_created_at=None,
+            payload_json={
+                "display_name": "0002-34",
+                "package_display_id": "0002",
+                "package_symbol_sequence": 34,
+                "source_object_key": "symbols/valve.dxf",
+                "visual_assets": {
+                    "source_assets": [
+                        {"object_key": "symbols/valve.dxf", "filename": "valve.dxf", "content_type": "application/dxf", "format": "dxf"}
+                    ]
+                },
+            },
+            rationale="",
+            page_id=UUID("33333333-3333-3333-3333-333333333333"),
+            page_code="PID-0002-34",
+            page_title="Valve",
+            effective_date=SimpleNamespace(isoformat=lambda: "2026-06-09"),
+            last_updated_at=None,
+            pack_id=UUID("44444444-4444-4444-4444-444444444444"),
+            pack_code="0002",
+            pack_title="Piping symbols",
+            audience="public",
+            sort_order=34,
+        )
+
+        payload = published_symbol_row(row)
+
+        self.assertIsNone(payload["previewUrl"])
+        self.assertIsNone(payload["previewAsset"])
+
     def test_published_symbol_comment_item_serializes_history_entry(self) -> None:
         comment = SimpleNamespace(
             id=UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
@@ -213,7 +299,14 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         class FakeSession:
             def get(self, model, key):
                 if model == SymbolRevision and key == symbol.current_revision_id:
-                    return SimpleNamespace(payload_json={"package_display_id": "0002", "package_symbol_sequence": 32})
+                    return SimpleNamespace(
+                        payload_json={
+                            "package_display_id": "0002",
+                            "package_symbol_sequence": 32,
+                            "source_object_key": "symbols/check-valve.png",
+                            "source_content_type": "image/png",
+                        }
+                    )
                 return None
 
         item = build_published_symbol_workspace_item(
@@ -231,6 +324,41 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         self.assertIn("Needs correcting", item.summary)
         self.assertEqual(item.currentStage, "classification_review")
         self.assertEqual(item.sourcePreviewUrl, "/api/v1/published/symbols/check-valve/preview")
+
+    def test_published_symbol_review_case_hides_preview_for_raw_dxf_only(self) -> None:
+        review_case = SimpleNamespace(
+            id=UUID("55555555-5555-5555-5555-555555555555"),
+            current_stage="classification_review",
+            escalation_level="medium",
+            opened_at=SimpleNamespace(isoformat=lambda: "2026-06-09T12:00:00+00:00"),
+        )
+        symbol = SimpleNamespace(
+            id=UUID("11111111-1111-1111-1111-111111111111"),
+            slug="dxf-only",
+            canonical_name="DXF only",
+            category="Valve",
+            discipline="Piping",
+            current_revision_id=UUID("22222222-2222-2222-2222-222222222222"),
+        )
+
+        class FakeSession:
+            def get(self, model, key):
+                if model == SymbolRevision and key == symbol.current_revision_id:
+                    return SimpleNamespace(
+                        payload_json={
+                            "source_object_key": "symbols/dxf-only.dxf",
+                            "source_content_type": "application/dxf",
+                        }
+                    )
+                return None
+
+        item = build_published_symbol_workspace_item(
+            session=FakeSession(),
+            review_case=review_case,
+            symbol=symbol,
+        )
+
+        self.assertIsNone(item.sourcePreviewUrl)
 
 
 if __name__ == "__main__":
