@@ -4471,7 +4471,7 @@ function SubmissionPage() {
             <input
               required
               type="file"
-              accept=".svg,.png,.jpg,.jpeg,.json"
+              accept=".svg,.png,.jpg,.jpeg,.json,.dxf"
               multiple
               onChange={(event) => updateField('files', Array.from(event.target.files || []))}
             />
