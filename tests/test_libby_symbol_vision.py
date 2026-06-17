@@ -12,6 +12,24 @@ spec.loader.exec_module(libby)
 
 
 class LibbySymbolVisionTests(unittest.TestCase):
+    def test_infer_classification_uses_filename_evidence_for_single_symbol_cases(self):
+        artifact = libby.infer_classification(
+            {
+                "queue_item_id": "aqi-libby-fire-breakglass",
+                "origin_file_name": "Elec_FireAlarm_BreakGlass.dxf",
+                "declared_format": "dxf",
+                "candidate_symbol_id": "ELEC-FIREALARM-BREAKGLASS-001",
+                "package_symbol_grouping": "paired_dxf_raster_symbol",
+            }
+        )
+
+        self.assertEqual(artifact["symbol_name"], "Electrical FireAlarm BreakGlass")
+        self.assertEqual(artifact["discipline"], "Electrical")
+        self.assertEqual(artifact["classification_summary"], "Electrical FireAlarm BreakGlass")
+        self.assertIn("Electrical FireAlarm BreakGlass", artifact["aliases"])
+        self.assertIn("BreakGlass", artifact["search_terms"])
+        self.assertEqual(artifact["evidence"]["filename_inference"]["discipline_hint"], "Electrical")
+
     def test_parse_gemini_symbol_property_json_from_text_part(self):
         response = {
             "candidates": [
@@ -57,6 +75,66 @@ class LibbySymbolVisionTests(unittest.TestCase):
         self.assertEqual(artifact["symbol_name"], "Gate Valve")
         self.assertIn("A gate valve isolation symbol.", artifact["classification_summary"])
         self.assertEqual(artifact["evidence"]["llm_symbol_properties"], llm_properties)
+
+    def test_gemini_symbol_property_prompt_includes_filename_hints(self):
+        captured = {}
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps(
+                    {
+                        "candidates": [
+                            {
+                                "content": {
+                                    "parts": [
+                                        {
+                                            "text": '{"name":"Electrical FireAlarm BreakGlass","description":"Electrical fire alarm break glass symbol.","category":"Fire alarm symbols","discipline":"Electrical"}'
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                ).encode("utf-8")
+
+        def fake_urlopen(request, timeout=60):
+            captured["body"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+        previous_key = os.environ.get("SYMGOV_GEMINI_API_KEY")
+        os.environ["SYMGOV_GEMINI_API_KEY"] = "test-key"
+        original_urlopen = libby.urllib.request.urlopen
+        libby.urllib.request.urlopen = fake_urlopen
+        try:
+            properties = libby.call_gemini_symbol_property_review(
+                b"fake-image",
+                "image/png",
+                filename_hints={
+                    "original_filename": "Elec_FireAlarm_BreakGlass.dxf",
+                    "inferred_name": "Electrical FireAlarm BreakGlass",
+                    "discipline_hint": "Electrical",
+                    "confidence": 0.91,
+                },
+            )
+        finally:
+            libby.urllib.request.urlopen = original_urlopen
+            if previous_key is None:
+                os.environ.pop("SYMGOV_GEMINI_API_KEY", None)
+            else:
+                os.environ["SYMGOV_GEMINI_API_KEY"] = previous_key
+
+        prompt = captured["body"]["contents"][0]["parts"][0]["text"]
+        self.assertIn("Filename hints", prompt)
+        self.assertIn("Elec_FireAlarm_BreakGlass.dxf", prompt)
+        self.assertIn("Electrical FireAlarm BreakGlass", prompt)
+        self.assertIn("advisory", prompt.lower())
+        self.assertEqual(properties["discipline"], "Electrical")
 
 
 if __name__ == "__main__":

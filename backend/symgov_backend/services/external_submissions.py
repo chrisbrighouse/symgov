@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ..filename_inference import infer_filename_metadata, inferred_candidate_title
 from ..runtime import RuntimePersistenceBridge
 
 
@@ -47,6 +48,8 @@ def guess_declared_format(filename: str) -> str:
         return "json"
     if suffix == ".dxf":
         return "dxf"
+    if suffix == ".zip":
+        return "zip"
     return "unknown"
 
 
@@ -63,9 +66,7 @@ def candidate_symbol_id(filename: str) -> str:
 
 
 def candidate_title(filename: str) -> str:
-    stem = Path(filename).stem
-    normalized = " ".join(part for part in stem.replace("_", " ").replace("-", " ").split() if part)
-    return normalized.title() if normalized else ""
+    return inferred_candidate_title(filename)
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -229,6 +230,7 @@ class ExternalSubmissionService:
                 "declared_format": primary["format"],
                 "candidate_symbol_id": candidate_symbol_id(primary["file_name"]),
                 "candidate_title": candidate_title(primary["file_name"]),
+                "filename_inference": infer_filename_metadata(primary["file_name"]),
                 "contributor_name": submitter_name,
                 "contributor_org": "",
                 "contributor_declaration": overall_description,

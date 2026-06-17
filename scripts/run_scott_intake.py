@@ -13,8 +13,10 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import hashlib
+import zipfile
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 SCHEMA_VERSION = "0.1.0"
@@ -32,9 +34,11 @@ SUPPORTED_FORMATS = {
     ".jpg": "jpeg",
     ".jpeg": "jpeg",
     ".dxf": "dxf",
+    ".zip": "zip",
 }
 DEFAULT_ENV_PATH = Path("/data/.openclaw/workspace/symgov/.env.backend.database")
-BACKEND_ROOT = Path("/data/.openclaw/workspace/symgov/backend")
+REPO_BACKEND_ROOT = Path(__file__).resolve().parents[1] / "backend"
+BACKEND_ROOT = REPO_BACKEND_ROOT if REPO_BACKEND_ROOT.exists() else Path("/data/.openclaw/workspace/symgov/backend")
 DEFAULT_SOURCE_DISCOVERY_DURATION_SECONDS = 300
 SOURCE_DISCOVERY_QUERY_SEEDS = [
     "engineering symbol library P&ID valve symbols SVG",
@@ -68,6 +72,7 @@ PROCESS_KEYWORDS = {
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
+from symgov_backend.filename_inference import infer_filename_metadata, inferred_candidate_title
 from symgov_backend.runtime import RuntimePersistenceBridge, env_flag
 from symgov_backend.notifications import send_agent_status_update
 from sqlalchemy import text
@@ -139,6 +144,300 @@ def ensure_list(value):
     if isinstance(value, list):
         return value
     return [value]
+
+
+ZIP_MEMBER_LIMIT = 200
+ZIP_MAX_MEMBER_BYTES = 50 * 1024 * 1024
+ZIP_MAX_TOTAL_BYTES = 250 * 1024 * 1024
+ZIP_MAX_COMPRESSION_RATIO = 100
+ZIP_MEMBER_FORMATS = {key: value for key, value in SUPPORTED_FORMATS.items() if value != "zip"}
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def sha256_bytes(payload):
+    return hashlib.sha256(payload).hexdigest()
+
+
+def safe_package_token(value):
+    normalized = "".join(char.lower() if char.isalnum() else "-" for char in str(value or "").strip())
+    return "-".join(part for part in normalized.split("-") if part) or "member"
+
+
+def zip_member_reason_codes(info):
+    raw_name = info.filename or ""
+    posix_path = PurePosixPath(raw_name.replace("\\", "/"))
+    windows_path = PureWindowsPath(raw_name)
+    reasons = []
+    if not raw_name or raw_name.endswith("/") or info.is_dir():
+        reasons.append("directory_member")
+    if raw_name.startswith(("/", "\\")) or posix_path.is_absolute() or windows_path.is_absolute():
+        reasons.append("absolute_path")
+    if windows_path.drive:
+        reasons.append("windows_drive_path")
+    if any(part in {"", ".", ".."} for part in posix_path.parts):
+        reasons.append("path_traversal")
+    mode = (info.external_attr >> 16) & 0o170000
+    if mode in {0o120000, 0o010000, 0o020000, 0o060000, 0o140000}:
+        reasons.append("symlink_or_special_file")
+    if info.file_size > ZIP_MAX_MEMBER_BYTES:
+        reasons.append("member_too_large")
+    if info.compress_size and info.file_size / max(1, info.compress_size) > ZIP_MAX_COMPRESSION_RATIO:
+        reasons.append("suspicious_compression_ratio")
+    if Path(posix_path.name).suffix.lower() == ".zip":
+        reasons.append("nested_zip_not_supported")
+    return reasons
+
+
+def build_zip_member_task(base_task, manifest, member):
+    member_path = member["safe_stored_path"]
+    package_id = manifest["source_package_id"]
+    member_id = member["member_id"]
+    filename = member["filename"]
+    filename_inference = infer_filename_metadata(filename)
+    object_key = f"{manifest['source_package_object_key']}/members/{member_id}/{filename}" if manifest.get("source_package_object_key") else None
+    package_member = {
+        key: member[key]
+        for key in (
+            "member_id",
+            "member_index",
+            "original_path",
+            "filename",
+            "extension",
+            "declared_format",
+            "sha256",
+            "compressed_size",
+            "uncompressed_size",
+        )
+    }
+    source_asset = {
+        "object_key": object_key,
+        "filename": filename,
+        "content_type": member.get("content_type") or "application/octet-stream",
+        "format": member["declared_format"],
+        "role": "package_member_source",
+        "downloadable": True,
+        "source_package_id": package_id,
+        "package_member_id": member_id,
+        "original_path": member["original_path"],
+    }
+    return {
+        "submission_kind": base_task.get("submission_kind"),
+        "source_ref": base_task.get("source_ref"),
+        "submitted_by": base_task.get("submitted_by"),
+        "raw_input_path": member_path,
+        "original_filename": filename,
+        "declared_format": member["declared_format"],
+        "candidate_symbol_id": f"{safe_package_token(Path(filename).stem).upper()}-{member['member_index']:03d}",
+        "candidate_title": inferred_candidate_title(filename),
+        "filename_inference": filename_inference,
+        "contributor_name": base_task.get("contributor_name"),
+        "contributor_org": base_task.get("contributor_org"),
+        "contributor_declaration": base_task.get("contributor_declaration"),
+        "source_notes": base_task.get("source_notes"),
+        "submission_batch_id": base_task.get("submission_batch_id"),
+        "submission_batch_summary": base_task.get("submission_batch_summary"),
+        "file_note": base_task.get("file_note"),
+        "external_submitter_id": base_task.get("external_submitter_id"),
+        "attachment_id": base_task.get("attachment_id"),
+        "attachment_ids": ensure_list(base_task.get("attachment_ids")) or ensure_list(base_task.get("attachment_id")),
+        "raw_object_key": object_key,
+        "visual_assets": {"source_assets": [source_asset]},
+        "companion_files": [],
+        "rights_documents": ensure_list(base_task.get("rights_documents")),
+        "evidence_links": ensure_list(base_task.get("evidence_links")),
+        "standards_source_refs": ensure_list(base_task.get("standards_source_refs")),
+        "source_package_id": package_id,
+        "source_package_attachment_id": manifest.get("source_package_attachment_id"),
+        "source_package_object_key": manifest.get("source_package_object_key"),
+        "source_package_sha256": manifest.get("source_package_sha256"),
+        "source_package_queue_item_id": manifest.get("source_package_queue_item_id"),
+        "package_member": package_member,
+    }
+
+
+def zip_member_pair_key(member):
+    """Return a conservative package-local key for pairing companion files."""
+    original_path = str(member.get("original_path") or "").replace("\\", "/")
+    posix = PurePosixPath(original_path)
+    parent = posix.parent.as_posix() if posix.parent.as_posix() != "." else ""
+    return (parent.lower(), Path(member.get("filename") or "").stem.lower())
+
+
+def zip_member_source_asset(manifest, member, role="package_member_source"):
+    object_key = (
+        f"{manifest['source_package_object_key']}/members/{member['member_id']}/{member['filename']}"
+        if manifest.get("source_package_object_key")
+        else None
+    )
+    return {
+        "object_key": object_key,
+        "filename": member["filename"],
+        "content_type": member.get("content_type") or "application/octet-stream",
+        "format": member["declared_format"],
+        "role": role,
+        "downloadable": True,
+        "source_package_id": manifest["source_package_id"],
+        "package_member_id": member["member_id"],
+        "original_path": member["original_path"],
+    }
+
+
+def attach_zip_companion_to_task(task, manifest, companion_member):
+    companion_asset = zip_member_source_asset(manifest, companion_member, role="package_member_companion")
+    task.setdefault("visual_assets", {}).setdefault("source_assets", []).append(companion_asset)
+    task.setdefault("companion_files", []).append(
+        {
+            "file_name": companion_member["filename"],
+            "format": companion_member["declared_format"],
+            "role": "package_member_companion",
+            "raw_input_path": companion_member["safe_stored_path"],
+            "object_key": companion_asset.get("object_key"),
+            "source_package_id": manifest["source_package_id"],
+            "package_member_id": companion_member["member_id"],
+            "original_path": companion_member["original_path"],
+            "sha256": companion_member.get("sha256"),
+        }
+    )
+    task["package_member_relationship"] = "primary_with_companion"
+    task["package_symbol_grouping"] = "paired_dxf_raster_symbol"
+    package_member = task.get("package_member")
+    if isinstance(package_member, dict):
+        package_member["relationship"] = "primary"
+        package_member["companion_member_ids"] = [companion_member["member_id"]]
+    companion_member["relationship"] = "companion"
+    companion_member["primary_member_id"] = package_member.get("member_id") if isinstance(package_member, dict) else None
+
+
+def build_zip_member_tasks(base_task, manifest):
+    accepted_members = [member for member in manifest.get("members", []) if member.get("status") == "accepted"]
+    by_pair_key = {}
+    for member in accepted_members:
+        by_pair_key.setdefault(zip_member_pair_key(member), []).append(member)
+
+    companion_member_ids = set()
+    primary_companions = {}
+    raster_formats = {"jpeg", "png"}
+    for members in by_pair_key.values():
+        dxf_members = [member for member in members if member.get("declared_format") == "dxf"]
+        raster_members = [member for member in members if member.get("declared_format") in raster_formats]
+        if len(dxf_members) == 1 and len(raster_members) == 1:
+            primary = dxf_members[0]
+            companion = raster_members[0]
+            primary_companions[primary["member_id"]] = companion
+            companion_member_ids.add(companion["member_id"])
+
+    child_tasks = []
+    for member in accepted_members:
+        if member["member_id"] in companion_member_ids:
+            member.setdefault("downstream_queue_ids", [])
+            member["downstream_role"] = "companion_to_primary_symbol"
+            continue
+        task = build_zip_member_task(base_task, manifest, member)
+        companion = primary_companions.get(member["member_id"])
+        if companion:
+            attach_zip_companion_to_task(task, manifest, companion)
+        child_tasks.append(task)
+    return child_tasks
+
+
+def expand_zip_package(task, raw_input_path, queue_item_id):
+    package_sha = sha256_file(raw_input_path)
+    package_id = f"pkg-{safe_package_token(queue_item_id)}-{package_sha[:12]}"
+    workspace_root = Path(task.get("package_workspace_root") or raw_input_path.parent / "zip_packages")
+    package_dir = workspace_root / package_id
+    package_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "source_package_id": package_id,
+        "source_package_attachment_id": task.get("attachment_id"),
+        "source_package_object_key": task.get("raw_object_key"),
+        "source_package_sha256": package_sha,
+        "source_package_queue_item_id": queue_item_id,
+        "original_zip_filename": task.get("original_filename") or raw_input_path.name,
+        "package_workspace_path": str(package_dir),
+        "members": [],
+    }
+    child_tasks = []
+    total_uncompressed = 0
+    unsafe_package = False
+    try:
+        with zipfile.ZipFile(raw_input_path) as archive:
+            infos = archive.infolist()
+            if len(infos) > ZIP_MEMBER_LIMIT:
+                unsafe_package = True
+                manifest["members"].append({
+                    "member_id": f"{package_id}-limit",
+                    "member_index": 0,
+                    "original_path": "<archive>",
+                    "filename": raw_input_path.name,
+                    "extension": ".zip",
+                    "declared_format": None,
+                    "sha256": None,
+                    "compressed_size": raw_input_path.stat().st_size,
+                    "uncompressed_size": None,
+                    "status": "rejected",
+                    "reason_codes": ["too_many_members"],
+                    "downstream_queue_ids": [],
+                })
+                return manifest, child_tasks, ["too_many_members"]
+            for index, info in enumerate(infos, start=1):
+                original_path = info.filename
+                filename = Path(PurePosixPath(original_path.replace("\\", "/")).name).name
+                extension = Path(filename).suffix.lower()
+                declared_format = ZIP_MEMBER_FORMATS.get(extension)
+                reason_codes = zip_member_reason_codes(info)
+                total_uncompressed += info.file_size
+                if total_uncompressed > ZIP_MAX_TOTAL_BYTES:
+                    reason_codes.append("package_too_large")
+                normalized_member_path = PurePosixPath(original_path.replace("\\", "/")).as_posix()
+                member_id = f"{index:04d}-{safe_package_token(normalized_member_path)}-{info.CRC:08x}"
+                safe_stored_path = str(package_dir / member_id / filename) if filename else None
+                member = {
+                    "member_id": member_id,
+                    "member_index": index,
+                    "original_path": original_path,
+                    "safe_stored_path": safe_stored_path,
+                    "filename": filename,
+                    "extension": extension or None,
+                    "declared_format": declared_format,
+                    "sha256": None,
+                    "compressed_size": info.compress_size,
+                    "uncompressed_size": info.file_size,
+                    "status": "accepted",
+                    "reason_codes": [],
+                    "downstream_queue_ids": [],
+                }
+                if reason_codes:
+                    member["status"] = "rejected"
+                    member["reason_codes"] = reason_codes
+                    unsafe_package = True
+                    manifest["members"].append(member)
+                    continue
+                if declared_format is None:
+                    member["status"] = "skipped"
+                    member["reason_codes"] = ["unsupported_member_format"]
+                    manifest["members"].append(member)
+                    continue
+                payload = archive.read(info)
+                member["sha256"] = sha256_bytes(payload)
+                output_path = Path(safe_stored_path)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_bytes(payload)
+                manifest["members"].append(member)
+    except zipfile.BadZipFile:
+        return manifest, child_tasks, ["bad_zip_file"]
+    if unsafe_package:
+        return manifest, child_tasks, ["unsafe_zip_member"]
+    child_tasks = build_zip_member_tasks(task, manifest)
+    if not child_tasks:
+        return manifest, child_tasks, ["no_supported_members"]
+    return manifest, child_tasks, []
 
 
 class SearchResultParser(HTMLParser):
@@ -848,6 +1147,9 @@ def build_routing(decision, eligibility_status, guessed_format, queue_priority):
     }
 
     if decision == "accepted" and eligibility_status == "eligible":
+        if guessed_format == "zip":
+            recommendation["reason_codes"].append("SCOTT-ROUTE-ZIP-PACKAGE")
+            return recommendation
         recommendation["route_to_agents"] = ["tracy"]
         recommendation["next_queue_families"] = ["provenance"]
         recommendation["reason_codes"].append("SCOTT-ROUTE-ACCEPTED")
@@ -894,6 +1196,8 @@ def run_intake_task(task):
     raw_object_key = task.get("raw_object_key")
     visual_assets = task.get("visual_assets") if isinstance(task.get("visual_assets"), dict) else None
     companion_files = ensure_list(task.get("companion_files"))
+    package_manifest = None
+    package_child_tasks = []
 
     defects = []
     evidence_trace = []
@@ -905,6 +1209,10 @@ def run_intake_task(task):
     if not candidate_symbol_id and raw_input_path_raw:
         candidate_symbol_id = Path(raw_input_path_raw).stem.upper()
 
+    effective_original_filename = original_filename or (Path(raw_input_path_raw).name if raw_input_path_raw else None)
+    filename_inference = copy.deepcopy(task.get("filename_inference")) if isinstance(task.get("filename_inference"), dict) else infer_filename_metadata(effective_original_filename)
+    candidate_title = task.get("candidate_title") or filename_inference.get("inferred_title")
+
     normalized_submission = {
         "source_type": source_type,
         "source_id": source_id,
@@ -912,10 +1220,11 @@ def run_intake_task(task):
         "source_ref": source_ref,
         "submitted_by": submitted_by,
         "raw_input_path": raw_input_path_raw,
-        "original_filename": original_filename or (Path(raw_input_path_raw).name if raw_input_path_raw else None),
+        "original_filename": effective_original_filename,
         "declared_format": normalized_declared,
         "candidate_symbol_id": candidate_symbol_id,
-        "candidate_title": task.get("candidate_title"),
+        "candidate_title": candidate_title,
+        "filename_inference": filename_inference,
         "contributor_name": contributor_name,
         "contributor_org": contributor_org,
         "contributor_declaration": contributor_declaration,
@@ -935,14 +1244,23 @@ def run_intake_task(task):
         "standards_source_refs": standards_source_refs,
         "rights_documents": rights_documents,
         "evidence_links": evidence_links,
+        "source_package_id": task.get("source_package_id"),
+        "source_package_attachment_id": task.get("source_package_attachment_id"),
+        "source_package_object_key": task.get("source_package_object_key"),
+        "source_package_sha256": task.get("source_package_sha256"),
+        "source_package_queue_item_id": task.get("source_package_queue_item_id"),
+        "package_member": copy.deepcopy(task.get("package_member")) if isinstance(task.get("package_member"), dict) else None,
+        "package_member_relationship": task.get("package_member_relationship"),
+        "package_symbol_grouping": task.get("package_symbol_grouping"),
     }
     extracted_metadata = {
         "file_name": Path(raw_input_path_raw).name if raw_input_path_raw else None,
-        "original_filename": original_filename or (Path(raw_input_path_raw).name if raw_input_path_raw else None),
+        "original_filename": effective_original_filename,
         "file_extension": suffix or None,
         "guessed_format": guessed_format,
         "candidate_symbol_id": candidate_symbol_id,
-        "candidate_title": task.get("candidate_title"),
+        "candidate_title": candidate_title,
+        "filename_inference": filename_inference,
         "contributor_name": contributor_name,
         "contributor_org": contributor_org,
         "import_batch_id": task.get("import_batch_id"),
@@ -1052,6 +1370,33 @@ def run_intake_task(task):
             f"{guessed_format.upper()} intake accepted for downstream raster sheet analysis by Vlad.",
         )
 
+    if guessed_format == "zip" and raw_input_path and raw_input_path.exists() and decision == "accepted":
+        package_manifest, package_child_tasks, package_errors = expand_zip_package(task, raw_input_path, queue_item_id)
+        extracted_metadata["zip_member_count"] = len(package_manifest.get("members", [])) if package_manifest else 0
+        extracted_metadata["zip_supported_member_count"] = len(package_child_tasks)
+        if package_errors:
+            if "no_supported_members" in package_errors:
+                add_defect(defects, "SCOTT-ZIP-003", "high", "ZIP package did not contain supported member files.")
+                eligibility_flags.append("no_supported_zip_members")
+            elif "bad_zip_file" in package_errors:
+                add_defect(defects, "SCOTT-ZIP-001", "critical", "ZIP package could not be opened as a valid archive.")
+                eligibility_flags.append("bad_zip_file")
+            else:
+                add_defect(defects, "SCOTT-ZIP-002", "critical", f"ZIP package failed safety checks: {', '.join(package_errors)}.")
+                eligibility_flags.append("unsafe_zip_member")
+            add_trace(evidence_trace, "zip_package_expansion", "failed", f"ZIP expansion stopped: {', '.join(package_errors)}.")
+            decision = "rejected"
+            confidence = 0.98
+            eligibility_status = "ineligible"
+        else:
+            add_trace(
+                evidence_trace,
+                "zip_package_expansion",
+                "passed",
+                f"Safely expanded ZIP package into {len(package_child_tasks)} supported member task(s).",
+            )
+            eligibility_flags.append("zip_package_expanded")
+
     if submission_kind == "contributor_submission" and not contributor_declaration:
         add_defect(defects, "SCOTT-ELIG-001", "high", "Contributor submissions require a contributor_declaration.")
         add_trace(evidence_trace, "declaration", "failed", "Contributor submission did not include a declaration.")
@@ -1100,6 +1445,8 @@ def run_intake_task(task):
         "routing_recommendation": routing_recommendation,
         "defects": defects,
         "evidence_trace": evidence_trace,
+        "package_manifest": package_manifest,
+        "package_child_tasks": package_child_tasks,
     }
 
 
@@ -1153,6 +1500,38 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
         )
     queue_item["completed_at"] = completed_at
     write_json(queue_item_path, queue_item)
+
+    package_child_queue_item_paths = []
+    if not is_source_discovery and artifact.get("package_child_tasks"):
+        child_timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        member_lookup = {
+            member.get("member_id"): member
+            for member in (artifact.get("package_manifest") or {}).get("members", [])
+            if isinstance(member, dict)
+        }
+        for child_task in artifact.get("package_child_tasks") or []:
+            package_member = child_task.get("package_member") or {}
+            member_id = package_member.get("member_id") or f"member-{len(package_child_queue_item_paths) + 1:04d}"
+            child_queue_id = f"aqi-scott-{safe_package_token(member_id)}-{child_timestamp}"
+            child_queue_item = {
+                "id": child_queue_id,
+                "agent_id": "scott",
+                "source_type": "zip_package_member",
+                "source_id": child_task.get("source_package_id"),
+                "status": "queued",
+                "priority": queue_item.get("priority") or "medium",
+                "payload_json": child_task,
+                "confidence": None,
+                "escalation_reason": None,
+                "created_at": completed_at,
+                "started_at": None,
+                "completed_at": None,
+            }
+            child_path = runtime_root / "agent_queue_items" / f"{child_queue_id}.json"
+            write_json(child_path, child_queue_item)
+            package_child_queue_item_paths.append(str(child_path))
+            if member_id in member_lookup:
+                member_lookup[member_id].setdefault("downstream_queue_ids", []).append(child_queue_id)
 
     run_id = stamp_id("arun", queue_item["id"])
     run_record = {
@@ -1248,6 +1627,7 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
         "db_persistence": db_persistence,
         "notifications": notification_status,
         "artifact": artifact,
+        "package_child_queue_item_paths": package_child_queue_item_paths,
     }
 
 

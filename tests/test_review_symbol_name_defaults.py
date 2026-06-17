@@ -32,6 +32,20 @@ class ReviewSymbolNameDefaultTests(unittest.TestCase):
             "Qet Pressure Switch No",
         )
 
+    def test_single_symbol_review_preserves_engineering_compounds_from_filename(self):
+        class ClassificationRecord:
+            symbol_key = "000F"
+            origin_file_name = "Elec_FireAlarm_BreakGlass.dxf"
+
+        self.assertEqual(
+            default_review_symbol_name(
+                package_id="000F",
+                primary_symbol_id="000F",
+                classification_record=ClassificationRecord(),
+            ),
+            "Electrical FireAlarm BreakGlass",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

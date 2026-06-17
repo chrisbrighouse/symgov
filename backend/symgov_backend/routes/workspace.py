@@ -14,8 +14,10 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import Text, and_, cast, func, inspect as inspect_database, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
 
+from ..filename_inference import infer_filename_metadata
 from ..asset_manifest import choose_preview_asset
 from ..dependencies import get_db_session
 from ..models import (
@@ -897,6 +899,18 @@ def split_child_key(child: dict, proposed_symbol_id: str, file_name: str) -> str
     return str(child.get("attachment_object_key") or proposed_symbol_id or file_name)
 
 
+def is_review_split_item_duplicate_integrity_error(exc: IntegrityError) -> bool:
+    message = str(exc.orig or exc).lower()
+    return (
+        "duplicate key value" in message
+        and "review_split_items" in str(exc).lower()
+        and (
+            "pk_review_split_items" in message
+            or "uq_review_split_items_case_child" in message
+        )
+    )
+
+
 def ensure_split_items(
     session: Session,
     *,
@@ -973,7 +987,26 @@ def ensure_split_items(
             item.updated_at = now
         items.append(item)
     if items:
-        session.flush()
+        try:
+            session.flush()
+        except IntegrityError as exc:
+            if not is_review_split_item_duplicate_integrity_error(exc):
+                raise
+            session.rollback()
+            reloaded_items = []
+            missing_ids = []
+            for item in items:
+                reloaded = session.get(ReviewSplitItem, item.id)
+                if reloaded is None:
+                    missing_ids.append(str(item.id))
+                else:
+                    reloaded_items.append(reloaded)
+            if missing_ids:
+                raise RuntimeError(
+                    "review_split_items duplicate recovery could not reload split items: "
+                    + ", ".join(missing_ids)
+                ) from exc
+            items = reloaded_items
     return items
 
 
@@ -1102,6 +1135,10 @@ def humanize_symbol_name(value: str | None) -> str:
     text_value = str(value or "").strip()
     if not text_value:
         return ""
+    inferred = infer_filename_metadata(text_value)
+    inferred_name = str(inferred.get("inferred_name") or "").strip()
+    if inferred_name:
+        return inferred_name
     stem = Path(text_value).stem if Path(text_value).suffix else text_value
     parts = [part for part in re.split(r"[^A-Za-z0-9]+", stem) if part]
     while parts and parts[-1].lower() in {"a11y", "accessible", "accessibility"}:
