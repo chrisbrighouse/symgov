@@ -368,7 +368,7 @@ def filename_hints_for_task(task):
 
 def is_likely_single_symbol_task(task, filename_hints):
     grouping = str(task.get("package_symbol_grouping") or "").strip().lower()
-    if grouping == "paired_dxf_raster_symbol":
+    if grouping in {"paired_dxf_raster_symbol", "standalone_package_symbol_file"}:
         return True
     if str(task.get("task_type") or "").strip().lower() == "symbol_graphic_change_request":
         return True

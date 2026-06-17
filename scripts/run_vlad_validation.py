@@ -1644,7 +1644,13 @@ def run_validation_task(task):
     asset_format = infer_asset_format(asset_path_raw, task.get("asset_format"))
     compare_root = task.get("compare_root")
     expected_checks = list(task.get("expected_checks") or [])
-    if asset_format in {"png", "jpeg"} and "raster_sheet_analysis" not in expected_checks:
+    package_symbol_grouping = str(task.get("package_symbol_grouping") or "").strip().lower()
+    package_member_relationship = str(task.get("package_member_relationship") or "").strip().lower()
+    already_isolated_package_symbol = (
+        package_symbol_grouping == "standalone_package_symbol_file"
+        or package_member_relationship == "standalone_symbol_file"
+    )
+    if asset_format in {"png", "jpeg"} and "raster_sheet_analysis" not in expected_checks and not already_isolated_package_symbol:
         expected_checks = ["integrity", "raster_sheet_analysis"]
 
     defects = []
@@ -1666,6 +1672,9 @@ def run_validation_task(task):
         "file_note": task.get("file_note"),
         "submission_batch_summary": task.get("submission_batch_summary"),
         "asset_format": asset_format or None,
+        "package_member": task.get("package_member"),
+        "package_member_relationship": task.get("package_member_relationship"),
+        "package_symbol_grouping": task.get("package_symbol_grouping"),
     }
 
     decision = "pass"

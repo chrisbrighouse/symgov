@@ -6,10 +6,16 @@ from unittest.mock import patch
 BACKEND_ROOT = pathlib.Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
 
-from symgov_backend.agent_queue_worker import AgentQueueWorkerConfig, drain_agent_queues
+from symgov_backend.agent_queue_worker import AGENT_SPECS, AgentQueueWorkerConfig, drain_agent_queues
 
 
 class HannahWorkerThrottleTests(unittest.TestCase):
+    def test_scott_worker_uses_repo_managed_runner(self):
+        self.assertEqual(
+            AGENT_SPECS["scott"]["runner_path"],
+            pathlib.Path("/data/symgov/scripts/run_scott_intake.py"),
+        )
+
     def test_global_drain_processes_hannah_once(self):
         calls = []
 

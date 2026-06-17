@@ -236,6 +236,49 @@ def test_scott_zip_keeps_same_named_dxf_raster_pairs_as_one_symbol_candidate(tmp
     sheet_task = child_tasks[1]
     assert sheet_task["declared_format"] == "jpeg"
     assert sheet_task["companion_files"] == []
+    assert sheet_task["package_symbol_grouping"] == "standalone_package_symbol_file"
+    assert sheet_task["package_member_relationship"] == "standalone_symbol_file"
+    assert sheet_task["package_member"]["relationship"] == "standalone_symbol_file"
+
+
+def test_scott_marks_fire_alarm_raster_package_members_as_standalone_symbols(tmp_path):
+    zip_path = build_zip(
+        tmp_path / "FireAlarms.zip",
+        {
+            "Elec_FireAlarms_Detector_Heat_RateOfRise.jpg": b"fake heat rate-of-rise jpeg",
+            "Elec_FireAlarms_Sounder_Beacon-alt.jpg": b"fake sounder beacon jpeg",
+        },
+    )
+
+    artifact = scott_runner.run_intake_task(
+        {
+            "queue_item_id": "aqi-scott-fire-raster-zip-test",
+            "submission_kind": "contributor_submission",
+            "source_ref": "external-submission-fire-raster-zip-test",
+            "submitted_by": "Tester <tester@example.test>",
+            "raw_input_path": str(zip_path),
+            "declared_format": "zip",
+            "candidate_symbol_id": "FIRE-ALARMS",
+            "contributor_declaration": "I can submit this test ZIP.",
+            "attachment_id": "att-fire-zip",
+            "raw_object_key": "external-submissions/batch/FireAlarms.zip",
+            "package_workspace_root": str(tmp_path / "packages"),
+        }
+    )
+
+    assert artifact["decision"] == "accepted"
+    child_tasks = artifact["package_child_tasks"]
+    assert [task["original_filename"] for task in child_tasks] == [
+        "Elec_FireAlarms_Detector_Heat_RateOfRise.jpg",
+        "Elec_FireAlarms_Sounder_Beacon-alt.jpg",
+    ]
+    heat_task = child_tasks[0]
+    assert heat_task["declared_format"] == "jpeg"
+    assert heat_task["candidate_title"] == "Electrical FireAlarms Detector Heat RateOfRise"
+    assert heat_task["package_symbol_grouping"] == "standalone_package_symbol_file"
+    assert heat_task["package_member_relationship"] == "standalone_symbol_file"
+    assert heat_task["package_member"]["relationship"] == "standalone_symbol_file"
+    assert heat_task["companion_files"] == []
 
 
 def test_scott_zip_rejects_path_traversal_without_extracting(tmp_path):
@@ -361,3 +404,41 @@ def test_downstream_queue_items_preserve_zip_package_member_provenance(tmp_path)
         assert payload["package_symbol_grouping"] == "paired_dxf_raster_symbol"
         assert payload["companion_files"][0]["original_path"] == "a/pump.jpg"
         assert payload["visual_assets"]["source_assets"][1]["filename"] == "pump.jpg"
+
+
+def test_downstream_does_not_request_raster_sheet_splitting_for_standalone_zip_symbol_jpeg(tmp_path):
+    member_path = tmp_path / "Elec_FireAlarms_Detector_Heat_RateOfRise.jpg"
+    member_path.write_bytes(b"fake jpeg")
+    intake_record = {
+        "id": "intake-fire-raster-member-test",
+        "intake_status": "accepted",
+        "eligibility_status": "eligible",
+        "source_ref": "external-submission-fire-zip-test",
+        "submitter": "Tester <tester@example.test>",
+        "routing_recommendation_json": {"route_to_agents": ["vlad", "tracy"], "priority": "medium"},
+        "normalized_submission_json": {
+            "raw_input_path": str(member_path),
+            "declared_format": "jpeg",
+            "candidate_symbol_id": "ELEC-FIREALARMS-DETECTOR-HEAT-RATEOFRISE-001",
+            "candidate_title": "Electrical FireAlarms Detector Heat Rate Of Rise",
+            "original_filename": member_path.name,
+            "source_package_id": "pkg-aqi-scott-fire-zip-test-abcdef123456",
+            "package_member": {
+                "member_id": "0001-elec-firealarms-detector-heat-rateofrise-jpg",
+                "member_index": 1,
+                "original_path": member_path.name,
+                "filename": member_path.name,
+                "declared_format": "jpeg",
+                "relationship": "standalone_symbol_file",
+            },
+            "package_member_relationship": "standalone_symbol_file",
+            "package_symbol_grouping": "standalone_package_symbol_file",
+            "companion_files": [],
+        },
+    }
+
+    vlad_item = scott_downstream.build_vlad_queue_item(intake_record, "20260613T000000Z")
+
+    assert vlad_item["payload_json"]["asset_format"] == "jpeg"
+    assert vlad_item["payload_json"]["expected_checks"] == ["integrity"]
+    assert vlad_item["payload_json"]["package_symbol_grouping"] == "standalone_package_symbol_file"

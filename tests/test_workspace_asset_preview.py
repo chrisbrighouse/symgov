@@ -13,6 +13,7 @@ if str(BACKEND_ROOT) not in sys.path:
 import symgov_backend.routes.workspace as workspace_routes  # noqa: E402
 from symgov_backend.routes.workspace import (  # noqa: E402
     build_provenance_workspace_item,
+    build_validation_workspace_item,
     choose_workspace_source_preview_asset,
 )
 from symgov_backend.models import Attachment, IntakeRecord, ReviewCase, ValidationReport  # noqa: E402
@@ -187,6 +188,64 @@ def test_workspace_source_preview_preserves_intake_companion_when_validation_add
     )
 
     assert selected["object_key"] == "symbols/valve.jpg"
+
+
+def test_workspace_source_preview_uses_intake_companion_source_asset_when_preview_key_missing():
+    intake_record = SimpleNamespace(
+        normalized_submission_json={
+            "raw_object_key": "symbols/fire-alarm.dxf",
+            "visual_assets": {
+                "source_assets": [
+                    {
+                        "object_key": "symbols/fire-alarm.dxf",
+                        "filename": "fire-alarm.dxf",
+                        "content_type": "application/dxf",
+                        "format": "dxf",
+                        "role": "source",
+                    },
+                    {
+                        "object_key": "symbols/fire-alarm.jpg",
+                        "filename": "fire-alarm.jpg",
+                        "content_type": "image/jpeg",
+                        "format": "jpg",
+                        "role": "package_member_companion",
+                    },
+                ]
+            },
+        }
+    )
+    validation_report = SimpleNamespace(
+        normalized_payload_json={
+            "raw_object_key": "symbols/fire-alarm.dxf",
+            "visual_assets": {
+                "preview": {
+                    "object_key": "validation-reports/fire-alarm/preview.svg",
+                    "filename": "fire-alarm.svg",
+                    "content_type": "image/svg+xml",
+                    "format": "svg",
+                    "role": "generated_preview",
+                },
+                "derivatives": [
+                    {
+                        "object_key": "validation-reports/fire-alarm/preview.svg",
+                        "filename": "fire-alarm.svg",
+                        "content_type": "image/svg+xml",
+                        "format": "svg",
+                        "role": "generated_preview",
+                    }
+                ],
+            },
+        }
+    )
+
+    selected = choose_workspace_source_preview_asset(
+        validation_report=validation_report,
+        intake_record=intake_record,
+        source_file_name="fire-alarm.dxf",
+        source_object_key="symbols/fire-alarm.dxf",
+    )
+
+    assert selected["object_key"] == "symbols/fire-alarm.jpg"
 
 
 def test_workspace_review_source_preview_endpoint_uses_intake_companion_for_validation_case(monkeypatch):
@@ -381,3 +440,82 @@ def test_provenance_review_case_uses_latest_dxf_validation_derivative_preview():
     )
 
     assert item.sourcePreviewUrl == f"/api/v1/workspace/review-cases/{review_case.id}/source/preview"
+
+
+def test_validation_workspace_item_exposes_available_formats_and_selected_preview_asset():
+    review_case = SimpleNamespace(
+        id=uuid.uuid4(),
+        opened_at=datetime(2026, 6, 17, tzinfo=timezone.utc),
+        escalation_level="medium",
+        current_stage="classification_review",
+    )
+    intake_record = SimpleNamespace(
+        id=uuid.uuid4(),
+        source_package_id=None,
+        normalized_submission_json={
+            "raw_object_key": "symbols/fire-alarm.dxf",
+            "candidate_symbol_id": "FIRE-ALARM",
+            "visual_assets": {
+                "source_assets": [
+                    {
+                        "object_key": "symbols/fire-alarm.dxf",
+                        "filename": "fire-alarm.dxf",
+                        "content_type": "application/dxf",
+                        "format": "dxf",
+                        "role": "source",
+                    },
+                    {
+                        "object_key": "symbols/fire-alarm.jpg",
+                        "filename": "fire-alarm.jpg",
+                        "content_type": "image/jpeg",
+                        "format": "jpg",
+                        "role": "package_member_companion",
+                    },
+                ]
+            },
+        },
+    )
+    validation_report = SimpleNamespace(
+        validation_status="validation_requires_escalation",
+        defect_count=0,
+        source_type="intake_record",
+        source_id=intake_record.id,
+        normalized_payload_json={
+            "raw_object_key": "symbols/fire-alarm.dxf",
+            "source_file_name": "fire-alarm.dxf",
+            "source_content_type": "application/dxf",
+            "visual_assets": {
+                "preview": {
+                    "object_key": "validation-reports/fire-alarm/preview.svg",
+                    "filename": "fire-alarm.svg",
+                    "content_type": "image/svg+xml",
+                    "format": "svg",
+                    "role": "generated_preview",
+                },
+                "derivatives": [
+                    {
+                        "object_key": "validation-reports/fire-alarm/preview.svg",
+                        "filename": "fire-alarm.svg",
+                        "content_type": "image/svg+xml",
+                        "format": "svg",
+                        "role": "generated_preview",
+                    }
+                ],
+            },
+        },
+        report_json={},
+    )
+
+    item = build_validation_workspace_item(
+        FakeSession(None),
+        review_case,
+        validation_report,
+        intake_record,
+    )
+
+    assert item.availableFormats == ["dxf", "jpg", "svg"]
+    assert [(asset.format, asset.selectedPreview) for asset in item.sourceAssets] == [
+        ("dxf", False),
+        ("jpg", True),
+        ("svg", False),
+    ]

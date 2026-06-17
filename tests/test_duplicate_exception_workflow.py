@@ -87,6 +87,7 @@ class DuplicateExceptionWorkflowTests(unittest.TestCase):
         self.assertEqual(HUMAN_VISIBLE_REVIEW_CASE_STAGES, {"classification_review", "raster_split_review"})
         self.assertTrue(is_human_visible_review_case_stage("classification_review"))
         self.assertTrue(is_human_visible_review_case_stage("raster_split_review"))
+        self.assertFalse(is_human_visible_review_case_stage("provenance_review"))
         self.assertFalse(is_human_visible_review_case_stage("libby_deletion_review"))
         self.assertFalse(is_human_visible_review_case_stage("changes_requested"))
 

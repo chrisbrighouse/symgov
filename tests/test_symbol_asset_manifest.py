@@ -10,6 +10,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from symgov_backend.asset_manifest import (  # noqa: E402
     choose_preview_asset,
     is_browser_previewable,
+    list_available_assets,
     list_download_assets,
 )
 
@@ -374,3 +375,57 @@ def test_list_download_assets_includes_legacy_fallback_source_asset():
     )
 
     assert [asset["object_key"] for asset in downloads] == ["assets/legacy.dxf", "assets/readme.txt"]
+
+
+def test_list_available_assets_includes_source_preview_downloads_and_derivatives_once():
+    payload = {
+        "visual_assets": {
+            "preview": {
+                "object_key": "assets/companion.jpg",
+                "filename": "companion.jpg",
+                "content_type": "image/jpeg",
+                "format": "jpg",
+                "role": "companion_preview",
+            },
+            "source_assets": [
+                {
+                    "object_key": "assets/raw.dxf",
+                    "filename": "raw.dxf",
+                    "content_type": "application/dxf",
+                    "format": "dxf",
+                    "role": "source",
+                },
+                {
+                    "object_key": "assets/companion.jpg",
+                    "filename": "companion.jpg",
+                    "content_type": "image/jpeg",
+                    "format": "jpg",
+                    "role": "companion_source",
+                },
+            ],
+            "derivatives": [
+                {
+                    "object_key": "assets/generated.svg",
+                    "filename": "generated.svg",
+                    "content_type": "image/svg+xml",
+                    "format": "svg",
+                    "role": "generated_preview",
+                }
+            ],
+        },
+        "downloads": [
+            {
+                "object_key": "assets/license.txt",
+                "filename": "license.txt",
+                "content_type": "text/plain",
+                "format": "txt",
+            }
+        ],
+    }
+
+    assert [asset["object_key"] for asset in list_available_assets(payload)] == [
+        "assets/raw.dxf",
+        "assets/companion.jpg",
+        "assets/license.txt",
+        "assets/generated.svg",
+    ]

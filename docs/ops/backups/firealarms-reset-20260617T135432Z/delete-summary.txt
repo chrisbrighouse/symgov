@@ -1,0 +1,9 @@
+BEGIN
+ review_symbol_properties_deleted | review_split_items_deleted | review_case_actions_deleted | human_review_decisions_deleted | review_cases_deleted | provenance_assessments_deleted | validation_reports_deleted | intake_records_deleted | source_packages_deleted | attachments_deleted | audit_events_deleted | agent_output_artifacts_deleted | agent_runs_deleted | agent_queue_items_deleted
+----------------------------------+----------------------------+-----------------------------+--------------------------------+----------------------+--------------------------------+----------------------------+------------------------+-------------------------+---------------------+----------------------+--------------------------------+--------------------+---------------------------
+                               62 |                          0 |                           0 |                              0 |                   62 |                             62 |                         62 |                     64 |                      64 |                  62 |                    2 |                            248 |                188 |                       219
+(1 row)
+
+COMMIT
+removed_runtime_dir=/data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260617T101053Z
+removed_runtime_dir=/data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260617T103527Z

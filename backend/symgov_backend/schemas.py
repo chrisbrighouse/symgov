@@ -64,6 +64,16 @@ class ExternalSubmissionResponse(BaseModel):
     queueItems: list[ExternalSubmissionQueueItemResponse]
 
 
+class WorkspaceReviewAssetResponse(BaseModel):
+    objectKey: str
+    filename: str
+    contentType: str | None = None
+    format: str | None = None
+    role: str | None = None
+    previewable: bool = False
+    selectedPreview: bool = False
+
+
 class WorkspaceReviewChildResponse(BaseModel):
     id: str
     proposedSymbolId: str
@@ -153,6 +163,8 @@ class WorkspaceReviewCaseResponse(BaseModel):
     sourceFileName: str
     sourceObjectKey: str | None = None
     sourcePreviewUrl: str | None = None
+    sourceAssets: list[WorkspaceReviewAssetResponse] = []
+    availableFormats: list[str] = []
     intakeRecordId: str
     childCount: int
     classificationStatus: str | None = None

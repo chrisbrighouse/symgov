@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
 
 from ..filename_inference import infer_filename_metadata
-from ..asset_manifest import choose_preview_asset
+from ..asset_manifest import choose_preview_asset, content_type_for_format, is_browser_previewable, list_available_assets
 from ..dependencies import get_db_session
 from ..models import (
     AgentDefinition,
@@ -76,6 +76,7 @@ from ..schemas import (
     WorkspaceReviewCaseListResponse,
     WorkspaceReviewCaseResponse,
     WorkspaceReviewChildResponse,
+    WorkspaceReviewAssetResponse,
     WorkspaceReviewDecisionRequest,
     WorkspaceReviewDecisionResponse,
     WorkspaceReviewSymbolPropertyOptionListResponse,
@@ -469,6 +470,31 @@ def build_source_preview_url(review_case_id: str, object_key: str | None) -> str
     return f"/api/v1/workspace/review-cases/{review_case_id}/source/preview"
 
 
+def _workspace_source_payload(
+    *,
+    validation_report: ValidationReport | None = None,
+    intake_record: IntakeRecord | None = None,
+    source_file_name: str | None = None,
+    source_object_key: str | None = None,
+) -> tuple[dict, dict]:
+    validation_payload = validation_report.normalized_payload_json if validation_report is not None else {}
+    validation_payload = validation_payload or {}
+    intake_payload = intake_record.normalized_submission_json if intake_record is not None else {}
+    intake_payload = intake_payload or {}
+    payload = {**intake_payload, **validation_payload}
+    merged_visual_assets = merge_workspace_visual_assets(intake_payload, validation_payload)
+    if merged_visual_assets is not None:
+        payload["visual_assets"] = merged_visual_assets
+    fallback_source_asset = {
+        "object_key": source_object_key,
+        "filename": source_file_name or payload.get("source_file_name") or payload.get("filename"),
+        "content_type": payload.get("source_content_type") or payload.get("content_type"),
+        "format": payload.get("source_format") or payload.get("format") or payload.get("file_format"),
+        "role": "source",
+    }
+    return payload, fallback_source_asset
+
+
 def merge_workspace_visual_assets(intake_payload: dict, validation_payload: dict) -> dict | None:
     intake_visual = intake_payload.get("visual_assets") if isinstance(intake_payload, dict) else None
     validation_visual = validation_payload.get("visual_assets") if isinstance(validation_payload, dict) else None
@@ -497,10 +523,14 @@ def merge_workspace_visual_assets(intake_payload: dict, validation_payload: dict
                 items.append(item)
         return items
 
+    intake_source_preview = choose_preview_asset({"visual_assets": {"source_assets": intake_visual.get("source_assets") or []}})
+
     # Prefer an uploaded contributor companion preview over generated validation
     # derivatives so DXF+JPG submissions show the supplied visual companion in
     # review. Single-file DXFs still fall through to validation's generated SVG.
-    preview = intake_visual.get("preview") or validation_visual.get("preview")
+    preview = intake_visual.get("preview")
+    if not isinstance(preview, dict):
+        preview = intake_source_preview or validation_visual.get("preview")
     if isinstance(preview, dict):
         merged["preview"] = preview
 
@@ -535,22 +565,60 @@ def choose_workspace_source_preview_asset(
     source_file_name: str | None = None,
     source_object_key: str | None = None,
 ) -> dict | None:
-    validation_payload = validation_report.normalized_payload_json if validation_report is not None else {}
-    validation_payload = validation_payload or {}
-    intake_payload = intake_record.normalized_submission_json if intake_record is not None else {}
-    intake_payload = intake_payload or {}
-    payload = {**intake_payload, **validation_payload}
-    merged_visual_assets = merge_workspace_visual_assets(intake_payload, validation_payload)
-    if merged_visual_assets is not None:
-        payload["visual_assets"] = merged_visual_assets
-    fallback_source_asset = {
-        "object_key": source_object_key,
-        "filename": source_file_name or payload.get("source_file_name") or payload.get("filename"),
-        "content_type": payload.get("source_content_type") or payload.get("content_type"),
-        "format": payload.get("source_format") or payload.get("format") or payload.get("file_format"),
-        "role": "source",
-    }
+    payload, fallback_source_asset = _workspace_source_payload(
+        validation_report=validation_report,
+        intake_record=intake_record,
+        source_file_name=source_file_name,
+        source_object_key=source_object_key,
+    )
     return choose_preview_asset(payload, fallback_source_asset=fallback_source_asset)
+
+
+def build_workspace_source_assets(
+    *,
+    validation_report: ValidationReport | None = None,
+    intake_record: IntakeRecord | None = None,
+    source_file_name: str | None = None,
+    source_object_key: str | None = None,
+) -> tuple[list[WorkspaceReviewAssetResponse], list[str]]:
+    payload, fallback_source_asset = _workspace_source_payload(
+        validation_report=validation_report,
+        intake_record=intake_record,
+        source_file_name=source_file_name,
+        source_object_key=source_object_key,
+    )
+    selected_preview = choose_preview_asset(payload, fallback_source_asset=fallback_source_asset)
+    selected_preview_key = selected_preview.get("object_key") if selected_preview else None
+    assets = list_available_assets(payload, fallback_source_asset=fallback_source_asset)
+    available_formats: list[str] = []
+    seen_formats: set[str] = set()
+    responses: list[WorkspaceReviewAssetResponse] = []
+    for asset in assets:
+        asset_format = str(asset.get("format") or "").strip().lower() or None
+        asset_content_type = content_type_for_format(
+            asset_format,
+            filename=asset.get("filename") or asset.get("object_key"),
+            content_type=asset.get("content_type"),
+        )
+        if asset_format and asset_format not in seen_formats:
+            seen_formats.add(asset_format)
+            available_formats.append(asset_format)
+        responses.append(
+            WorkspaceReviewAssetResponse(
+                objectKey=str(asset.get("object_key") or ""),
+                filename=str(asset.get("filename") or source_file_name or asset.get("object_key") or ""),
+                contentType=asset_content_type,
+                format=asset_format,
+                role=str(asset.get("role") or "").strip() or None,
+                previewable=is_browser_previewable(
+                    content_type=asset_content_type,
+                    format=asset_format,
+                    filename=asset.get("filename") or asset.get("object_key"),
+                ),
+                selectedPreview=str(asset.get("object_key") or "") == selected_preview_key,
+            )
+        )
+    return responses, available_formats
 
 
 def resolve_source_object_key(validation_report: ValidationReport) -> str | None:
@@ -1167,6 +1235,36 @@ def default_review_symbol_name(
     return compact_text(package_id or primary_symbol_id, 50)
 
 
+def infer_split_item_seed_properties(split_item: ReviewSplitItem | None) -> dict[str, str | None]:
+    if split_item is None:
+        return {"name": None, "discipline": None}
+
+    payload = split_item.payload_json if isinstance(split_item.payload_json, dict) else {}
+    candidates = [
+        payload.get("proposed_symbol_name"),
+        getattr(split_item, "proposed_symbol_name", None),
+        payload.get("file_name"),
+        getattr(split_item, "file_name", None),
+    ]
+
+    for candidate in candidates:
+        text_value = str(candidate or "").strip()
+        if not text_value:
+            continue
+        stem = Path(text_value).stem if Path(text_value).suffix else text_value
+        trimmed = re.sub(r"(?i)^region[\s_\-]*\d+$", "", stem).strip(" _-")
+        trimmed = re.sub(r"(?i)(?:[\s_\-]+region[\s_\-]*\d+)$", "", trimmed).strip(" _-")
+        if not trimmed or trimmed.lower() in {"region", "crop", "symbol"}:
+            continue
+        inferred = infer_filename_metadata(trimmed)
+        inferred_name = str(inferred.get("inferred_name") or "").strip() or None
+        discipline = compact_text(inferred.get("discipline_hint"), 80)
+        if inferred_name and inferred_name.lower() not in {"region", "crop", "symbol"}:
+            return {"name": inferred_name, "discipline": discipline}
+
+    return {"name": None, "discipline": None}
+
+
 FORMAT_LABELS = {
     "dxf": "DXF",
     "jpeg": "JPEG",
@@ -1258,6 +1356,9 @@ def get_or_create_symbol_properties(
     default_format: str | None = None,
 ) -> ReviewSymbolProperty:
     symbol_record_key = split_item.child_key if split_item is not None else str(review_case.id)
+    split_seed = infer_split_item_seed_properties(split_item)
+    seeded_name = compact_text(split_seed.get("name") or default_name, 50) or compact_text(symbol_record_key, 50)
+    seeded_discipline = compact_text(split_seed.get("discipline"), 80) or None
     query = session.query(ReviewSymbolProperty).filter(
         ReviewSymbolProperty.review_case_id == review_case.id,
         ReviewSymbolProperty.symbol_record_key == symbol_record_key,
@@ -1270,10 +1371,10 @@ def get_or_create_symbol_properties(
             review_case_id=review_case.id,
             review_split_item_id=split_item.id if split_item is not None else None,
             symbol_record_key=symbol_record_key,
-            name=compact_text(default_name, 50) or compact_text(symbol_record_key, 50),
+            name=seeded_name,
             description=compact_text(default_description, 256),
             category=compact_text(classification_record.category if classification_record else None, 80) or None,
-            discipline=compact_text(classification_record.discipline if classification_record else None, 80) or None,
+            discipline=compact_text(classification_record.discipline if classification_record else None, 80) or seeded_discipline,
             format=normalize_symbol_format(default_format or (classification_record.format if classification_record else None)),
             source="agent_initial",
             updated_by=None,
@@ -1293,8 +1394,14 @@ def get_or_create_symbol_properties(
             properties.discipline = compact_text(classification_record.discipline, 80) or None
         if not properties.format:
             properties.format = normalize_symbol_format(default_format or classification_record.format)
-    elif default_format and not properties.format:
-        properties.format = normalize_symbol_format(default_format)
+    else:
+        if seeded_discipline and not properties.discipline:
+            properties.discipline = seeded_discipline
+        if default_format and not properties.format:
+            properties.format = normalize_symbol_format(default_format)
+
+    if split_seed.get("name") and properties.name == compact_text(default_name, 50):
+        properties.name = seeded_name
     session.add(properties)
     return properties
 
@@ -1440,6 +1547,12 @@ def build_validation_workspace_item(
         source_file_name=source_file_name,
         source_object_key=source_object_key,
     )
+    source_assets, available_formats = build_workspace_source_assets(
+        validation_report=validation_report,
+        intake_record=intake_record,
+        source_file_name=source_file_name,
+        source_object_key=source_object_key,
+    )
     children = build_children(session, review_case, validation_report, str(review_case.id), source_file_name)
     package_id = package_display_id(session, intake_record)
     primary_symbol_id = children[0].proposedSymbolId if children else str(
@@ -1473,6 +1586,8 @@ def build_validation_workspace_item(
         "sourcePreviewUrl": build_source_preview_url(
             str(review_case.id), source_preview_asset.get("object_key") if source_preview_asset else None
         ),
+        "sourceAssets": source_assets,
+        "availableFormats": available_formats,
         "intakeRecordId": str(intake_record.id),
         "childCount": len(children),
         "symbolProperties": build_symbol_properties_response(
@@ -1517,6 +1632,12 @@ def build_split_item_workspace_item(
     opened_at = split_item.updated_at if isinstance(split_item.updated_at, datetime) else review_case.opened_at
     due = opened_at + timedelta(days=2)
     preview_url = build_preview_url(str(review_case.id), split_item.attachment_object_key)
+    source_assets, available_formats = build_workspace_source_assets(
+        validation_report=validation_report,
+        intake_record=intake_record,
+        source_file_name=source_file_name,
+        source_object_key=source_object_key,
+    )
     item_package_id, item_sequence, item_display_name = split_item_display_parts(split_item)
     payload = split_item.payload_json if isinstance(split_item.payload_json, dict) else {}
     duplicate_review = payload.get("libby_duplicate_resolution") if isinstance(payload.get("libby_duplicate_resolution"), dict) else None
@@ -1583,6 +1704,8 @@ def build_split_item_workspace_item(
         "sourceFileName": source_file_name,
         "sourceObjectKey": source_object_key,
         "sourcePreviewUrl": preview_url,
+        "sourceAssets": source_assets,
+        "availableFormats": available_formats,
         "intakeRecordId": str(intake_record.id),
         "childCount": 1,
         "symbolProperties": build_symbol_properties_response(symbol_properties),
@@ -1630,6 +1753,12 @@ def build_provenance_workspace_item(
         source_file_name=source_file_name,
         source_object_key=source_object_key,
     )
+    source_assets, available_formats = build_workspace_source_assets(
+        validation_report=latest_validation_report,
+        intake_record=intake_record,
+        source_file_name=source_file_name,
+        source_object_key=source_object_key,
+    )
     package_id = package_display_id(session, intake_record)
     opened_at = review_case.opened_at if isinstance(review_case.opened_at, datetime) else datetime.now(timezone.utc)
     due = opened_at + timedelta(days=2)
@@ -1661,6 +1790,8 @@ def build_provenance_workspace_item(
         "sourcePreviewUrl": build_source_preview_url(
             str(review_case.id), source_preview_asset.get("object_key") if source_preview_asset else None
         ),
+        "sourceAssets": source_assets,
+        "availableFormats": available_formats,
         "intakeRecordId": str(intake_record.id),
         "childCount": 0,
         "symbolProperties": build_symbol_properties_response(
@@ -4114,6 +4245,7 @@ def get_workspace_review_source_preview(
         raise HTTPException(status_code=404, detail="Review case not found.")
 
     object_key = None
+    preview_asset = None
     if review_case.source_entity_type == "validation_report":
         validation_report = session.get(ValidationReport, review_case.source_entity_id)
         if validation_report is not None:
@@ -4148,5 +4280,9 @@ def get_workspace_review_source_preview(
 
     attachment = session.execute(select(Attachment).where(Attachment.object_key == object_key)).scalar_one_or_none()
     payload = download_object_bytes(object_key=object_key, env_file=str(get_settings().storage_env_file))
-    media_type = attachment.content_type if attachment is not None else payload["content_type"]
+    media_type = content_type_for_format(
+        preview_asset.get("format") if preview_asset else None,
+        filename=(preview_asset or {}).get("filename") or object_key,
+        content_type=(preview_asset or {}).get("content_type") or (attachment.content_type if attachment is not None else payload["content_type"]),
+    )
     return Response(content=payload["payload"], media_type=media_type)

@@ -1,0 +1,18 @@
+FireAlarms reset backup created at 20260617T135432Z
+Batches:
+- subext-20260617T101053Z
+- subext-20260617T103527Z
+queue_items=219
+intake_records=64
+validation_reports=62
+provenance_assessments=62
+review_cases=62
+review_split_items=0
+review_symbol_properties=62
+review_case_actions=0
+human_review_decisions=0
+source_packages=64
+agent_runs=188
+agent_output_artifacts=248
+attachments=62
+audit_events=2

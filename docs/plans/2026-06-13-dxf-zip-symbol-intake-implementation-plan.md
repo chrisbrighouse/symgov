@@ -473,3 +473,293 @@ Next actions:
 Updated restart prompt:
 
 Continue Symgov DXF/ZIP symbol intake from `/data/symgov/docs/plans/2026-06-13-dxf-zip-symbol-intake-implementation-plan.md`. Phase 1 direct DXF support has initial tests and live smoke verification. First inspect `git status --short --branch`, verify `/data/symgov/scripts/run_scott_intake.py` still matches `/data/.openclaw/workspaces/scott/run_scott_intake.py`, and inspect the external live worker changes in Scott downstream enqueue and Vlad. Then either harden Phase 1 DXF derivatives/tests or proceed to Phase 2 ZIP package expansion. Preserve original DXF/ZIP provenance, keep Tracy in the route, and verify with `python3 -m pytest tests -q`, API health checks, and synthetic DXF/ZIP smoke tests before closeout.
+
+## Phase 2 ZIP package support status update - 2026-06-16T18:33:03Z
+
+Status: Phase 2 ZIP package support has been implemented, deployed to the live Scott runner copy, and smoke-verified.
+
+Implemented in repo-managed files:
+
+- `/data/symgov/backend/symgov_backend/services/external_submissions.py`
+  - `guess_declared_format("*.zip")` now returns `zip`, so external submissions can queue ZIP packages.
+- `/data/symgov/scripts/run_scott_intake.py`
+  - `.zip` is now a supported Scott intake extension.
+  - Added hostile-archive controls using stdlib `zipfile`: path traversal/absolute path/Windows drive rejection, symlink and special-file rejection, member count limit, per-member and total uncompressed size limits, compression-ratio guard, and no nested ZIP support.
+  - ZIP members are extracted only into a controlled package workspace.
+  - Duplicate member basenames are preserved with package/member IDs and unique storage paths.
+  - ZIP package artifact includes a package manifest and child Scott task payloads for supported members.
+  - Raw ZIP packages do not route directly to Vlad/Tracy; extracted child members are queued back to Scott, and accepted child intakes then follow normal SVG/DXF/PNG/JPEG/JSON routing.
+  - Child member payloads preserve `source_package_id`, source ZIP attachment/object key/sha256, member index/id/path/sha256, and package-member visual source asset metadata.
+  - Repo runner now uses repo backend imports when executed from `/data/symgov`, and falls back to the legacy backend path only when copied into live OpenClaw workspace.
+- `/data/symgov/tests/test_zip_phase2.py`
+  - Added regression coverage for external ZIP format guessing, safe expansion, duplicate filenames, traversal rejection, child Scott queue creation, and downstream Vlad/Tracy provenance preservation.
+
+Implemented in live/external files outside git:
+
+- `/data/.openclaw/workspaces/scott/run_scott_intake.py`
+  - Synchronized from `/data/symgov/scripts/run_scott_intake.py`; verified with `cmp` result `0`.
+- `/data/.openclaw/workspaces/scott/enqueue_scott_downstream.py`
+  - Vlad and Tracy queue payloads now include ZIP package/member provenance fields when processing child intake records.
+- `/data/.openclaw/workspace/symgov/backend/symgov_backend/services/external_submissions.py`
+  - Patched compatibility backend `guess_declared_format("*.zip")` to return `zip`.
+
+Verification completed:
+
+- RED test run before implementation:
+  - `python3 -m pytest tests/test_zip_phase2.py -q`
+  - Result before code changes: `4 failed`, proving ZIP support was missing.
+- Downstream provenance RED test before helper patch:
+  - `python3 -m pytest tests/test_zip_phase2.py::test_downstream_queue_items_preserve_zip_package_member_provenance -q`
+  - Result before helper change: failed with missing `source_package_id`.
+- Focused GREEN run:
+  - `python3 -m pytest tests/test_zip_phase2.py -q`
+  - Result: `5 passed`.
+- Focused regression run:
+  - `python3 -m pytest tests/test_zip_phase2.py tests/test_dxf_phase1.py tests/test_scott_auth_verification.py -q`
+  - Result: `18 passed`.
+- Full repo test run:
+  - `python3 -m pytest tests -q`
+  - Result: `114 passed`.
+- Syntax/live sync verification:
+  - `cmp -s /data/symgov/scripts/run_scott_intake.py /data/.openclaw/workspaces/scott/run_scott_intake.py; echo scott_cmp:$?`
+  - Result: `scott_cmp:0`.
+  - `python3 -m py_compile /data/symgov/scripts/run_scott_intake.py /data/.openclaw/workspaces/scott/run_scott_intake.py /data/.openclaw/workspaces/scott/enqueue_scott_downstream.py /data/symgov/backend/symgov_backend/services/external_submissions.py /data/.openclaw/workspace/symgov/backend/symgov_backend/services/external_submissions.py`
+  - Result: no errors.
+- Mixed ZIP smoke through live Scott runner:
+  - ZIP contained `area-a/pump.svg`, `area-b/pump.svg`, `cad/valve.dxf`, `metadata/manifest.json`, and `ignored/readme.txt`.
+  - Result: `decision accepted`, `eligibility_status eligible`, `route_to_agents []` for the raw ZIP package.
+  - Accepted child formats: `svg`, `svg`, `dxf`, `json`.
+  - Unsupported TXT member recorded as skipped with `unsupported_member_format`.
+  - Duplicate `pump.svg` member filenames had distinct safe stored paths.
+- Live API image/runtime verification:
+  - Rebuilt/recreated `symgov-hermes-api` with `docker compose --project-directory /docker/symgov-hermes build symgov-api` and `docker compose --project-directory /docker/symgov-hermes up -d --no-deps --force-recreate symgov-api`.
+  - Container check: `container_zip_guess zip`.
+  - In-container API health: `{"ok":true,"service":"symgov-api","time":"2026-06-16T18:32:21Z"}`.
+
+Current repo/uncommitted state after Phase 2 work:
+
+- Modified tracked repo files:
+  - `backend/symgov_backend/services/external_submissions.py`
+  - `scripts/run_scott_intake.py`
+  - `docs/plans/2026-06-13-dxf-zip-symbol-intake-implementation-plan.md`
+- New untracked repo files:
+  - `tests/test_zip_phase2.py`
+- External live files changed outside git:
+  - `/data/.openclaw/workspaces/scott/run_scott_intake.py`
+  - `/data/.openclaw/workspaces/scott/enqueue_scott_downstream.py`
+  - `/data/.openclaw/workspace/symgov/backend/symgov_backend/services/external_submissions.py`
+
+Known limitations of this Phase 2 slice:
+
+- JSON members are accepted as conservative metadata/library-manifest inputs, but ZIP JSON sibling enrichment is not implemented yet.
+- ZIP child package-member object keys are provenance keys for downstream metadata; extracted member uploads as independent object-store attachments are not implemented in this slice.
+- Package expansion status is not yet surfaced in frontend/operator UI.
+- DXF derivative quality limitations from Phase 1 remain: conservative accessible technical SVG preview, no PNG preview, no DXF block/layer splitting yet.
+
+Next actions:
+
+1. Commit/stage the Phase 1/Phase 2 repo-visible files if desired.
+2. Decide whether to formalize repo-managed locations for Scott downstream enqueue and Vlad live worker code, since Scott downstream enqueue is still outside git.
+3. Add ZIP JSON manifest enrichment for sibling symbols.
+4. Add UI/operator package trace display for ZIP -> member -> candidate.
+5. Continue DXF Phase 3 library intelligence: block/layer candidate splitting and better derivatives.
+
+Updated restart prompt:
+
+Continue Symgov DXF/ZIP symbol intake from `/data/symgov/docs/plans/2026-06-13-dxf-zip-symbol-intake-implementation-plan.md`. Phase 1 direct DXF and Phase 2 ZIP package expansion are implemented and verified. First inspect `git status --short --branch`, verify `/data/symgov/scripts/run_scott_intake.py` still matches `/data/.openclaw/workspaces/scott/run_scott_intake.py`, and inspect external live changes in `/data/.openclaw/workspaces/scott/enqueue_scott_downstream.py` plus Vlad. Preserve original DXF/ZIP provenance and duplicate ZIP member filenames via package/member IDs. Next likely work is ZIP JSON sibling enrichment, package-trace UI polish, or DXF Phase 3 library intelligence. Re-run `python3 -m pytest tests -q`, a mixed ZIP smoke, and API health checks before closeout.
+
+## Public ZIP submission fix - 2026-06-16T18:50Z
+
+Reason for the failed fire-alarms ZIP upload:
+
+- The public upload reached `applications-web` nginx, not the Symgov API.
+- Nginx rejected the body before proxying it because the JSON/base64 request was `3,860,018` bytes and the default nginx `client_max_body_size` was still 1MB.
+- Evidence from `docker logs --since=24h applications-web`:
+  - `client intended to send too large body: 3860018 bytes`
+  - `POST /api/v1/public/external-submissions HTTP/1.1" 413`
+- No saved Scott upload/queue item exists for that attempt; the user needs to re-upload after the fix.
+
+Implemented fixes:
+
+- `/data/symgov/frontend/src/App.jsx`
+  - Added `.zip` to the external submission file input `accept` list.
+  - Updated visible accepted-format helper text to include `JPEG`, `DXF`, and `ZIP`.
+- `/data/symgov/tests/test_submission_ui_zip_acceptance.py`
+  - Added regression coverage that the submission UI advertises/selects `.zip` packages.
+- `/docker/symgov-hermes/nginx.conf`
+  - Added `client_max_body_size 64m;` under `location /api/`.
+  - Recreated `applications-web` because the bind-mounted config file needed a container recreate before nginx saw the new inode.
+
+Verification completed:
+
+- RED UI regression before the UI change:
+  - `python3 -m pytest tests/test_submission_ui_zip_acceptance.py -q`
+  - Result: failed because `.zip` was absent.
+- GREEN UI regression/build:
+  - `python3 -m pytest tests/test_submission_ui_zip_acceptance.py -q`
+  - Result: `1 passed`.
+  - `npm run build`
+  - Result: Vite build succeeded; live asset is `assets/index-CHUI0XS9.js`.
+- Nginx config/deploy verification:
+  - `docker compose -f /docker/symgov-hermes/docker-compose.yml up -d --no-deps --force-recreate applications-web`
+  - In-container config now shows `client_max_body_size 64m;` inside `location /api/`.
+- Public body-size probe:
+  - A 3,860,301-byte wrapped invalid-PIN request now returns `http=400` with `Invalid submission PIN`, proving it reaches the API rather than failing at nginx with 413.
+- Public frontend verification:
+  - `curl https://apps.chrisbrighouse.com/` references `assets/index-CHUI0XS9.js`.
+  - The live JS contains `.svg,.png,.jpg,.jpeg,.json,.dxf,.zip` and the updated accepted-format text.
+- Focused ZIP/UI regression:
+  - `python3 -m pytest tests/test_submission_ui_zip_acceptance.py tests/test_zip_phase2.py -q`
+  - Result: `6 passed`.
+
+Current uncommitted state after this update:
+
+- Modified tracked repo files:
+  - `backend/symgov_backend/services/external_submissions.py`
+  - `docs/plans/2026-06-13-dxf-zip-symbol-intake-implementation-plan.md`
+  - `frontend/src/App.jsx`
+  - `scripts/run_scott_intake.py`
+- New untracked repo files:
+  - `tests/test_submission_ui_zip_acceptance.py`
+  - `tests/test_zip_phase2.py`
+- External live files changed outside git:
+  - `/data/.openclaw/workspaces/scott/run_scott_intake.py`
+  - `/data/.openclaw/workspaces/scott/enqueue_scott_downstream.py`
+  - `/data/.openclaw/workspace/symgov/backend/symgov_backend/services/external_submissions.py`
+  - `/docker/symgov-hermes/nginx.conf`
+
+Updated restart prompt:
+
+Continue Symgov DXF/ZIP symbol intake from `/data/symgov`. Phase 1 direct DXF, Phase 2 ZIP expansion, public ZIP file selection, and nginx upload-body sizing are implemented and live. First inspect `git status --short --branch`, verify `/data/symgov/scripts/run_scott_intake.py` still matches `/data/.openclaw/workspaces/scott/run_scott_intake.py`, and verify `docker exec applications-web grep -n "client_max_body_size" /etc/nginx/conf.d/default.conf`. If continuing ZIP intake, ask the user to re-upload the fire-alarms ZIP because the failed 413 attempt never reached the API. Re-run `python3 -m pytest tests/test_submission_ui_zip_acceptance.py tests/test_zip_phase2.py -q`, `npm run build`, and a public large-body invalid-PIN probe before closeout.
+
+## Live fire-alarms ZIP submission monitoring and review split idempotency fix - 2026-06-16T19:05Z
+
+Live batch monitored:
+
+- Submission batch: `subext-20260616T185153Z`.
+- Raw Scott queue item: `aqi-scott-ext-20260616T185153Z-01`.
+- ZIP extraction succeeded into `/data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260616T185153Z/zip_packages/pkg-aqi-scott-ext-20260616t185153z-01-3f09d51b8eaa/`.
+- Queue summary verified from Postgres:
+  - Scott: `61 completed`.
+  - Vlad: `33 completed`.
+  - Vlad: `28 escalated` with `validation_requires_escalation`.
+  - Tracy: `61 escalated` with `provenance_requires_escalation`.
+- Interpretation: live ZIP expansion and Scott -> Vlad/Tracy routing did not stall. Tracy provenance escalation is expected for insufficient rights declaration. Vlad escalations are review/validation outcomes for JPEG/raster candidates, not ZIP processing failures.
+
+Bug found and fixed:
+
+- API logs showed intermittent `GET /api/v1/workspace/review-cases` failures from `ensure_split_items(...)` in `/data/symgov/backend/symgov_backend/routes/workspace.py`.
+- Error: `sqlalchemy.exc.IntegrityError: duplicate key value violates unique constraint "pk_review_split_items"` during `session.flush()`.
+- Root cause: `ensure_split_items` performs read-then-insert for deterministic split-item IDs. Concurrent review-cases requests can both observe a missing split item, both add the same deterministic ID, and the loser hits the primary-key race at flush.
+- Fix: `ensure_split_items` now catches only duplicate-key `IntegrityError`s for `review_split_items` (`pk_review_split_items` / `uq_review_split_items_case_child`), rolls back the failed read transaction, reloads the already-created split items by deterministic ID, and returns them. Other integrity errors are still raised.
+- Added regression test: `/data/symgov/tests/test_workspace_split_items.py` reproduces a concurrent insert between `session.get(...)` and `session.flush()` and proves `ensure_split_items` recovers idempotently.
+
+Verification completed:
+
+- RED regression before fix:
+  - `python3 -m pytest tests/test_workspace_split_items.py::test_ensure_split_items_recovers_from_concurrent_duplicate_primary_key_insert -q`
+  - Result: failed with `sqlalchemy.exc.IntegrityError` at `ensure_split_items -> session.flush()`.
+- Focused GREEN run:
+  - `python3 -m pytest tests/test_workspace_split_items.py tests/test_workspace_asset_preview.py -q`
+  - Result: `8 passed`.
+- ZIP/UI/review focused regression:
+  - `python3 -m pytest tests/test_zip_phase2.py tests/test_submission_ui_zip_acceptance.py tests/test_workspace_split_items.py tests/test_workspace_asset_preview.py -q`
+  - Result: `14 passed`.
+- Full repo test run:
+  - `python3 -m pytest -q`
+  - Result: `116 passed`.
+- Live API rebuild/recreate:
+  - `docker compose --project-directory /docker/symgov-hermes build symgov-api`
+  - `docker compose --project-directory /docker/symgov-hermes up -d --no-deps --force-recreate symgov-api`
+  - Result: `symgov-hermes-api` recreated and started.
+- Health and endpoint verification:
+  - In-container health: `{"ok":true,"service":"symgov-api","time":"2026-06-16T19:04:44Z"}`.
+  - Public health: `{"ok":true,"service":"symgov-api","time":"2026-06-16T19:04:45Z"}`.
+  - Public review-cases: `OK (HTTP 200, bytes 564366)`, `review_cases_items=143`.
+  - Concurrent public review-cases probe: `10` parallel-ish requests all returned `200`.
+  - Recent API logs after restart contained no `pk_review_split_items` duplicate-key trace.
+  - In-container import check confirmed active module path `/data/symgov/backend/symgov_backend/routes/workspace.py` includes `is_review_split_item_duplicate_integrity_error(...)`.
+
+Current uncommitted state after this update:
+
+- Modified tracked repo files:
+  - `backend/symgov_backend/routes/workspace.py`
+  - `backend/symgov_backend/services/external_submissions.py`
+  - `docs/plans/2026-06-13-dxf-zip-symbol-intake-implementation-plan.md`
+  - `frontend/src/App.jsx`
+  - `scripts/run_scott_intake.py`
+- New untracked repo files:
+  - `tests/test_submission_ui_zip_acceptance.py`
+  - `tests/test_workspace_split_items.py`
+  - `tests/test_zip_phase2.py`
+- External/live files changed outside git from earlier ZIP/upload work remain:
+  - `/data/.openclaw/workspaces/scott/run_scott_intake.py`
+  - `/data/.openclaw/workspaces/scott/enqueue_scott_downstream.py`
+  - `/data/.openclaw/workspace/symgov/backend/symgov_backend/services/external_submissions.py`
+  - `/docker/symgov-hermes/nginx.conf`
+
+Updated restart prompt:
+
+Continue Symgov DXF/ZIP symbol intake from `/data/symgov`. Phase 1 direct DXF, Phase 2 ZIP expansion, public ZIP file selection, nginx upload-body sizing, and the review-cases split-item idempotency race fix are implemented and live. First inspect `git status --short --branch`, verify `/data/symgov/scripts/run_scott_intake.py` still matches `/data/.openclaw/workspaces/scott/run_scott_intake.py`, verify `docker exec applications-web grep -n "client_max_body_size" /etc/nginx/conf.d/default.conf`, and re-check `curl -fsS https://apps.chrisbrighouse.com/api/v1/workspace/review-cases`. The live fire-alarms ZIP batch `subext-20260616T185153Z` processed through Scott/Vlad/Tracy; remaining escalations are review/provenance work rather than ZIP intake stalls. Before closing future work, re-run `python3 -m pytest -q`, API health checks, and recent API-log checks for `pk_review_split_items`.
+
+## ZIP individual-symbol package pairing heuristic - 2026-06-16T19:20Z
+
+Issue found:
+
+- The fire-alarms ZIP is not a sheet-only package. Most entries are logical symbol pairs: one DXF plus one same-named JPG preview per symbol.
+- Earlier Phase 2 expansion treated every supported ZIP member as an independent child task. Same-named JPG previews were therefore routed to Vlad as standalone raster inputs, where the raster sheet analyzer sometimes proposed split crops. That is wrong for individual-symbol ZIP libraries: the JPG is a companion/preview for the DXF symbol, not a sheet requiring subdivision.
+
+Fix implemented:
+
+- `/data/symgov/scripts/run_scott_intake.py` now groups ZIP members by conservative package-local key: same directory plus same filename stem.
+- If a group contains exactly one DXF and exactly one raster preview (`jpeg` or `png`), Scott emits one downstream child task for the DXF primary and attaches the raster as a `package_member_companion` in `companion_files` and `visual_assets.source_assets`.
+- The raster companion is preserved in the package manifest with `relationship=companion` and `downstream_role=companion_to_primary_symbol`, but it is not emitted as an independent Scott child task. This prevents Vlad from applying raster sheet splitting to a preview image that belongs to an individual symbol.
+- Unpaired raster files are still emitted as standalone child tasks and remain eligible for Vlad raster sheet analysis. This preserves the sheet workflow for genuine sheets of symbols.
+- `/data/.openclaw/workspaces/scott/enqueue_scott_downstream.py` now forwards `package_member_relationship`, `package_symbol_grouping`, `companion_files`, and `visual_assets` into Vlad/Tracy payloads so paired DXF/JPG lineage remains visible downstream.
+
+Probe against the live fire-alarms ZIP using the patched Scott classifier:
+
+- Source ZIP: `/data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260616T185153Z/01-Fire Alarms.zip`.
+- Manifest members: `62`.
+- Downstream child tasks after pairing: `31`.
+- Paired DXF+raster symbol candidates: `30`.
+- Standalone raster tasks remaining: `1` (`Elec_FireAlarms_Sounder_Beacon-alt.jpg`).
+- Interpretation: the submitted ZIP is overwhelmingly an individual-symbol package, not a raster sheet package. Future submissions with the same structure should now keep each DXF/JPG symbol intact.
+
+Verification completed:
+
+- Focused ZIP regression:
+  - `python3 -m pytest tests/test_zip_phase2.py -q`
+  - Result: `6 passed`.
+- ZIP + DXF focused regression:
+  - `python3 -m pytest tests/test_zip_phase2.py tests/test_dxf_phase1.py -q`
+  - Result: `13 passed`.
+- Full repo tests and syntax check:
+  - `python3 -m py_compile /data/.openclaw/workspaces/scott/enqueue_scott_downstream.py /data/symgov/scripts/run_scott_intake.py && python3 -m pytest -q`
+  - Result: `117 passed`.
+- Live API/runtime refresh:
+  - `docker compose --project-directory /docker/symgov-hermes up -d --no-deps --force-recreate symgov-api`
+  - Result: `symgov-hermes-api` recreated and started.
+- Health and review endpoint checks:
+  - In-container health: `{"ok":true,"service":"symgov-api","time":"2026-06-16T19:19:05Z"}`.
+  - Public review-cases: `HTTP 200`, `564366` bytes, `review_cases_items=143`.
+  - Recent API logs after restart contained no `Traceback`, `ERROR`, `IntegrityError`, or `pk_review_split_items` entries.
+
+Current uncommitted state after this update:
+
+- Modified tracked repo files include:
+  - `backend/symgov_backend/routes/workspace.py` (previous review split idempotency fix).
+  - `backend/symgov_backend/services/external_submissions.py` (pre-existing ZIP/upload work).
+  - `docs/plans/2026-06-13-dxf-zip-symbol-intake-implementation-plan.md`.
+  - `frontend/src/App.jsx` (pre-existing UI work).
+  - `scripts/run_scott_intake.py` (this ZIP pairing change plus previous ZIP work).
+- New/untracked repo tests include:
+  - `tests/test_submission_ui_zip_acceptance.py`.
+  - `tests/test_workspace_split_items.py`.
+  - `tests/test_zip_phase2.py`.
+- External/live file changed outside git:
+  - `/data/.openclaw/workspaces/scott/enqueue_scott_downstream.py` (forward paired-symbol provenance to Vlad/Tracy).
+
+Updated restart prompt:
+
+Continue Symgov DXF/ZIP symbol intake from `/data/symgov`. Phase 1 direct DXF and Phase 2 ZIP expansion are live. The fire-alarms ZIP revealed that individual-symbol ZIP packages often contain same-stem DXF/JPG pairs that must stay intact rather than sending the JPG through Vlad sheet splitting. Scott now groups exact same-directory/same-stem DXF+raster pairs into one DXF primary child with the raster preserved as a companion; only unpaired rasters still go to Vlad raster sheet analysis. First inspect `git status --short --branch`, verify `/data/symgov/scripts/run_scott_intake.py` and `/data/.openclaw/workspaces/scott/enqueue_scott_downstream.py`, and rerun `python3 -m pytest tests/test_zip_phase2.py tests/test_dxf_phase1.py -q`. If testing another live ZIP, expect individual-symbol libraries to produce fewer downstream child tasks than raw member count, with paired previews in `companion_files` rather than standalone Vlad raster split review cases.

@@ -289,6 +289,15 @@ def zip_member_source_asset(manifest, member, role="package_member_source"):
     }
 
 
+def mark_zip_task_as_standalone_symbol(task):
+    """Mark a ZIP member as an already-isolated symbol, not a raster sheet."""
+    task["package_member_relationship"] = "standalone_symbol_file"
+    task["package_symbol_grouping"] = "standalone_package_symbol_file"
+    package_member = task.get("package_member")
+    if isinstance(package_member, dict):
+        package_member["relationship"] = "standalone_symbol_file"
+
+
 def attach_zip_companion_to_task(task, manifest, companion_member):
     companion_asset = zip_member_source_asset(manifest, companion_member, role="package_member_companion")
     task.setdefault("visual_assets", {}).setdefault("source_assets", []).append(companion_asset)
@@ -340,6 +349,7 @@ def build_zip_member_tasks(base_task, manifest):
             member["downstream_role"] = "companion_to_primary_symbol"
             continue
         task = build_zip_member_task(base_task, manifest, member)
+        mark_zip_task_as_standalone_symbol(task)
         companion = primary_companions.get(member["member_id"])
         if companion:
             attach_zip_companion_to_task(task, manifest, companion)

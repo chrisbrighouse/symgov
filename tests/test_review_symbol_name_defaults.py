@@ -1,4 +1,10 @@
+import sys
 import unittest
+from pathlib import Path
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1] / "backend"
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 from symgov_backend.routes.workspace import default_review_symbol_name
 

@@ -2484,6 +2484,25 @@ function PublishedSymbolCommentHistory({ state }) {
   );
 }
 
+function formatReviewAssetFormat(format) {
+  return String(format || '').trim().toUpperCase();
+}
+
+function formatReviewAssetChip(asset) {
+  const parts = [];
+  const formatLabel = formatReviewAssetFormat(asset?.format);
+  if (formatLabel) {
+    parts.push(formatLabel);
+  }
+  if (asset?.selectedPreview) {
+    parts.push('displayed');
+  }
+  if (asset?.role) {
+    parts.push(String(asset.role).replaceAll('_', ' '));
+  }
+  return parts.join(' · ') || asset?.filename || 'Asset';
+}
+
 function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, onSaveProperties, propertyOptions, workspaceMode }) {
   const primaryChild = activeChildren[0];
   const resolvedPreviewUrl = resolveWorkspaceAssetUrl(activeChange?.sourcePreviewUrl || primaryChild?.previewUrl);
@@ -2499,6 +2518,10 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
   const itemName = displaySymbolId(activeChange) || 'Review item';
   const originalFilename = displayReviewOriginalFilename(activeChange) || 'Not recorded';
   const symbolProperties = activeChange?.symbolProperties || {};
+  const reviewSourceAssets = Array.isArray(activeChange?.sourceAssets) ? activeChange.sourceAssets : [];
+  const availableFormats = Array.isArray(activeChange?.availableFormats)
+    ? activeChange.availableFormats.map((format) => formatReviewAssetFormat(format)).filter(Boolean)
+    : [];
   const propertyNamePattern = '^[A-Za-z0-9 \\\\-/$]*$';
   const categoryOptions = mergePropertyOptions(propertyOptions?.category, propertyDraft.category);
   const disciplineOptions = mergePropertyOptions(propertyOptions?.discipline, propertyDraft.discipline);
@@ -2606,10 +2629,23 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
           <Fact label="Original file" value={originalFilename} />
           <Fact label="Review item" value={activeChange?.reviewItemType === 'split_item' ? 'Split child' : 'Review case'} />
           <Fact label="Status" value={activeChange?.splitChildStatus || activeChange?.status || 'Pending'} />
+          <Fact label="Available formats" value={availableFormats.join(', ') || activeChange?.format || 'Pending'} />
           <Fact label="Child decisions" value={`${reviewedChildCount} / ${activeChildren.length || activeChange?.childCount || 0}`} />
           <Fact label="Intake record" value={activeChange?.intakeRecordId || 'Pending'} />
         </div>
       </div>
+      {reviewSourceAssets.length ? (
+        <div className="copy-block">
+          <h4>Available source assets</h4>
+          <div className="tag-row compact">
+            {reviewSourceAssets.map((asset) => (
+              <span key={asset.objectKey || asset.filename} className="tag-chip">
+                {formatReviewAssetChip(asset)}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <form className="symbol-property-editor" onSubmit={saveProperties}>
         <div className="symbol-property-editor-left">
           <label className="field">
@@ -4406,7 +4442,7 @@ function SubmissionPage() {
         <div>
           <p className="eyebrow">External intake</p>
           <h2>Upload symbol files for processing</h2>
-          <p className="title-support">Accepted: SVG, PNG, JPG, JSON</p>
+          <p className="title-support">Accepted: SVG, PNG, JPG, JPEG, JSON, DXF, ZIP</p>
         </div>
       </div>
       <p className={`page-status-text status-${healthState.mode}`}>
@@ -4471,7 +4507,7 @@ function SubmissionPage() {
             <input
               required
               type="file"
-              accept=".svg,.png,.jpg,.jpeg,.json,.dxf"
+              accept=".svg,.png,.jpg,.jpeg,.json,.dxf,.zip"
               multiple
               onChange={(event) => updateField('files', Array.from(event.target.files || []))}
             />

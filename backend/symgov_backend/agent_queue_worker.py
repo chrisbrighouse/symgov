@@ -17,7 +17,7 @@ from .runtime import RuntimePersistenceBridge
 AGENT_SPECS: dict[str, dict[str, Any]] = {
     "scott": {
         "runtime_root": Path("/data/.openclaw/workspaces/scott/runtime"),
-        "runner_path": Path("/data/.openclaw/workspaces/scott/run_scott_intake.py"),
+        "runner_path": Path("/data/symgov/scripts/run_scott_intake.py"),
         "module": "symgov_scott_runner_worker",
         "persist_db": True,
         "downstream_path": Path("/data/.openclaw/workspaces/scott/enqueue_scott_downstream.py"),
@@ -31,7 +31,7 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
     },
     "tracy": {
         "runtime_root": Path("/data/.openclaw/workspaces/tracy/runtime"),
-        "runner_path": Path("/data/.openclaw/workspaces/tracy/run_tracy_provenance.py"),
+        "runner_path": Path("/data/symgov/scripts/run_tracy_provenance.py"),
         "module": "symgov_tracy_runner_worker",
         "persist_db": True,
     },
