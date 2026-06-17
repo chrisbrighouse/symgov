@@ -1150,7 +1150,7 @@ function displaySymbolId(record) {
     record.symbol_slug,
     record.slug
   ];
-  const shortId = candidates.find((value) => /^\d{4}-\d+$/.test(String(value || '').trim()));
+  const shortId = candidates.find((value) => /^[0-9A-F]{4}-\d+$/i.test(String(value || '').trim()));
   return (
     shortId ||
     record.symbolDisplayId ||
@@ -1994,7 +1994,7 @@ function resolveQueueItemTitle(queueItem) {
   const packageSequence =
     queueItem.packageSymbolSequence ?? payload.package_symbol_sequence ?? payload.packageSymbolSequence;
   const packageDisplay = packageId && packageSequence != null ? `${packageId}-${packageSequence}` : packageId;
-  const isShortSymbolId = (value) => /^\d{4}-\d+$/.test(String(value || '').trim());
+  const isShortSymbolId = (value) => /^[0-9A-F]{4}-\d+$/i.test(String(value || '').trim());
   const shortIdCandidate = [
     queueItem.displayName,
     queueItem.publishedSymbolId,

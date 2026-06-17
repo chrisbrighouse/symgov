@@ -243,6 +243,7 @@ def build_zip_member_task(base_task, manifest, member):
         "source_notes": base_task.get("source_notes"),
         "submission_batch_id": base_task.get("submission_batch_id"),
         "submission_batch_summary": base_task.get("submission_batch_summary"),
+        "package_symbol_sequence": member.get("package_symbol_sequence"),
         "file_note": base_task.get("file_note"),
         "external_submitter_id": base_task.get("external_submitter_id"),
         "attachment_id": base_task.get("attachment_id"),
@@ -343,12 +344,16 @@ def build_zip_member_tasks(base_task, manifest):
             companion_member_ids.add(companion["member_id"])
 
     child_tasks = []
+    symbol_sequence = 0
     for member in accepted_members:
         if member["member_id"] in companion_member_ids:
             member.setdefault("downstream_queue_ids", [])
             member["downstream_role"] = "companion_to_primary_symbol"
             continue
+        symbol_sequence += 1
+        member["package_symbol_sequence"] = symbol_sequence
         task = build_zip_member_task(base_task, manifest, member)
+        task["package_symbol_sequence"] = symbol_sequence
         mark_zip_task_as_standalone_symbol(task)
         companion = primary_companions.get(member["member_id"])
         if companion:
@@ -1244,6 +1249,7 @@ def run_intake_task(task):
         "submitter_email": submitter_email or None,
         "submission_batch_id": submission_batch_id,
         "submission_batch_summary": submission_batch_summary or None,
+        "package_symbol_sequence": task.get("package_symbol_sequence"),
         "file_note": file_note or None,
         "external_submitter_id": external_submitter_id,
         "attachment_id": attachment_id,
@@ -1254,6 +1260,10 @@ def run_intake_task(task):
         "standards_source_refs": standards_source_refs,
         "rights_documents": rights_documents,
         "evidence_links": evidence_links,
+        "source_package_code": task.get("source_package_code"),
+        "package_display_id": task.get("package_display_id"),
+        "symbol_display_id": task.get("symbol_display_id"),
+        "workspace_display_name": task.get("workspace_display_name"),
         "source_package_id": task.get("source_package_id"),
         "source_package_attachment_id": task.get("source_package_attachment_id"),
         "source_package_object_key": task.get("source_package_object_key"),

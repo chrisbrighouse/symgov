@@ -641,6 +641,72 @@ def next_source_package_code(session) -> str:
     return f"{next_value:04X}"
 
 
+def _coerce_positive_int(value: Any) -> int | None:
+    try:
+        candidate = int(value)
+    except (TypeError, ValueError):
+        return None
+    return candidate if candidate > 0 else None
+
+
+def find_existing_source_package_for_submission(session, normalized: dict[str, Any]) -> SourcePackage | None:
+    submission_batch_id = str(normalized.get("submission_batch_id") or "").strip()
+    package_token = str(normalized.get("source_package_id") or "").strip()
+    package_queue_item_id = str(normalized.get("source_package_queue_item_id") or "").strip()
+
+    lookup_specs: list[tuple[str, str]] = []
+    if submission_batch_id:
+        lookup_specs.append(("submission_batch_id", submission_batch_id))
+    if package_token:
+        lookup_specs.append(("source_package_id", package_token))
+    if package_queue_item_id:
+        lookup_specs.append(("source_package_queue_item_id", package_queue_item_id))
+
+    for json_key, lookup_value in lookup_specs:
+        row = session.execute(
+            text(
+                f"""
+                SELECT source_package_id
+                FROM intake_records
+                WHERE source_package_id IS NOT NULL
+                  AND normalized_submission_json->>'{json_key}' = :lookup_value
+                ORDER BY created_at ASC
+                LIMIT 1
+                """
+            ),
+            {"lookup_value": lookup_value},
+        ).first()
+        if row and row[0]:
+            package = session.get(SourcePackage, coerce_uuid(row[0]))
+            if package is not None:
+                return package
+
+    return None
+
+
+def next_source_package_sequence(session, source_package_id: uuid.UUID) -> int:
+    row = session.execute(
+        text(
+            """
+            SELECT COALESCE(
+                MAX(
+                    CASE
+                        WHEN (normalized_submission_json->>'package_symbol_sequence') ~ '^[0-9]+$'
+                        THEN (normalized_submission_json->>'package_symbol_sequence')::integer
+                        ELSE NULL
+                    END
+                ),
+                0
+            )
+            FROM intake_records
+            WHERE source_package_id = :source_package_id
+            """
+        ),
+        {"source_package_id": source_package_id},
+    ).scalar_one()
+    return int(row or 0) + 1
+
+
 def ensure_source_package_for_intake(session, durable_record: dict[str, Any], created_at: datetime) -> SourcePackage:
     package_id = coerce_uuid(durable_record.get("source_package_id"))
     normalized = dict(durable_record.get("normalized_submission_json") or {})
@@ -657,6 +723,19 @@ def ensure_source_package_for_intake(session, durable_record: dict[str, Any], cr
         package = session.get(SourcePackage, package_id)
         if package is not None:
             return package
+
+    package = find_existing_source_package_for_submission(session, normalized)
+    if package is not None:
+        return package
+
+    # Serialize package allocation so one submission package (batch/ZIP token)
+    # always maps to one shared source package code.
+    session.execute(text("LOCK TABLE intake_records IN EXCLUSIVE MODE"))
+    session.execute(text("LOCK TABLE source_packages IN EXCLUSIVE MODE"))
+
+    package = find_existing_source_package_for_submission(session, normalized)
+    if package is not None:
+        return package
 
     package_code = str(normalized.get("source_package_code") or "").strip().upper()
     if not (len(package_code) == 4 and all(char in "0123456789ABCDEF" for char in package_code)):
@@ -2118,8 +2197,28 @@ class RuntimePersistenceBridge:
                 created_at = parse_timestamp(durable_record["created_at"])
                 source_package = ensure_source_package_for_intake(session, durable_record, created_at)
                 normalized_submission = dict(durable_record["normalized_submission_json"])
-                normalized_submission["source_package_code"] = source_package.package_code
-                normalized_submission["workspace_display_name"] = source_package.package_code
+
+                package_sequence = _coerce_positive_int(normalized_submission.get("package_symbol_sequence"))
+                if package_sequence is None:
+                    package_sequence = next_source_package_sequence(session, source_package.id)
+
+                package_code = source_package.package_code
+                display_name = f"{package_code}-{package_sequence}"
+                normalized_submission["source_package_code"] = package_code
+                normalized_submission["package_display_id"] = package_code
+                normalized_submission["package_symbol_sequence"] = package_sequence
+                normalized_submission["symbol_display_id"] = display_name
+                normalized_submission["workspace_display_name"] = display_name
+
+                queue_payload = dict(agent_queue_item.payload_json or {})
+                queue_payload["source_package_code"] = package_code
+                queue_payload["package_display_id"] = package_code
+                queue_payload["package_symbol_sequence"] = package_sequence
+                queue_payload["symbol_display_id"] = display_name
+                queue_payload["workspace_display_name"] = display_name
+                queue_payload["display_name"] = display_name
+                agent_queue_item.payload_json = queue_payload
+
                 durable_record["source_package_id"] = str(source_package.id)
                 durable_record["normalized_submission_json"] = normalized_submission
 

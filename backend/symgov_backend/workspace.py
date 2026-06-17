@@ -325,14 +325,37 @@ def package_display_id(session: Session, intake_record: IntakeRecord | None) -> 
     if intake_record is None:
         return None
     normalized = intake_record.normalized_submission_json or {}
-    code = str(normalized.get("source_package_code") or normalized.get("workspace_display_name") or "").strip().upper()
-    if code:
-        return code
+    source_code = str(normalized.get("source_package_code") or "").strip().upper()
+    if re.fullmatch(r"[0-9A-F]{4}", source_code):
+        return source_code
+
+    workspace_name = str(normalized.get("workspace_display_name") or "").strip().upper()
+    short_match = re.fullmatch(r"([0-9A-F]{4})-\d+", workspace_name)
+    if short_match:
+        return short_match.group(1)
+    if re.fullmatch(r"[0-9A-F]{4}", workspace_name):
+        return workspace_name
+
     if intake_record.source_package_id:
         package = session.get(SourcePackage, intake_record.source_package_id)
         if package is not None:
             return package.package_code
     return None
+
+
+def intake_display_parts(session: Session, intake_record: IntakeRecord | None) -> tuple[str | None, int | None, str | None]:
+    package_id = package_display_id(session, intake_record)
+    if intake_record is None:
+        return package_id, None, package_id
+    normalized = intake_record.normalized_submission_json or {}
+    sequence_raw = normalized.get("package_symbol_sequence")
+    try:
+        sequence = int(sequence_raw) if sequence_raw is not None else None
+    except (TypeError, ValueError):
+        sequence = None
+    if package_id and sequence is not None:
+        return package_id, sequence, f"{package_id}-{sequence}"
+    return package_id, sequence, package_id
 
 
 def split_item_display_parts(split_item: ReviewSplitItem) -> tuple[str | None, int | None, str | None]:
@@ -355,6 +378,10 @@ def queue_item_display_parts(session: Session, queue_item: AgentQueueItem) -> tu
         direct_sequence = payload.get("package_symbol_sequence") or payload.get("packageSymbolSequence")
         if direct_display_name:
             return direct_package_id, direct_sequence, direct_display_name
+        if direct_package_id and direct_sequence is not None:
+            return direct_package_id, direct_sequence, f"{direct_package_id}-{direct_sequence}"
+        if direct_package_id:
+            return direct_package_id, direct_sequence, direct_package_id
 
     review_case_id = payload.get("review_case_id") if isinstance(payload, dict) else None
     child_decisions = payload.get("child_decisions") if isinstance(payload, dict) else None
@@ -436,8 +463,8 @@ def queue_item_display_parts(session: Session, queue_item: AgentQueueItem) -> tu
         if object_key:
             intake_record = session.query(IntakeRecord).filter(IntakeRecord.raw_object_key == object_key).one_or_none()
 
-    package_id = package_display_id(session, intake_record)
-    return package_id, None, package_id
+    package_id, package_sequence, display_name = intake_display_parts(session, intake_record)
+    return package_id, package_sequence, display_name
 
 
 def rupert_published_metadata(session: Session, queue_item: AgentQueueItem) -> dict[str, str | None]:
@@ -735,7 +762,7 @@ def compact_text(value: str | None, limit: int) -> str:
 
 def is_package_identifier(value: str | None) -> bool:
     text_value = str(value or "").strip()
-    return bool(re.fullmatch(r"\d{3,4}[A-Z]?", text_value, flags=re.IGNORECASE) or re.fullmatch(r"\d{4}-\d+", text_value))
+    return bool(re.fullmatch(r"\d{3,4}[A-Z]?", text_value, flags=re.IGNORECASE) or re.fullmatch(r"[0-9A-F]{4}-\d+", text_value, flags=re.IGNORECASE))
 
 
 def humanize_symbol_name(value: str | None) -> str:
@@ -1125,7 +1152,7 @@ def build_validation_workspace_item(
         source_object_key=source_object_key,
     )
     children = build_children(session, review_case, validation_report, str(review_case.id), source_file_name)
-    package_id = package_display_id(session, intake_record)
+    package_id, package_sequence, package_display_name = intake_display_parts(session, intake_record)
     primary_symbol_id = children[0].proposedSymbolId if children else str(
         (intake_record.normalized_submission_json or {}).get("candidate_symbol_id") or "PNG-REVIEW"
     )
@@ -1134,9 +1161,9 @@ def build_validation_workspace_item(
     payload = {
         "id": str(review_case.id),
         "symbolId": primary_symbol_id,
-        "displayName": package_id,
+        "displayName": package_display_name,
         "packageDisplayId": package_id,
-        "packageSymbolSequence": None,
+        "packageSymbolSequence": package_sequence,
         "title": f"Review raster split proposal for {source_file_name}",
         "owner": "Unassigned",
         "due": due.date().isoformat(),
@@ -1285,7 +1312,7 @@ def build_provenance_workspace_item(
         source_file_name=source_file_name,
         source_object_key=source_object_key,
     )
-    package_id = package_display_id(session, intake_record)
+    package_id, package_sequence, package_display_name = intake_display_parts(session, intake_record)
     opened_at = review_case.opened_at if isinstance(review_case.opened_at, datetime) else datetime.now(timezone.utc)
     due = opened_at + timedelta(days=2)
     symbol_id = str(normalized.get("candidate_symbol_id") or intake_record.id)
@@ -1293,9 +1320,9 @@ def build_provenance_workspace_item(
     payload = {
         "id": str(review_case.id),
         "symbolId": symbol_id,
-        "displayName": package_id,
+        "displayName": package_display_name,
         "packageDisplayId": package_id,
-        "packageSymbolSequence": None,
+        "packageSymbolSequence": package_sequence,
         "title": f"Review classification for {source_file_name}",
         "owner": "Unassigned",
         "due": due.date().isoformat(),

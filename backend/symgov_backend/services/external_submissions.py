@@ -237,6 +237,7 @@ class ExternalSubmissionService:
                 "source_notes": combined_note,
                 "submission_batch_id": batch_id,
                 "submission_batch_summary": overall_description,
+                "package_symbol_sequence": symbol_index,
                 "file_note": primary["file_note"],
                 "external_submitter_id": submitter["id"],
                 "attachment_id": primary["attachment"]["id"],
