@@ -5,7 +5,7 @@
 - Wired filename inference into upstream intake metadata in:
   - `backend/symgov_backend/services/external_submissions.py`
   - `scripts/run_scott_intake.py`
-- Updated the live Libby worker at `/data/.openclaw/workspaces/libby/run_libby_classification.py` so filename hints are first-class evidence for:
+- Vendored the Libby worker into the repo at `scripts/run_libby_classification.py` and kept the live workspace copy at `/data/.openclaw/workspaces/libby/run_libby_classification.py` in sync so filename hints are first-class evidence for:
   - symbol name
   - discipline
   - aliases/search terms
@@ -29,6 +29,7 @@
 - `/data/symgov/backend/symgov_backend/filename_inference.py`
 - `/data/symgov/backend/symgov_backend/services/external_submissions.py`
 - `/data/symgov/scripts/run_scott_intake.py`
+- `/data/symgov/scripts/run_libby_classification.py`
 - `/data/.openclaw/workspaces/libby/run_libby_classification.py`
 - `/data/symgov/backend/symgov_backend/routes/workspace.py`
 - `/data/symgov/tests/test_filename_inference.py`
@@ -45,13 +46,14 @@
   - `docs/ops/`
   - `tests/test_submission_ui_zip_acceptance.py`
   - `tests/test_workspace_split_items.py`
-- The live Libby worker change is outside the repo and cannot be included in the `/data/symgov` git commit:
+- The repo now vendors the Libby worker at:
+  - `/data/symgov/scripts/run_libby_classification.py`
+- The live runtime still executes the synchronized workspace copy at:
   - `/data/.openclaw/workspaces/libby/run_libby_classification.py`
 
 ## Next actions
-1. Push the current local `main` HEAD if you want the repo-side change published upstream.
-2. Capture or sync `/data/.openclaw/workspaces/libby/run_libby_classification.py` into its canonical source if you want that live-worker change versioned.
-3. If desired, run a live service-backed Scott → Vlad → Libby submission through the deployed stack, not just the local script smoke path.
+1. Push the current local `main` HEAD so the vendored Libby worker and repo-side filename-classification changes are published upstream.
+2. If desired, run a live service-backed Scott → Vlad → Libby submission through the deployed stack, not just the local script smoke path.
 
 ## Restart prompt
-Continue from `/data/symgov`. Read `docs/plans/2026-06-17-libby-filename-classification-implementation-restart.md`, run `git status --short --branch`, inspect `/data/.openclaw/workspaces/libby/run_libby_classification.py` if you need to sync the external worker, then either push the repo commit or run a deployed-stack Scott/Vlad/Libby smoke test.
+Continue from `/data/symgov`. Read `docs/plans/2026-06-17-libby-filename-classification-implementation-restart.md`, run `git status --short --branch`, verify `scripts/run_libby_classification.py` still matches `/data/.openclaw/workspaces/libby/run_libby_classification.py`, then either push the repo commit or run a deployed-stack Scott/Vlad/Libby smoke test.

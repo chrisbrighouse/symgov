@@ -3,7 +3,7 @@ from pathlib import Path
 import unittest
 
 
-RUNNER_PATH = Path("/data/.openclaw/workspaces/libby/run_libby_classification.py")
+RUNNER_PATH = Path("/data/symgov/scripts/run_libby_classification.py")
 spec = importlib.util.spec_from_file_location("run_libby_classification", RUNNER_PATH)
 libby = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(libby)
