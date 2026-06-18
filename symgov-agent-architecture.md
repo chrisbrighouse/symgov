@@ -465,7 +465,7 @@ Current implementation status:
   - `python /data/.openclaw/workspace/symgov/backend/manage_symgov.py check-storage`
 - Mirror a local runner execution into PostgreSQL with:
   - `python /data/.openclaw/workspaces/scott/run_scott_intake.py --queue-item ... --runtime-root ... --persist-db`
-  - `python /data/.openclaw/workspaces/vlad/run_vlad_validation.py --queue-item ... --runtime-root ... --persist-db`
+  - `python /data/symgov/scripts/run_vlad_validation.py --queue-item ... --runtime-root /data/.openclaw/workspaces/vlad/runtime --persist-db`
   - `python /data/.openclaw/workspaces/tracy/run_tracy_provenance.py --queue-item ... --runtime-root ... --persist-db`
 - Run local scaffold-only agents with:
   - `python /data/.openclaw/workspaces/daisy/run_daisy_coordination.py --queue-item ... --runtime-root ...`

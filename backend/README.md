@@ -154,7 +154,7 @@ python /data/.openclaw/workspaces/scott/enqueue_scott_downstream.py \
   --vlad-runtime-root /data/.openclaw/workspaces/vlad/runtime \
   --tracy-runtime-root /data/.openclaw/workspaces/tracy/runtime
 
-python /data/.openclaw/workspaces/vlad/run_vlad_validation.py \
+python /data/symgov/scripts/run_vlad_validation.py \
   --queue-item /data/.openclaw/workspaces/vlad/runtime/agent_queue_items/aqi-vlad-ir-aqi-scott-0001-20260409T130244Z-20260409T164854Z.json \
   --runtime-root /data/.openclaw/workspaces/vlad/runtime \
   --persist-db \
@@ -173,6 +173,7 @@ python manage_symgov.py check-storage
 Current runner bridge notes:
 
 - `manage_symgov.py seed-agent-definitions` upserts baseline `agent_definitions` rows for `scott`, `vlad`, `tracy`, `daisy`, `libby`, `rupert`, `ed`, `hannah`, and `whitney`
+- Vlad's runner is repo-managed at `/data/symgov/scripts/run_vlad_validation.py`; the old `/data/.openclaw/workspaces/vlad/run_vlad_validation.py` code copy has been retired. Keep using `/data/.openclaw/workspaces/vlad/runtime` for queue/history artifacts.
 - `manage_symgov.py seed-scott-source-discovery` upserts Scott's durable source-discovery memory rows, prioritising the recommended standards/source backbone: IEC 60617, ISO 14617, ISA-5.1, ASME Y14.5 / ISO 1101, ProjectMaterials, Vista Projects, NECA 100, QElectroTech, readable GD&T references, and rights-gated CAD-library candidates; ignored domains such as `linecad.com`, `svghmi.pro`, and `autodesk.com` remain ignored
 - Scott source-search defaults now seed toward `ProjectMaterials P&ID symbols ISA-5.1 ISO 14617 IEC 60617 NECA 100 QElectroTech GD&T`, while ignored domains and checked `include_next_run` rows are passed into the next run payload
 - Scott treats downloadable CAD/manufacturer libraries as reference/intake sources only until rights, reuse terms, provenance, and standards alignment have been checked. ProjectMaterials is treated as the immediate practical P&ID seed source, but its candidates must be mapped back to ISA-5.1 / ISO 14617 rather than treated as authoritative.

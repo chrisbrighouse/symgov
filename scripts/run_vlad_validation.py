@@ -24,6 +24,8 @@ import xml.etree.ElementTree as ET
 
 SCHEMA_VERSION = "0.2.0"
 PROMPT_VERSION = "vlad-local-contract-0.2.0"
+DEFAULT_VLAD_MODEL = "ollama/gemma4:e4b"
+DEFAULT_VLAD_GEMINI_MODEL = "gemini/gemini-2.5-flash"
 BACKEND_ROOT = Path(__file__).resolve().parents[1] / "backend"
 
 if str(BACKEND_ROOT) not in sys.path:
@@ -49,6 +51,20 @@ except ImportError:  # pragma: no cover
 
 def utc_now():
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def get_gemini_api_key():
+    return (os.environ.get("SYMGOV_GEMINI_API_KEY", "").strip() or os.environ.get("GEMINI_API_KEY", "").strip())
+
+
+def resolve_vlad_model():
+    """Return the model Vlad should report/use for non-deterministic assistance."""
+    configured = os.environ.get("SYMGOV_VLAD_MODEL", "").strip()
+    if configured:
+        return configured
+    if get_gemini_api_key():
+        return os.environ.get("SYMGOV_GEMINI_MODEL", DEFAULT_VLAD_GEMINI_MODEL).strip() or DEFAULT_VLAD_GEMINI_MODEL
+    return DEFAULT_VLAD_MODEL
 
 
 def stamp_id(prefix, base_id):
@@ -1378,14 +1394,14 @@ def erase_text_from_image(source_path, output_path):
 def gemini_image_edit_enabled():
     provider = os.environ.get("SYMGOV_VLAD_IMAGE_EDIT_PROVIDER", "").strip().lower()
     fallback = os.environ.get("SYMGOV_VLAD_IMAGE_EDIT_FALLBACK", "").strip().lower()
-    api_key = os.environ.get("SYMGOV_GEMINI_API_KEY", "").strip()
+    api_key = get_gemini_api_key()
     return provider == "gemini" and fallback in {"1", "true", "yes", "on"} and bool(api_key)
 
 
 def gemini_image_edit_config_status():
     provider = os.environ.get("SYMGOV_VLAD_IMAGE_EDIT_PROVIDER", "").strip().lower()
     fallback = os.environ.get("SYMGOV_VLAD_IMAGE_EDIT_FALLBACK", "").strip().lower()
-    has_key = bool(os.environ.get("SYMGOV_GEMINI_API_KEY", "").strip())
+    has_key = bool(get_gemini_api_key())
     if provider != "gemini":
         return "provider_not_gemini"
     if fallback not in {"1", "true", "yes", "on"}:
@@ -1431,7 +1447,7 @@ def response_part_image_bytes(response_payload):
 
 
 def edit_image_with_gemini(source_path, output_path, prompt):
-    api_key = os.environ.get("SYMGOV_GEMINI_API_KEY", "").strip()
+    api_key = get_gemini_api_key()
     if not api_key:
         return {"status": "failed", "reason": "missing_gemini_api_key", "provider": "gemini"}
 
@@ -2109,7 +2125,7 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
     run_record = {
         "id": run_id,
         "queue_item_id": queue_item["id"],
-        "model": "ollama/gemma4:e4b",
+        "model": resolve_vlad_model(),
         "prompt_version": PROMPT_VERSION,
         "tool_trace_json": artifact["evidence_trace"],
         "result_status": queue_item["status"],

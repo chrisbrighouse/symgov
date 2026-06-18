@@ -61,88 +61,110 @@ from .models import (
 
 DEFAULT_STORAGE_ENV_FILE = Path("/data/.openclaw/workspace/symgov/.env.backend.storage")
 LEGACY_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "symgov/runtime-legacy-id")
-AGENT_DEFINITION_SEEDS = (
-    {
-        "slug": "scott",
-        "display_name": "Scott",
-        "role": "intake agent",
-        "model": "ollama/gemma4:e4b",
-        "status": "active",
-        "queue_family": "intake",
-    },
-    {
-        "slug": "vlad",
-        "display_name": "Vlad",
-        "role": "technical validation agent",
-        "model": "ollama/gemma4:e4b",
-        "status": "active",
-        "queue_family": "validation",
-    },
-    {
-        "slug": "tracy",
-        "display_name": "Tracy",
-        "role": "provenance and rights agent",
-        "model": "ollama/gemma4:e4b",
-        "status": "active",
-        "queue_family": "provenance",
-    },
-    {
-        "slug": "daisy",
-        "display_name": "Daisy",
-        "role": "review coordination agent",
-        "model": "ollama/gemma4:e4b",
-        "status": "active",
-        "queue_family": "review_coordination",
-    },
-    {
-        "slug": "libby",
-        "display_name": "Libby",
-        "role": "classification and research librarian",
-        "model": "ollama/gemma4:e4b",
-        "status": "active",
-        "queue_family": "classification",
-    },
-    {
-        "slug": "rupert",
-        "display_name": "Rupert",
-        "role": "publishing and release management agent",
-        "model": "ollama/gemma4:e4b",
-        "status": "active",
-        "queue_family": "publication",
-    },
-    {
-        "slug": "ed",
-        "display_name": "Ed",
-        "role": "visual experience and feedback agent",
-        "model": "ollama/gemma4:e4b",
-        "status": "active",
-        "queue_family": "ux_feedback",
-    },
-    {
-        "slug": "hannah",
-        "display_name": "Hannah",
-        "role": "catalogue quality and long-term curation agent",
-        "model": "ollama/gemma4:e4b",
-        "status": "active",
-        "queue_family": "curation",
-    },
-    {
-        "slug": "reggie",
-        "display_name": "Reggie",
-        "role": "audit, compliance, and control-room agent",
-        "model": "ollama/gemma4:e4b",
-        "status": "active",
-        "queue_family": "control_audit",
-    },
-    {
-        "slug": "whitney",
-        "display_name": "Whitney",
-        "role": "market intelligence and demand sensing agent",
-        "model": "ollama/gemma4:e4b",
-        "status": "active",
-        "queue_family": "market_intelligence",
-    },
-)
+DEFAULT_AGENT_MODEL = "ollama/gemma4:e4b"
+DEFAULT_VLAD_GEMINI_MODEL = "gemini/gemini-2.5-flash"
+
+
+def get_gemini_api_key() -> str:
+    return os.environ.get("SYMGOV_GEMINI_API_KEY", "").strip() or os.environ.get("GEMINI_API_KEY", "").strip()
+
+
+def resolve_vlad_agent_model() -> str:
+    """Prefer Gemini for Vlad when credentials/config make it available."""
+    configured = os.environ.get("SYMGOV_VLAD_MODEL", "").strip()
+    if configured:
+        return configured
+    if get_gemini_api_key():
+        return os.environ.get("SYMGOV_GEMINI_MODEL", DEFAULT_VLAD_GEMINI_MODEL).strip() or DEFAULT_VLAD_GEMINI_MODEL
+    return DEFAULT_AGENT_MODEL
+
+
+def agent_definition_seeds() -> tuple[dict[str, str], ...]:
+    return (
+        {
+            "slug": "scott",
+            "display_name": "Scott",
+            "role": "intake agent",
+            "model": DEFAULT_AGENT_MODEL,
+            "status": "active",
+            "queue_family": "intake",
+        },
+        {
+            "slug": "vlad",
+            "display_name": "Vlad",
+            "role": "technical validation and graphic-quality agent",
+            "model": resolve_vlad_agent_model(),
+            "status": "active",
+            "queue_family": "validation",
+        },
+        {
+            "slug": "tracy",
+            "display_name": "Tracy",
+            "role": "provenance and rights agent",
+            "model": DEFAULT_AGENT_MODEL,
+            "status": "active",
+            "queue_family": "provenance",
+        },
+        {
+            "slug": "daisy",
+            "display_name": "Daisy",
+            "role": "review coordination agent",
+            "model": DEFAULT_AGENT_MODEL,
+            "status": "active",
+            "queue_family": "review_coordination",
+        },
+        {
+            "slug": "libby",
+            "display_name": "Libby",
+            "role": "classification and research librarian",
+            "model": DEFAULT_AGENT_MODEL,
+            "status": "active",
+            "queue_family": "classification",
+        },
+        {
+            "slug": "rupert",
+            "display_name": "Rupert",
+            "role": "publishing and release management agent",
+            "model": DEFAULT_AGENT_MODEL,
+            "status": "active",
+            "queue_family": "publication",
+        },
+        {
+            "slug": "ed",
+            "display_name": "Ed",
+            "role": "visual experience and feedback agent",
+            "model": DEFAULT_AGENT_MODEL,
+            "status": "active",
+            "queue_family": "ux_feedback",
+        },
+        {
+            "slug": "hannah",
+            "display_name": "Hannah",
+            "role": "catalogue quality and long-term curation agent",
+            "model": DEFAULT_AGENT_MODEL,
+            "status": "active",
+            "queue_family": "curation",
+        },
+        {
+            "slug": "reggie",
+            "display_name": "Reggie",
+            "role": "audit, compliance, and control-room agent",
+            "model": DEFAULT_AGENT_MODEL,
+            "status": "active",
+            "queue_family": "control_audit",
+        },
+        {
+            "slug": "whitney",
+            "display_name": "Whitney",
+            "role": "market intelligence and demand sensing agent",
+            "model": DEFAULT_AGENT_MODEL,
+            "status": "active",
+            "queue_family": "market_intelligence",
+        },
+    )
+
+
+AGENT_DEFINITION_SEEDS = agent_definition_seeds()
 
 SCOTT_SOURCE_DISCOVERY_DEFAULT_SEED_QUERY = (
     "ProjectMaterials P&ID symbols ISA-5.1 ISO 14617 IEC 60617 NECA 100 QElectroTech GD&T"
@@ -1044,7 +1066,7 @@ class RuntimePersistenceBridge:
         operations: list[dict[str, str]] = []
         now = datetime.now(timezone.utc).replace(microsecond=0)
         with self.session_scope() as session:
-            for spec in AGENT_DEFINITION_SEEDS:
+            for spec in agent_definition_seeds():
                 row = session.query(AgentDefinition).filter_by(slug=spec["slug"]).one_or_none()
                 if row is None:
                     row = AgentDefinition(
