@@ -115,6 +115,12 @@ class LibbySymbolVisionTests(unittest.TestCase):
             properties = libby.call_gemini_symbol_property_review(
                 b"fake-image",
                 "image/png",
+                submission_context={
+                    "submission_batch_summary": "Fire alarm symbols for building services classification.",
+                    "source_notes": "Installer pack from manual submission.",
+                    "file_note": "Break glass call point variant.",
+                    "contributor_declaration": "Operations team says these are electrical fire alarm symbols.",
+                },
                 filename_hints={
                     "original_filename": "Elec_FireAlarm_BreakGlass.dxf",
                     "inferred_name": "Electrical FireAlarm BreakGlass",
@@ -133,6 +139,9 @@ class LibbySymbolVisionTests(unittest.TestCase):
         self.assertIn("Filename hints", prompt)
         self.assertIn("Elec_FireAlarm_BreakGlass.dxf", prompt)
         self.assertIn("Electrical FireAlarm BreakGlass", prompt)
+        self.assertIn("Submission context", prompt)
+        self.assertIn("Fire alarm symbols for building services classification", prompt)
+        self.assertIn("Installer pack from manual submission", prompt)
         self.assertIn("advisory", prompt.lower())
         self.assertEqual(properties["discipline"], "Electrical")
 

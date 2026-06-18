@@ -134,6 +134,15 @@ class WorkspaceHumanReviewDecisionSummary(BaseModel):
     createdAt: str
 
 
+class WorkspaceSubmissionContextResponse(BaseModel):
+    submissionSummary: str | None = None
+    sourceNotes: str | None = None
+    fileNote: str | None = None
+    contributorDeclaration: str | None = None
+    submittedBy: str | None = None
+    submissionBatchId: str | None = None
+
+
 class WorkspaceReviewCaseResponse(BaseModel):
     id: str
     reviewItemType: str = "review_case"
@@ -165,6 +174,7 @@ class WorkspaceReviewCaseResponse(BaseModel):
     sourcePreviewUrl: str | None = None
     sourceAssets: list[WorkspaceReviewAssetResponse] = []
     availableFormats: list[str] = []
+    submissionContext: WorkspaceSubmissionContextResponse | None = None
     intakeRecordId: str
     childCount: int
     classificationStatus: str | None = None

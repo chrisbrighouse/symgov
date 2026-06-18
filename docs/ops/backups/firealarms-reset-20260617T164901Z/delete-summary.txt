@@ -1,0 +1,25 @@
+FireAlarms reset completed at: 2026-06-17T16:49:06Z
+Backup dir: /data/symgov/docs/ops/backups/firealarms-reset-20260617T164901Z
+Batch IDs removed:
+subext-20260617T160604Z
+
+Verification counts:
+        table_name        | row_count
+--------------------------+-----------
+ agent_output_artifacts   |         0
+ agent_queue_items        |         0
+ agent_runs               |         0
+ attachments              |         0
+ audit_events             |         0
+ human_review_decisions   |         0
+ intake_records           |         0
+ provenance_assessments   |         0
+ review_case_actions      |         0
+ review_cases             |         0
+ review_split_items       |         0
+ review_symbol_properties |         0
+ source_packages          |         0
+ validation_reports       |         0
+(14 rows)
+
+API health: {"ok":true,"service":"symgov-api","time":"2026-06-17T16:49:06Z"}

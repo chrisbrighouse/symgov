@@ -12,11 +12,36 @@ if str(BACKEND_ROOT) not in sys.path:
 
 import symgov_backend.routes.workspace as workspace_routes  # noqa: E402
 from symgov_backend.routes.workspace import (  # noqa: E402
+    build_submission_context,
     build_provenance_workspace_item,
     build_validation_workspace_item,
     choose_workspace_source_preview_asset,
 )
 from symgov_backend.models import Attachment, IntakeRecord, ReviewCase, ValidationReport  # noqa: E402
+
+
+def test_submission_context_exposes_manual_summary_for_reviewers():
+    intake_record = SimpleNamespace(
+        normalized_submission_json={
+            "submission_batch_summary": "Fire alarm device symbols for BS-style electrical review.",
+            "source_notes": "Installer-supplied FireAlarms ZIP.",
+            "file_note": "Heat detector variant.",
+            "contributor_declaration": "Submitted by operations for classification help.",
+            "submitted_by": "Tester <tester@example.test>",
+            "submission_batch_id": "subext-test",
+        }
+    )
+
+    context = build_submission_context(intake_record)
+
+    assert context == {
+        "submissionSummary": "Fire alarm device symbols for BS-style electrical review.",
+        "sourceNotes": "Installer-supplied FireAlarms ZIP.",
+        "fileNote": "Heat detector variant.",
+        "contributorDeclaration": "Submitted by operations for classification help.",
+        "submittedBy": "Tester <tester@example.test>",
+        "submissionBatchId": "subext-test",
+    }
 
 
 def test_workspace_source_preview_uses_generated_svg_for_dxf_validation_report():

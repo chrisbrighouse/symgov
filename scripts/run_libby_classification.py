@@ -184,7 +184,14 @@ def resolve_symbol_image_bytes(task, storage_env_file=None):
     return None, None, None
 
 
-def call_gemini_symbol_property_review(image_bytes, content_type, category_options=None, discipline_options=None, filename_hints=None):
+def call_gemini_symbol_property_review(
+    image_bytes,
+    content_type,
+    category_options=None,
+    discipline_options=None,
+    filename_hints=None,
+    submission_context=None,
+):
     api_key = os.environ.get("SYMGOV_GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("SYMGOV_GEMINI_API_KEY is not configured.")
@@ -208,6 +215,14 @@ def call_gemini_symbol_property_review(image_bytes, content_type, category_optio
             f"- hint confidence: {filename_hints.get('confidence') or 0}\n"
             "Prefer a compact engineering name when the filename looks intentional, preserve useful compounds like FireAlarm or BreakGlass, "
             "and use the inferred wording as the description only when the image does not support a better description."
+        )
+    if submission_context:
+        prompt = (
+            f"{prompt}\n\nSubmission context (advisory human/manual intake context; use it to disambiguate classification but do not copy irrelevant prose):\n"
+            f"- submission summary: {submission_context.get('submission_batch_summary') or 'unknown'}\n"
+            f"- source notes: {submission_context.get('source_notes') or 'unknown'}\n"
+            f"- file note: {submission_context.get('file_note') or 'unknown'}\n"
+            f"- contributor declaration: {submission_context.get('contributor_declaration') or 'unknown'}"
         )
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{urllib.parse.quote(model, safe='')}:generateContent?key={urllib.parse.quote(api_key)}"
     body = {
@@ -237,6 +252,16 @@ def call_gemini_symbol_property_review(image_bytes, content_type, category_optio
         return parse_gemini_symbol_property_response(json.loads(response.read().decode("utf-8")))
 
 
+def submission_context_for_task(task):
+    context = {
+        "submission_batch_summary": normalize_label(task.get("submission_batch_summary")),
+        "source_notes": normalize_label(task.get("source_notes")),
+        "file_note": normalize_label(task.get("file_note")),
+        "contributor_declaration": normalize_label(task.get("contributor_declaration")),
+    }
+    return {key: value for key, value in context.items() if value}
+
+
 def enrich_classification_with_symbol_image(artifact, task, db_env_file=None, storage_env_file=None):
     if os.environ.get("LIBBY_DISABLE_SYMBOL_VISION", "").lower() in {"1", "true", "yes", "on"}:
         return artifact
@@ -258,6 +283,7 @@ def enrich_classification_with_symbol_image(artifact, task, db_env_file=None, st
             category_options=category_options,
             discipline_options=discipline_options,
             filename_hints=artifact.get("evidence", {}).get("filename_inference") or filename_hints_for_task(task),
+            submission_context=submission_context_for_task(task),
         )
         if bridge is not None:
             properties["category"] = bridge.remember_review_symbol_property_option(field_name="category", value=properties.get("category"))

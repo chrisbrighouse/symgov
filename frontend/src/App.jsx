@@ -2518,6 +2518,15 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
   const itemName = displaySymbolId(activeChange) || 'Review item';
   const originalFilename = displayReviewOriginalFilename(activeChange) || 'Not recorded';
   const symbolProperties = activeChange?.symbolProperties || {};
+  const submissionContext = activeChange?.submissionContext || {};
+  const hasSubmissionContext = Boolean(
+    submissionContext.submissionSummary ||
+    submissionContext.sourceNotes ||
+    submissionContext.fileNote ||
+    submissionContext.contributorDeclaration ||
+    submissionContext.submittedBy ||
+    submissionContext.submissionBatchId
+  );
   const reviewSourceAssets = Array.isArray(activeChange?.sourceAssets) ? activeChange.sourceAssets : [];
   const availableFormats = Array.isArray(activeChange?.availableFormats)
     ? activeChange.availableFormats.map((format) => formatReviewAssetFormat(format)).filter(Boolean)
@@ -2643,6 +2652,19 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
                 {formatReviewAssetChip(asset)}
               </span>
             ))}
+          </div>
+        </div>
+      ) : null}
+      {hasSubmissionContext ? (
+        <div className="copy-block">
+          <h4>Submission context</h4>
+          {submissionContext.submissionSummary ? <p>{submissionContext.submissionSummary}</p> : null}
+          <div className="review-support-facts">
+            <Fact label="Source notes" value={submissionContext.sourceNotes || 'Not recorded'} />
+            <Fact label="File note" value={submissionContext.fileNote || 'Not recorded'} />
+            <Fact label="Contributor declaration" value={submissionContext.contributorDeclaration || 'Not recorded'} />
+            <Fact label="Submitted by" value={submissionContext.submittedBy || 'Not recorded'} />
+            <Fact label="Batch" value={submissionContext.submissionBatchId || 'Not recorded'} />
           </div>
         </div>
       ) : null}

@@ -1221,6 +1221,26 @@ def compact_text(value: str | None, limit: int) -> str:
     return text_value[:limit]
 
 
+def submission_context_text(value: object) -> str | None:
+    text_value = " ".join(str(value or "").split())
+    return text_value or None
+
+
+def build_submission_context(intake_record: IntakeRecord | None) -> dict[str, str | None] | None:
+    if intake_record is None:
+        return None
+    normalized = intake_record.normalized_submission_json or {}
+    context = {
+        "submissionSummary": submission_context_text(normalized.get("submission_batch_summary")),
+        "sourceNotes": submission_context_text(normalized.get("source_notes")),
+        "fileNote": submission_context_text(normalized.get("file_note")),
+        "contributorDeclaration": submission_context_text(normalized.get("contributor_declaration")),
+        "submittedBy": submission_context_text(normalized.get("submitted_by") or getattr(intake_record, "submitter", None)),
+        "submissionBatchId": submission_context_text(normalized.get("submission_batch_id")),
+    }
+    return context if any(context.values()) else None
+
+
 def is_package_identifier(value: str | None) -> bool:
     text_value = str(value or "").strip()
     return bool(re.fullmatch(r"\d{3,4}[A-Z]?", text_value, flags=re.IGNORECASE) or re.fullmatch(r"[0-9A-F]{4}-\d+", text_value, flags=re.IGNORECASE))
@@ -1615,6 +1635,7 @@ def build_validation_workspace_item(
         ),
         "sourceAssets": source_assets,
         "availableFormats": available_formats,
+        "submissionContext": build_submission_context(intake_record),
         "intakeRecordId": str(intake_record.id),
         "childCount": len(children),
         "symbolProperties": build_symbol_properties_response(
@@ -1733,6 +1754,7 @@ def build_split_item_workspace_item(
         "sourcePreviewUrl": preview_url,
         "sourceAssets": source_assets,
         "availableFormats": available_formats,
+        "submissionContext": build_submission_context(intake_record),
         "intakeRecordId": str(intake_record.id),
         "childCount": 1,
         "symbolProperties": build_symbol_properties_response(symbol_properties),
@@ -1819,6 +1841,7 @@ def build_provenance_workspace_item(
         ),
         "sourceAssets": source_assets,
         "availableFormats": available_formats,
+        "submissionContext": build_submission_context(intake_record),
         "intakeRecordId": str(intake_record.id),
         "childCount": 0,
         "symbolProperties": build_symbol_properties_response(
