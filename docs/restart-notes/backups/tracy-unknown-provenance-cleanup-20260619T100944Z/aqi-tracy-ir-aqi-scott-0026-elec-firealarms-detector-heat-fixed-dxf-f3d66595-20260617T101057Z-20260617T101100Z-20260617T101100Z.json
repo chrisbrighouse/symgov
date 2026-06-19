@@ -1,0 +1,98 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-0026-elec-firealarms-detector-heat-fixed-dxf-f3d66595-20260617T101057Z-20260617T101100Z-20260617T101100Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-0026-elec-firealarms-detector-heat-fixed-dxf-f3d66595-20260617T101057Z-20260617T101100Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-0026-elec-firealarms-detector-heat-fixed-dxf-f3d66595-20260617T101057Z-20260617T101100Z",
+    "source_ref": "external-submission-20260617T101053Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "ELEC-FIREALARMS-DETECTOR-HEAT-FIXED-026",
+    "candidate_title": "Electrical FireAlarms Detector Heat Fixed",
+    "origin_file_name": "Elec_FireAlarms_Detector_Heat_Fixed.dxf",
+    "source_notes": "Fire Alarms symbols",
+    "file_note": null,
+    "submission_batch_summary": "Fire Alarms symbols",
+    "attachment_id": "cac15d2d-15a6-4278-9d5b-f47bed94127d",
+    "attachment_ids": [
+      "cac15d2d-15a6-4278-9d5b-f47bed94127d"
+    ],
+    "raw_object_key": "external-submissions/subext-20260617T101053Z/01-Fire Alarms.zip/members/0026-elec-firealarms-detector-heat-fixed-dxf-f3d66595/Elec_FireAlarms_Detector_Heat_Fixed.dxf",
+    "declared_format": "dxf",
+    "submission_batch_id": "subext-20260617T101053Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Fire Alarms symbols",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": [],
+    "source_package_id": "pkg-aqi-scott-ext-20260617t101053z-01-3f09d51b8eaa",
+    "source_package_attachment_id": "cac15d2d-15a6-4278-9d5b-f47bed94127d",
+    "source_package_object_key": "external-submissions/subext-20260617T101053Z/01-Fire Alarms.zip",
+    "source_package_sha256": "3f09d51b8eaa6a9bfc641b1a080ba25363244b9288c2788007b727eeeef08306",
+    "source_package_queue_item_id": "aqi-scott-ext-20260617T101053Z-01",
+    "package_member": {
+      "member_id": "0026-elec-firealarms-detector-heat-fixed-dxf-f3d66595",
+      "member_index": 26,
+      "original_path": "Elec_FireAlarms_Detector_Heat_Fixed.dxf",
+      "filename": "Elec_FireAlarms_Detector_Heat_Fixed.dxf",
+      "extension": ".dxf",
+      "declared_format": "dxf",
+      "sha256": "02030b323816d71ec32b3910c8a3d10afc45b1428020900d7a302b4416cfc773",
+      "compressed_size": 10739,
+      "uncompressed_size": 181348,
+      "relationship": "primary",
+      "companion_member_ids": [
+        "0051-elec-firealarms-detector-heat-fixed-jpg-bfc00611"
+      ]
+    },
+    "package_member_relationship": "primary_with_companion",
+    "package_symbol_grouping": "paired_dxf_raster_symbol",
+    "companion_files": [
+      {
+        "file_name": "Elec_FireAlarms_Detector_Heat_Fixed.jpg",
+        "format": "jpeg",
+        "role": "package_member_companion",
+        "raw_input_path": "/data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260617T101053Z/zip_packages/pkg-aqi-scott-ext-20260617t101053z-01-3f09d51b8eaa/0051-elec-firealarms-detector-heat-fixed-jpg-bfc00611/Elec_FireAlarms_Detector_Heat_Fixed.jpg",
+        "object_key": "external-submissions/subext-20260617T101053Z/01-Fire Alarms.zip/members/0051-elec-firealarms-detector-heat-fixed-jpg-bfc00611/Elec_FireAlarms_Detector_Heat_Fixed.jpg",
+        "source_package_id": "pkg-aqi-scott-ext-20260617t101053z-01-3f09d51b8eaa",
+        "package_member_id": "0051-elec-firealarms-detector-heat-fixed-jpg-bfc00611",
+        "original_path": "Elec_FireAlarms_Detector_Heat_Fixed.jpg",
+        "sha256": "269aef0da11c47807cdc3029730df9259d72f99d4337326212fc2f1615015be6"
+      }
+    ],
+    "visual_assets": {
+      "source_assets": [
+        {
+          "object_key": "external-submissions/subext-20260617T101053Z/01-Fire Alarms.zip/members/0026-elec-firealarms-detector-heat-fixed-dxf-f3d66595/Elec_FireAlarms_Detector_Heat_Fixed.dxf",
+          "filename": "Elec_FireAlarms_Detector_Heat_Fixed.dxf",
+          "content_type": "application/octet-stream",
+          "format": "dxf",
+          "role": "package_member_source",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t101053z-01-3f09d51b8eaa",
+          "package_member_id": "0026-elec-firealarms-detector-heat-fixed-dxf-f3d66595",
+          "original_path": "Elec_FireAlarms_Detector_Heat_Fixed.dxf"
+        },
+        {
+          "object_key": "external-submissions/subext-20260617T101053Z/01-Fire Alarms.zip/members/0051-elec-firealarms-detector-heat-fixed-jpg-bfc00611/Elec_FireAlarms_Detector_Heat_Fixed.jpg",
+          "filename": "Elec_FireAlarms_Detector_Heat_Fixed.jpg",
+          "content_type": "application/octet-stream",
+          "format": "jpeg",
+          "role": "package_member_companion",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t101053z-01-3f09d51b8eaa",
+          "package_member_id": "0051-elec-firealarms-detector-heat-fixed-jpg-bfc00611",
+          "original_path": "Elec_FireAlarms_Detector_Heat_Fixed.jpg"
+        }
+      ]
+    }
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-17T10:11:00Z",
+  "started_at": "2026-06-17T10:11:03Z",
+  "completed_at": "2026-06-17T10:11:03Z"
+}

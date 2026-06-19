@@ -1,0 +1,98 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-0016-elec-firealarm-remoteindicator-dxf-db0acaf7-20260617T103536Z-20260617T103537Z-20260617T103537Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-0016-elec-firealarm-remoteindicator-dxf-db0acaf7-20260617T103536Z-20260617T103537Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-0016-elec-firealarm-remoteindicator-dxf-db0acaf7-20260617T103536Z-20260617T103537Z",
+    "source_ref": "external-submission-20260617T103527Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "ELEC-FIREALARM-REMOTEINDICATOR-016",
+    "candidate_title": "Electrical FireAlarm RemoteIndicator",
+    "origin_file_name": "Elec_FireAlarm_RemoteIndicator.dxf",
+    "source_notes": "Fire Alarms symbols",
+    "file_note": null,
+    "submission_batch_summary": "Fire Alarms symbols",
+    "attachment_id": "9fdad114-b999-42c2-83f4-5dc094649e2e",
+    "attachment_ids": [
+      "9fdad114-b999-42c2-83f4-5dc094649e2e"
+    ],
+    "raw_object_key": "external-submissions/subext-20260617T103527Z/01-Fire Alarms.zip/members/0016-elec-firealarm-remoteindicator-dxf-db0acaf7/Elec_FireAlarm_RemoteIndicator.dxf",
+    "declared_format": "dxf",
+    "submission_batch_id": "subext-20260617T103527Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Fire Alarms symbols",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": [],
+    "source_package_id": "pkg-aqi-scott-ext-20260617t103527z-01-3f09d51b8eaa",
+    "source_package_attachment_id": "9fdad114-b999-42c2-83f4-5dc094649e2e",
+    "source_package_object_key": "external-submissions/subext-20260617T103527Z/01-Fire Alarms.zip",
+    "source_package_sha256": "3f09d51b8eaa6a9bfc641b1a080ba25363244b9288c2788007b727eeeef08306",
+    "source_package_queue_item_id": "aqi-scott-ext-20260617T103527Z-01",
+    "package_member": {
+      "member_id": "0016-elec-firealarm-remoteindicator-dxf-db0acaf7",
+      "member_index": 16,
+      "original_path": "Elec_FireAlarm_RemoteIndicator.dxf",
+      "filename": "Elec_FireAlarm_RemoteIndicator.dxf",
+      "extension": ".dxf",
+      "declared_format": "dxf",
+      "sha256": "3327b8d589ee199abcfda561efcb68943b53f5c515be565964fd156e7139c220",
+      "compressed_size": 11179,
+      "uncompressed_size": 183424,
+      "relationship": "primary",
+      "companion_member_ids": [
+        "0014-elec-firealarm-remoteindicator-jpg-6ea45626"
+      ]
+    },
+    "package_member_relationship": "primary_with_companion",
+    "package_symbol_grouping": "paired_dxf_raster_symbol",
+    "companion_files": [
+      {
+        "file_name": "Elec_FireAlarm_RemoteIndicator.jpg",
+        "format": "jpeg",
+        "role": "package_member_companion",
+        "raw_input_path": "/data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260617T103527Z/zip_packages/pkg-aqi-scott-ext-20260617t103527z-01-3f09d51b8eaa/0014-elec-firealarm-remoteindicator-jpg-6ea45626/Elec_FireAlarm_RemoteIndicator.jpg",
+        "object_key": "external-submissions/subext-20260617T103527Z/01-Fire Alarms.zip/members/0014-elec-firealarm-remoteindicator-jpg-6ea45626/Elec_FireAlarm_RemoteIndicator.jpg",
+        "source_package_id": "pkg-aqi-scott-ext-20260617t103527z-01-3f09d51b8eaa",
+        "package_member_id": "0014-elec-firealarm-remoteindicator-jpg-6ea45626",
+        "original_path": "Elec_FireAlarm_RemoteIndicator.jpg",
+        "sha256": "ddf82b5207635d8887bf6dd7b9aeaca6f2c6ebeb25840753ef198f3add444524"
+      }
+    ],
+    "visual_assets": {
+      "source_assets": [
+        {
+          "object_key": "external-submissions/subext-20260617T103527Z/01-Fire Alarms.zip/members/0016-elec-firealarm-remoteindicator-dxf-db0acaf7/Elec_FireAlarm_RemoteIndicator.dxf",
+          "filename": "Elec_FireAlarm_RemoteIndicator.dxf",
+          "content_type": "application/octet-stream",
+          "format": "dxf",
+          "role": "package_member_source",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t103527z-01-3f09d51b8eaa",
+          "package_member_id": "0016-elec-firealarm-remoteindicator-dxf-db0acaf7",
+          "original_path": "Elec_FireAlarm_RemoteIndicator.dxf"
+        },
+        {
+          "object_key": "external-submissions/subext-20260617T103527Z/01-Fire Alarms.zip/members/0014-elec-firealarm-remoteindicator-jpg-6ea45626/Elec_FireAlarm_RemoteIndicator.jpg",
+          "filename": "Elec_FireAlarm_RemoteIndicator.jpg",
+          "content_type": "application/octet-stream",
+          "format": "jpeg",
+          "role": "package_member_companion",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t103527z-01-3f09d51b8eaa",
+          "package_member_id": "0014-elec-firealarm-remoteindicator-jpg-6ea45626",
+          "original_path": "Elec_FireAlarm_RemoteIndicator.jpg"
+        }
+      ]
+    }
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-17T10:35:37Z",
+  "started_at": "2026-06-17T10:35:40Z",
+  "completed_at": "2026-06-17T10:35:40Z"
+}

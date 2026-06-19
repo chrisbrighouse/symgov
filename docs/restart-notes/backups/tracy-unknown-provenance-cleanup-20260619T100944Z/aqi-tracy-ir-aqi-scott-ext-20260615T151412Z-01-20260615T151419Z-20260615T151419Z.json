@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260615T151412Z-01-20260615T151419Z-20260615T151419Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260615T151412Z-01-20260615T151419Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260615T151412Z-01-20260615T151419Z",
+    "source_ref": "external-submission-20260615T151412Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "VESSELS-TEST",
+    "candidate_title": "Vessels Test",
+    "origin_file_name": "Vessels-test.png",
+    "source_notes": "Contractor-originated company variant",
+    "file_note": null,
+    "submission_batch_summary": "Contractor-originated company variant",
+    "attachment_id": "b557d164-1c1d-4566-aa60-7a6fe5049a25",
+    "attachment_ids": [
+      "b557d164-1c1d-4566-aa60-7a6fe5049a25"
+    ],
+    "raw_object_key": "external-submissions/subext-20260615T151412Z/01-Vessels-test.png",
+    "declared_format": "png",
+    "submission_batch_id": "subext-20260615T151412Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Contractor-originated company variant",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-15T15:14:19Z",
+  "started_at": "2026-06-15T15:14:21Z",
+  "completed_at": "2026-06-15T15:14:21Z"
+}

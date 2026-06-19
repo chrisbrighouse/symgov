@@ -1,0 +1,71 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-0014-elec-smallpower-shaversocket-jpg-8d5df1da-20260617T090125Z-20260617T090130Z-20260617T090130Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-0014-elec-smallpower-shaversocket-jpg-8d5df1da-20260617T090125Z-20260617T090130Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-0014-elec-smallpower-shaversocket-jpg-8d5df1da-20260617T090125Z-20260617T090130Z",
+    "source_ref": "external-submission-20260617T090124Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "ELEC-SMALLPOWER-SHAVERSOCKET-014",
+    "candidate_title": "Elec Smallpower Shaversocket",
+    "origin_file_name": "Elec_SmallPower_ShaverSocket.jpg",
+    "source_notes": "Small Power symbols",
+    "file_note": null,
+    "submission_batch_summary": "Small Power symbols",
+    "attachment_id": "2a0b211e-c562-4d55-87da-84909a684457",
+    "attachment_ids": [
+      "2a0b211e-c562-4d55-87da-84909a684457"
+    ],
+    "raw_object_key": "external-submissions/subext-20260617T090124Z/01-Small Power.zip/members/0014-elec-smallpower-shaversocket-jpg-8d5df1da/Elec_SmallPower_ShaverSocket.jpg",
+    "declared_format": "jpeg",
+    "submission_batch_id": "subext-20260617T090124Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Small Power symbols",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": [],
+    "source_package_id": "pkg-aqi-scott-ext-20260617t090124z-01-e64531f36920",
+    "source_package_attachment_id": "2a0b211e-c562-4d55-87da-84909a684457",
+    "source_package_object_key": "external-submissions/subext-20260617T090124Z/01-Small Power.zip",
+    "source_package_sha256": "e64531f36920a894c2b9f13aa22a9881640a0f0759cc4acaaec5697f8bf9b112",
+    "source_package_queue_item_id": "aqi-scott-ext-20260617T090124Z-01",
+    "package_member": {
+      "member_id": "0014-elec-smallpower-shaversocket-jpg-8d5df1da",
+      "member_index": 14,
+      "original_path": "Elec_SmallPower_ShaverSocket.jpg",
+      "filename": "Elec_SmallPower_ShaverSocket.jpg",
+      "extension": ".jpg",
+      "declared_format": "jpeg",
+      "sha256": "528ac1290d6140a7e3aabfc0eba531430746e7194d8ec58d78160e65aaf125a8",
+      "compressed_size": 2532,
+      "uncompressed_size": 2527
+    },
+    "package_member_relationship": null,
+    "package_symbol_grouping": null,
+    "companion_files": [],
+    "visual_assets": {
+      "source_assets": [
+        {
+          "object_key": "external-submissions/subext-20260617T090124Z/01-Small Power.zip/members/0014-elec-smallpower-shaversocket-jpg-8d5df1da/Elec_SmallPower_ShaverSocket.jpg",
+          "filename": "Elec_SmallPower_ShaverSocket.jpg",
+          "content_type": "application/octet-stream",
+          "format": "jpeg",
+          "role": "package_member_source",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t090124z-01-e64531f36920",
+          "package_member_id": "0014-elec-smallpower-shaversocket-jpg-8d5df1da",
+          "original_path": "Elec_SmallPower_ShaverSocket.jpg"
+        }
+      ]
+    }
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-17T09:01:30Z",
+  "started_at": "2026-06-17T09:01:33Z",
+  "completed_at": "2026-06-17T09:01:33Z"
+}

@@ -1,0 +1,98 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-0055-elec-firealarms-detector-smoke-receiver-dxf-88f08786-20260617T160606Z-20260617T160614Z-20260617T160614Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-0055-elec-firealarms-detector-smoke-receiver-dxf-88f08786-20260617T160606Z-20260617T160614Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-0055-elec-firealarms-detector-smoke-receiver-dxf-88f08786-20260617T160606Z-20260617T160614Z",
+    "source_ref": "external-submission-20260617T160604Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "ELEC-FIREALARMS-DETECTOR-SMOKE-RECEIVER-055",
+    "candidate_title": "Electrical FireAlarms Detector Smoke Receiver",
+    "origin_file_name": "Elec_FireAlarms_Detector_Smoke_Receiver.dxf",
+    "source_notes": "Fire Alarms",
+    "file_note": null,
+    "submission_batch_summary": "Fire Alarms",
+    "attachment_id": "955427b6-433a-49ba-82d1-77395cbda65b",
+    "attachment_ids": [
+      "955427b6-433a-49ba-82d1-77395cbda65b"
+    ],
+    "raw_object_key": "external-submissions/subext-20260617T160604Z/01-Fire Alarms.zip/members/0055-elec-firealarms-detector-smoke-receiver-dxf-88f08786/Elec_FireAlarms_Detector_Smoke_Receiver.dxf",
+    "declared_format": "dxf",
+    "submission_batch_id": "subext-20260617T160604Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Fire Alarms",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": [],
+    "source_package_id": "pkg-aqi-scott-ext-20260617t160604z-01-3f09d51b8eaa",
+    "source_package_attachment_id": "955427b6-433a-49ba-82d1-77395cbda65b",
+    "source_package_object_key": "external-submissions/subext-20260617T160604Z/01-Fire Alarms.zip",
+    "source_package_sha256": "3f09d51b8eaa6a9bfc641b1a080ba25363244b9288c2788007b727eeeef08306",
+    "source_package_queue_item_id": "aqi-scott-ext-20260617T160604Z-01",
+    "package_member": {
+      "member_id": "0055-elec-firealarms-detector-smoke-receiver-dxf-88f08786",
+      "member_index": 55,
+      "original_path": "Elec_FireAlarms_Detector_Smoke_Receiver.dxf",
+      "filename": "Elec_FireAlarms_Detector_Smoke_Receiver.dxf",
+      "extension": ".dxf",
+      "declared_format": "dxf",
+      "sha256": "afc030b9c751b0856bee98f2a7c53b58e1e2e9c3e79c199ae2157f81936ff496",
+      "compressed_size": 10789,
+      "uncompressed_size": 181724,
+      "relationship": "primary",
+      "companion_member_ids": [
+        "0052-elec-firealarms-detector-smoke-receiver-jpg-4a9349cf"
+      ]
+    },
+    "package_member_relationship": "primary_with_companion",
+    "package_symbol_grouping": "paired_dxf_raster_symbol",
+    "companion_files": [
+      {
+        "file_name": "Elec_FireAlarms_Detector_Smoke_Receiver.jpg",
+        "format": "jpeg",
+        "role": "package_member_companion",
+        "raw_input_path": "/data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260617T160604Z/zip_packages/pkg-aqi-scott-ext-20260617t160604z-01-3f09d51b8eaa/0052-elec-firealarms-detector-smoke-receiver-jpg-4a9349cf/Elec_FireAlarms_Detector_Smoke_Receiver.jpg",
+        "object_key": "external-submissions/subext-20260617T160604Z/01-Fire Alarms.zip/members/0052-elec-firealarms-detector-smoke-receiver-jpg-4a9349cf/Elec_FireAlarms_Detector_Smoke_Receiver.jpg",
+        "source_package_id": "pkg-aqi-scott-ext-20260617t160604z-01-3f09d51b8eaa",
+        "package_member_id": "0052-elec-firealarms-detector-smoke-receiver-jpg-4a9349cf",
+        "original_path": "Elec_FireAlarms_Detector_Smoke_Receiver.jpg",
+        "sha256": "82d4ba092994be7f9c20c5d100dcca064957d4c207fac266386e4a33d21eec3b"
+      }
+    ],
+    "visual_assets": {
+      "source_assets": [
+        {
+          "object_key": "external-submissions/subext-20260617T160604Z/01-Fire Alarms.zip/members/0055-elec-firealarms-detector-smoke-receiver-dxf-88f08786/Elec_FireAlarms_Detector_Smoke_Receiver.dxf",
+          "filename": "Elec_FireAlarms_Detector_Smoke_Receiver.dxf",
+          "content_type": "application/octet-stream",
+          "format": "dxf",
+          "role": "package_member_source",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t160604z-01-3f09d51b8eaa",
+          "package_member_id": "0055-elec-firealarms-detector-smoke-receiver-dxf-88f08786",
+          "original_path": "Elec_FireAlarms_Detector_Smoke_Receiver.dxf"
+        },
+        {
+          "object_key": "external-submissions/subext-20260617T160604Z/01-Fire Alarms.zip/members/0052-elec-firealarms-detector-smoke-receiver-jpg-4a9349cf/Elec_FireAlarms_Detector_Smoke_Receiver.jpg",
+          "filename": "Elec_FireAlarms_Detector_Smoke_Receiver.jpg",
+          "content_type": "application/octet-stream",
+          "format": "jpeg",
+          "role": "package_member_companion",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t160604z-01-3f09d51b8eaa",
+          "package_member_id": "0052-elec-firealarms-detector-smoke-receiver-jpg-4a9349cf",
+          "original_path": "Elec_FireAlarms_Detector_Smoke_Receiver.jpg"
+        }
+      ]
+    }
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-17T16:06:14Z",
+  "started_at": "2026-06-17T16:06:16Z",
+  "completed_at": "2026-06-17T16:06:16Z"
+}

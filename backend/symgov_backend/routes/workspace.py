@@ -133,7 +133,7 @@ REVIEW_SPLIT_STATUS_GROUPS = {
     "terminal_duplicate": frozenset({"duplicate_resolved"}),
     "terminal_non_publication": frozenset({"deleted", "rejected", "blocked", "deferred"}),
 }
-HUMAN_VISIBLE_REVIEW_CASE_STAGES = frozenset({"classification_review", "raster_split_review"})
+HUMAN_VISIBLE_REVIEW_CASE_STAGES = frozenset({"classification_review", "raster_split_review", "provenance_rights_review"})
 OPEN_SPLIT_ITEM_STATUSES = tuple(sorted(REVIEW_SPLIT_STATUS_GROUPS["active_review"]))
 DURABLE_SPLIT_ITEM_STATUSES = frozenset().union(
     REVIEW_SPLIT_STATUS_GROUPS["active_downstream"],
@@ -180,6 +180,14 @@ def immediate_terminal_split_status_for_action(action_code: str | None) -> str |
 def is_human_visible_review_case_stage(stage: str | None) -> bool:
     """Whether a review case stage should still appear in the human review queue."""
     return (stage or "").strip() in HUMAN_VISIBLE_REVIEW_CASE_STAGES
+
+
+def queue_family_for_agent_queue_item(agent_slug: str, payload_json: dict | None, default_queue_family: str) -> str:
+    if agent_slug == "daisy" and isinstance(payload_json, dict):
+        requested_review_family = str(payload_json.get("review_queue_family") or "").strip()
+        if requested_review_family == "rights_review":
+            return "rights_review"
+    return default_queue_family
 
 
 def split_item_status_after_handoff(item: ReviewSplitItem | None, *, is_approval: bool) -> tuple[str, str | None]:
@@ -1819,8 +1827,12 @@ def build_provenance_workspace_item(
         "displayName": package_display_name,
         "packageDisplayId": package_id,
         "packageSymbolSequence": package_sequence,
-        "title": f"Review classification for {source_file_name}",
-        "owner": "Unassigned",
+        "title": (
+            f"Review provenance/rights for {source_file_name}"
+            if review_case.current_stage == "provenance_rights_review"
+            else f"Review classification for {source_file_name}"
+        ),
+        "owner": "Rights reviewer" if review_case.current_stage == "provenance_rights_review" else "Unassigned",
         "due": due.date().isoformat(),
         "priority": review_case.escalation_level.title(),
         "risk": "Medium" if review_case.escalation_level.lower() == "medium" else review_case.escalation_level.title(),
@@ -1956,11 +1968,13 @@ def list_workspace_agent_queue_items(
         latest_run = latest_runs_by_queue_item.get(queue_item.id)
         published_metadata = rupert_published_metadata(session, queue_item) if definition.slug == "rupert" else {}
         queue_status = "published" if published_metadata else queue_item.status
+        payload_json = queue_item.payload_json or {}
+        queue_family = queue_family_for_agent_queue_item(definition.slug, payload_json, definition.queue_family)
         items.append(WorkspaceAgentQueueItemResponse(
             id=str(queue_item.id),
             agentId=definition.slug,
             agentName=definition.display_name,
-            queueFamily=definition.queue_family,
+            queueFamily=queue_family,
             sourceType=queue_item.source_type,
             sourceId=str(queue_item.source_id),
             displayName=display_name,

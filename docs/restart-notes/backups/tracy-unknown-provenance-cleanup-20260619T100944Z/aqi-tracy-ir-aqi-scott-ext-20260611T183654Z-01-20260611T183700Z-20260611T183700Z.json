@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260611T183654Z-01-20260611T183700Z-20260611T183700Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260611T183654Z-01-20260611T183700Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260611T183654Z-01-20260611T183700Z",
+    "source_ref": "external-submission-20260611T183654Z",
+    "submitted_by": "Scott source discovery <scott-source-discovery@symgov.local>",
+    "candidate_symbol_id": "QET-HYDRAULIC-FIXED-DISPLACEMENT-PUMP",
+    "candidate_title": "Qet Hydraulic Fixed Displacement Pump",
+    "origin_file_name": "qet-hydraulic-fixed-displacement-pump.svg",
+    "source_notes": "QElectroTech hydraulic fixed-displacement pump candidate; source licence/provenance to be checked by Tracy. Source: https://raw.githubusercontent.com/qelectrotech/qelectrotech-git-mirror/master/elements/30_hydraulic/61_pumps/pompe_debit_fixe.elmt",
+    "file_note": "QElectroTech hydraulic fixed-displacement pump candidate; source licence/provenance to be checked by Tracy. Source: https://raw.githubusercontent.com/qelectrotech/qelectrotech-git-mirror/master/elements/30_hydraulic/61_pumps/pompe_debit_fixe.elmt",
+    "submission_batch_summary": "Scott 60-second source-discovery follow-up: QElectroTech practical symbol candidates submitted for Symgov processing. Treat as intake/reference candidates only until Tracy verifies rights and provenance; map to relevant IEC/ISO/ISA taxonomy before publication.",
+    "attachment_id": "8ab6468c-b4fb-489b-b325-6676d95eedef",
+    "attachment_ids": [
+      "8ab6468c-b4fb-489b-b325-6676d95eedef"
+    ],
+    "raw_object_key": "external-submissions/subext-20260611T183654Z/01-qet-hydraulic-fixed-displacement-pump.svg",
+    "declared_format": "svg",
+    "submission_batch_id": "subext-20260611T183654Z",
+    "contributor_name": "Scott source discovery",
+    "contributor_org": "",
+    "contributor_declaration": "Scott 60-second source-discovery follow-up: QElectroTech practical symbol candidates submitted for Symgov processing. Treat as intake/reference candidates only until Tracy verifies rights and provenance; map to relevant IEC/ISO/ISA taxonomy before publication.",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-11T18:37:00Z",
+  "started_at": "2026-06-11T18:37:03Z",
+  "completed_at": "2026-06-11T18:37:03Z"
+}

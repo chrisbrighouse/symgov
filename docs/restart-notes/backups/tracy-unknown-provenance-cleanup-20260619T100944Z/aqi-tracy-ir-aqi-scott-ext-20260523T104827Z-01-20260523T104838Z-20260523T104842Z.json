@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260523T104827Z-01-20260523T104838Z-20260523T104842Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260523T104827Z-01-20260523T104838Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260523T104827Z-01-20260523T104838Z",
+    "source_ref": "external-submission-20260523T104827Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "960PX-AGITATOR--GENERAL---STIRRER--GENERAL---ISO-10628-2--SVG",
+    "candidate_title": "960Px Agitator (General), Stirrer (General) (Iso 10628 2).Svg",
+    "origin_file_name": "960px-Agitator_(general),_stirrer_(general)_(ISO_10628-2).svg.png",
+    "source_notes": "from: https://commons.wikimedia.org/wiki/Category:P%26ID_symbols",
+    "file_note": null,
+    "submission_batch_summary": "from: https://commons.wikimedia.org/wiki/Category:P%26ID_symbols",
+    "attachment_id": "23c7bf52-0ef2-41ca-9736-219f33b96734",
+    "attachment_ids": [
+      "23c7bf52-0ef2-41ca-9736-219f33b96734"
+    ],
+    "raw_object_key": "external-submissions/subext-20260523T104827Z/01-960px-Agitator_(general),_stirrer_(general)_(ISO_10628-2).svg.png",
+    "declared_format": "png",
+    "submission_batch_id": "subext-20260523T104827Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "from: https://commons.wikimedia.org/wiki/Category:P%26ID_symbols",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-05-23T10:48:42Z",
+  "started_at": "2026-05-23T10:48:52Z",
+  "completed_at": "2026-05-23T10:48:56Z"
+}

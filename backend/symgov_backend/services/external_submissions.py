@@ -91,6 +91,7 @@ class ExternalSubmissionService:
         submitter_name = str(payload.get("submitter_name") or "").strip()
         submitter_email = str(payload.get("submitter_email") or "").strip().lower()
         overall_description = str(payload.get("overall_description") or "").strip()
+        source_notes = str(payload.get("source_notes") or "").strip()
         files = payload.get("files")
 
         if not submitter_name:
@@ -214,7 +215,7 @@ class ExternalSubmissionService:
             source_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{batch_id}:{symbol_index}:{primary['file_name']}"))
             queue_item_id = f"aqi-scott-ext-{batch_token}-{symbol_index:02d}"
             queue_item_path = self.scott_runtime_root / "agent_queue_items" / f"{queue_item_id}.json"
-            combined_note = primary["file_note"] or overall_description
+            combined_note = source_notes
             if len(group) > 1:
                 grouped_names = ", ".join(item["file_name"] for item in group)
                 combined_note = f"{combined_note}\nCompanion files in this symbol submission: {grouped_names}".strip()
@@ -304,6 +305,7 @@ class ExternalSubmissionService:
             payload_json={
                 "batch_id": batch_id,
                 "source_ref": source_ref,
+                "source_notes": source_notes,
                 "submitter_name": submitter_name,
                 "submitter_email": submitter_email,
                 "file_count": len(queue_items),

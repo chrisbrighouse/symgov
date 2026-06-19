@@ -84,9 +84,13 @@ class DuplicateExceptionWorkflowTests(unittest.TestCase):
         self.assertIsNone(immediate_terminal_split_status_for_action("reject"))
 
     def test_only_human_actionable_case_stages_are_visible_in_review_queue(self) -> None:
-        self.assertEqual(HUMAN_VISIBLE_REVIEW_CASE_STAGES, {"classification_review", "raster_split_review"})
+        self.assertEqual(
+            HUMAN_VISIBLE_REVIEW_CASE_STAGES,
+            {"classification_review", "raster_split_review", "provenance_rights_review"},
+        )
         self.assertTrue(is_human_visible_review_case_stage("classification_review"))
         self.assertTrue(is_human_visible_review_case_stage("raster_split_review"))
+        self.assertTrue(is_human_visible_review_case_stage("provenance_rights_review"))
         self.assertFalse(is_human_visible_review_case_stage("provenance_review"))
         self.assertFalse(is_human_visible_review_case_stage("libby_deletion_review"))
         self.assertFalse(is_human_visible_review_case_stage("changes_requested"))

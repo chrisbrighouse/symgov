@@ -1,0 +1,38 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260615T151845Z-01-20260615T151852Z-20260615T151852Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260615T151845Z-01-20260615T151852Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260615T151845Z-01-20260615T151852Z",
+    "source_ref": "external-submission-20260615T151845Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "MECH-HEATING-COOLING-BOILER-WATER-CONDENSING",
+    "candidate_title": "Mech Heating+Cooling Boiler Water Condensing",
+    "origin_file_name": "Mech_Heating+Cooling_Boiler_Water_Condensing.dxf",
+    "source_notes": "Contractor-originated company variant\nCompanion files in this symbol submission: Mech_Heating+Cooling_Boiler_Water_Condensing.dxf, Mech_Heating+Cooling_Boiler_Water_Condensing.jpg",
+    "file_note": null,
+    "submission_batch_summary": "Contractor-originated company variant",
+    "attachment_id": "bee91208-62fb-4bd0-a590-47d7bfcc009f",
+    "attachment_ids": [
+      "bee91208-62fb-4bd0-a590-47d7bfcc009f",
+      "1fa2bdcd-96ea-45ed-89eb-cee07ed16784"
+    ],
+    "raw_object_key": "external-submissions/subext-20260615T151845Z/01-Mech_Heating+Cooling_Boiler_Water_Condensing.dxf",
+    "declared_format": "dxf",
+    "submission_batch_id": "subext-20260615T151845Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Contractor-originated company variant",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-15T15:18:52Z",
+  "started_at": "2026-06-15T15:18:52Z",
+  "completed_at": "2026-06-15T15:18:52Z"
+}

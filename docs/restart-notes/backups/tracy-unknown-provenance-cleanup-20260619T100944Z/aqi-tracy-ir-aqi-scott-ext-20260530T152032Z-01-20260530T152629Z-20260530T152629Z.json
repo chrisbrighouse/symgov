@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260530T152032Z-01-20260530T152629Z-20260530T152629Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260530T152032Z-01-20260530T152629Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260530T152032Z-01-20260530T152629Z",
+    "source_ref": "external-submission-20260530T152032Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "PROCESS-CONTROL-PID-SYMBOLS",
+    "candidate_title": "Process Control Pid Symbols",
+    "origin_file_name": "Process Control PID Symbols.png",
+    "source_notes": "These are are set of process control symbols, they should be assigned the discipline 'Process Control'",
+    "file_note": null,
+    "submission_batch_summary": "These are are set of process control symbols, they should be assigned the discipline 'Process Control'",
+    "attachment_id": "8c5f6f55-464d-4c2a-a01d-b746012d77df",
+    "attachment_ids": [
+      "8c5f6f55-464d-4c2a-a01d-b746012d77df"
+    ],
+    "raw_object_key": "external-submissions/subext-20260530T152032Z/01-Process Control PID Symbols.png",
+    "declared_format": "png",
+    "submission_batch_id": "subext-20260530T152032Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "These are are set of process control symbols, they should be assigned the discipline 'Process Control'",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-05-30T15:26:29Z",
+  "started_at": "2026-06-01T14:41:46Z",
+  "completed_at": "2026-06-01T14:41:46Z"
+}

@@ -2,6 +2,7 @@
 import argparse
 import copy
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,7 +10,8 @@ from pathlib import Path
 
 SCHEMA_VERSION = "0.1.0"
 PROMPT_VERSION = "tracy-local-contract-0.1.0"
-BACKEND_ROOT = Path("/data/.openclaw/workspace/symgov/backend")
+DEFAULT_BACKEND_ROOT = Path(__file__).resolve().parents[1] / "backend"
+BACKEND_ROOT = Path(os.environ.get("SYMGOV_BACKEND_ROOT", str(DEFAULT_BACKEND_ROOT))).resolve()
 
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
@@ -123,6 +125,56 @@ def build_libby_queue_item(
         },
         "confidence": None,
         "escalation_reason": None,
+        "created_at": utc_now(),
+        "started_at": None,
+        "completed_at": None,
+    }
+
+
+def build_daisy_rights_coordination_queue_item(
+    *,
+    queue_item: dict,
+    task: dict,
+    artifact: dict,
+    provenance_assessment_id: str,
+    created_review_case: dict,
+    timestamp: str,
+):
+    queue_id = f"aqi-daisy-rights-coord-{provenance_assessment_id}-{timestamp}"
+    payload = queue_item.get("payload_json") or {}
+    return {
+        "id": queue_id,
+        "agent_id": "daisy",
+        "source_type": "provenance_rights_coordination",
+        "source_id": created_review_case["id"],
+        "status": "queued",
+        "priority": queue_item.get("priority") or "high",
+        "payload_json": {
+            "review_case_id": created_review_case["id"],
+            "current_stage": created_review_case.get("current_stage"),
+            "source_entity_type": created_review_case.get("source_entity_type"),
+            "source_entity_id": created_review_case.get("source_entity_id"),
+            "escalation_level": created_review_case.get("escalation_level"),
+            "validation_status": None,
+            "rights_status": artifact.get("rights_status"),
+            "risk_level": artifact.get("risk_level"),
+            "review_queue_family": "review_coordination",
+            "review_queue_label": "Daisy Rights Review Coordination",
+            "coordination_step": "daisy_rights_review_coordination",
+            "target_review_queue_family": "rights_review",
+            "target_review_queue_label": "Provenance/Rights Review",
+            "reviewer_pool": ["rights_reviewer", "qa_admin"],
+            "candidate_symbol_id": payload.get("candidate_symbol_id"),
+            "candidate_title": payload.get("candidate_title"),
+            "source_ref": task.get("source_ref"),
+            "source_notes": payload.get("source_notes"),
+            "tracy_provenance_assessment_id": provenance_assessment_id,
+            "tracy_rights_summary": artifact.get("reviewer_summary"),
+            "tracy_recommended_actions": ensure_list(artifact.get("recommended_actions")),
+            "tracy_defects": ensure_list(artifact.get("defects")),
+        },
+        "confidence": None,
+        "escalation_reason": "rights_review_required",
         "created_at": utc_now(),
         "started_at": None,
         "completed_at": None,
@@ -277,9 +329,12 @@ def run_provenance_task(task):
 
     if rights_status in {"restricted", "conflict"} or decision == "fail":
         review_recommendation = {
-            "current_stage": "provenance_review",
+            "current_stage": "provenance_rights_review",
             "escalation_level": "high" if rights_status in {"restricted", "conflict"} else "medium",
             "detail": f"Tracy flagged rights status {rights_status} with {risk_level} risk for human review.",
+            "coordination_step": "daisy_rights_review_coordination",
+            "review_queue_family": "review_coordination",
+            "review_queue_label": "Daisy Rights Review Coordination",
         }
 
     reviewer_summary = (
@@ -392,8 +447,9 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
     write_json(runtime_root / "provenance_assessments" / f"{report_id}.json", provenance_assessment)
 
     db_persistence = None
-    additional_db_records = {"review_case": None}
+    additional_db_records = {"review_case": None, "daisy_rights_coordination_queue_item": None}
     libby_queue_item_path = None
+    daisy_rights_coordination_queue_item_path = None
     if persist_db or env_flag("SYMGOV_PERSIST_TO_DB"):
         bridge = RuntimePersistenceBridge(env_file=db_env_file)
         db_persistence = bridge.persist_agent_execution(
@@ -412,6 +468,18 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
                 escalation_level=review_recommendation["escalation_level"],
                 opened_at=completed_at,
             )
+            daisy_rights_coordination_queue_item = build_daisy_rights_coordination_queue_item(
+                queue_item=queue_item,
+                task=task,
+                artifact=artifact,
+                provenance_assessment_id=report_id,
+                created_review_case=additional_db_records["review_case"],
+                timestamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+            )
+            daisy_runtime_root = Path("/data/.openclaw/workspaces/daisy/runtime")
+            daisy_rights_coordination_queue_item_path = daisy_runtime_root / "agent_queue_items" / f"{daisy_rights_coordination_queue_item['id']}.json"
+            write_json(daisy_rights_coordination_queue_item_path, daisy_rights_coordination_queue_item)
+            additional_db_records["daisy_rights_coordination_queue_item"] = bridge.upsert_agent_queue_item(daisy_rights_coordination_queue_item)
 
     libby_runtime_root = Path("/data/.openclaw/workspaces/libby/runtime")
     libby_queue_item = build_libby_queue_item(
@@ -443,6 +511,7 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
         "additional_db_records": additional_db_records,
         "downstream_created": {
             "libby_queue_item_path": str(libby_queue_item_path) if libby_queue_item_path else None,
+            "daisy_rights_coordination_queue_item_path": str(daisy_rights_coordination_queue_item_path) if daisy_rights_coordination_queue_item_path else None,
         },
         "notifications": notification_status,
         "artifact": artifact,

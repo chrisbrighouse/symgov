@@ -355,6 +355,13 @@ def process_agent_queue_once(agent: str, config: AgentQueueWorkerConfig) -> dict
                     related_queue_item = load_queue_item(Path(related_path))
                     if related_queue_item:
                         db_updates.append(bridge.upsert_agent_queue_item(related_queue_item))
+                downstream_paths = (result.get("downstream_created") or {}).values()
+                for downstream_path in downstream_paths:
+                    if not downstream_path:
+                        continue
+                    downstream_queue_item = load_queue_item(Path(downstream_path))
+                    if downstream_queue_item:
+                        db_updates.append(bridge.upsert_agent_queue_item(downstream_queue_item))
                 result["dbQueueStatusUpdates"] = db_updates
             downstream = process_scott_downstream(result, config) if agent == "scott" else None
             processed.append(

@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260614T154938Z-01-20260614T154942Z-20260614T154942Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260614T154938Z-01-20260614T154942Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260614T154938Z-01-20260614T154942Z",
+    "source_ref": "external-submission-20260614T154938Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "MECH-HEATING-COOLING-BOILER-FLUE-TOP",
+    "candidate_title": "Mech Heating+Cooling Boiler Flue Top",
+    "origin_file_name": "Mech_Heating+Cooling_Boiler_Flue_Top.dxf",
+    "source_notes": "Mechanical heating flue symbol",
+    "file_note": null,
+    "submission_batch_summary": "Mechanical heating flue symbol",
+    "attachment_id": "f0861f1f-4f3e-4b91-b153-6338b468f439",
+    "attachment_ids": [
+      "f0861f1f-4f3e-4b91-b153-6338b468f439"
+    ],
+    "raw_object_key": "external-submissions/subext-20260614T154938Z/01-Mech_Heating+Cooling_Boiler_Flue_Top.dxf",
+    "declared_format": "dxf",
+    "submission_batch_id": "subext-20260614T154938Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Mechanical heating flue symbol",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-14T15:49:42Z",
+  "started_at": "2026-06-14T15:49:45Z",
+  "completed_at": "2026-06-14T15:49:45Z"
+}

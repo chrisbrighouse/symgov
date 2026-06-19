@@ -1,0 +1,38 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260614T165135Z-01-20260614T165140Z-20260614T165140Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260614T165135Z-01-20260614T165140Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260614T165135Z-01-20260614T165140Z",
+    "source_ref": "external-submission-20260614T165135Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "MECH-HEATING-COOLING-BOILER-STEAM-ELEC",
+    "candidate_title": "Mech Heating+Cooling Boiler Steam Elec",
+    "origin_file_name": "Mech_Heating+Cooling_Boiler_Steam_Elec.dxf",
+    "source_notes": "Contractor-originated company variant\nCompanion files in this symbol submission: Mech_Heating+Cooling_Boiler_Steam_Elec.dxf, Mech_Heating+Cooling_Boiler_Steam_Elec.jpg",
+    "file_note": null,
+    "submission_batch_summary": "Contractor-originated company variant",
+    "attachment_id": "143e7dfd-9f2d-4a05-b939-da32acd94ffd",
+    "attachment_ids": [
+      "143e7dfd-9f2d-4a05-b939-da32acd94ffd",
+      "f3514b8b-c2e1-49ac-8d83-c7d5ac940aa3"
+    ],
+    "raw_object_key": "external-submissions/subext-20260614T165135Z/01-Mech_Heating+Cooling_Boiler_Steam_Elec.dxf",
+    "declared_format": "dxf",
+    "submission_batch_id": "subext-20260614T165135Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Contractor-originated company variant",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-14T16:51:40Z",
+  "started_at": "2026-06-14T16:51:41Z",
+  "completed_at": "2026-06-14T16:51:41Z"
+}

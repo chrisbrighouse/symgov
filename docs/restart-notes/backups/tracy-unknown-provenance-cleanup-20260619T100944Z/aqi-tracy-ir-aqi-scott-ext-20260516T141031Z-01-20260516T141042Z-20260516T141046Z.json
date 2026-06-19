@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260516T141031Z-01-20260516T141042Z-20260516T141046Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260516T141031Z-01-20260516T141042Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260516T141031Z-01-20260516T141042Z",
+    "source_ref": "external-submission-20260516T141031Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "COMMONVALVES",
+    "candidate_title": "Commonvalves",
+    "origin_file_name": "CommonValves.png",
+    "source_notes": "A sheet of commonly used valve symbols",
+    "file_note": null,
+    "submission_batch_summary": "A sheet of commonly used valve symbols",
+    "attachment_id": "58d9222b-ee5b-4178-9ff7-dfd8f3fed02c",
+    "attachment_ids": [
+      "58d9222b-ee5b-4178-9ff7-dfd8f3fed02c"
+    ],
+    "raw_object_key": "external-submissions/subext-20260516T141031Z/01-CommonValves.png",
+    "declared_format": "png",
+    "submission_batch_id": "subext-20260516T141031Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "A sheet of commonly used valve symbols",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-05-16T14:10:46Z",
+  "started_at": "2026-05-16T14:10:59Z",
+  "completed_at": "2026-05-16T14:11:04Z"
+}

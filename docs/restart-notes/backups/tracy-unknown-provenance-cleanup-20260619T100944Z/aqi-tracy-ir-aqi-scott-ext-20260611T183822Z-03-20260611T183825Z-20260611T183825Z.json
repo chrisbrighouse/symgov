@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260611T183822Z-03-20260611T183825Z-20260611T183825Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260611T183822Z-03-20260611T183825Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260611T183822Z-03-20260611T183825Z",
+    "source_ref": "external-submission-20260611T183822Z",
+    "submitted_by": "Scott source discovery <scott-source-discovery@symgov.local>",
+    "candidate_symbol_id": "QET-SOLENOID-VALVE-A11Y",
+    "candidate_title": "Qet Solenoid Valve A11Y",
+    "origin_file_name": "qet-solenoid-valve-a11y.svg",
+    "source_notes": "QElectroTech solenoid/electrovalve candidate; resubmitted with SVG accessibility metadata for Vlad. Source: https://raw.githubusercontent.com/qelectrotech/qelectrotech-git-mirror/master/elements/10_electric/10_allpole/391_consumers&actuators/20_valves/electrovanne.elmt",
+    "file_note": "QElectroTech solenoid/electrovalve candidate; resubmitted with SVG accessibility metadata for Vlad. Source: https://raw.githubusercontent.com/qelectrotech/qelectrotech-git-mirror/master/elements/10_electric/10_allpole/391_consumers&actuators/20_valves/electrovanne.elmt",
+    "submission_batch_summary": "Scott 60-second source-discovery follow-up, accessibility-corrected resubmission of QElectroTech symbol candidates for Symgov processing. Reference/intake only until Tracy verifies rights/provenance and standards mapping.",
+    "attachment_id": "df5c1129-9b4f-43fd-b845-81522d84cf8c",
+    "attachment_ids": [
+      "df5c1129-9b4f-43fd-b845-81522d84cf8c"
+    ],
+    "raw_object_key": "external-submissions/subext-20260611T183822Z/03-qet-solenoid-valve-a11y.svg",
+    "declared_format": "svg",
+    "submission_batch_id": "subext-20260611T183822Z",
+    "contributor_name": "Scott source discovery",
+    "contributor_org": "",
+    "contributor_declaration": "Scott 60-second source-discovery follow-up, accessibility-corrected resubmission of QElectroTech symbol candidates for Symgov processing. Reference/intake only until Tracy verifies rights/provenance and standards mapping.",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-11T18:38:25Z",
+  "started_at": "2026-06-11T18:38:25Z",
+  "completed_at": "2026-06-11T18:38:25Z"
+}

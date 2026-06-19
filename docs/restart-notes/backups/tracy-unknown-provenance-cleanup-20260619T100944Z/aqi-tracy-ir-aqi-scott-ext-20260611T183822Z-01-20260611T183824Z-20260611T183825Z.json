@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260611T183822Z-01-20260611T183824Z-20260611T183825Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260611T183822Z-01-20260611T183824Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260611T183822Z-01-20260611T183824Z",
+    "source_ref": "external-submission-20260611T183822Z",
+    "submitted_by": "Scott source discovery <scott-source-discovery@symgov.local>",
+    "candidate_symbol_id": "QET-HYDRAULIC-FIXED-DISPLACEMENT-PUMP-A11Y",
+    "candidate_title": "Qet Hydraulic Fixed Displacement Pump A11Y",
+    "origin_file_name": "qet-hydraulic-fixed-displacement-pump-a11y.svg",
+    "source_notes": "QElectroTech hydraulic fixed-displacement pump candidate; resubmitted with SVG accessibility metadata for Vlad. Source: https://raw.githubusercontent.com/qelectrotech/qelectrotech-git-mirror/master/elements/30_hydraulic/61_pumps/pompe_debit_fixe.elmt",
+    "file_note": "QElectroTech hydraulic fixed-displacement pump candidate; resubmitted with SVG accessibility metadata for Vlad. Source: https://raw.githubusercontent.com/qelectrotech/qelectrotech-git-mirror/master/elements/30_hydraulic/61_pumps/pompe_debit_fixe.elmt",
+    "submission_batch_summary": "Scott 60-second source-discovery follow-up, accessibility-corrected resubmission of QElectroTech symbol candidates for Symgov processing. Reference/intake only until Tracy verifies rights/provenance and standards mapping.",
+    "attachment_id": "714665e0-4b5b-4c8b-b849-a8eb3ddf17a7",
+    "attachment_ids": [
+      "714665e0-4b5b-4c8b-b849-a8eb3ddf17a7"
+    ],
+    "raw_object_key": "external-submissions/subext-20260611T183822Z/01-qet-hydraulic-fixed-displacement-pump-a11y.svg",
+    "declared_format": "svg",
+    "submission_batch_id": "subext-20260611T183822Z",
+    "contributor_name": "Scott source discovery",
+    "contributor_org": "",
+    "contributor_declaration": "Scott 60-second source-discovery follow-up, accessibility-corrected resubmission of QElectroTech symbol candidates for Symgov processing. Reference/intake only until Tracy verifies rights/provenance and standards mapping.",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-11T18:38:25Z",
+  "started_at": "2026-06-11T18:38:25Z",
+  "completed_at": "2026-06-11T18:38:25Z"
+}

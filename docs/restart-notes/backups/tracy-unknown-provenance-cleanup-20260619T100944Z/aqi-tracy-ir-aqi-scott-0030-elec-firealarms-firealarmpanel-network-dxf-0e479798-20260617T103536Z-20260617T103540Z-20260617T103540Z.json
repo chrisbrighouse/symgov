@@ -1,0 +1,98 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-0030-elec-firealarms-firealarmpanel-network-dxf-0e479798-20260617T103536Z-20260617T103540Z-20260617T103540Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-0030-elec-firealarms-firealarmpanel-network-dxf-0e479798-20260617T103536Z-20260617T103540Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-0030-elec-firealarms-firealarmpanel-network-dxf-0e479798-20260617T103536Z-20260617T103540Z",
+    "source_ref": "external-submission-20260617T103527Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "ELEC-FIREALARMS-FIREALARMPANEL-NETWORK-030",
+    "candidate_title": "Electrical FireAlarms FireAlarmPanel Network",
+    "origin_file_name": "Elec_FireAlarms_FireAlarmPanel_Network.dxf",
+    "source_notes": "Fire Alarms symbols",
+    "file_note": null,
+    "submission_batch_summary": "Fire Alarms symbols",
+    "attachment_id": "9fdad114-b999-42c2-83f4-5dc094649e2e",
+    "attachment_ids": [
+      "9fdad114-b999-42c2-83f4-5dc094649e2e"
+    ],
+    "raw_object_key": "external-submissions/subext-20260617T103527Z/01-Fire Alarms.zip/members/0030-elec-firealarms-firealarmpanel-network-dxf-0e479798/Elec_FireAlarms_FireAlarmPanel_Network.dxf",
+    "declared_format": "dxf",
+    "submission_batch_id": "subext-20260617T103527Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Fire Alarms symbols",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": [],
+    "source_package_id": "pkg-aqi-scott-ext-20260617t103527z-01-3f09d51b8eaa",
+    "source_package_attachment_id": "9fdad114-b999-42c2-83f4-5dc094649e2e",
+    "source_package_object_key": "external-submissions/subext-20260617T103527Z/01-Fire Alarms.zip",
+    "source_package_sha256": "3f09d51b8eaa6a9bfc641b1a080ba25363244b9288c2788007b727eeeef08306",
+    "source_package_queue_item_id": "aqi-scott-ext-20260617T103527Z-01",
+    "package_member": {
+      "member_id": "0030-elec-firealarms-firealarmpanel-network-dxf-0e479798",
+      "member_index": 30,
+      "original_path": "Elec_FireAlarms_FireAlarmPanel_Network.dxf",
+      "filename": "Elec_FireAlarms_FireAlarmPanel_Network.dxf",
+      "extension": ".dxf",
+      "declared_format": "dxf",
+      "sha256": "e698a219c6529202a95233cc440076b6d8ab52bc36d4e876796d5db3c2631a34",
+      "compressed_size": 66044,
+      "uncompressed_size": 289123,
+      "relationship": "primary",
+      "companion_member_ids": [
+        "0029-elec-firealarms-firealarmpanel-network-jpg-835caeb4"
+      ]
+    },
+    "package_member_relationship": "primary_with_companion",
+    "package_symbol_grouping": "paired_dxf_raster_symbol",
+    "companion_files": [
+      {
+        "file_name": "Elec_FireAlarms_FireAlarmPanel_Network.jpg",
+        "format": "jpeg",
+        "role": "package_member_companion",
+        "raw_input_path": "/data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260617T103527Z/zip_packages/pkg-aqi-scott-ext-20260617t103527z-01-3f09d51b8eaa/0029-elec-firealarms-firealarmpanel-network-jpg-835caeb4/Elec_FireAlarms_FireAlarmPanel_Network.jpg",
+        "object_key": "external-submissions/subext-20260617T103527Z/01-Fire Alarms.zip/members/0029-elec-firealarms-firealarmpanel-network-jpg-835caeb4/Elec_FireAlarms_FireAlarmPanel_Network.jpg",
+        "source_package_id": "pkg-aqi-scott-ext-20260617t103527z-01-3f09d51b8eaa",
+        "package_member_id": "0029-elec-firealarms-firealarmpanel-network-jpg-835caeb4",
+        "original_path": "Elec_FireAlarms_FireAlarmPanel_Network.jpg",
+        "sha256": "c460be8270b041c7617c229604d0b964afda8d2423bb38b70f79fa3b9e27bb58"
+      }
+    ],
+    "visual_assets": {
+      "source_assets": [
+        {
+          "object_key": "external-submissions/subext-20260617T103527Z/01-Fire Alarms.zip/members/0030-elec-firealarms-firealarmpanel-network-dxf-0e479798/Elec_FireAlarms_FireAlarmPanel_Network.dxf",
+          "filename": "Elec_FireAlarms_FireAlarmPanel_Network.dxf",
+          "content_type": "application/octet-stream",
+          "format": "dxf",
+          "role": "package_member_source",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t103527z-01-3f09d51b8eaa",
+          "package_member_id": "0030-elec-firealarms-firealarmpanel-network-dxf-0e479798",
+          "original_path": "Elec_FireAlarms_FireAlarmPanel_Network.dxf"
+        },
+        {
+          "object_key": "external-submissions/subext-20260617T103527Z/01-Fire Alarms.zip/members/0029-elec-firealarms-firealarmpanel-network-jpg-835caeb4/Elec_FireAlarms_FireAlarmPanel_Network.jpg",
+          "filename": "Elec_FireAlarms_FireAlarmPanel_Network.jpg",
+          "content_type": "application/octet-stream",
+          "format": "jpeg",
+          "role": "package_member_companion",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t103527z-01-3f09d51b8eaa",
+          "package_member_id": "0029-elec-firealarms-firealarmpanel-network-jpg-835caeb4",
+          "original_path": "Elec_FireAlarms_FireAlarmPanel_Network.jpg"
+        }
+      ]
+    }
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-17T10:35:40Z",
+  "started_at": "2026-06-17T10:35:42Z",
+  "completed_at": "2026-06-17T10:35:42Z"
+}

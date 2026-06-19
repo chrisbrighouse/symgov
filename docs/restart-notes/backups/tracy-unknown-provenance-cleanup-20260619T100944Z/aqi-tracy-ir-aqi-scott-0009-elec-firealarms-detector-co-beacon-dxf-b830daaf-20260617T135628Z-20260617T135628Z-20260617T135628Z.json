@@ -1,0 +1,98 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-0009-elec-firealarms-detector-co-beacon-dxf-b830daaf-20260617T135628Z-20260617T135628Z-20260617T135628Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-0009-elec-firealarms-detector-co-beacon-dxf-b830daaf-20260617T135628Z-20260617T135628Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-0009-elec-firealarms-detector-co-beacon-dxf-b830daaf-20260617T135628Z-20260617T135628Z",
+    "source_ref": "external-submission-20260617T135618Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "ELEC-FIREALARMS-DETECTOR-CO-BEACON-009",
+    "candidate_title": "Electrical FireAlarms Detector Co Beacon",
+    "origin_file_name": "Elec_FireAlarms_Detector_CO_Beacon.dxf",
+    "source_notes": "Fire Alarms",
+    "file_note": null,
+    "submission_batch_summary": "Fire Alarms",
+    "attachment_id": "854d05f4-8453-45a4-8749-a3e102adbae5",
+    "attachment_ids": [
+      "854d05f4-8453-45a4-8749-a3e102adbae5"
+    ],
+    "raw_object_key": "external-submissions/subext-20260617T135618Z/01-Fire Alarms.zip/members/0009-elec-firealarms-detector-co-beacon-dxf-b830daaf/Elec_FireAlarms_Detector_CO_Beacon.dxf",
+    "declared_format": "dxf",
+    "submission_batch_id": "subext-20260617T135618Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Fire Alarms",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": [],
+    "source_package_id": "pkg-aqi-scott-ext-20260617t135618z-01-3f09d51b8eaa",
+    "source_package_attachment_id": "854d05f4-8453-45a4-8749-a3e102adbae5",
+    "source_package_object_key": "external-submissions/subext-20260617T135618Z/01-Fire Alarms.zip",
+    "source_package_sha256": "3f09d51b8eaa6a9bfc641b1a080ba25363244b9288c2788007b727eeeef08306",
+    "source_package_queue_item_id": "aqi-scott-ext-20260617T135618Z-01",
+    "package_member": {
+      "member_id": "0009-elec-firealarms-detector-co-beacon-dxf-b830daaf",
+      "member_index": 9,
+      "original_path": "Elec_FireAlarms_Detector_CO_Beacon.dxf",
+      "filename": "Elec_FireAlarms_Detector_CO_Beacon.dxf",
+      "extension": ".dxf",
+      "declared_format": "dxf",
+      "sha256": "0279f3ca4304fa5be17adb4d3121d0543ae854be98facdadecc317b7ee74759d",
+      "compressed_size": 66462,
+      "uncompressed_size": 292556,
+      "relationship": "primary",
+      "companion_member_ids": [
+        "0017-elec-firealarms-detector-co-beacon-jpg-916d2fe1"
+      ]
+    },
+    "package_member_relationship": "primary_with_companion",
+    "package_symbol_grouping": "paired_dxf_raster_symbol",
+    "companion_files": [
+      {
+        "file_name": "Elec_FireAlarms_Detector_CO_Beacon.jpg",
+        "format": "jpeg",
+        "role": "package_member_companion",
+        "raw_input_path": "/data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260617T135618Z/zip_packages/pkg-aqi-scott-ext-20260617t135618z-01-3f09d51b8eaa/0017-elec-firealarms-detector-co-beacon-jpg-916d2fe1/Elec_FireAlarms_Detector_CO_Beacon.jpg",
+        "object_key": "external-submissions/subext-20260617T135618Z/01-Fire Alarms.zip/members/0017-elec-firealarms-detector-co-beacon-jpg-916d2fe1/Elec_FireAlarms_Detector_CO_Beacon.jpg",
+        "source_package_id": "pkg-aqi-scott-ext-20260617t135618z-01-3f09d51b8eaa",
+        "package_member_id": "0017-elec-firealarms-detector-co-beacon-jpg-916d2fe1",
+        "original_path": "Elec_FireAlarms_Detector_CO_Beacon.jpg",
+        "sha256": "328dbb5d6915166bba02bef3621e9dab272e541d76b931ceb605ce9947f6c330"
+      }
+    ],
+    "visual_assets": {
+      "source_assets": [
+        {
+          "object_key": "external-submissions/subext-20260617T135618Z/01-Fire Alarms.zip/members/0009-elec-firealarms-detector-co-beacon-dxf-b830daaf/Elec_FireAlarms_Detector_CO_Beacon.dxf",
+          "filename": "Elec_FireAlarms_Detector_CO_Beacon.dxf",
+          "content_type": "application/octet-stream",
+          "format": "dxf",
+          "role": "package_member_source",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t135618z-01-3f09d51b8eaa",
+          "package_member_id": "0009-elec-firealarms-detector-co-beacon-dxf-b830daaf",
+          "original_path": "Elec_FireAlarms_Detector_CO_Beacon.dxf"
+        },
+        {
+          "object_key": "external-submissions/subext-20260617T135618Z/01-Fire Alarms.zip/members/0017-elec-firealarms-detector-co-beacon-jpg-916d2fe1/Elec_FireAlarms_Detector_CO_Beacon.jpg",
+          "filename": "Elec_FireAlarms_Detector_CO_Beacon.jpg",
+          "content_type": "application/octet-stream",
+          "format": "jpeg",
+          "role": "package_member_companion",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t135618z-01-3f09d51b8eaa",
+          "package_member_id": "0017-elec-firealarms-detector-co-beacon-jpg-916d2fe1",
+          "original_path": "Elec_FireAlarms_Detector_CO_Beacon.jpg"
+        }
+      ]
+    }
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-17T13:56:28Z",
+  "started_at": "2026-06-17T13:56:30Z",
+  "completed_at": "2026-06-17T13:56:30Z"
+}

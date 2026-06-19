@@ -96,6 +96,13 @@ const WORKSPACE_QUEUE_COLUMNS = [
     tone: 'coordination'
   },
   {
+    id: 'rights_review',
+    title: 'Rights',
+    subtitle: 'Provenance/Rights Review',
+    agentId: null,
+    tone: 'provenance'
+  },
+  {
     id: 'human_review',
     title: 'Review',
     subtitle: 'Human',
@@ -204,8 +211,8 @@ const WHITNEY_SIGNAL_COLUMNS = [
   ['lastSessionQueueItemId', 'Last queue item']
 ];
 const WORKSPACE_MONITOR_SCREENS = {
-  pipeline: ['intake', 'validation', 'provenance', 'classification', 'review_coordination', 'human_review', 'publication'],
-  intelligence: ['curation', 'control_audit', 'market_intelligence', 'ux_feedback']
+  pipeline: ['intake', 'validation', 'provenance', 'classification', 'review_coordination', 'rights_review', 'human_review'],
+  intelligence: ['publication', 'curation', 'control_audit', 'market_intelligence', 'ux_feedback']
 };
 const WORKSPACE_MONITOR_SCREEN_SEQUENCE = ['pipeline', 'intelligence'];
 
@@ -1513,7 +1520,8 @@ function WorkspacePage() {
       return;
     }
 
-    navigate(`/reviews?review=${encodeURIComponent(item.reviewCaseId)}`);
+    const queueParam = item.queueFamily === 'rights_review' || item.columnId === 'rights_review' ? '&queue=rights' : '';
+    navigate(`/reviews?review=${encodeURIComponent(item.reviewCaseId)}${queueParam}`);
   };
   const openPublishedFromWorkspace = (item) => {
     const standardsPath = item.publishedStandardsPath || (item.publishedSymbolId ? `/standards?symbol=${encodeURIComponent(item.publishedSymbolId)}` : '');
@@ -1824,6 +1832,7 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
   if (queueMode === 'live') {
     (queueItems || []).forEach((queueItem) => {
       const column =
+        (queueItem.queueFamily === 'rights_review' ? columns.find((candidate) => candidate.id === 'rights_review') : null) ||
         columns.find((candidate) => candidate.agentId === queueItem.agentId) ||
         columns.find((candidate) => candidate.id === queueItem.queueFamily);
 
@@ -1840,6 +1849,9 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
         status: stoppedSearch ? 'stopped' : queueItem.status,
         statusLabel: stoppedSearch?.label,
         priority: queueItem.priority,
+        columnId: column.id,
+        queueFamily: queueItem.queueFamily,
+        reviewCaseId: queueItem.payload?.review_case_id || queueItem.payload?.reviewCaseId || null,
         publishedSymbolId: queueItem.publishedSymbolId,
         publishedPageCode: queueItem.publishedPageCode,
         publishedPackCode: queueItem.publishedPackCode,
@@ -1904,10 +1916,13 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
   (reviewItems || []).forEach((review) => {
     const reviewIdentifier = review.symbolId || review.id;
     const isSplitItem = review.reviewItemType === 'split_item';
+    const reviewColumnId = review.currentStage === 'provenance_rights_review' ? 'rights_review' : 'human_review';
 
-    byId.human_review.items.push({
+    byId[reviewColumnId].items.push({
       id: `review-${review.id}`,
       reviewCaseId: review.id,
+      columnId: reviewColumnId,
+      queueFamily: reviewColumnId,
       label: formatWorkspaceDisplayDate(review.openedAt || review.createdAt, { id: reviewIdentifier }),
       title: compactTitle(review.displayName || review.title || review.summary || reviewIdentifier),
       meta: isSplitItem ? 'Split item review' : review.currentStage || review.status || review.owner || 'Review case',
@@ -2292,7 +2307,7 @@ function WorkspaceQueueColumn({ column, statusOptions, statusFilter, onStatusTog
               key={item.id}
               item={item}
               onOpen={
-                ['human_review', 'ux_feedback'].includes(column.id)
+                ['human_review', 'rights_review', 'ux_feedback'].includes(column.id)
                   ? onReviewOpen
                   : column.id === 'publication'
                     ? onPublishedOpen
@@ -2787,6 +2802,7 @@ function ReviewsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const [queueFilter, setQueueFilter] = useState('new');
+  const requestedQueue = searchParams.get('queue') || '';
   const [workspaceState, setWorkspaceState] = useState({
     loading: true,
     mode: appConfig.apiRoot ? 'loading' : 'seeded',
@@ -2919,14 +2935,16 @@ function ReviewsPage() {
     return reviewQueue.reduce(
       (counts, item) => {
         const isReturned = item.splitChildStatus === 'returned_for_review' || String(item.status || '').toLowerCase().includes('returned');
-        if (isReturned) {
+        if (item.currentStage === 'provenance_rights_review') {
+          counts.rights += 1;
+        } else if (isReturned) {
           counts.returned += 1;
         } else {
           counts.new += 1;
         }
         return counts;
       },
-      { new: 0, returned: 0 }
+      { new: 0, rights: 0, returned: 0 }
     );
   }, [reviewQueue]);
 
@@ -2935,6 +2953,13 @@ function ReviewsPage() {
 
     return reviewQueue.filter((item) => {
       const isReturned = item.splitChildStatus === 'returned_for_review' || String(item.status || '').toLowerCase().includes('returned');
+      const isRightsReview = item.currentStage === 'provenance_rights_review';
+      if (queueFilter === 'rights' && !isRightsReview) {
+        return false;
+      }
+      if (queueFilter !== 'rights' && isRightsReview) {
+        return false;
+      }
       if (queueFilter === 'returned' && !isReturned) {
         return false;
       }
@@ -2958,6 +2983,12 @@ function ReviewsPage() {
       ].some((value) => String(value).toLowerCase().includes(normalizedQuery));
     });
   }, [query, reviewQueue, queueFilter]);
+
+  useEffect(() => {
+    if (requestedQueue === 'rights') {
+      setQueueFilter('rights');
+    }
+  }, [requestedQueue]);
 
   useEffect(() => {
     if (!filteredQueue.some((item) => item.id === activeId)) {
@@ -3255,6 +3286,9 @@ function ReviewsPage() {
             <div className="segmented-control" aria-label="Review queue filter">
               <button type="button" className={queueFilter === 'new' ? 'active' : ''} onClick={() => setQueueFilter('new')}>
                 New <span>{reviewQueueCounts.new}</span>
+              </button>
+              <button type="button" className={queueFilter === 'rights' ? 'active' : ''} onClick={() => setQueueFilter('rights')}>
+                Rights <span>{reviewQueueCounts.rights}</span>
               </button>
               <button type="button" className={queueFilter === 'returned' ? 'active' : ''} onClick={() => setQueueFilter('returned')}>
                 Returned <span>{reviewQueueCounts.returned}</span>
@@ -4408,6 +4442,7 @@ function SubmissionPage() {
     submitterEmail: rememberedDetails.submitterEmail || '',
     pin: '',
     description: submissionPresets[0],
+    source: '',
     files: []
   });
 
@@ -4522,6 +4557,15 @@ function SubmissionPage() {
               rows="5"
               value={formState.description}
               onChange={(event) => updateField('description', event.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Source</span>
+            <textarea
+              rows="3"
+              placeholder="Optional: website URL, datasheet, drawing pack, contractor note, or other source context"
+              value={formState.source}
+              onChange={(event) => updateField('source', event.target.value)}
             />
           </label>
           <label className="field">

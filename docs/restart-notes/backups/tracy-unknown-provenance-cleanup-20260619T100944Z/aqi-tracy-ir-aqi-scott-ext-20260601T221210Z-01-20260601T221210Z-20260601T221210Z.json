@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260601T221210Z-01-20260601T221210Z-20260601T221210Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260601T221210Z-01-20260601T221210Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260601T221210Z-01-20260601T221210Z",
+    "source_ref": "external-submission-20260601T221210Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "PUMPS-AND-TURBINE",
+    "candidate_title": "Pumps And Turbine",
+    "origin_file_name": "Pumps and Turbine.png",
+    "source_notes": "Pumps and Turbine",
+    "file_note": null,
+    "submission_batch_summary": "Pumps and Turbine",
+    "attachment_id": "1bf51ce7-1be5-41d2-8d51-1f819e6415a2",
+    "attachment_ids": [
+      "1bf51ce7-1be5-41d2-8d51-1f819e6415a2"
+    ],
+    "raw_object_key": "external-submissions/subext-20260601T221210Z/01-Pumps and Turbine.png",
+    "declared_format": "png",
+    "submission_batch_id": "subext-20260601T221210Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Pumps and Turbine",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-01T22:12:10Z",
+  "started_at": "2026-06-01T22:12:11Z",
+  "completed_at": "2026-06-01T22:12:11Z"
+}

@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260611T183822Z-02-20260611T183825Z-20260611T183825Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260611T183822Z-02-20260611T183825Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260611T183822Z-02-20260611T183825Z",
+    "source_ref": "external-submission-20260611T183822Z",
+    "submitted_by": "Scott source discovery <scott-source-discovery@symgov.local>",
+    "candidate_symbol_id": "QET-PRESSURE-SWITCH-NO-A11Y",
+    "candidate_title": "Qet Pressure Switch No A11Y",
+    "origin_file_name": "qet-pressure-switch-no-a11y.svg",
+    "source_notes": "QElectroTech pressure switch NO candidate; resubmitted with SVG accessibility metadata for Vlad. Source: https://raw.githubusercontent.com/qelectrotech/qelectrotech-git-mirror/master/elements/10_electric/10_allpole/390_sensors&instruments/13_sensors_pressure/pressure_switch_no.elmt",
+    "file_note": "QElectroTech pressure switch NO candidate; resubmitted with SVG accessibility metadata for Vlad. Source: https://raw.githubusercontent.com/qelectrotech/qelectrotech-git-mirror/master/elements/10_electric/10_allpole/390_sensors&instruments/13_sensors_pressure/pressure_switch_no.elmt",
+    "submission_batch_summary": "Scott 60-second source-discovery follow-up, accessibility-corrected resubmission of QElectroTech symbol candidates for Symgov processing. Reference/intake only until Tracy verifies rights/provenance and standards mapping.",
+    "attachment_id": "1542d681-db20-4357-8712-ca84da47db0b",
+    "attachment_ids": [
+      "1542d681-db20-4357-8712-ca84da47db0b"
+    ],
+    "raw_object_key": "external-submissions/subext-20260611T183822Z/02-qet-pressure-switch-no-a11y.svg",
+    "declared_format": "svg",
+    "submission_batch_id": "subext-20260611T183822Z",
+    "contributor_name": "Scott source discovery",
+    "contributor_org": "",
+    "contributor_declaration": "Scott 60-second source-discovery follow-up, accessibility-corrected resubmission of QElectroTech symbol candidates for Symgov processing. Reference/intake only until Tracy verifies rights/provenance and standards mapping.",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-11T18:38:25Z",
+  "started_at": "2026-06-11T18:38:25Z",
+  "completed_at": "2026-06-11T18:38:25Z"
+}

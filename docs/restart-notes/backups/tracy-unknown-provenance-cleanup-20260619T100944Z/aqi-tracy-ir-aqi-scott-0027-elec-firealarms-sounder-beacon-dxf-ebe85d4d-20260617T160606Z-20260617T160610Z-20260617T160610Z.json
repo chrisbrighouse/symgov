@@ -1,0 +1,98 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-0027-elec-firealarms-sounder-beacon-dxf-ebe85d4d-20260617T160606Z-20260617T160610Z-20260617T160610Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-0027-elec-firealarms-sounder-beacon-dxf-ebe85d4d-20260617T160606Z-20260617T160610Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-0027-elec-firealarms-sounder-beacon-dxf-ebe85d4d-20260617T160606Z-20260617T160610Z",
+    "source_ref": "external-submission-20260617T160604Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "ELEC-FIREALARMS-SOUNDER-BEACON-027",
+    "candidate_title": "Electrical FireAlarms Sounder Beacon",
+    "origin_file_name": "Elec_FireAlarms_Sounder_Beacon.dxf",
+    "source_notes": "Fire Alarms",
+    "file_note": null,
+    "submission_batch_summary": "Fire Alarms",
+    "attachment_id": "955427b6-433a-49ba-82d1-77395cbda65b",
+    "attachment_ids": [
+      "955427b6-433a-49ba-82d1-77395cbda65b"
+    ],
+    "raw_object_key": "external-submissions/subext-20260617T160604Z/01-Fire Alarms.zip/members/0027-elec-firealarms-sounder-beacon-dxf-ebe85d4d/Elec_FireAlarms_Sounder_Beacon.dxf",
+    "declared_format": "dxf",
+    "submission_batch_id": "subext-20260617T160604Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Fire Alarms",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": [],
+    "source_package_id": "pkg-aqi-scott-ext-20260617t160604z-01-3f09d51b8eaa",
+    "source_package_attachment_id": "955427b6-433a-49ba-82d1-77395cbda65b",
+    "source_package_object_key": "external-submissions/subext-20260617T160604Z/01-Fire Alarms.zip",
+    "source_package_sha256": "3f09d51b8eaa6a9bfc641b1a080ba25363244b9288c2788007b727eeeef08306",
+    "source_package_queue_item_id": "aqi-scott-ext-20260617T160604Z-01",
+    "package_member": {
+      "member_id": "0027-elec-firealarms-sounder-beacon-dxf-ebe85d4d",
+      "member_index": 27,
+      "original_path": "Elec_FireAlarms_Sounder_Beacon.dxf",
+      "filename": "Elec_FireAlarms_Sounder_Beacon.dxf",
+      "extension": ".dxf",
+      "declared_format": "dxf",
+      "sha256": "251dde5de288a73c25a2976e480a51dad1f4ded82068a9b5e4c9eba3e5e5ca3f",
+      "compressed_size": 66483,
+      "uncompressed_size": 291628,
+      "relationship": "primary",
+      "companion_member_ids": [
+        "0028-elec-firealarms-sounder-beacon-jpg-93a156a2"
+      ]
+    },
+    "package_member_relationship": "primary_with_companion",
+    "package_symbol_grouping": "paired_dxf_raster_symbol",
+    "companion_files": [
+      {
+        "file_name": "Elec_FireAlarms_Sounder_Beacon.jpg",
+        "format": "jpeg",
+        "role": "package_member_companion",
+        "raw_input_path": "/data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260617T160604Z/zip_packages/pkg-aqi-scott-ext-20260617t160604z-01-3f09d51b8eaa/0028-elec-firealarms-sounder-beacon-jpg-93a156a2/Elec_FireAlarms_Sounder_Beacon.jpg",
+        "object_key": "external-submissions/subext-20260617T160604Z/01-Fire Alarms.zip/members/0028-elec-firealarms-sounder-beacon-jpg-93a156a2/Elec_FireAlarms_Sounder_Beacon.jpg",
+        "source_package_id": "pkg-aqi-scott-ext-20260617t160604z-01-3f09d51b8eaa",
+        "package_member_id": "0028-elec-firealarms-sounder-beacon-jpg-93a156a2",
+        "original_path": "Elec_FireAlarms_Sounder_Beacon.jpg",
+        "sha256": "bad1deb5fc078fe1cea190d018d42570f8b6a288d4a37f1ee521cc5ed0abb238"
+      }
+    ],
+    "visual_assets": {
+      "source_assets": [
+        {
+          "object_key": "external-submissions/subext-20260617T160604Z/01-Fire Alarms.zip/members/0027-elec-firealarms-sounder-beacon-dxf-ebe85d4d/Elec_FireAlarms_Sounder_Beacon.dxf",
+          "filename": "Elec_FireAlarms_Sounder_Beacon.dxf",
+          "content_type": "application/octet-stream",
+          "format": "dxf",
+          "role": "package_member_source",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t160604z-01-3f09d51b8eaa",
+          "package_member_id": "0027-elec-firealarms-sounder-beacon-dxf-ebe85d4d",
+          "original_path": "Elec_FireAlarms_Sounder_Beacon.dxf"
+        },
+        {
+          "object_key": "external-submissions/subext-20260617T160604Z/01-Fire Alarms.zip/members/0028-elec-firealarms-sounder-beacon-jpg-93a156a2/Elec_FireAlarms_Sounder_Beacon.jpg",
+          "filename": "Elec_FireAlarms_Sounder_Beacon.jpg",
+          "content_type": "application/octet-stream",
+          "format": "jpeg",
+          "role": "package_member_companion",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t160604z-01-3f09d51b8eaa",
+          "package_member_id": "0028-elec-firealarms-sounder-beacon-jpg-93a156a2",
+          "original_path": "Elec_FireAlarms_Sounder_Beacon.jpg"
+        }
+      ]
+    }
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-17T16:06:10Z",
+  "started_at": "2026-06-17T16:06:13Z",
+  "completed_at": "2026-06-17T16:06:13Z"
+}

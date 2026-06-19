@@ -158,6 +158,7 @@ def test_external_submission_groups_same_stem_dxf_and_jpg_as_one_symbol(tmp_path
             "submitter_name": "Tester",
             "submitter_email": "tester@example.test",
             "overall_description": "Two representations of one boiler flue symbol.",
+            "source_notes": "From contractor drawing pack https://example.test/fire-symbols",
             "files": [
                 {
                     "name": "Boiler_Flue_Top.dxf",
@@ -183,6 +184,8 @@ def test_external_submission_groups_same_stem_dxf_and_jpg_as_one_symbol(tmp_path
     assert payload["visual_assets"]["preview"]["object_key"].endswith("02-Boiler_Flue_Top.jpg")
     assert payload["visual_assets"]["preview"]["content_type"] == "image/jpeg"
     assert payload["visual_assets"]["source_assets"][0]["object_key"].endswith("01-Boiler_Flue_Top.dxf")
+    assert payload["source_notes"].startswith("From contractor drawing pack https://example.test/fire-symbols")
+    assert "Companion files in this symbol submission" in payload["source_notes"]
 
 
 def test_scott_accepts_dxf_and_routes_to_vlad_and_tracy(tmp_path):

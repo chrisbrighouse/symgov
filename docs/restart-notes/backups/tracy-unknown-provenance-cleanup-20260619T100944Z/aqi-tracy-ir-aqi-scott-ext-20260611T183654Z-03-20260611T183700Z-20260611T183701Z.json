@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260611T183654Z-03-20260611T183700Z-20260611T183701Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260611T183654Z-03-20260611T183700Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260611T183654Z-03-20260611T183700Z",
+    "source_ref": "external-submission-20260611T183654Z",
+    "submitted_by": "Scott source discovery <scott-source-discovery@symgov.local>",
+    "candidate_symbol_id": "QET-SOLENOID-VALVE",
+    "candidate_title": "Qet Solenoid Valve",
+    "origin_file_name": "qet-solenoid-valve.svg",
+    "source_notes": "QElectroTech solenoid/electrovalve candidate; practical intake reference only until licence/provenance verified. Source: https://raw.githubusercontent.com/qelectrotech/qelectrotech-git-mirror/master/elements/10_electric/10_allpole/391_consumers&actuators/20_valves/electrovanne.elmt",
+    "file_note": "QElectroTech solenoid/electrovalve candidate; practical intake reference only until licence/provenance verified. Source: https://raw.githubusercontent.com/qelectrotech/qelectrotech-git-mirror/master/elements/10_electric/10_allpole/391_consumers&actuators/20_valves/electrovanne.elmt",
+    "submission_batch_summary": "Scott 60-second source-discovery follow-up: QElectroTech practical symbol candidates submitted for Symgov processing. Treat as intake/reference candidates only until Tracy verifies rights and provenance; map to relevant IEC/ISO/ISA taxonomy before publication.",
+    "attachment_id": "29195ef0-1d36-45c8-8a04-8fe3efd41ee7",
+    "attachment_ids": [
+      "29195ef0-1d36-45c8-8a04-8fe3efd41ee7"
+    ],
+    "raw_object_key": "external-submissions/subext-20260611T183654Z/03-qet-solenoid-valve.svg",
+    "declared_format": "svg",
+    "submission_batch_id": "subext-20260611T183654Z",
+    "contributor_name": "Scott source discovery",
+    "contributor_org": "",
+    "contributor_declaration": "Scott 60-second source-discovery follow-up: QElectroTech practical symbol candidates submitted for Symgov processing. Treat as intake/reference candidates only until Tracy verifies rights and provenance; map to relevant IEC/ISO/ISA taxonomy before publication.",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-11T18:37:01Z",
+  "started_at": "2026-06-11T18:37:03Z",
+  "completed_at": "2026-06-11T18:37:03Z"
+}

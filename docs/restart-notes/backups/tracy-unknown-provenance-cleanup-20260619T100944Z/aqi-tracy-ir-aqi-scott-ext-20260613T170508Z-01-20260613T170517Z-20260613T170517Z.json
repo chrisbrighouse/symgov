@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260613T170508Z-01-20260613T170517Z-20260613T170517Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260613T170508Z-01-20260613T170517Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260613T170508Z-01-20260613T170517Z",
+    "source_ref": "external-submission-20260613T170508Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "MECH-HEATING-COOLING-BOILER-FLUE-LEFT",
+    "candidate_title": "Mech Heating+Cooling Boiler Flue Left",
+    "origin_file_name": "Mech_Heating+Cooling_Boiler_Flue_Left.dxf",
+    "source_notes": "Contractor-originated company variant",
+    "file_note": null,
+    "submission_batch_summary": "Contractor-originated company variant",
+    "attachment_id": "35770f66-3d9e-433b-9b15-570959044b19",
+    "attachment_ids": [
+      "35770f66-3d9e-433b-9b15-570959044b19"
+    ],
+    "raw_object_key": "external-submissions/subext-20260613T170508Z/01-Mech_Heating+Cooling_Boiler_Flue_Left.dxf",
+    "declared_format": "dxf",
+    "submission_batch_id": "subext-20260613T170508Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Contractor-originated company variant",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-13T17:05:17Z",
+  "started_at": "2026-06-13T17:05:17Z",
+  "completed_at": "2026-06-13T17:05:17Z"
+}

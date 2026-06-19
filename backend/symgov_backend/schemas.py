@@ -32,6 +32,7 @@ class ExternalSubmissionRequest(BaseModel):
     submitter_name: str = Field(min_length=1)
     submitter_email: str = Field(min_length=3)
     overall_description: str = Field(min_length=1)
+    source_notes: str | None = None
     files: list[ExternalSubmissionFileInput] = Field(min_length=1)
 
 

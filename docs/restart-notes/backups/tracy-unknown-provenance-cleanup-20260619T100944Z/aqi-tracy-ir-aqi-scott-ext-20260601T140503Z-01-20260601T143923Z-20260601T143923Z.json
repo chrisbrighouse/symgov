@@ -1,0 +1,37 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-ext-20260601T140503Z-01-20260601T143923Z-20260601T143923Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-ext-20260601T140503Z-01-20260601T143923Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-ext-20260601T140503Z-01-20260601T143923Z",
+    "source_ref": "external-submission-20260601T140503Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "MECHANICAL-SYMBOLS",
+    "candidate_title": "Mechanical Symbols",
+    "origin_file_name": "Mechanical-Symbols.png",
+    "source_notes": "Mechanical Symbols sheet from wikimedia commons",
+    "file_note": null,
+    "submission_batch_summary": "Mechanical Symbols sheet from wikimedia commons",
+    "attachment_id": "4017ec25-8015-49d2-84ed-143607c8f98f",
+    "attachment_ids": [
+      "4017ec25-8015-49d2-84ed-143607c8f98f"
+    ],
+    "raw_object_key": "external-submissions/subext-20260601T140503Z/01-Mechanical-Symbols.png",
+    "declared_format": "png",
+    "submission_batch_id": "subext-20260601T140503Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Mechanical Symbols sheet from wikimedia commons",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": []
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-01T14:39:23Z",
+  "started_at": "2026-06-01T14:41:46Z",
+  "completed_at": "2026-06-01T14:41:46Z"
+}

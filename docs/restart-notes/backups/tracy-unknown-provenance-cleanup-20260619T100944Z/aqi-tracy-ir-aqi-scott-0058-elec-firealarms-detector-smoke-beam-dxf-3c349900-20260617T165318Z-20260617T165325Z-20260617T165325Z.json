@@ -1,0 +1,98 @@
+{
+  "id": "aqi-tracy-ir-aqi-scott-0058-elec-firealarms-detector-smoke-beam-dxf-3c349900-20260617T165318Z-20260617T165325Z-20260617T165325Z",
+  "agent_id": "tracy",
+  "source_type": "intake_record",
+  "source_id": "ir-aqi-scott-0058-elec-firealarms-detector-smoke-beam-dxf-3c349900-20260617T165318Z-20260617T165325Z",
+  "status": "escalated",
+  "priority": "medium",
+  "payload_json": {
+    "intake_record_id": "ir-aqi-scott-0058-elec-firealarms-detector-smoke-beam-dxf-3c349900-20260617T165318Z-20260617T165325Z",
+    "source_ref": "external-submission-20260617T165310Z",
+    "submitted_by": "Chris <chris.brighouse@hotmail.co.uk>",
+    "candidate_symbol_id": "ELEC-FIREALARMS-DETECTOR-SMOKE-BEAM-058",
+    "candidate_title": "Electrical FireAlarms Detector Smoke Beam",
+    "origin_file_name": "Elec_FireAlarms_Detector_Smoke_Beam.dxf",
+    "source_notes": "Fire alarms",
+    "file_note": null,
+    "submission_batch_summary": "Fire alarms",
+    "attachment_id": "b35ff9b4-ac83-4ffa-a0c5-75a1d8d46801",
+    "attachment_ids": [
+      "b35ff9b4-ac83-4ffa-a0c5-75a1d8d46801"
+    ],
+    "raw_object_key": "external-submissions/subext-20260617T165310Z/01-Fire Alarms.zip/members/0058-elec-firealarms-detector-smoke-beam-dxf-3c349900/Elec_FireAlarms_Detector_Smoke_Beam.dxf",
+    "declared_format": "dxf",
+    "submission_batch_id": "subext-20260617T165310Z",
+    "contributor_name": "Chris",
+    "contributor_org": "",
+    "contributor_declaration": "Fire alarms",
+    "rights_documents": [],
+    "standards_source_refs": [],
+    "evidence_links": [],
+    "source_package_id": "pkg-aqi-scott-ext-20260617t165310z-01-3f09d51b8eaa",
+    "source_package_attachment_id": "b35ff9b4-ac83-4ffa-a0c5-75a1d8d46801",
+    "source_package_object_key": "external-submissions/subext-20260617T165310Z/01-Fire Alarms.zip",
+    "source_package_sha256": "3f09d51b8eaa6a9bfc641b1a080ba25363244b9288c2788007b727eeeef08306",
+    "source_package_queue_item_id": "aqi-scott-ext-20260617T165310Z-01",
+    "package_member": {
+      "member_id": "0058-elec-firealarms-detector-smoke-beam-dxf-3c349900",
+      "member_index": 58,
+      "original_path": "Elec_FireAlarms_Detector_Smoke_Beam.dxf",
+      "filename": "Elec_FireAlarms_Detector_Smoke_Beam.dxf",
+      "extension": ".dxf",
+      "declared_format": "dxf",
+      "sha256": "63d64a0f890a069b9c5fb97b8996bcc61476dbf32e9cc7b392fad21d834bde15",
+      "compressed_size": 10799,
+      "uncompressed_size": 181712,
+      "relationship": "primary",
+      "companion_member_ids": [
+        "0057-elec-firealarms-detector-smoke-beam-jpg-35cc324c"
+      ]
+    },
+    "package_member_relationship": "primary_with_companion",
+    "package_symbol_grouping": "paired_dxf_raster_symbol",
+    "companion_files": [
+      {
+        "file_name": "Elec_FireAlarms_Detector_Smoke_Beam.jpg",
+        "format": "jpeg",
+        "role": "package_member_companion",
+        "raw_input_path": "/data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260617T165310Z/zip_packages/pkg-aqi-scott-ext-20260617t165310z-01-3f09d51b8eaa/0057-elec-firealarms-detector-smoke-beam-jpg-35cc324c/Elec_FireAlarms_Detector_Smoke_Beam.jpg",
+        "object_key": "external-submissions/subext-20260617T165310Z/01-Fire Alarms.zip/members/0057-elec-firealarms-detector-smoke-beam-jpg-35cc324c/Elec_FireAlarms_Detector_Smoke_Beam.jpg",
+        "source_package_id": "pkg-aqi-scott-ext-20260617t165310z-01-3f09d51b8eaa",
+        "package_member_id": "0057-elec-firealarms-detector-smoke-beam-jpg-35cc324c",
+        "original_path": "Elec_FireAlarms_Detector_Smoke_Beam.jpg",
+        "sha256": "07569472568de53d0a368ba7126557bfc0f2abd60a789d2b5427c5a874188b12"
+      }
+    ],
+    "visual_assets": {
+      "source_assets": [
+        {
+          "object_key": "external-submissions/subext-20260617T165310Z/01-Fire Alarms.zip/members/0058-elec-firealarms-detector-smoke-beam-dxf-3c349900/Elec_FireAlarms_Detector_Smoke_Beam.dxf",
+          "filename": "Elec_FireAlarms_Detector_Smoke_Beam.dxf",
+          "content_type": "application/octet-stream",
+          "format": "dxf",
+          "role": "package_member_source",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t165310z-01-3f09d51b8eaa",
+          "package_member_id": "0058-elec-firealarms-detector-smoke-beam-dxf-3c349900",
+          "original_path": "Elec_FireAlarms_Detector_Smoke_Beam.dxf"
+        },
+        {
+          "object_key": "external-submissions/subext-20260617T165310Z/01-Fire Alarms.zip/members/0057-elec-firealarms-detector-smoke-beam-jpg-35cc324c/Elec_FireAlarms_Detector_Smoke_Beam.jpg",
+          "filename": "Elec_FireAlarms_Detector_Smoke_Beam.jpg",
+          "content_type": "application/octet-stream",
+          "format": "jpeg",
+          "role": "package_member_companion",
+          "downloadable": true,
+          "source_package_id": "pkg-aqi-scott-ext-20260617t165310z-01-3f09d51b8eaa",
+          "package_member_id": "0057-elec-firealarms-detector-smoke-beam-jpg-35cc324c",
+          "original_path": "Elec_FireAlarms_Detector_Smoke_Beam.jpg"
+        }
+      ]
+    }
+  },
+  "confidence": 0.55,
+  "escalation_reason": "provenance_requires_escalation",
+  "created_at": "2026-06-17T16:53:25Z",
+  "started_at": "2026-06-17T16:53:27Z",
+  "completed_at": "2026-06-17T16:53:27Z"
+}
