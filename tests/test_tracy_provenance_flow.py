@@ -112,7 +112,7 @@ def test_restricted_rights_recommend_daisy_coordination_before_rights_review_que
     assert artifact["review_recommendation"] == {
         "current_stage": "provenance_rights_review",
         "escalation_level": "high",
-        "detail": "Tracy flagged rights status restricted with high risk for human review.",
+        "detail": "Tracy flagged rights disposition restricted with high risk for human review.",
         "coordination_step": "daisy_rights_review_coordination",
         "review_queue_family": "review_coordination",
         "review_queue_label": "Daisy Rights Review Coordination",
@@ -149,3 +149,41 @@ def test_restricted_rights_recommend_daisy_coordination_before_rights_review_que
     assert daisy_item["payload_json"]["rights_status"] == "restricted"
     assert daisy_item["payload_json"]["review_case_id"] == "review-restricted-0001"
     assert daisy_item["payload_json"]["tracy_provenance_assessment_id"] == "pa-restricted-0001"
+
+
+def test_ambiguous_rights_emit_canonical_warning_and_non_blocking_processing_state():
+    tracy = load_tracy_runner()
+
+    artifact = tracy.run_provenance_task(
+        {
+            "queue_item_id": "aqi-tracy-canonical-0001",
+            "intake_record_id": "intake-canonical-0001",
+            "source_ref": "package-code-only",
+            "submitted_by": "Scott",
+            "contributor_declaration": "Package code only",
+            "standards_source_refs": [],
+            "evidence_links": [],
+            "rights_documents": [],
+        }
+    )
+
+    assert artifact["rights_disposition"] == "unknown_warning"
+    assert artifact["processing_outcome"] == "review_required"
+
+
+def test_restricted_rights_emit_canonical_blocking_states():
+    tracy = load_tracy_runner()
+
+    artifact = tracy.run_provenance_task(
+        {
+            "queue_item_id": "aqi-tracy-canonical-0002",
+            "intake_record_id": "intake-canonical-0002",
+            "source_ref": "contractor-library",
+            "submitted_by": "Tester",
+            "contributor_declaration": "Third-party licensed symbol; no redistribution allowed.",
+            "standards_source_refs": ["contractor-library"],
+        }
+    )
+
+    assert artifact["rights_disposition"] == "restricted"
+    assert artifact["processing_outcome"] == "failed"

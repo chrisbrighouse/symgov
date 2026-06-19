@@ -2282,6 +2282,36 @@ class RuntimePersistenceBridge:
                 record.queue_item_id = queue_item_id
                 record.intake_record_id = coerce_uuid(durable_record["intake_record_id"])
                 record.rights_status = durable_record["rights_status"]
+                
+                # Canonical state separation with compatibility fallbacks
+                if "rights_disposition" in durable_record:
+                    record.rights_disposition = durable_record["rights_disposition"]
+                else:
+                    rs = str(durable_record.get("rights_status") or "unknown").lower()
+                    if rs == "cleared":
+                        record.rights_disposition = "cleared"
+                    elif rs == "unknown":
+                        record.rights_disposition = "unknown_warning"
+                    elif rs == "restricted":
+                        record.rights_disposition = "restricted"
+                    elif rs == "conflict":
+                        record.rights_disposition = "conflict"
+                    else:
+                        record.rights_disposition = "failed"
+
+                if "processing_outcome" in durable_record:
+                    record.processing_outcome = durable_record["processing_outcome"]
+                else:
+                    report = durable_record.get("report_json") or {}
+                    decision = str(report.get("decision") or "").lower()
+                    rs = str(durable_record.get("rights_status") or "unknown").lower()
+                    if decision == "pass":
+                        record.processing_outcome = "pass"
+                    elif rs in {"restricted", "conflict"} or decision == "fail":
+                        record.processing_outcome = "failed"
+                    else:
+                        record.processing_outcome = "review_required"
+
                 record.risk_level = durable_record["risk_level"]
                 record.confidence = coerce_numeric(durable_record["confidence"]) or Decimal("0")
                 record.summary = durable_record["summary"]

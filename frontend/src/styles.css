@@ -2632,6 +2632,38 @@ a {
   color: var(--mint);
 }
 
+.rights-disposition {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.rights-cleared {
+  background: rgba(167, 255, 216, 0.1);
+  border-color: rgba(167, 255, 216, 0.3);
+  color: var(--mint);
+}
+
+.rights-unknown_warning {
+  background: rgba(255, 223, 148, 0.1);
+  border-color: rgba(255, 223, 148, 0.3);
+  color: #ffdf94;
+}
+
+.rights-restricted,
+.rights-conflict,
+.rights-failed {
+  background: rgba(255, 200, 219, 0.1);
+  border-color: rgba(255, 200, 219, 0.3);
+  color: var(--rose);
+}
+
 .split-actions {
   margin-top: 0.15rem;
   gap: 0.35rem;

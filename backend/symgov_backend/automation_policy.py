@@ -173,6 +173,7 @@ def evaluate_publication_automation_gate(
         "validation_defect_count": validation.defect_count if validation else None,
         "provenance_assessment_id": str(provenance.id) if provenance else None,
         "rights_status": provenance.rights_status if provenance else None,
+        "rights_disposition": (provenance.rights_disposition if provenance else None) or (provenance.rights_status if provenance else None),
         "provenance_risk_level": provenance.risk_level if provenance else None,
         "review_case_id": str(review_case.id) if review_case else None,
         "review_case_stage": review_case.current_stage if review_case else None,
@@ -202,9 +203,19 @@ def evaluate_publication_automation_gate(
     if provenance is None:
         reasons.append("provenance_assessment_missing")
     else:
-        rights_status = str(provenance.rights_status or "").strip().lower()
+        # Prefer canonical rights disposition
+        rights_disposition = str(provenance.rights_disposition or "").strip().lower()
+        if not rights_disposition:
+            # Fallback to legacy rights status
+            rights_disposition = str(provenance.rights_status or "unknown").strip().lower()
+            if rights_disposition == "unknown":
+                rights_disposition = "unknown_warning"
+
         risk_level = str(provenance.risk_level or "").strip().lower()
-        if rights_status not in LOW_RISK_RIGHTS_STATUSES:
+        
+        # Policy: only 'cleared' (and other explicitly low-risk legacy tokens) are allowed for auto-publication.
+        # 'unknown_warning' remains blocked for auto-publication but allowed for downstream flow.
+        if rights_disposition not in LOW_RISK_RIGHTS_STATUSES:
             reasons.append("rights_not_low_risk")
         if risk_level not in LOW_RISK_PROVENANCE_RISK_LEVELS:
             reasons.append("provenance_risk_not_low")

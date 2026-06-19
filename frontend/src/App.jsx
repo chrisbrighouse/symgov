@@ -2652,7 +2652,14 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
           <Fact label="ID" value={itemName} />
           <Fact label="Original file" value={originalFilename} />
           <Fact label="Review item" value={activeChange?.reviewItemType === 'split_item' ? 'Split child' : 'Review case'} />
-          <Fact label="Status" value={activeChange?.splitChildStatus || activeChange?.status || 'Pending'} />
+          <Fact label="Status" value={
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <span>{activeChange?.splitChildStatus || activeChange?.status || 'Pending'}</span>
+              {activeChange?.rightsDisposition && (
+                <RightsBadge disposition={activeChange.rightsDisposition} />
+              )}
+            </div>
+          } />
           <Fact label="Available formats" value={availableFormats.join(', ') || activeChange?.format || 'Pending'} />
           <Fact label="Child decisions" value={`${reviewedChildCount} / ${activeChildren.length || activeChange?.childCount || 0}`} />
           <Fact label="Intake record" value={activeChange?.intakeRecordId || 'Pending'} />
@@ -5122,6 +5129,16 @@ function HannahCurationPanel({ state, sort, filters, onSort, onFilterChange, onS
 
 function formatHannahCandidateValue(candidate, key) {
   const value = candidate?.[key];
+  if (key === 'rightsStatus') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+        <span>{String(value || '')}</span>
+        {candidate.rightsDisposition && (
+          <RightsBadge disposition={candidate.rightsDisposition} />
+        )}
+      </div>
+    );
+  }
   if (key === 'relevanceScore') {
     return value == null ? '' : Number(value).toFixed(4);
   }
@@ -5265,6 +5282,16 @@ function Metric({ title, value }) {
       <span>{title}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function RightsBadge({ disposition }) {
+  if (!disposition) return null;
+  const label = disposition.replace('_', ' ');
+  return (
+    <span className={`rights-disposition rights-${disposition}`}>
+      {label}
+    </span>
   );
 }
 

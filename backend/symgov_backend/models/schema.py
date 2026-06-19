@@ -574,6 +574,8 @@ class ProvenanceAssessment(Base):
     queue_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_queue_items.id"), nullable=False)
     intake_record_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("intake_records.id"), nullable=False)
     rights_status: Mapped[str] = mapped_column(Text, nullable=False)
+    rights_disposition: Mapped[str] = mapped_column(Text, nullable=False)
+    processing_outcome: Mapped[str] = mapped_column(Text, nullable=False)
     risk_level: Mapped[str] = mapped_column(Text, nullable=False)
     confidence: Mapped[float] = mapped_column(Numeric(5, 4), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)

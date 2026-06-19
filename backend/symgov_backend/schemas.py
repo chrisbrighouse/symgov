@@ -170,6 +170,9 @@ class WorkspaceReviewCaseResponse(BaseModel):
     openedAt: str
     validationStatus: str
     defectCount: int
+    rightsStatus: str | None = None
+    rightsDisposition: str | None = None
+    processingOutcome: str | None = None
     sourceFileName: str
     sourceObjectKey: str | None = None
     sourcePreviewUrl: str | None = None
@@ -378,6 +381,9 @@ class WorkspaceHannahPhotoCandidateResponse(BaseModel):
     title: str | None = None
     description: str | None = None
     rightsStatus: str
+    rightsDisposition: str | None = None
+    processingOutcome: str | None = None
+    riskLevel: str | None = None
     licenseLabel: str | None = None
     status: str
     relevanceScore: float | None = None

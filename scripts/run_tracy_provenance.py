@@ -67,6 +67,15 @@ def cleanup_queue_item(queue_item_path, runtime_root):
     }
 
 
+def queue_status_for_outcome(outcome):
+    if outcome == "failed":
+        return "failed"
+    # Both 'pass' and 'review_required' (canonical escalation) result in completed
+    # queue items because the agent's work is done; routing logic then decides
+    # the next step (Libby or Daisy).
+    return "completed"
+
+
 def queue_status_for_decision(decision):
     if decision == "escalate":
         return "escalated"
@@ -114,6 +123,8 @@ def build_libby_queue_item(
             "candidate_symbol_name": payload.get("candidate_title") or candidate_symbol_id,
             "asset_format": payload.get("declared_format"),
             "rights_status": artifact.get("rights_status"),
+            "rights_disposition": artifact.get("rights_disposition"),
+            "processing_outcome": artifact.get("processing_outcome"),
             "source_refs": ensure_list(artifact.get("evidence", {}).get("standards_source_refs")),
             "contributor_declaration": payload.get("contributor_declaration"),
             "source_notes": payload.get("source_notes"),
@@ -157,6 +168,8 @@ def build_daisy_rights_coordination_queue_item(
             "escalation_level": created_review_case.get("escalation_level"),
             "validation_status": None,
             "rights_status": artifact.get("rights_status"),
+            "rights_disposition": artifact.get("rights_disposition"),
+            "processing_outcome": artifact.get("processing_outcome"),
             "risk_level": artifact.get("risk_level"),
             "review_queue_family": "review_coordination",
             "review_queue_label": "Daisy Rights Review Coordination",
@@ -232,6 +245,11 @@ def run_provenance_task(task):
     escalation_target = "none"
     rights_status = "unknown"
     risk_level = "medium"
+    
+    # Canonical state separation
+    rights_disposition = "unknown_warning"
+    processing_outcome = "pass"
+
     recommended_actions = []
     review_recommendation = None
 
@@ -250,33 +268,43 @@ def run_provenance_task(task):
         escalation_target = "human_reviewer"
         rights_status = "unknown"
         risk_level = "high"
+        rights_disposition = "failed"
+        processing_outcome = "failed"
 
     if contributor_declaration:
         positive, negative = summarize_keywords(contributor_declaration)
         if positive and negative:
             rights_status = "conflict"
+            rights_disposition = "conflict"
             risk_level = "critical"
             decision = "escalate"
+            processing_outcome = "failed"
             confidence = min(confidence, 0.72)
             escalation_target = "human_reviewer"
             add_defect(defects, "TRACY-RIGHTS-001", "critical", "Declaration contains both ownership and restriction signals.")
             add_trace(evidence_trace, "declaration_analysis", "failed", "Detected conflicting ownership and restriction language.")
         elif negative:
             rights_status = "restricted"
+            rights_disposition = "restricted"
             risk_level = "high"
             decision = "fail"
+            processing_outcome = "failed"
             confidence = min(confidence, 0.91)
             add_defect(defects, "TRACY-RIGHTS-002", "high", "Declaration indicates restricted or third-party licensing.")
             add_trace(evidence_trace, "declaration_analysis", "failed", "Detected restrictive or third-party rights language.")
             recommended_actions.append("Route to human reviewer for licensing resolution before publication.")
         elif positive:
             rights_status = "cleared"
+            rights_disposition = "cleared"
             risk_level = "low"
+            processing_outcome = "pass"
             add_trace(evidence_trace, "declaration_analysis", "passed", "Detected positive ownership language with no restriction keywords.")
         else:
             rights_status = "unknown"
+            rights_disposition = "unknown_warning"
             risk_level = "medium"
             decision = "escalate"
+            processing_outcome = "review_required"
             confidence = min(confidence, 0.55)
             escalation_target = "human_reviewer"
             add_defect(defects, "TRACY-DECL-001", "medium", "Declaration does not clearly state ownership or rights status.")
@@ -290,6 +318,8 @@ def run_provenance_task(task):
             decision = "escalate"
             escalation_target = "human_reviewer"
             rights_status = "unknown"
+            rights_disposition = "unknown_warning"
+            processing_outcome = "review_required"
             risk_level = "medium"
     else:
         add_trace(evidence_trace, "source_refs", "passed", f"Captured {len(standards_source_refs)} standards source reference(s).")
@@ -314,6 +344,8 @@ def run_provenance_task(task):
         escalation_target = "human_reviewer"
         if rights_status == "cleared":
             rights_status = "unknown"
+            rights_disposition = "unknown_warning"
+            processing_outcome = "review_required"
         risk_level = "high"
     else:
         add_trace(evidence_trace, "evidence_links", "passed", f"Recorded {len(all_evidence_refs)} evidence reference(s).")
@@ -327,11 +359,11 @@ def run_provenance_task(task):
     else:
         recommended_actions.append("Allow downstream review to proceed while preserving provenance evidence.")
 
-    if rights_status in {"restricted", "conflict"} or decision == "fail":
+    if rights_disposition in {"restricted", "conflict"} or processing_outcome == "failed":
         review_recommendation = {
             "current_stage": "provenance_rights_review",
-            "escalation_level": "high" if rights_status in {"restricted", "conflict"} else "medium",
-            "detail": f"Tracy flagged rights status {rights_status} with {risk_level} risk for human review.",
+            "escalation_level": "high" if rights_disposition in {"restricted", "conflict"} else "medium",
+            "detail": f"Tracy flagged rights disposition {rights_disposition} with {risk_level} risk for human review.",
             "coordination_step": "daisy_rights_review_coordination",
             "review_queue_family": "review_coordination",
             "review_queue_label": "Daisy Rights Review Coordination",
@@ -349,6 +381,8 @@ def run_provenance_task(task):
         "confidence": round(confidence, 2),
         "escalation_target": escalation_target,
         "rights_status": rights_status,
+        "rights_disposition": rights_disposition,
+        "processing_outcome": processing_outcome,
         "risk_level": risk_level,
         "reviewer_summary": reviewer_summary,
         "evidence": evidence,
@@ -391,7 +425,7 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
     artifact = run_provenance_task(task)
     completed_at = utc_now()
 
-    queue_item["status"] = queue_status_for_decision(artifact["decision"])
+    queue_item["status"] = queue_status_for_outcome(artifact["processing_outcome"])
     queue_item["confidence"] = artifact["confidence"]
     queue_item["escalation_reason"] = (
         "provenance_requires_escalation" if artifact["decision"] == "escalate" else None
@@ -425,8 +459,10 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
     provenance_assessment = {
         "id": report_id,
         "queue_item_id": queue_item["id"],
-        "intake_record_id": task.get("intake_record_id"),
+        "intake_record_id": artifact["intake_record_id"],
         "rights_status": artifact["rights_status"],
+        "rights_disposition": artifact["rights_disposition"],
+        "processing_outcome": artifact["processing_outcome"],
         "risk_level": artifact["risk_level"],
         "confidence": artifact["confidence"],
         "summary": artifact["reviewer_summary"],

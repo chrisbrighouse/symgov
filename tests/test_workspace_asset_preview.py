@@ -436,6 +436,8 @@ def test_provenance_review_case_uses_latest_dxf_validation_derivative_preview():
         report_json={},
         evidence_json={},
         rights_status="unknown",
+        rights_disposition="unknown_warning",
+        processing_outcome="review_required",
     )
     validation_report = SimpleNamespace(
         normalized_payload_json={

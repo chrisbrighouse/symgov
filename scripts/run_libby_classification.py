@@ -409,7 +409,12 @@ def infer_classification(task):
     candidate_symbol_id = task.get("candidate_symbol_id") or task.get("symbol_key") or "UNSPECIFIED"
     origin_file_name = task.get("origin_file_name") or task.get("original_filename") or "Submitted file"
     declared_format = (task.get("asset_format") or task.get("declared_format") or "").lower() or None
-    rights_status = (task.get("rights_status") or "unknown").lower()
+    
+    # Canonical rights disposition preferred over legacy rights status
+    rights_disposition = (task.get("rights_disposition") or task.get("rights_status") or "unknown").lower()
+    if rights_disposition == "unknown":
+        rights_disposition = "unknown_warning"
+    
     source_refs = ensure_list(task.get("source_refs"))
     ocr_labels = [normalize_label(item) for item in ensure_list(task.get("ocr_labels")) if normalize_label(item)]
     contributor_declaration = normalize_label(task.get("contributor_declaration"))
@@ -475,7 +480,7 @@ def infer_classification(task):
     parent_equipment_class = "unknown_equipment"
     industry = "general_industry"
     standards_source = source_refs[0] if source_refs else None
-    library_provenance_class = "internet_research_candidate" if rights_status == "unknown" else "contributor_submission"
+    library_provenance_class = "internet_research_candidate" if rights_disposition == "unknown_warning" else "contributor_submission"
     source_classification = "unknown"
     classification_status = "provisional"
     libby_approved = False
@@ -570,12 +575,12 @@ def infer_classification(task):
         symbol_family = f"candidate:{candidate_symbol_id.lower()}"
         add_trace(evidence_trace, "taxonomy_match", "warning", "No strong family match found; Libby created a provisional taxonomy term.")
 
-    if rights_status == "cleared":
+    if rights_disposition == "cleared":
         source_classification = "contributor_asserted" if source_classification == "unknown" else source_classification
         confidence = max(confidence, 0.8)
-    elif rights_status in {"restricted", "conflict"}:
+    elif rights_disposition in {"restricted", "conflict"}:
         add_defect(defects, "LIBBY-RIGHTS-001", "high", "Classification depends on a provenance record that still has rights risk.")
-        add_trace(evidence_trace, "rights_status", "warning", f"Upstream rights status remained {rights_status}.")
+        add_trace(evidence_trace, "rights_status", "warning", f"Upstream rights disposition remained {rights_disposition}.")
         confidence = min(confidence, 0.62)
     else:
         evidence["web_research_used"] = True
