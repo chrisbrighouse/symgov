@@ -70,16 +70,49 @@ def cleanup_queue_item(queue_item_path, runtime_root):
 def queue_status_for_outcome(outcome):
     if outcome == "failed":
         return "failed"
-    # Both 'pass' and 'review_required' (canonical escalation) result in completed
-    # queue items because the agent's work is done; routing logic then decides
-    # the next step (Libby or Daisy).
+    # Both 'pass' and 'review_required' (canonical warning/review-needed outcomes)
+    # result in completed queue items because Tracy's work is done; routing logic
+    # then decides the next step (Libby or Daisy).
     return "completed"
+
+
+def queue_escalation_reason_for_artifact(artifact):
+    """Return an operator-facing escalation reason only for blocking rights cases."""
+    rights_disposition = artifact.get("rights_disposition")
+    processing_outcome = artifact.get("processing_outcome")
+    if rights_disposition in {"restricted", "conflict"} or processing_outcome == "failed":
+        return "provenance_rights_review_required"
+    return None
 
 
 def queue_status_for_decision(decision):
     if decision == "escalate":
         return "escalated"
     return "completed"
+
+
+def review_case_recommendation_for_libby_handoff(artifact):
+    """Create a non-rights review-case gate so Libby outputs can surface in human review.
+
+    Tracy rights warnings/clears that continue to Libby may not include a provenance
+    review recommendation. Without a review-case row, completed Libby classifications
+    can become invisible to /workspace/review-cases despite being ready for human
+    classification review.
+    """
+    if (artifact.get("processing_outcome") or "").strip().lower() not in {"pass", "review_required"}:
+        return None
+
+    risk_level = (artifact.get("risk_level") or "").strip().lower()
+    if risk_level in {"low", "medium", "high"}:
+        escalation_level = risk_level
+    else:
+        escalation_level = "medium"
+
+    return {
+        "current_stage": "libby_disposition_review",
+        "escalation_level": escalation_level,
+        "detail": "Tracy completed non-blocking provenance checks and routed through Libby before human classification review.",
+    }
 
 
 def build_libby_queue_item(
@@ -375,6 +408,7 @@ def run_provenance_task(task):
 
     return {
         "queue_item_id": queue_item_id,
+        "intake_record_id": intake_record_id,
         "agent": "tracy",
         "schema_version": SCHEMA_VERSION,
         "decision": decision,
@@ -427,9 +461,7 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
 
     queue_item["status"] = queue_status_for_outcome(artifact["processing_outcome"])
     queue_item["confidence"] = artifact["confidence"]
-    queue_item["escalation_reason"] = (
-        "provenance_requires_escalation" if artifact["decision"] == "escalate" else None
-    )
+    queue_item["escalation_reason"] = queue_escalation_reason_for_artifact(artifact)
     queue_item["completed_at"] = completed_at
     write_json(queue_item_path, queue_item)
 
@@ -495,7 +527,8 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
             durable_record=provenance_assessment,
             durable_kind="provenance_assessment",
         )
-        review_recommendation = artifact.get("review_recommendation")
+        rights_review_recommendation = artifact.get("review_recommendation")
+        review_recommendation = rights_review_recommendation or review_case_recommendation_for_libby_handoff(artifact)
         if review_recommendation:
             additional_db_records["review_case"] = bridge.create_review_case(
                 source_entity_type="provenance_assessment",
@@ -504,18 +537,19 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
                 escalation_level=review_recommendation["escalation_level"],
                 opened_at=completed_at,
             )
-            daisy_rights_coordination_queue_item = build_daisy_rights_coordination_queue_item(
-                queue_item=queue_item,
-                task=task,
-                artifact=artifact,
-                provenance_assessment_id=report_id,
-                created_review_case=additional_db_records["review_case"],
-                timestamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
-            )
-            daisy_runtime_root = Path("/data/.openclaw/workspaces/daisy/runtime")
-            daisy_rights_coordination_queue_item_path = daisy_runtime_root / "agent_queue_items" / f"{daisy_rights_coordination_queue_item['id']}.json"
-            write_json(daisy_rights_coordination_queue_item_path, daisy_rights_coordination_queue_item)
-            additional_db_records["daisy_rights_coordination_queue_item"] = bridge.upsert_agent_queue_item(daisy_rights_coordination_queue_item)
+            if rights_review_recommendation:
+                daisy_rights_coordination_queue_item = build_daisy_rights_coordination_queue_item(
+                    queue_item=queue_item,
+                    task=task,
+                    artifact=artifact,
+                    provenance_assessment_id=report_id,
+                    created_review_case=additional_db_records["review_case"],
+                    timestamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+                )
+                daisy_runtime_root = Path("/data/.openclaw/workspaces/daisy/runtime")
+                daisy_rights_coordination_queue_item_path = daisy_runtime_root / "agent_queue_items" / f"{daisy_rights_coordination_queue_item['id']}.json"
+                write_json(daisy_rights_coordination_queue_item_path, daisy_rights_coordination_queue_item)
+                additional_db_records["daisy_rights_coordination_queue_item"] = bridge.upsert_agent_queue_item(daisy_rights_coordination_queue_item)
 
     libby_runtime_root = Path("/data/.openclaw/workspaces/libby/runtime")
     libby_queue_item = build_libby_queue_item(

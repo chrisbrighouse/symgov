@@ -5,6 +5,7 @@ import html
 from html.parser import HTMLParser
 import importlib.util
 import json
+import mimetypes
 import re
 import socket
 import struct
@@ -288,6 +289,36 @@ def zip_member_source_asset(manifest, member, role="package_member_source"):
         "package_member_id": member["member_id"],
         "original_path": member["original_path"],
     }
+
+
+def upload_zip_package_member_objects(bridge, manifest, storage_env_file=None):
+    if not manifest or not manifest.get("source_package_object_key"):
+        return {"uploaded_count": 0, "uploads": [], "skipped_count": 0, "reason": "missing_source_package_object_key"}
+
+    uploads = []
+    skipped_count = 0
+    for member in manifest.get("members") or []:
+        if member.get("status") != "accepted":
+            skipped_count += 1
+            continue
+        path = member.get("safe_stored_path")
+        if not path or not Path(path).exists():
+            skipped_count += 1
+            continue
+        object_key = zip_member_source_asset(manifest, member).get("object_key")
+        if not object_key:
+            skipped_count += 1
+            continue
+        content_type = member.get("content_type") or mimetypes.guess_type(member.get("filename") or "")[0] or "application/octet-stream"
+        uploads.append(
+            bridge.upload_file(
+                object_key=object_key,
+                path=path,
+                content_type=content_type,
+                env_file=storage_env_file,
+            )
+        )
+    return {"uploaded_count": len(uploads), "uploads": uploads, "skipped_count": skipped_count}
 
 
 def mark_zip_task_as_standalone_symbol(task):
@@ -1479,7 +1510,7 @@ def queue_item_payload_to_task(queue_item):
     return payload
 
 
-def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_file=None):
+def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_file=None, storage_env_file=None):
     queue_item_path = Path(queue_item_path)
     runtime_root = Path(runtime_root)
 
@@ -1619,8 +1650,15 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
     write_json(durable_record_path, durable_record)
 
     db_persistence = None
+    zip_member_uploads = None
     if persist_db or env_flag("SYMGOV_PERSIST_TO_DB"):
         bridge = RuntimePersistenceBridge(env_file=db_env_file)
+        if artifact.get("package_manifest") and storage_env_file:
+            zip_member_uploads = upload_zip_package_member_objects(
+                bridge,
+                artifact.get("package_manifest"),
+                storage_env_file=storage_env_file,
+            )
         db_persistence = bridge.persist_agent_execution(
             queue_item=queue_item,
             run_record=run_record,
@@ -1645,6 +1683,7 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
         "durable_record_path": str(durable_record_path),
         "intake_record_path": None if is_source_discovery else str(durable_record_path),
         "db_persistence": db_persistence,
+        "zip_member_uploads": zip_member_uploads,
         "notifications": notification_status,
         "artifact": artifact,
         "package_child_queue_item_paths": package_child_queue_item_paths,
@@ -1682,6 +1721,10 @@ def parse_args():
         action="store_true",
         help="Also mirror queue, run, artifact, and intake records into the Symgov database.",
     )
+    parser.add_argument(
+        "--storage-env-file",
+        help="Path to the Symgov object-storage env file used for ZIP member object uploads.",
+    )
     return parser.parse_args()
 
 
@@ -1706,6 +1749,7 @@ def main():
             args.runtime_root,
             persist_db=args.persist_db,
             db_env_file=args.db_env_file,
+            storage_env_file=args.storage_env_file,
         )
         print(json.dumps(result, indent=2))
         return

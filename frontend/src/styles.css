@@ -974,6 +974,45 @@ a {
   align-items: start;
 }
 
+.rights-workbench-grid {
+  display: grid;
+  grid-template-columns: minmax(15rem, 0.48fr) minmax(0, 1.12fr) minmax(18rem, 0.7fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.rights-review-card .review-status {
+  text-transform: capitalize;
+}
+
+.rights-status-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.rights-evidence-card ul {
+  margin: 0.5rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.rights-decision-panel {
+  gap: 0.8rem;
+}
+
+.rights-decision-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.rights-queue-pane,
+.rights-evidence-pane,
+.rights-decision-pane {
+  position: sticky;
+  top: 6.1rem;
+  max-height: calc(100vh - 7.2rem);
+  overflow: auto;
+}
+
 .review-queue-pane,
 .review-decision-pane,
 .review-focus-pane {

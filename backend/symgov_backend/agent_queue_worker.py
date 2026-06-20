@@ -20,6 +20,7 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
         "runner_path": Path("/data/symgov/scripts/run_scott_intake.py"),
         "module": "symgov_scott_runner_worker",
         "persist_db": True,
+        "storage": True,
         "downstream_path": Path("/data/.openclaw/workspaces/scott/enqueue_scott_downstream.py"),
     },
     "vlad": {

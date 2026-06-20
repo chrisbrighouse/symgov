@@ -84,6 +84,11 @@ from ..schemas import (
     WorkspaceReggieQueueControlListResponse,
     WorkspaceReggieQueueControlSuggestionResponse,
     WorkspaceReviewSymbolPropertiesResponse,
+    WorkspaceRightsEvidenceResponse,
+    WorkspaceRightsReviewCaseListResponse,
+    WorkspaceRightsReviewCaseResponse,
+    WorkspaceRightsReviewDecisionRequest,
+    WorkspaceRightsReviewDecisionResponse,
     WorkspaceReviewSymbolPropertiesUpdateRequest,
     WorkspaceScottSourceSiteIncludeNextRunUpdateRequest,
     WorkspaceScottSourceSiteListResponse,
@@ -281,6 +286,44 @@ DECISION_TRANSITIONS = {
     },
 }
 
+RIGHTS_DECISION_TRANSITIONS = {
+    "clear_rights": {
+        "to_stage": "rights_cleared",
+        "action_code": "rights_clearance_recorded",
+        "target_agent_slug": "libby",
+        "target_stage": "classification_or_publication_readiness",
+        "close": False,
+    },
+    "restrict_publication": {
+        "to_stage": "rights_restricted",
+        "action_code": "publication_blocked_by_rights",
+        "target_agent_slug": "daisy",
+        "target_stage": "rights_block_coordination",
+        "close": False,
+    },
+    "request_rights_evidence": {
+        "to_stage": "waiting_for_rights_evidence",
+        "action_code": "request_rights_evidence",
+        "target_agent_slug": "scott",
+        "target_stage": "rights_evidence_collection",
+        "close": False,
+    },
+    "mark_conflict": {
+        "to_stage": "rights_conflict",
+        "action_code": "escalate_rights_conflict",
+        "target_agent_slug": "daisy",
+        "target_stage": "rights_conflict_coordination",
+        "close": False,
+    },
+    "defer_rights": {
+        "to_stage": "rights_deferred",
+        "action_code": "defer_rights_review",
+        "target_agent_slug": "daisy",
+        "target_stage": "rights_review_deferred",
+        "close": False,
+    },
+}
+
 SCOTT_SOURCE_SITE_BASE_LOAD_COLUMNS = (
     ScottSourceDiscoverySite.id,
     ScottSourceDiscoverySite.domain,
@@ -464,6 +507,52 @@ def build_provenance_notes(provenance_assessment: ProvenanceAssessment) -> list[
     if declaration:
         notes.append(f"Declaration excerpt: {declaration}")
     return notes
+
+
+def _list_of_dicts(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
+
+
+def _list_of_strings(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item or "").strip()]
+
+
+def build_rights_evidence_payload(provenance_assessment: ProvenanceAssessment) -> WorkspaceRightsEvidenceResponse:
+    report = provenance_assessment.report_json if isinstance(provenance_assessment.report_json, dict) else {}
+    evidence = provenance_assessment.evidence_json if isinstance(provenance_assessment.evidence_json, dict) else {}
+    source_context = report.get("source_context") or report.get("sourceContext") or evidence.get("source_context") or {}
+    if not isinstance(source_context, dict):
+        source_context = {}
+    recommended_actions = (
+        _list_of_strings(report.get("recommended_actions"))
+        or _list_of_strings(report.get("recommendedActions"))
+        or _list_of_strings(evidence.get("recommended_actions"))
+    )
+    return WorkspaceRightsEvidenceResponse(
+        provenanceAssessmentId=str(provenance_assessment.id),
+        tracyQueueItemId=str(provenance_assessment.queue_item_id) if getattr(provenance_assessment, "queue_item_id", None) else None,
+        rightsStatus=str(provenance_assessment.rights_status or "unknown"),
+        rightsDisposition=str(provenance_assessment.rights_disposition or "unknown"),
+        processingOutcome=str(provenance_assessment.processing_outcome or "unknown"),
+        riskLevel=str(provenance_assessment.risk_level or "unknown"),
+        confidence=float(provenance_assessment.confidence) if provenance_assessment.confidence is not None else None,
+        summary=str(provenance_assessment.summary or ""),
+        defects=_list_of_dicts(report.get("defects")),
+        recommendedActions=recommended_actions,
+        sourceContext=source_context,
+        evidence=evidence,
+        report=report,
+    )
+
+
+def build_rights_review_case_response(base: WorkspaceReviewCaseResponse, provenance_assessment: ProvenanceAssessment) -> WorkspaceRightsReviewCaseResponse:
+    payload = base.model_dump()
+    payload["rightsEvidence"] = build_rights_evidence_payload(provenance_assessment)
+    return WorkspaceRightsReviewCaseResponse(**payload)
 
 
 def build_preview_url(review_case_id: str, object_key: str | None) -> str | None:
@@ -3590,6 +3679,51 @@ def list_workspace_review_cases(
     return WorkspaceReviewCaseListResponse(items=items)
 
 
+@router.get(
+    "/rights-review-cases",
+    response_model=WorkspaceRightsReviewCaseListResponse,
+    responses={500: {"description": "Server error"}},
+)
+@legacy_router.get(
+    "/workspace/rights-review-cases",
+    response_model=WorkspaceRightsReviewCaseListResponse,
+    include_in_schema=False,
+)
+def list_workspace_rights_review_cases(
+    session: Session = Depends(get_db_session),
+) -> WorkspaceRightsReviewCaseListResponse:
+    rows = session.execute(
+        select(ReviewCase, ProvenanceAssessment)
+        .join(
+            ProvenanceAssessment,
+            and_(
+                ReviewCase.source_entity_type == "provenance_assessment",
+                ReviewCase.source_entity_id == ProvenanceAssessment.id,
+            ),
+        )
+        .where(ReviewCase.closed_at.is_(None))
+        .where(ReviewCase.current_stage == "provenance_rights_review")
+        .order_by(ReviewCase.opened_at.desc())
+    ).all()
+    items = []
+    for review_case, provenance_assessment in rows:
+        intake_record = session.get(IntakeRecord, provenance_assessment.intake_record_id)
+        if intake_record is None:
+            continue
+        classification_record = load_current_classification(
+            session,
+            review_case_id=str(review_case.id),
+            provenance_assessment_id=str(provenance_assessment.id),
+        )
+        base = attach_latest_decision(
+            session,
+            build_provenance_workspace_item(session, review_case, provenance_assessment, intake_record, classification_record),
+        )
+        items.append(build_rights_review_case_response(base, provenance_assessment))
+    session.commit()
+    return WorkspaceRightsReviewCaseListResponse(items=items)
+
+
 def create_review_action(
     *,
     review_case: ReviewCase,
@@ -3739,6 +3873,156 @@ def list_workspace_review_symbol_property_options(
             )
             for option in options
         ]
+    )
+
+
+@router.post(
+    "/rights-review-cases/{review_case_id}/decisions",
+    response_model=WorkspaceRightsReviewDecisionResponse,
+    responses={404: {"description": "Review case not found"}, 422: {"description": "Invalid rights decision"}},
+)
+def create_workspace_rights_review_decision(
+    review_case_id: str,
+    request: WorkspaceRightsReviewDecisionRequest,
+    session: Session = Depends(get_db_session),
+) -> WorkspaceRightsReviewDecisionResponse:
+    parsed_case_id = parse_review_case_id(review_case_id)
+    review_case = session.get(ReviewCase, parsed_case_id)
+    if review_case is None:
+        raise HTTPException(status_code=404, detail="Review case not found.")
+    if review_case.current_stage != "provenance_rights_review":
+        raise HTTPException(status_code=422, detail="Review case is not a rights review.")
+
+    decision_code = request.decisionCode.strip()
+    if decision_code not in RIGHTS_DECISION_TRANSITIONS:
+        raise HTTPException(status_code=422, detail=f"Unsupported rights review decision: {decision_code}.")
+    note_required = {"restrict_publication", "request_rights_evidence", "mark_conflict", "defer_rights"}
+    if decision_code in note_required and not request.evidenceNote.strip():
+        raise HTTPException(status_code=422, detail="Evidence note is required for this rights decision.")
+
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    previous_decisions = (
+        session.query(HumanReviewDecision)
+        .filter(HumanReviewDecision.review_case_id == review_case.id)
+        .filter(HumanReviewDecision.superseded_at.is_(None))
+        .all()
+    )
+    for previous in previous_decisions:
+        previous.superseded_at = now
+
+    transition = RIGHTS_DECISION_TRANSITIONS[decision_code]
+    from_stage = review_case.current_stage
+    to_stage = transition["to_stage"]
+    updated_rights = {
+        "corrected_rights_status": request.correctedRightsStatus or None,
+        "corrected_rights_disposition": request.correctedRightsDisposition or None,
+        "corrected_processing_outcome": request.correctedProcessingOutcome or None,
+        "license_label": request.licenseLabel or None,
+        "source_url": request.sourceUrl or None,
+        "evidence_note": request.evidenceNote or None,
+    }
+    provenance_assessment = None
+    previous_rights = {}
+    if review_case.source_entity_type == "provenance_assessment":
+        provenance_assessment = session.get(ProvenanceAssessment, review_case.source_entity_id)
+    if provenance_assessment is not None:
+        previous_rights = {
+            "rights_status": provenance_assessment.rights_status,
+            "rights_disposition": provenance_assessment.rights_disposition,
+            "processing_outcome": provenance_assessment.processing_outcome,
+            "evidence_json": provenance_assessment.evidence_json or {},
+        }
+        if request.correctedRightsStatus:
+            provenance_assessment.rights_status = request.correctedRightsStatus
+        if request.correctedRightsDisposition:
+            provenance_assessment.rights_disposition = request.correctedRightsDisposition
+        if request.correctedProcessingOutcome:
+            provenance_assessment.processing_outcome = request.correctedProcessingOutcome
+        evidence_json = dict(provenance_assessment.evidence_json or {})
+        evidence_json["reviewer_rights_correction"] = {
+            "decision_code": decision_code,
+            "license_label": request.licenseLabel or None,
+            "source_url": request.sourceUrl or None,
+            "evidence_note": request.evidenceNote or None,
+            "decider_name": request.deciderName,
+            "decider_role": request.deciderRole or "rights_reviewer",
+            "corrected_at": isoformat_utc(now),
+        }
+        if request.licenseLabel:
+            evidence_json["license_label"] = request.licenseLabel
+        if request.sourceUrl:
+            evidence_json["source_url"] = request.sourceUrl
+        provenance_assessment.evidence_json = evidence_json
+        session.add(provenance_assessment)
+    decision = HumanReviewDecision(
+        review_case_id=review_case.id,
+        decision_code=decision_code,
+        decision_summary=f"{request.deciderName} recorded rights decision {decision_code.replace('_', ' ')}.",
+        decision_note=request.evidenceNote or None,
+        decided_by=None,
+        decider_name=request.deciderName,
+        decider_role=request.deciderRole or "rights_reviewer",
+        from_stage=from_stage,
+        to_stage=to_stage,
+        decision_payload_json={
+            "review_case_id": str(review_case.id),
+            "rights_decision": decision_code,
+            "updated_rights": updated_rights,
+        },
+        created_at=now,
+    )
+    session.add(decision)
+    session.flush()
+    action = create_review_action(
+        review_case=review_case,
+        decision=decision,
+        action_code=transition["action_code"],
+        action_status="pending",
+        payload={"decision_code": decision_code, "updated_rights": updated_rights},
+        target_agent_slug=transition["target_agent_slug"],
+        target_stage=transition["target_stage"],
+    )
+    session.add(action)
+    review_case.current_stage = to_stage
+    if transition["close"]:
+        review_case.closed_at = now
+    session.add(
+        AuditEvent(
+            entity_type="review_case",
+            entity_id=review_case.id,
+            action="rights_review_decision_recorded",
+            actor_id=None,
+            payload_json={
+                "decision_id": str(decision.id),
+                "decision_code": decision_code,
+                "from_stage": from_stage,
+                "to_stage": to_stage,
+                "updated_rights": updated_rights,
+                "previous_rights": previous_rights,
+                "provenance_assessment_id": str(provenance_assessment.id) if provenance_assessment is not None else None,
+            },
+            created_at=now,
+        )
+    )
+    session.commit()
+    session.refresh(review_case)
+    session.refresh(action)
+    return WorkspaceRightsReviewDecisionResponse(
+        reviewCaseId=str(review_case.id),
+        decision=build_decision_summary(decision),
+        actions=[
+            WorkspaceReviewActionResponse(
+                id=str(action.id),
+                actionCode=action.action_code,
+                actionStatus=action.action_status,
+                targetAgentSlug=action.target_agent_slug,
+                targetStage=action.target_stage,
+                createdAt=isoformat_utc(action.created_at),
+            )
+        ],
+        currentStage=review_case.current_stage,
+        closedAt=isoformat_utc(review_case.closed_at) if review_case.closed_at else None,
+        updatedRights=updated_rights,
     )
 
 

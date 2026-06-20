@@ -306,6 +306,73 @@ def test_scott_zip_rejects_path_traversal_without_extracting(tmp_path):
     assert "path_traversal" in artifact["package_manifest"]["members"][0]["reason_codes"]
 
 
+def test_scott_process_queue_uploads_extracted_zip_members_to_declared_object_keys(tmp_path, monkeypatch):
+    zip_path = build_zip(
+        tmp_path / "symbols.zip",
+        {"a/pump.svg": minimal_svg("pump"), "b/valve.dxf": minimal_dxf()},
+    )
+    runtime_root = tmp_path / "runtime"
+    queue_item_path = runtime_root / "agent_queue_items" / "aqi-scott-zip-upload-test.json"
+    queue_item_path.parent.mkdir(parents=True)
+    queue_item = {
+        "id": "aqi-scott-zip-upload-test",
+        "agent_id": "scott",
+        "source_type": "raw_submission",
+        "source_id": "src-zip-upload-test",
+        "status": "queued",
+        "priority": "medium",
+        "payload_json": {
+            "submission_kind": "contributor_submission",
+            "source_ref": "external-submission-zip-upload-test",
+            "submitted_by": "Tester <tester@example.test>",
+            "raw_input_path": str(zip_path),
+            "declared_format": "zip",
+            "candidate_symbol_id": "PLANT-SYMBOLS",
+            "contributor_declaration": "I can submit this test ZIP.",
+            "raw_object_key": "external-submissions/batch/symbols.zip",
+            "package_workspace_root": str(tmp_path / "packages"),
+        },
+    }
+    queue_item_path.write_text(json.dumps(queue_item), encoding="utf-8")
+    monkeypatch.setattr(scott_runner, "send_agent_status_update", lambda *args, **kwargs: {"status": "skipped"})
+
+    class FakeBridge:
+        instances = []
+
+        def __init__(self, env_file=None):
+            self.env_file = env_file
+            self.uploads = []
+            FakeBridge.instances.append(self)
+
+        def upload_file(self, **kwargs):
+            self.uploads.append(kwargs)
+            return {"status": "uploaded", "object_key": kwargs["object_key"]}
+
+        def persist_agent_execution(self, **kwargs):
+            return {"status": "persisted"}
+
+    monkeypatch.setattr(scott_runner, "RuntimePersistenceBridge", FakeBridge)
+
+    result = scott_runner.process_queue_item(
+        queue_item_path,
+        runtime_root,
+        persist_db=True,
+        db_env_file=tmp_path / "db.env",
+        storage_env_file=tmp_path / "storage.env",
+    )
+
+    bridge = FakeBridge.instances[0]
+    uploaded_keys = [upload["object_key"] for upload in bridge.uploads]
+    accepted_members = [member for member in result["artifact"]["package_manifest"]["members"] if member["status"] == "accepted"]
+    assert uploaded_keys == [
+        f"external-submissions/batch/symbols.zip/members/{accepted_members[0]['member_id']}/pump.svg",
+        f"external-submissions/batch/symbols.zip/members/{accepted_members[1]['member_id']}/valve.dxf",
+    ]
+    assert all(upload["env_file"] == tmp_path / "storage.env" for upload in bridge.uploads)
+    assert all(Path(upload["path"]).exists() for upload in bridge.uploads)
+    assert result["zip_member_uploads"]["uploaded_count"] == 2
+
+
 def test_scott_process_queue_writes_child_scott_queue_items_for_zip(tmp_path, monkeypatch):
     zip_path = build_zip(tmp_path / "symbols.zip", {"a/pump.svg": minimal_svg("pump"), "b/valve.dxf": minimal_dxf()})
     runtime_root = tmp_path / "runtime"

@@ -11,6 +11,7 @@ import {
   fetchWorkspaceDaisyReports,
   fetchWorkspaceQueueItems,
   fetchWorkspaceReviewCases,
+  fetchWorkspaceRightsReviewCases,
   fetchWorkspaceReviewSymbolPropertyOptions,
   processWorkspaceSplitReviewDecisions,
   startHannahCurationSearch,
@@ -20,6 +21,7 @@ import {
   stopScottSourceSearch,
   stopWhitneyDemandScan,
   submitWorkspaceReviewDecision,
+  submitWorkspaceRightsReviewDecision,
   submitExternalSubmission,
   submitPublishedSymbolCommand,
   updateScottSourceSiteIncludeNextRun,
@@ -57,6 +59,14 @@ const REVIEW_CHILD_ACTION_OPTIONS = [
   ['duplicate', 'Duplicate'],
   ['deleted', 'Delete'],
   ['defer', 'Defer']
+];
+
+const RIGHTS_REVIEW_ACTION_OPTIONS = [
+  ['clear_rights', 'Clear rights'],
+  ['restrict_publication', 'Restrict publication'],
+  ['request_rights_evidence', 'Request rights evidence'],
+  ['mark_conflict', 'Mark conflict'],
+  ['defer_rights', 'Defer rights']
 ];
 
 const WORKSPACE_QUEUE_COLUMNS = [
@@ -229,6 +239,7 @@ function App() {
           <Route path="/" element={<Navigate to="/workspace" replace />} />
           <Route path="/workspace" element={<WorkspacePage />} />
           <Route path="/reviews" element={<ReviewsPage />} />
+          <Route path="/rights" element={<RightsReviewPage />} />
           <Route path="/standards" element={<StandardsPage />} />
           <Route path="/standards/submit" element={<SubmissionPage />} />
           <Route path="/support" element={<SupportPage />} />
@@ -254,6 +265,9 @@ function Header() {
       <nav className="top-nav" aria-label="Primary navigation">
         <NavLink to="/standards/submit" className={({ isActive }) => navClass(isActive)}>
           Submissions
+        </NavLink>
+        <NavLink to="/rights" className={({ isActive }) => navClass(isActive)}>
+          Rights
         </NavLink>
         <NavLink to="/reviews" className={({ isActive }) => navClass(isActive)}>
           Reviews
@@ -1520,8 +1534,11 @@ function WorkspacePage() {
       return;
     }
 
-    const queueParam = item.queueFamily === 'rights_review' || item.columnId === 'rights_review' ? '&queue=rights' : '';
-    navigate(`/reviews?review=${encodeURIComponent(item.reviewCaseId)}${queueParam}`);
+    if (item.queueFamily === 'rights_review' || item.columnId === 'rights_review') {
+      navigate(`/rights?review=${encodeURIComponent(item.reviewCaseId)}`);
+      return;
+    }
+    navigate(`/reviews?review=${encodeURIComponent(item.reviewCaseId)}`);
   };
   const openPublishedFromWorkspace = (item) => {
     const standardsPath = item.publishedStandardsPath || (item.publishedSymbolId ? `/standards?symbol=${encodeURIComponent(item.publishedSymbolId)}` : '');
@@ -2604,6 +2621,10 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
 
   async function saveProperties(event) {
     event.preventDefault();
+    if (typeof onSaveProperties !== 'function') {
+      setPropertyState({ pending: false, message: '', error: 'Symbol property editing is not available on this screen.' });
+      return;
+    }
     setPropertyState({ pending: true, message: '', error: '' });
     try {
       await onSaveProperties({
@@ -2768,7 +2789,7 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
           <button
             type="submit"
             className="action-button secondary compact-save-button"
-            disabled={propertyState.pending || workspaceMode !== 'live'}
+            disabled={propertyState.pending || workspaceMode !== 'live' || typeof onSaveProperties !== 'function'}
           >
             {propertyState.pending ? 'Saving...' : 'Save'}
           </button>
@@ -2803,6 +2824,364 @@ function mergePropertyOptions(options = [], currentValue = '') {
     values.unshift(current);
   }
   return values;
+}
+
+function RightsReviewPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [query, setQuery] = useState('');
+  const [rightsState, setRightsState] = useState({
+    loading: true,
+    mode: appConfig.apiRoot ? 'loading' : 'seeded',
+    message: appConfig.apiRoot ? 'Loading Rights reviews…' : 'No API root configured. Showing seeded rights review queue.',
+    items: []
+  });
+  const [daisyState, setDaisyState] = useState({ loading: true, mode: appConfig.apiRoot ? 'loading' : 'seeded', message: '', items: [] });
+  const [activeId, setActiveId] = useState('');
+  const [decisionState, setDecisionState] = useState({});
+  const [submitState, setSubmitState] = useState({ pending: false, message: '', error: '' });
+  const requestedReviewId = searchParams.get('review') || '';
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([fetchWorkspaceRightsReviewCases(), fetchWorkspaceDaisyReports()]).then(([rightsResult, daisyResult]) => {
+      if (cancelled) {
+        return;
+      }
+      setRightsState({
+        loading: false,
+        mode: rightsResult.ok ? 'live' : 'seeded',
+        message: rightsResult.ok
+          ? (rightsResult.items.length ? rightsResult.message : 'No live Rights review cases are currently open.')
+          : `${rightsResult.message} Showing empty Rights queue instead.`,
+        items: rightsResult.ok ? rightsResult.items : []
+      });
+      setDaisyState({
+        loading: false,
+        mode: daisyResult.ok ? 'live' : 'seeded',
+        message: daisyResult.ok ? daisyResult.message : daisyResult.message || 'Daisy coordination unavailable.',
+        items: daisyResult.ok ? daisyResult.items : []
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const rightsQueue = useMemo(() => {
+    return rightsState.items.filter((item) => item.currentStage === 'provenance_rights_review');
+  }, [rightsState.items]);
+
+  const filteredQueue = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) {
+      return rightsQueue;
+    }
+    return rightsQueue.filter((item) => {
+      const evidence = item.rightsEvidence || {};
+      return [
+        item.id,
+        item.symbolId,
+        item.displayName,
+        item.title,
+        item.summary,
+        item.sourceFileName,
+        item.rightsStatus,
+        item.rightsDisposition,
+        item.processingOutcome,
+        evidence.rightsStatus,
+        evidence.riskLevel,
+        evidence.summary,
+        evidence.evidence?.source_url,
+        evidence.sourceContext?.domain
+      ].some((value) => String(value || '').toLowerCase().includes(normalized));
+    });
+  }, [query, rightsQueue]);
+
+  useEffect(() => {
+    if (requestedReviewId && filteredQueue.some((item) => item.id === requestedReviewId)) {
+      setActiveId(requestedReviewId);
+      return;
+    }
+    if (!filteredQueue.some((item) => item.id === activeId)) {
+      setActiveId(filteredQueue[0]?.id || '');
+    }
+  }, [filteredQueue, requestedReviewId, activeId]);
+
+  const activeChange = filteredQueue.find((item) => item.id === activeId) || filteredQueue[0];
+  const activeIndex = activeChange ? filteredQueue.findIndex((item) => item.id === activeChange.id) : -1;
+  const activeDaisyReports = useMemo(
+    () => daisyState.items.filter((item) => item.reviewCaseId === activeChange?.id),
+    [activeChange?.id, daisyState.items]
+  );
+  const activeDecision = getRightsDecision(activeChange);
+
+  function getRightsDecision(item) {
+    if (!item) {
+      return emptyRightsDecision();
+    }
+    return decisionState[item.id] || emptyRightsDecision(item);
+  }
+
+  function emptyRightsDecision(item = {}) {
+    return {
+      decisionCode: '',
+      correctedRightsStatus: item.rightsStatus || item.rightsEvidence?.rightsStatus || '',
+      correctedRightsDisposition: item.rightsDisposition || item.rightsEvidence?.rightsDisposition || '',
+      correctedProcessingOutcome: item.processingOutcome || item.rightsEvidence?.processingOutcome || '',
+      licenseLabel: item.rightsEvidence?.evidence?.license_label || item.rightsEvidence?.report?.license_label || '',
+      sourceUrl: item.rightsEvidence?.evidence?.source_url || item.rightsEvidence?.sourceContext?.source_url || '',
+      evidenceNote: '',
+      deciderName: 'Human',
+      deciderRole: 'rights_reviewer'
+    };
+  }
+
+  function updateRightsDecision(updates) {
+    if (!activeChange) {
+      return;
+    }
+    setSubmitState((current) => current.pending ? current : { pending: false, message: '', error: '' });
+    setDecisionState((current) => ({
+      ...current,
+      [activeChange.id]: {
+        ...getRightsDecision(activeChange),
+        ...updates
+      }
+    }));
+  }
+
+  function selectRightsReview(reviewId) {
+    setActiveId(reviewId);
+    const nextParams = new URLSearchParams(searchParams);
+    if (reviewId) {
+      nextParams.set('review', reviewId);
+    } else {
+      nextParams.delete('review');
+    }
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  function selectAdjacentRightsReview(direction) {
+    if (!filteredQueue.length || activeIndex < 0) {
+      return;
+    }
+    const nextIndex = Math.min(Math.max(activeIndex + direction, 0), filteredQueue.length - 1);
+    selectRightsReview(filteredQueue[nextIndex].id);
+  }
+
+  async function refreshRightsData() {
+    const [rightsResult, daisyResult] = await Promise.all([fetchWorkspaceRightsReviewCases(), fetchWorkspaceDaisyReports()]);
+    if (rightsResult.ok) {
+      setRightsState({
+        loading: false,
+        mode: 'live',
+        message: rightsResult.items.length ? rightsResult.message : 'No live Rights review cases are currently open.',
+        items: rightsResult.items
+      });
+    }
+    if (daisyResult.ok) {
+      setDaisyState({ loading: false, mode: 'live', message: daisyResult.message, items: daisyResult.items });
+    }
+  }
+
+  async function submitRightsDecision() {
+    if (!activeChange || !activeDecision.decisionCode) {
+      return;
+    }
+    setSubmitState({ pending: true, message: '', error: '' });
+    try {
+      const result = await submitWorkspaceRightsReviewDecision(activeChange.id, activeDecision);
+      setSubmitState({
+        pending: false,
+        message: `Rights decision recorded: ${result.decision.decisionCode.replaceAll('_', ' ')}.`,
+        error: ''
+      });
+      await refreshRightsData();
+    } catch (error) {
+      setSubmitState({ pending: false, message: '', error: error instanceof Error ? error.message : 'Rights review decision failed.' });
+    }
+  }
+
+  return (
+    <section className="experience-shell rights-review-shell">
+      <div className="hero-panel glass-panel workspace-hero">
+        <div>
+          <p className="eyebrow">Daisy-coordinated Rights</p>
+          <h2>Rights Review</h2>
+        </div>
+        <div className="action-stack">
+          <label className="field search-field" aria-label="Search rights reviews">
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search rights status, ID, source, evidence, or Tracy summary"
+            />
+          </label>
+        </div>
+      </div>
+      <p className={`page-status-text status-${rightsState.mode}`}>
+        {rightsState.loading ? 'Loading Rights reviews...' : rightsState.message} · Coordinator: Daisy
+      </p>
+
+      <div className="rights-workbench-grid">
+        <section className="glass-panel pane rights-queue-pane">
+          <div className="review-pane-heading">
+            <div className="review-queue-title-row">
+              <h3>Rights Queue</h3>
+              <div className="review-navigation compact-icon-navigation" aria-label="Rights review navigation">
+                <button type="button" className="icon-nav-button" disabled={activeIndex <= 0} onClick={() => selectAdjacentRightsReview(-1)} aria-label="Previous rights review">
+                  &lt;
+                </button>
+                <button type="button" className="icon-nav-button" disabled={activeIndex < 0 || activeIndex >= filteredQueue.length - 1} onClick={() => selectAdjacentRightsReview(1)} aria-label="Next rights review">
+                  &gt;
+                </button>
+              </div>
+            </div>
+            <p className="daisy-empty-text">{filteredQueue.length} Daisy-controlled rights case{filteredQueue.length === 1 ? '' : 's'}</p>
+          </div>
+          <div className="stack-list">
+            {filteredQueue.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`queue-card review-list-card rights-review-card ${item.id === activeId ? 'active' : ''}`}
+                onClick={() => selectRightsReview(item.id)}
+              >
+                <div className="queue-card-topline">
+                  <strong>{displaySymbolId(item)}</strong>
+                  <span className={`review-status review-${String(item.rightsStatus || item.rightsEvidence?.rightsStatus || 'pending').toLowerCase().replace(/[^a-z0-9_-]+/g, '-')}`}>
+                    {item.rightsStatus || item.rightsEvidence?.rightsStatus || 'Rights'}
+                  </span>
+                </div>
+                <p>{item.title}</p>
+                <small>{item.rightsDisposition || item.rightsEvidence?.rightsDisposition || 'Disposition pending'} · {item.rightsEvidence?.riskLevel || item.risk || 'Risk pending'}</small>
+                <small>{item.sourceFileName || 'Source file pending'}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="glass-panel pane rights-evidence-pane review-focus-pane">
+          <SectionHeading title="Rights Evidence" subtitle={activeChange ? `${activeIndex + 1} of ${filteredQueue.length}` : 'No active item'} />
+          {activeChange ? (
+            <>
+              <div className="detail-heading">
+                <div>
+                  <h3>{displaySymbolId(activeChange)}</h3>
+                  <p>{activeChange.sourceFileName || 'Original file not recorded'} · {activeChange.title}</p>
+                </div>
+                <span className="status-pill">{activeChange.rightsEvidence?.riskLevel || activeChange.risk}</span>
+              </div>
+              <ReviewSourceVisual
+                activeChange={activeChange}
+                activeChildren={[]}
+                reviewedChildCount={0}
+                onSaveProperties={null}
+                propertyOptions={{ category: [], discipline: [] }}
+                workspaceMode={rightsState.mode}
+              />
+              <div className="rights-status-grid fact-grid">
+                <Fact label="Tracy rights status" value={activeChange.rightsEvidence?.rightsStatus || activeChange.rightsStatus || 'Unknown'} />
+                <Fact label="Tracy disposition" value={activeChange.rightsEvidence?.rightsDisposition || activeChange.rightsDisposition || 'Unknown'} />
+                <Fact label="Processing outcome" value={activeChange.rightsEvidence?.processingOutcome || activeChange.processingOutcome || 'Unknown'} />
+                <Fact label="Risk level" value={activeChange.rightsEvidence?.riskLevel || activeChange.risk || 'Unknown'} />
+                <Fact label="Confidence" value={typeof activeChange.rightsEvidence?.confidence === 'number' ? `${Math.round(activeChange.rightsEvidence.confidence * 100)}%` : 'Pending'} />
+                <Fact label="Source domain" value={activeChange.rightsEvidence?.sourceContext?.domain || 'Unknown'} />
+              </div>
+              <div className="copy-block rights-evidence-card">
+                <h4>Tracy summary</h4>
+                <p>{activeChange.rightsEvidence?.summary || activeChange.summary || 'No Tracy summary is available.'}</p>
+              </div>
+              <div className="copy-block rights-evidence-card">
+                <h4>Tracy defects and recommended actions</h4>
+                {activeChange.rightsEvidence?.defects?.length ? (
+                  <ul>
+                    {activeChange.rightsEvidence.defects.map((defect, index) => (
+                      <li key={`defect-${index}`}><strong>{defect.code || 'Defect'}</strong>: {defect.message || defect.summary || JSON.stringify(defect)}</li>
+                    ))}
+                  </ul>
+                ) : <p>No defects were itemised.</p>}
+                {activeChange.rightsEvidence?.recommendedActions?.length ? (
+                  <ul>
+                    {activeChange.rightsEvidence.recommendedActions.map((action, index) => <li key={`action-${index}`}>{action}</li>)}
+                  </ul>
+                ) : <p>No recommended actions were itemised.</p>}
+              </div>
+              {activeDaisyReports.length ? (
+                <div className="copy-block daisy-block">
+                  <h4>Daisy coordination</h4>
+                  <div className="daisy-report-list">
+                    {activeDaisyReports.map((report) => <DaisyReportCard key={report.id} report={report} />)}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          ) : (
+            <EmptyState title="No Rights reviews" body="There are no Daisy-coordinated rights reviews to show." />
+          )}
+        </section>
+
+        <section className="glass-panel pane rights-decision-pane">
+          <SectionHeading title="Rights Decision" subtitle="Correct fields and record outcome" />
+          {activeChange ? (
+            <div className="decision-block rights-decision-panel">
+              <h4>Correct problem fields</h4>
+              <label className="field">
+                <span>Corrected rights status</span>
+                <input value={activeDecision.correctedRightsStatus} onChange={(event) => updateRightsDecision({ correctedRightsStatus: event.target.value })} placeholder="restricted, conflict, cleared, unknown" />
+              </label>
+              <label className="field">
+                <span>Corrected rights disposition</span>
+                <input value={activeDecision.correctedRightsDisposition} onChange={(event) => updateRightsDecision({ correctedRightsDisposition: event.target.value })} placeholder="review_required, cleared, blocked" />
+              </label>
+              <label className="field">
+                <span>Corrected processing outcome</span>
+                <input value={activeDecision.correctedProcessingOutcome} onChange={(event) => updateRightsDecision({ correctedProcessingOutcome: event.target.value })} placeholder="blocked, continue, evidence_needed" />
+              </label>
+              <label className="field">
+                <span>License or permission label</span>
+                <input value={activeDecision.licenseLabel} onChange={(event) => updateRightsDecision({ licenseLabel: event.target.value })} placeholder="Permission granted, public domain, restricted vendor asset" />
+              </label>
+              <label className="field">
+                <span>Source URL / evidence link</span>
+                <input value={activeDecision.sourceUrl} onChange={(event) => updateRightsDecision({ sourceUrl: event.target.value })} placeholder="https://..." />
+              </label>
+              <div className="rights-decision-actions simple-review-actions" role="group" aria-label="Rights review decision options">
+                {RIGHTS_REVIEW_ACTION_OPTIONS.map(([value, label]) => (
+                  <button
+                    key={value}
+                    type="button"
+                    className={`action-button case-decision-button rights-decision-${value} ${activeDecision.decisionCode === value ? 'selected' : ''}`}
+                    onClick={() => updateRightsDecision({ decisionCode: activeDecision.decisionCode === value ? '' : value })}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <label className="field">
+                <span>Rights evidence note</span>
+                <textarea rows="5" value={activeDecision.evidenceNote} onChange={(event) => updateRightsDecision({ evidenceNote: event.target.value })} placeholder="Explain why the rights status is being cleared, restricted, or sent back for more evidence." />
+              </label>
+              <button
+                type="button"
+                className={`action-button record-review-button ${submitState.pending ? 'recording' : ''} ${submitState.message ? 'recorded' : ''} ${submitState.error ? 'failed' : ''}`}
+                disabled={submitState.pending || rightsState.mode !== 'live' || !activeDecision.decisionCode}
+                onClick={submitRightsDecision}
+              >
+                {submitState.pending ? 'Submitting...' : submitState.message ? 'Submitted' : 'Submit Rights Decision'}
+              </button>
+              {submitState.message ? <p className="success-text">{submitState.message}</p> : null}
+              {submitState.error ? <p className="error-text">{submitState.error}</p> : null}
+              {rightsState.mode !== 'live' ? <p className="daisy-empty-text">Decision persistence requires the live Symgov API.</p> : null}
+            </div>
+          ) : (
+            <EmptyState title="No active Rights case" body="Select a Rights queue card to review Tracy evidence and correct the problem fields." />
+          )}
+        </section>
+      </div>
+    </section>
+  );
 }
 
 function ReviewsPage() {

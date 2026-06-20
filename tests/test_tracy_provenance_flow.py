@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import sys
 
@@ -169,6 +170,7 @@ def test_ambiguous_rights_emit_canonical_warning_and_non_blocking_processing_sta
 
     assert artifact["rights_disposition"] == "unknown_warning"
     assert artifact["processing_outcome"] == "review_required"
+    assert tracy.queue_escalation_reason_for_artifact(artifact) is None
 
 
 def test_restricted_rights_emit_canonical_blocking_states():
@@ -187,3 +189,127 @@ def test_restricted_rights_emit_canonical_blocking_states():
 
     assert artifact["rights_disposition"] == "restricted"
     assert artifact["processing_outcome"] == "failed"
+    assert tracy.queue_escalation_reason_for_artifact(artifact) == "provenance_rights_review_required"
+
+
+def test_non_blocking_rights_get_libby_gate_review_case_recommendation():
+    tracy = load_tracy_runner()
+
+    recommendation = tracy.review_case_recommendation_for_libby_handoff(
+        {
+            "processing_outcome": "review_required",
+            "risk_level": "medium",
+        }
+    )
+
+    assert recommendation == {
+        "current_stage": "libby_disposition_review",
+        "escalation_level": "medium",
+        "detail": "Tracy completed non-blocking provenance checks and routed through Libby before human classification review.",
+    }
+
+
+def test_process_queue_item_creates_libby_gate_review_case_when_provenance_is_non_blocking(monkeypatch, tmp_path):
+    tracy = load_tracy_runner()
+
+    queue_dir = tmp_path / "runtime" / "agent_queue_items"
+    queue_dir.mkdir(parents=True)
+    queue_item_path = queue_dir / "aqi-tracy-test-nonblocking.json"
+    queue_item_path.write_text(
+        json.dumps(
+            {
+                "id": "aqi-tracy-test-nonblocking",
+                "agent_id": "tracy",
+                "source_type": "intake_record",
+                "source_id": "ir-test-nonblocking",
+                "status": "queued",
+                "priority": "medium",
+                "payload_json": {
+                    "intake_record_id": "ir-test-nonblocking",
+                    "candidate_symbol_id": "ELEC-LIGHTING-TEST-001",
+                    "candidate_title": "Lighting Test Symbol",
+                    "declared_format": "dxf",
+                    "raw_object_key": "external-submissions/test/lighting.zip/members/0001/Lighting_Test_Symbol.dxf",
+                    "submission_batch_id": "subext-test",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    artifact = {
+        "schema_version": "tracy-local-contract-0.2.0",
+        "queue_item_id": "aqi-tracy-test-nonblocking",
+        "intake_record_id": "ir-test-nonblocking",
+        "decision": "escalate",
+        "rights_status": "unknown",
+        "rights_disposition": "unknown_warning",
+        "processing_outcome": "review_required",
+        "risk_level": "medium",
+        "confidence": 0.42,
+        "reviewer_summary": "Package-code-only provenance warning; continue to Libby.",
+        "evidence": {"standards_source_refs": []},
+        "recommended_actions": ["route_to_libby"],
+        "defects": [],
+        "evidence_trace": [],
+        "escalation_target": "libby",
+        "review_recommendation": None,
+    }
+
+    monkeypatch.setattr(tracy, "run_provenance_task", lambda task: artifact)
+    monkeypatch.setattr(tracy, "send_agent_status_update", lambda *args, **kwargs: {"status": "skipped"})
+
+    written_payloads = []
+
+    def fake_write_json(path, payload):
+        written_payloads.append((str(path), payload))
+
+    monkeypatch.setattr(tracy, "write_json", fake_write_json)
+
+    class FakeBridge:
+        last_instance = None
+
+        def __init__(self, env_file=None):
+            self.env_file = env_file
+            self.created_review_cases = []
+            FakeBridge.last_instance = self
+
+        def persist_agent_execution(self, **kwargs):
+            return {"status": "persisted"}
+
+        def create_review_case(self, **kwargs):
+            self.created_review_cases.append(kwargs)
+            return {
+                "id": "review-libby-gate-0001",
+                "source_entity_type": kwargs["source_entity_type"],
+                "source_entity_id": kwargs["source_entity_id"],
+                "current_stage": kwargs["current_stage"],
+                "escalation_level": kwargs["escalation_level"],
+            }
+
+        def upsert_agent_queue_item(self, queue_item):
+            return {"status": "upserted", "id": queue_item["id"]}
+
+    monkeypatch.setattr(tracy, "RuntimePersistenceBridge", FakeBridge)
+
+    result = tracy.process_queue_item(
+        queue_item_path,
+        tmp_path / "runtime",
+        persist_db=True,
+        db_env_file=tmp_path / "db.env",
+    )
+
+    assert result["additional_db_records"]["review_case"]["id"] == "review-libby-gate-0001"
+    assert result["additional_db_records"]["review_case"]["current_stage"] == "libby_disposition_review"
+
+    assert FakeBridge.last_instance is not None
+    assert FakeBridge.last_instance.created_review_cases[0]["current_stage"] == "libby_disposition_review"
+    assert FakeBridge.last_instance.created_review_cases[0]["escalation_level"] == "medium"
+
+    libby_handoff_payloads = [
+        payload for path, payload in written_payloads if "/workspaces/libby/runtime/agent_queue_items/" in path
+    ]
+    assert len(libby_handoff_payloads) == 1
+    libby_payload = libby_handoff_payloads[0]["payload_json"]
+    assert libby_payload["review_case_id"] == "review-libby-gate-0001"
+    assert libby_payload["current_stage"] == "libby_disposition_review"

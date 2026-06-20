@@ -27,13 +27,31 @@ def test_daisy_rights_review_queue_family_is_routed_to_rights_lane_before_agent_
     assert "candidate.id === 'rights_review'" in source
 
 
-def test_rights_lane_cards_open_dedicated_rights_review_filter():
+def test_rights_lane_cards_open_dedicated_rights_review_screen():
     source = APP_JSX.read_text(encoding="utf-8")
 
     assert "['human_review', 'rights_review', 'ux_feedback'].includes(column.id)" in source
     assert "item.queueFamily === 'rights_review' || item.columnId === 'rights_review'" in source
-    assert "&queue=rights" in source
+    assert "navigate(`/rights?review=${encodeURIComponent(item.reviewCaseId)}`)" in source
     assert "queueFilter === 'rights'" in source
+
+
+def test_top_nav_has_first_class_rights_button_left_of_reviews_and_route():
+    source = APP_JSX.read_text(encoding="utf-8")
+
+    assert 'to="/rights"' in source
+    assert source.index('to="/rights"') < source.index('to="/reviews"')
+    assert 'Route path="/rights" element={<RightsReviewPage />}' in source
+    assert "function RightsReviewPage()" in source
+
+
+def test_rights_screen_has_corrective_problem_fields_and_rights_actions():
+    source = APP_JSX.read_text(encoding="utf-8")
+
+    for label in ["Correct problem fields", "Corrected rights status", "Corrected rights disposition", "License or permission label", "Source URL / evidence link"]:
+        assert label in source
+    for label in ["Clear rights", "Restrict publication", "Request rights evidence", "Mark conflict", "Defer rights"]:
+        assert label in source
 
 
 def test_provenance_rights_stage_is_human_visible_but_separate_lane():

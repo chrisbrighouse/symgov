@@ -527,6 +527,59 @@ class WorkspaceReviewDecisionRequest(BaseModel):
     caseComment: str = ""
 
 
+class WorkspaceRightsEvidenceResponse(BaseModel):
+    provenanceAssessmentId: str
+    tracyQueueItemId: str | None = None
+    rightsStatus: str
+    rightsDisposition: str
+    processingOutcome: str
+    riskLevel: str
+    confidence: float | None = None
+    summary: str
+    defects: list[dict[str, Any]] = Field(default_factory=list)
+    recommendedActions: list[str] = Field(default_factory=list)
+    sourceContext: dict[str, Any] = Field(default_factory=dict)
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    report: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkspaceRightsReviewCaseResponse(WorkspaceReviewCaseResponse):
+    rightsEvidence: WorkspaceRightsEvidenceResponse | None = None
+
+
+class WorkspaceRightsReviewCaseListResponse(BaseModel):
+    items: list[WorkspaceRightsReviewCaseResponse]
+
+
+class WorkspaceRightsReviewDecisionRequest(BaseModel):
+    decisionCode: str = Field(min_length=1)
+    correctedRightsStatus: str | None = Field(default=None, max_length=80)
+    correctedRightsDisposition: str | None = Field(default=None, max_length=80)
+    correctedProcessingOutcome: str | None = Field(default=None, max_length=80)
+    licenseLabel: str | None = Field(default=None, max_length=160)
+    sourceUrl: str | None = Field(default=None, max_length=1000)
+    evidenceNote: str = Field(default="", max_length=4000)
+    deciderName: str = "Human"
+    deciderRole: str = "rights_reviewer"
+
+    @field_validator(
+        "decisionCode",
+        "correctedRightsStatus",
+        "correctedRightsDisposition",
+        "correctedProcessingOutcome",
+        "licenseLabel",
+        "sourceUrl",
+        "evidenceNote",
+        "deciderName",
+        "deciderRole",
+    )
+    @classmethod
+    def trim_rights_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip()
+
+
 class WorkspaceReviewSymbolPropertiesUpdateRequest(BaseModel):
     splitItemId: str | None = None
     name: str = Field(min_length=1, max_length=50)
@@ -593,3 +646,7 @@ class WorkspaceReviewDecisionResponse(BaseModel):
     actions: list[WorkspaceReviewActionResponse]
     currentStage: str
     closedAt: str | None = None
+
+
+class WorkspaceRightsReviewDecisionResponse(WorkspaceReviewDecisionResponse):
+    updatedRights: dict[str, Any] = Field(default_factory=dict)

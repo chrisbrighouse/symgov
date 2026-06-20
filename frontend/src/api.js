@@ -123,6 +123,40 @@ export async function fetchWorkspaceReviewCases() {
   }
 }
 
+export async function fetchWorkspaceRightsReviewCases() {
+  if (!appConfig.apiRoot) {
+    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
+  }
+
+  try {
+    const response = await fetch(workspaceUrl('/workspace/rights-review-cases'), { cache: 'no-store' });
+    const payload = await parseJson(response);
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        mode: 'error',
+        message: payload?.detail || 'Rights review load failed.',
+        items: []
+      };
+    }
+
+    return {
+      ok: true,
+      mode: 'live',
+      message: 'Live Rights review loaded.',
+      items: Array.isArray(payload?.items) ? payload.items : []
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'offline',
+      message: error instanceof Error ? error.message : 'Rights review load failed.',
+      items: []
+    };
+  }
+}
+
 export async function fetchWorkspaceQueueItems() {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
@@ -715,6 +749,37 @@ export async function submitWorkspaceReviewDecision(reviewCaseId, decisionPayloa
   if (!response.ok) {
     const validationDetails = formatValidationIssues(payload?.issues);
     throw new Error(validationDetails || payload?.detail || 'Review decision failed.');
+  }
+
+  return payload;
+}
+
+export async function submitWorkspaceRightsReviewDecision(reviewCaseId, decisionPayload) {
+  if (!appConfig.apiRoot) {
+    throw new Error('API root is not configured.');
+  }
+
+  const endpoint = `${appConfig.apiRoot}/workspace/rights-review-cases/${encodeURIComponent(reviewCaseId)}/decisions`;
+  const postDecision = async (payload, wrapped = false) => {
+    const requestBody = wrapped ? { request: payload } : payload;
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    });
+    const payloadJson = await parseJson(response);
+    return { response, payload: payloadJson };
+  };
+
+  let { response, payload } = await postDecision(decisionPayload);
+
+  if (!response.ok && hasMissingWrappedRequestIssue(payload?.issues)) {
+    ({ response, payload } = await postDecision(decisionPayload, true));
+  }
+
+  if (!response.ok) {
+    const validationDetails = formatValidationIssues(payload?.issues);
+    throw new Error(validationDetails || payload?.detail || 'Rights review decision failed.');
   }
 
   return payload;
