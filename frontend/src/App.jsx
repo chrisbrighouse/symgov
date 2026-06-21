@@ -69,6 +69,33 @@ const RIGHTS_REVIEW_ACTION_OPTIONS = [
   ['defer_rights', 'Defer rights']
 ];
 
+const RIGHTS_STATUS_OPTIONS = [
+  ['', 'Select rights status'],
+  ['cleared', 'Cleared'],
+  ['restricted', 'Restricted'],
+  ['conflict', 'Conflict'],
+  ['unknown', 'Unknown'],
+  ['low_risk', 'Low risk'],
+  ['needs_review', 'Needs review'],
+  ['pending_review', 'Pending review']
+];
+
+const RIGHTS_DISPOSITION_OPTIONS = [
+  ['', 'Select rights disposition'],
+  ['cleared', 'Cleared'],
+  ['restricted', 'Restricted'],
+  ['conflict', 'Conflict'],
+  ['unknown_warning', 'Unknown warning'],
+  ['failed', 'Failed']
+];
+
+const RIGHTS_PROCESSING_OUTCOME_OPTIONS = [
+  ['', 'Select processing outcome'],
+  ['pass', 'Pass'],
+  ['review_required', 'Review required'],
+  ['failed', 'Failed']
+];
+
 const WORKSPACE_QUEUE_COLUMNS = [
   {
     id: 'intake',
@@ -2826,6 +2853,11 @@ function mergePropertyOptions(options = [], currentValue = '') {
   return values;
 }
 
+function optionValueOrEmpty(options, value) {
+  const normalized = String(value || '').trim();
+  return options.some(([optionValue]) => optionValue === normalized) ? normalized : '';
+}
+
 function RightsReviewPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
@@ -2925,9 +2957,9 @@ function RightsReviewPage() {
   function emptyRightsDecision(item = {}) {
     return {
       decisionCode: '',
-      correctedRightsStatus: item.rightsStatus || item.rightsEvidence?.rightsStatus || '',
-      correctedRightsDisposition: item.rightsDisposition || item.rightsEvidence?.rightsDisposition || '',
-      correctedProcessingOutcome: item.processingOutcome || item.rightsEvidence?.processingOutcome || '',
+      correctedRightsStatus: optionValueOrEmpty(RIGHTS_STATUS_OPTIONS, item.rightsStatus || item.rightsEvidence?.rightsStatus),
+      correctedRightsDisposition: optionValueOrEmpty(RIGHTS_DISPOSITION_OPTIONS, item.rightsDisposition || item.rightsEvidence?.rightsDisposition),
+      correctedProcessingOutcome: optionValueOrEmpty(RIGHTS_PROCESSING_OUTCOME_OPTIONS, item.processingOutcome || item.rightsEvidence?.processingOutcome),
       licenseLabel: item.rightsEvidence?.evidence?.license_label || item.rightsEvidence?.report?.license_label || '',
       sourceUrl: item.rightsEvidence?.evidence?.source_url || item.rightsEvidence?.sourceContext?.source_url || '',
       evidenceNote: '',
@@ -3129,15 +3161,39 @@ function RightsReviewPage() {
               <h4>Correct problem fields</h4>
               <label className="field">
                 <span>Corrected rights status</span>
-                <input value={activeDecision.correctedRightsStatus} onChange={(event) => updateRightsDecision({ correctedRightsStatus: event.target.value })} placeholder="restricted, conflict, cleared, unknown" />
+                <select
+                  aria-label="Corrected rights status"
+                  value={activeDecision.correctedRightsStatus}
+                  onChange={(event) => updateRightsDecision({ correctedRightsStatus: event.target.value })}
+                >
+                  {RIGHTS_STATUS_OPTIONS.map(([value, label]) => (
+                    <option key={value || 'empty-rights-status'} value={value}>{label}</option>
+                  ))}
+                </select>
               </label>
               <label className="field">
                 <span>Corrected rights disposition</span>
-                <input value={activeDecision.correctedRightsDisposition} onChange={(event) => updateRightsDecision({ correctedRightsDisposition: event.target.value })} placeholder="review_required, cleared, blocked" />
+                <select
+                  aria-label="Corrected rights disposition"
+                  value={activeDecision.correctedRightsDisposition}
+                  onChange={(event) => updateRightsDecision({ correctedRightsDisposition: event.target.value })}
+                >
+                  {RIGHTS_DISPOSITION_OPTIONS.map(([value, label]) => (
+                    <option key={value || 'empty-rights-disposition'} value={value}>{label}</option>
+                  ))}
+                </select>
               </label>
               <label className="field">
                 <span>Corrected processing outcome</span>
-                <input value={activeDecision.correctedProcessingOutcome} onChange={(event) => updateRightsDecision({ correctedProcessingOutcome: event.target.value })} placeholder="blocked, continue, evidence_needed" />
+                <select
+                  aria-label="Corrected processing outcome"
+                  value={activeDecision.correctedProcessingOutcome}
+                  onChange={(event) => updateRightsDecision({ correctedProcessingOutcome: event.target.value })}
+                >
+                  {RIGHTS_PROCESSING_OUTCOME_OPTIONS.map(([value, label]) => (
+                    <option key={value || 'empty-processing-outcome'} value={value}>{label}</option>
+                  ))}
+                </select>
               </label>
               <label className="field">
                 <span>License or permission label</span>

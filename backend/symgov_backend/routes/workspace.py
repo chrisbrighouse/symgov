@@ -294,37 +294,63 @@ RIGHTS_DECISION_TRANSITIONS = {
         "action_code": "rights_clearance_recorded",
         "target_agent_slug": "libby",
         "target_stage": "classification_or_publication_readiness",
-        "close": False,
+        "close": True,
     },
     "restrict_publication": {
         "to_stage": "rights_restricted",
         "action_code": "publication_blocked_by_rights",
         "target_agent_slug": "daisy",
         "target_stage": "rights_block_coordination",
-        "close": False,
+        "close": True,
     },
     "request_rights_evidence": {
         "to_stage": "waiting_for_rights_evidence",
         "action_code": "request_rights_evidence",
         "target_agent_slug": "scott",
         "target_stage": "rights_evidence_collection",
-        "close": False,
+        "close": True,
     },
     "mark_conflict": {
         "to_stage": "rights_conflict",
         "action_code": "escalate_rights_conflict",
         "target_agent_slug": "daisy",
         "target_stage": "rights_conflict_coordination",
-        "close": False,
+        "close": True,
     },
     "defer_rights": {
         "to_stage": "rights_deferred",
         "action_code": "defer_rights_review",
         "target_agent_slug": "daisy",
         "target_stage": "rights_review_deferred",
-        "close": False,
+        "close": True,
     },
 }
+
+RIGHTS_DISPOSITION_ALIASES = {
+    "rights_cleared": "cleared",
+    "review_required": "unknown_warning",
+    "blocked": "restricted",
+}
+
+PROCESSING_OUTCOME_ALIASES = {
+    "continue": "pass",
+    "evidence_needed": "review_required",
+    "blocked": "review_required",
+}
+
+
+def normalize_rights_disposition(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    return RIGHTS_DISPOSITION_ALIASES.get(normalized, normalized)
+
+
+def normalize_processing_outcome(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip()
+    return PROCESSING_OUTCOME_ALIASES.get(normalized, normalized)
 
 SCOTT_SOURCE_SITE_BASE_LOAD_COLUMNS = (
     ScottSourceDiscoverySite.id,
@@ -3933,10 +3959,12 @@ def create_workspace_rights_review_decision(
     transition = RIGHTS_DECISION_TRANSITIONS[decision_code]
     from_stage = review_case.current_stage
     to_stage = transition["to_stage"]
+    corrected_rights_disposition = normalize_rights_disposition(request.correctedRightsDisposition)
+    corrected_processing_outcome = normalize_processing_outcome(request.correctedProcessingOutcome)
     updated_rights = {
         "corrected_rights_status": request.correctedRightsStatus or None,
-        "corrected_rights_disposition": request.correctedRightsDisposition or None,
-        "corrected_processing_outcome": request.correctedProcessingOutcome or None,
+        "corrected_rights_disposition": corrected_rights_disposition,
+        "corrected_processing_outcome": corrected_processing_outcome,
         "license_label": request.licenseLabel or None,
         "source_url": request.sourceUrl or None,
         "evidence_note": request.evidenceNote or None,
@@ -3954,10 +3982,10 @@ def create_workspace_rights_review_decision(
         }
         if request.correctedRightsStatus:
             provenance_assessment.rights_status = request.correctedRightsStatus
-        if request.correctedRightsDisposition:
-            provenance_assessment.rights_disposition = request.correctedRightsDisposition
-        if request.correctedProcessingOutcome:
-            provenance_assessment.processing_outcome = request.correctedProcessingOutcome
+        if corrected_rights_disposition:
+            provenance_assessment.rights_disposition = corrected_rights_disposition
+        if corrected_processing_outcome:
+            provenance_assessment.processing_outcome = corrected_processing_outcome
         evidence_json = dict(provenance_assessment.evidence_json or {})
         evidence_json["reviewer_rights_correction"] = {
             "decision_code": decision_code,

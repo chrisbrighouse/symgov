@@ -54,6 +54,31 @@ def test_rights_screen_has_corrective_problem_fields_and_rights_actions():
         assert label in source
 
 
+def test_rights_screen_uses_picklists_for_corrected_status_and_disposition():
+    source = APP_JSX.read_text(encoding="utf-8")
+
+    assert "const RIGHTS_STATUS_OPTIONS = [" in source
+    assert "const RIGHTS_DISPOSITION_OPTIONS = [" in source
+    assert "const RIGHTS_PROCESSING_OUTCOME_OPTIONS = [" in source
+    assert 'aria-label="Corrected rights status"' in source
+    assert 'aria-label="Corrected rights disposition"' in source
+    assert 'aria-label="Corrected processing outcome"' in source
+    assert "RIGHTS_STATUS_OPTIONS.map(([value, label])" in source
+    assert "RIGHTS_DISPOSITION_OPTIONS.map(([value, label])" in source
+    assert "RIGHTS_PROCESSING_OUTCOME_OPTIONS.map(([value, label])" in source
+
+    status_label_index = source.index("Corrected rights status")
+    disposition_label_index = source.index("Corrected rights disposition")
+    processing_label_index = source.index("Corrected processing outcome")
+    assert source.index("<select", status_label_index, disposition_label_index) > status_label_index
+    assert source.index("<select", disposition_label_index, processing_label_index) > disposition_label_index
+    assert "<input value={activeDecision.correctedRightsStatus}" not in source
+    assert "<input value={activeDecision.correctedRightsDisposition}" not in source
+    assert "<input value={activeDecision.correctedProcessingOutcome}" not in source
+    assert "['rights_cleared'" not in source
+    assert "['review_required', 'Review required']" not in source.split("const RIGHTS_DISPOSITION_OPTIONS = [", 1)[1].split("];", 1)[0]
+
+
 def test_provenance_rights_stage_is_human_visible_but_separate_lane():
     source = WORKSPACE_PY.read_text(encoding="utf-8")
     app_source = APP_JSX.read_text(encoding="utf-8")
