@@ -206,6 +206,20 @@ class WorkspaceReviewCaseListResponse(BaseModel):
     items: list[WorkspaceReviewCaseResponse]
 
 
+
+
+class WorkspaceTracyStatusResponse(BaseModel):
+    generatedAt: str
+    queueStatusCounts: dict[str, int] = Field(default_factory=dict)
+    oldestActiveQueueItemAt: str | None = None
+    rightsDispositionCounts: dict[str, int] = Field(default_factory=dict)
+    processingOutcomeCounts: dict[str, int] = Field(default_factory=dict)
+    assessmentsMissingReviewCases: int = 0
+    assessmentsWithoutOpenReviewCases: int = 0
+    rightsLaneOpenCount: int = 0
+    runtimeQueueFiles: int = 0
+    runtimeStatusCounts: dict[str, int] = Field(default_factory=dict)
+
 class WorkspaceAgentQueueItemResponse(BaseModel):
     id: str
     agentId: str

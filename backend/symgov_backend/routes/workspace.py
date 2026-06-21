@@ -54,6 +54,7 @@ from ..agent_feedback import (
     build_symbol_property_feedback_events,
 )
 from ..agent_queue_reconciliation import reconcile_agent_queue_state
+from ..tracy_operations import tracy_status_summary
 from ..publication_handoff import execute_publication_handoff
 from ..property_options import remember_property_option
 from ..review_followup_handoff import execute_review_followup_handoff
@@ -66,6 +67,7 @@ from ..runtime import (
 from ..schemas import (
     WorkspaceAgentQueueItemListResponse,
     WorkspaceAgentQueueItemResponse,
+    WorkspaceTracyStatusResponse,
     WorkspaceDaisyAssignmentProposalResponse,
     WorkspaceDaisyEvidenceRequestResponse,
     WorkspaceDaisyReportListResponse,
@@ -2195,6 +2197,24 @@ def _build_reggie_queue_control_response(
         controlSuggestionCount=int(payload.get("control_suggestion_count") or len(suggestions)),
         items=suggestions,
     )
+
+
+@router.get(
+    "/tracy/status",
+    response_model=WorkspaceTracyStatusResponse,
+    responses={500: {"description": "Server error"}},
+)
+@legacy_router.get(
+    "/workspace/tracy/status",
+    response_model=WorkspaceTracyStatusResponse,
+    include_in_schema=False,
+)
+def get_workspace_tracy_status() -> WorkspaceTracyStatusResponse:
+    try:
+        payload = tracy_status_summary(db_env_file=SCOTT_DB_ENV_FILE)
+    except Exception as exc:  # pragma: no cover - production API guard
+        raise HTTPException(status_code=500, detail="Tracy status could not be loaded.") from exc
+    return WorkspaceTracyStatusResponse(**payload)
 
 
 @router.get(

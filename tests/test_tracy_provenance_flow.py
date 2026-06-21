@@ -12,11 +12,19 @@ REPO_BACKEND_ROOT = REPO_ROOT / "backend"
 
 
 def load_tracy_runner():
-    # Simulate a standalone runner process: clear only Symgov project modules so the
-    # import path configured by the runner decides which backend package is loaded.
-    for module_name in list(sys.modules):
+    # Simulate a standalone runner process without invalidating already-imported
+    # repo modules used by other tests. Only clear Symgov modules that came from a
+    # non-repo path; deleting repo modules mid-suite breaks monkeypatch targets in
+    # tests that imported functions during collection.
+    for module_name, module in list(sys.modules.items()):
         if module_name == "symgov_backend" or module_name.startswith("symgov_backend."):
-            del sys.modules[module_name]
+            module_file = getattr(module, "__file__", None)
+            if module_file is None:
+                continue
+            try:
+                pathlib.Path(module_file).resolve().relative_to(REPO_BACKEND_ROOT.resolve())
+            except ValueError:
+                del sys.modules[module_name]
 
     spec = importlib.util.spec_from_file_location("symgov_tracy_runner_under_test", TRACY_RUNNER)
     assert spec is not None
@@ -313,3 +321,154 @@ def test_process_queue_item_creates_libby_gate_review_case_when_provenance_is_no
     libby_payload = libby_handoff_payloads[0]["payload_json"]
     assert libby_payload["review_case_id"] == "review-libby-gate-0001"
     assert libby_payload["current_stage"] == "libby_disposition_review"
+
+
+def test_source_notes_with_restricted_library_terms_are_blocking_rights():
+    tracy = load_tracy_runner()
+
+    artifact = tracy.run_provenance_task(
+        {
+            "queue_item_id": "aqi-tracy-source-notes-restricted",
+            "intake_record_id": "intake-source-notes-restricted",
+            "source_ref": "manufacturer-cad-library",
+            "submitted_by": "Scott",
+            "contributor_declaration": "Package sourced from manufacturer CAD library for reference only.",
+            "source_notes": "Downloaded from a third-party manufacturer CAD library; licence terms are reference-only and do not grant redistribution.",
+            "standards_source_refs": ["manufacturer-cad-library"],
+        }
+    )
+
+    assert artifact["rights_disposition"] == "restricted"
+    assert artifact["processing_outcome"] == "failed"
+    assert artifact["risk_level"] == "high"
+    assert any(defect["code"] == "TRACY-RIGHTS-003" for defect in artifact["defects"])
+
+
+def test_internal_original_submission_with_source_refs_is_cleared():
+    tracy = load_tracy_runner()
+
+    artifact = tracy.run_provenance_task(
+        {
+            "queue_item_id": "aqi-tracy-internal-clear",
+            "intake_record_id": "intake-internal-clear",
+            "source_ref": "internal-original-submission",
+            "submitted_by": "Symgov",
+            "contributor_declaration": "Original company-authored symbol owned by Symgov for unrestricted internal catalogue reuse.",
+            "source_notes": "Contributor confirms this is original authored work, not copied from a third-party CAD library.",
+            "standards_source_refs": ["internal-symbol-library"],
+        }
+    )
+
+    assert artifact["rights_disposition"] == "cleared"
+    assert artifact["processing_outcome"] == "pass"
+    assert artifact["risk_level"] == "low"
+    assert artifact["evidence"]["source_context"]["source_classification"] == "contributor_original"
+
+
+def test_tracy_worker_spec_uses_repo_managed_runner():
+    backend_root = REPO_ROOT / "backend"
+    if str(backend_root) not in sys.path:
+        sys.path.insert(0, str(backend_root))
+    from symgov_backend.agent_queue_worker import AGENT_SPECS
+
+    assert AGENT_SPECS["tracy"]["runner_path"] == pathlib.Path("/data/symgov/scripts/run_tracy_provenance.py")
+
+
+def test_process_queue_item_does_not_create_libby_handoff_for_blocking_rights(monkeypatch, tmp_path):
+    tracy = load_tracy_runner()
+    queue_dir = tmp_path / "runtime" / "agent_queue_items"
+    queue_dir.mkdir(parents=True)
+    queue_item_path = queue_dir / "aqi-tracy-test-blocking.json"
+    queue_item_path.write_text(
+        json.dumps(
+            {
+                "id": "aqi-tracy-test-blocking",
+                "agent_id": "tracy",
+                "source_type": "intake_record",
+                "source_id": "ir-test-blocking",
+                "status": "queued",
+                "priority": "high",
+                "payload_json": {"intake_record_id": "ir-test-blocking", "candidate_symbol_id": "BLOCKED"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifact = {
+        "schema_version": "tracy-local-contract-0.2.0",
+        "queue_item_id": "aqi-tracy-test-blocking",
+        "intake_record_id": "ir-test-blocking",
+        "decision": "fail",
+        "rights_status": "restricted",
+        "rights_disposition": "restricted",
+        "processing_outcome": "failed",
+        "risk_level": "high",
+        "confidence": 0.9,
+        "reviewer_summary": "Restricted rights must stop before Libby classification.",
+        "evidence": {"standards_source_refs": []},
+        "recommended_actions": [],
+        "defects": [],
+        "evidence_trace": [],
+        "escalation_target": "human_reviewer",
+        "review_recommendation": {
+            "current_stage": "provenance_rights_review",
+            "escalation_level": "high",
+            "detail": "blocking",
+            "coordination_step": "daisy_rights_review_coordination",
+            "review_queue_family": "review_coordination",
+            "review_queue_label": "Daisy Rights Review Coordination",
+        },
+    }
+    monkeypatch.setattr(tracy, "run_provenance_task", lambda task: artifact)
+    monkeypatch.setattr(tracy, "send_agent_status_update", lambda *args, **kwargs: {"status": "skipped"})
+    written_payloads = []
+    monkeypatch.setattr(tracy, "write_json", lambda path, payload: written_payloads.append((str(path), payload)))
+
+    class FakeBridge:
+        def __init__(self, env_file=None):
+            pass
+        def persist_agent_execution(self, **kwargs):
+            return {"status": "persisted"}
+        def create_review_case(self, **kwargs):
+            return {"id": "review-blocking", "source_entity_type": kwargs["source_entity_type"], "source_entity_id": kwargs["source_entity_id"], "current_stage": kwargs["current_stage"], "escalation_level": kwargs["escalation_level"]}
+        def upsert_agent_queue_item(self, queue_item):
+            return {"status": "upserted", "id": queue_item["id"]}
+    monkeypatch.setattr(tracy, "RuntimePersistenceBridge", FakeBridge)
+
+    result = tracy.process_queue_item(queue_item_path, tmp_path / "runtime", persist_db=True)
+
+    assert result["downstream_created"]["daisy_rights_coordination_queue_item_path"]
+    assert result["downstream_created"]["libby_queue_item_path"] is None
+    assert not [payload for path, payload in written_payloads if "/workspaces/libby/runtime/agent_queue_items/" in path]
+
+
+def test_process_queue_item_file_only_blocking_rights_does_not_raise(monkeypatch, tmp_path):
+    tracy = load_tracy_runner()
+    queue_dir = tmp_path / "runtime" / "agent_queue_items"
+    queue_dir.mkdir(parents=True)
+    queue_item_path = queue_dir / "aqi-tracy-file-only-blocking.json"
+    queue_item_path.write_text(json.dumps({"id": "aqi-tracy-file-only-blocking", "agent_id": "tracy", "source_type": "intake_record", "source_id": "ir-file-only", "status": "queued", "priority": "high", "payload_json": {"intake_record_id": "ir-file-only"}}), encoding="utf-8")
+    artifact = {"schema_version": "tracy-local-contract-0.2.0", "queue_item_id": "aqi-tracy-file-only-blocking", "intake_record_id": "ir-file-only", "decision": "fail", "rights_status": "restricted", "rights_disposition": "restricted", "processing_outcome": "failed", "risk_level": "high", "confidence": 0.9, "reviewer_summary": "Restricted.", "evidence": {"standards_source_refs": []}, "recommended_actions": [], "defects": [], "evidence_trace": [], "escalation_target": "human_reviewer", "review_recommendation": {"current_stage": "provenance_rights_review", "escalation_level": "high", "detail": "blocking"}}
+    monkeypatch.setattr(tracy, "run_provenance_task", lambda task: artifact)
+    monkeypatch.setattr(tracy, "send_agent_status_update", lambda *args, **kwargs: {"status": "skipped"})
+
+    result = tracy.process_queue_item(queue_item_path, tmp_path / "runtime", persist_db=False)
+
+    assert result["queue_item_status"] == "failed"
+    assert result["downstream_created"]["libby_queue_item_path"] is None
+
+
+def test_negated_restricted_source_context_does_not_block_original_work():
+    tracy = load_tracy_runner()
+    artifact = tracy.run_provenance_task(
+        {
+            "queue_item_id": "aqi-tracy-negated-restricted",
+            "intake_record_id": "intake-negated-restricted",
+            "source_ref": "internal-original-submission",
+            "submitted_by": "Symgov",
+            "contributor_declaration": "Original company-authored symbol owned by Symgov for unrestricted internal catalogue reuse.",
+            "source_notes": "Contributor confirms this is original authored work and not copied from a manufacturer CAD library; not reference-only.",
+            "standards_source_refs": ["internal-symbol-library"],
+        }
+    )
+    assert artifact["rights_disposition"] == "cleared"
+    assert artifact["evidence"]["source_context"]["restricted_markers_detected"] == []

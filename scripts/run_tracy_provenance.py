@@ -246,12 +246,84 @@ def local_evidence_status(ref):
 
 def summarize_keywords(text):
     lowered = text.lower()
-    positive = any(token in lowered for token in ["original", "authored", "owned", "internal", "company-authored"])
-    negative = any(
-        token in lowered
-        for token in ["licensed", "restricted", "third-party", "third party", "no redistribution", "may not be redistributed"]
-    )
+    positive = any(token in lowered for token in ["original", "authored", "owned", "internal", "company-authored", "unrestricted"])
+    negative_terms = ["licensed", "restricted", "no redistribution", "may not be redistributed", "do not grant redistribution"]
+    negative = any(token in lowered for token in negative_terms)
+    if "unrestricted" in lowered:
+        negative = any(token in lowered for token in ["no redistribution", "may not be redistributed", "do not grant redistribution"])
     return positive, negative
+
+
+def context_contains_unnegated_marker(context_text, marker):
+    search_from = 0
+    while True:
+        index = context_text.find(marker, search_from)
+        if index == -1:
+            return False
+        prefix = context_text[max(0, index - 36):index]
+        if not any(
+            negation in prefix
+            for negation in ("not ", "not copied from ", "not from ", "not a ", "not an ", "no evidence of ", "without ")
+        ):
+            return True
+        search_from = index + len(marker)
+
+
+def source_context_for_task(task):
+    context_text = " ".join(
+        str(task.get(key) or "")
+        for key in (
+            "source_ref",
+            "source_notes",
+            "file_note",
+            "submission_batch_summary",
+            "contributor_declaration",
+        )
+    ).lower()
+    restricted_markers = [
+        "reference-only",
+        "reference only",
+        "no redistribution",
+        "may not be redistributed",
+        "do not grant redistribution",
+        "redistribution prohibited",
+        "restricted licence",
+        "restricted license",
+        "third-party licensed",
+        "third party licensed",
+        "proprietary cad",
+        "manufacturer cad library",
+        "downloaded from a third-party",
+        "downloaded from a third party",
+    ]
+    original_markers = [
+        "original company-authored",
+        "company-authored",
+        "original authored work",
+        "owned by symgov",
+        "internal original",
+        "contributor confirms this is original",
+    ]
+    standards_markers = ["iec", "iso", "isa-", "asme", "neca", "standard"]
+    restricted_detected = [
+        marker for marker in restricted_markers if context_contains_unnegated_marker(context_text, marker)
+    ]
+    original_detected = [marker for marker in original_markers if marker in context_text]
+    standards_detected = [marker for marker in standards_markers if marker in context_text]
+    if restricted_detected:
+        source_classification = "restricted_reference_library"
+    elif original_detected:
+        source_classification = "contributor_original"
+    elif standards_detected:
+        source_classification = "standards_reference"
+    else:
+        source_classification = "undetermined"
+    return {
+        "source_classification": source_classification,
+        "restricted_markers_detected": restricted_detected,
+        "original_markers_detected": original_detected,
+        "standards_markers_detected": standards_detected,
+    }
 
 
 def run_provenance_task(task):
@@ -266,11 +338,13 @@ def run_provenance_task(task):
 
     defects = []
     evidence_trace = []
+    source_context = source_context_for_task(task)
     evidence = {
         "declaration_excerpt": contributor_declaration[:240] if contributor_declaration else None,
         "rights_documents": [],
         "standards_source_refs": standards_source_refs,
         "evidence_links": [],
+        "source_context": source_context,
     }
 
     decision = "pass"
@@ -342,6 +416,26 @@ def run_provenance_task(task):
             escalation_target = "human_reviewer"
             add_defect(defects, "TRACY-DECL-001", "medium", "Declaration does not clearly state ownership or rights status.")
             add_trace(evidence_trace, "declaration_analysis", "failed", "Declaration language was ambiguous.")
+
+    if source_context["source_classification"] == "restricted_reference_library":
+        rights_status = "restricted"
+        rights_disposition = "restricted"
+        risk_level = "high"
+        decision = "fail"
+        processing_outcome = "failed"
+        confidence = min(max(confidence, 0.78), 0.91)
+        escalation_target = "human_reviewer"
+        add_defect(defects, "TRACY-RIGHTS-003", "high", "Source context indicates reference-only, manufacturer/library, or no-redistribution rights constraints.")
+        add_trace(evidence_trace, "source_context_analysis", "failed", "Detected restricted source-context markers.")
+    elif source_context["source_classification"] == "contributor_original" and rights_disposition not in {"restricted", "conflict", "failed"}:
+        rights_status = "cleared"
+        rights_disposition = "cleared"
+        risk_level = "low"
+        processing_outcome = "pass"
+        decision = "pass"
+        escalation_target = "none"
+        confidence = max(confidence, 0.88)
+        add_trace(evidence_trace, "source_context_analysis", "passed", "Detected original contributor-owned source-context markers.")
 
     if not standards_source_refs:
         add_defect(defects, "TRACY-SOURCE-001", "medium", "No standards source references were provided.")
@@ -518,6 +612,7 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
     additional_db_records = {"review_case": None, "daisy_rights_coordination_queue_item": None}
     libby_queue_item_path = None
     daisy_rights_coordination_queue_item_path = None
+    rights_review_recommendation = artifact.get("review_recommendation")
     if persist_db or env_flag("SYMGOV_PERSIST_TO_DB"):
         bridge = RuntimePersistenceBridge(env_file=db_env_file)
         db_persistence = bridge.persist_agent_execution(
@@ -527,7 +622,6 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
             durable_record=provenance_assessment,
             durable_kind="provenance_assessment",
         )
-        rights_review_recommendation = artifact.get("review_recommendation")
         review_recommendation = rights_review_recommendation or review_case_recommendation_for_libby_handoff(artifact)
         if review_recommendation:
             additional_db_records["review_case"] = bridge.create_review_case(
@@ -551,17 +645,18 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
                 write_json(daisy_rights_coordination_queue_item_path, daisy_rights_coordination_queue_item)
                 additional_db_records["daisy_rights_coordination_queue_item"] = bridge.upsert_agent_queue_item(daisy_rights_coordination_queue_item)
 
-    libby_runtime_root = Path("/data/.openclaw/workspaces/libby/runtime")
-    libby_queue_item = build_libby_queue_item(
-        queue_item=queue_item,
-        task=task,
-        artifact=artifact,
-        provenance_assessment_id=report_id,
-        created_review_case=additional_db_records["review_case"],
-        timestamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
-    )
-    libby_queue_item_path = libby_runtime_root / "agent_queue_items" / f"{libby_queue_item['id']}.json"
-    write_json(libby_queue_item_path, libby_queue_item)
+    if not rights_review_recommendation:
+        libby_runtime_root = Path("/data/.openclaw/workspaces/libby/runtime")
+        libby_queue_item = build_libby_queue_item(
+            queue_item=queue_item,
+            task=task,
+            artifact=artifact,
+            provenance_assessment_id=report_id,
+            created_review_case=additional_db_records["review_case"],
+            timestamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"),
+        )
+        libby_queue_item_path = libby_runtime_root / "agent_queue_items" / f"{libby_queue_item['id']}.json"
+        write_json(libby_queue_item_path, libby_queue_item)
 
     notification_status["completed"] = send_agent_status_update(
         "tracy",

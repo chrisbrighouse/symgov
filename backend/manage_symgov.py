@@ -20,6 +20,12 @@ from symgov_backend.automation_policy import (
 )
 from symgov_backend.openclaw_sync import audit_openclaw_registration, reconcile_openclaw_registration
 from symgov_backend.runtime import RuntimePersistenceBridge, check_database_health, check_storage_health
+from symgov_backend.tracy_operations import (
+    archive_agent_runtime_queue,
+    backfill_provenance_libby_review_cases,
+    find_provenance_libby_items_missing_review_cases,
+    tracy_status_summary,
+)
 
 
 def parse_args():
@@ -126,6 +132,34 @@ def parse_args():
         help="Inspect terminal DB rows too. Default inspects active/stuck DB rows only.",
     )
 
+
+    archive_parser = subparsers.add_parser(
+        "archive-agent-runtime-queue",
+        help="Archive terminal agent runtime queue JSON files out of active agent_queue_items.",
+    )
+    archive_parser.add_argument("--agent", required=True, choices=DEFAULT_AGENT_ORDER, help="Agent runtime queue to archive.")
+    archive_parser.add_argument("--runtime-root", required=True, help="Agent runtime root containing agent_queue_items/.")
+    archive_parser.add_argument("--archive-root", help="Destination archive directory. Defaults under runtime root.")
+    archive_parser.add_argument(
+        "--terminal-status",
+        action="append",
+        help="Terminal status to archive. Repeatable; defaults to known terminal statuses.",
+    )
+    archive_parser.add_argument("--apply", action="store_true", help="Move files. Omit for dry-run.")
+
+    tracy_status_parser = subparsers.add_parser("tracy-status", help="Summarize Tracy provenance health and coverage.")
+    tracy_status_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    tracy_status_parser.add_argument("--runtime-root", default="/data/.openclaw/workspaces/tracy/runtime")
+
+    tracy_backfill_parser = subparsers.add_parser(
+        "backfill-tracy-libby-review-cases",
+        help="Create missing libby_disposition_review cases for Libby provenance handoffs.",
+    )
+    tracy_backfill_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    tracy_backfill_parser.add_argument("--origin-batch-id", help="Restrict backfill to one origin batch id.")
+    tracy_backfill_parser.add_argument("--list-only", action="store_true", help="Only list candidate missing cases.")
+    tracy_backfill_parser.add_argument("--apply", action="store_true", help="Apply the backfill. Omit for dry-run.")
+
     gate_parser = subparsers.add_parser(
         "evaluate-automation-gates",
         help="Evaluate conservative publication automation gates without creating publication work.",
@@ -203,6 +237,40 @@ def main():
             apply=args.apply,
             active_only=not args.include_terminal_db_rows,
         )
+        print(json.dumps(result, indent=2, default=str))
+        return
+
+
+    if args.command == "archive-agent-runtime-queue":
+        result = archive_agent_runtime_queue(
+            agent=args.agent,
+            runtime_root=args.runtime_root,
+            archive_root=args.archive_root,
+            terminal_statuses=set(args.terminal_status) if args.terminal_status else None,
+            dry_run=not args.apply,
+        )
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "tracy-status":
+        result = tracy_status_summary(db_env_file=args.db_env_file, runtime_root=args.runtime_root)
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.command == "backfill-tracy-libby-review-cases":
+        if args.list_only:
+            result = {
+                "items": find_provenance_libby_items_missing_review_cases(
+                    db_env_file=args.db_env_file,
+                    origin_batch_id=args.origin_batch_id,
+                )
+            }
+        else:
+            result = backfill_provenance_libby_review_cases(
+                db_env_file=args.db_env_file,
+                origin_batch_id=args.origin_batch_id,
+                dry_run=not args.apply,
+            )
         print(json.dumps(result, indent=2, default=str))
         return
 
