@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   fetchReggieQueueControls,
@@ -6,6 +6,9 @@ import {
   fetchHannahPhotoCandidates,
   fetchWhitneyDemandSignals,
   fetchHealth,
+  fetchCurrentUser,
+  loginUser,
+  logoutUser,
   fetchPublishedSymbolComments,
   fetchPublishedSymbols,
   fetchWorkspaceDaisyReports,
@@ -252,32 +255,228 @@ const WORKSPACE_MONITOR_SCREENS = {
   intelligence: ['publication', 'curation', 'control_audit', 'market_intelligence', 'ux_feedback']
 };
 const WORKSPACE_MONITOR_SCREEN_SEQUENCE = ['pipeline', 'intelligence'];
+const AuthContext = createContext(null);
+
+function roleList(user) {
+  return Array.isArray(user?.roles) ? user.roles : [];
+}
+
+function hasAnyRole(user, roles) {
+  const available = new Set(roleList(user));
+  return roles.some((role) => available.has(role));
+}
+
+function defaultPathForUser(user) {
+  if (hasAnyRole(user, ['admin'])) {
+    return '/workspace';
+  }
+  if (hasAnyRole(user, ['reviewer'])) {
+    return '/reviews';
+  }
+  if (hasAnyRole(user, ['submitter'])) {
+    return '/standards/submit';
+  }
+  return '/standards';
+}
+
+function AuthProvider({ children }) {
+  const [authState, setAuthState] = useState({ loading: true, user: null, message: '' });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchCurrentUser().then((result) => {
+      if (!cancelled) {
+        setAuthState({ loading: false, user: result.user || null, message: result.ok ? '' : result.message });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const value = useMemo(() => ({
+    ...authState,
+    refresh: async () => {
+      const result = await fetchCurrentUser();
+      setAuthState({ loading: false, user: result.user || null, message: result.ok ? '' : result.message });
+      return result;
+    },
+    login: async ({ email, pin }) => {
+      setAuthState((current) => ({ ...current, loading: true, message: '' }));
+      const result = await loginUser({ email, pin });
+      setAuthState({ loading: false, user: result.user || null, message: result.ok ? '' : result.message });
+      return result;
+    },
+    logout: async () => {
+      await logoutUser();
+      setAuthState({ loading: false, user: null, message: '' });
+    }
+  }), [authState]);
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+function useAuth() {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used inside AuthProvider');
+  }
+  return context;
+}
+
+function RequireAuth({ children }) {
+  const auth = useAuth();
+  const location = useLocation();
+
+  if (auth.loading) {
+    return <StatusPanel title="Checking access" message="Opening your Symgov session…" />;
+  }
+
+  if (!auth.user) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  return children;
+}
+
+function RequireAnyRole({ roles, children }) {
+  const auth = useAuth();
+
+  return (
+    <RequireAuth>
+      {hasAnyRole(auth.user, roles) ? children : <AccessDenied roles={roles} />}
+    </RequireAuth>
+  );
+}
+
+function StatusPanel({ title, message }) {
+  return (
+    <section className="workspace-empty-state">
+      <p className="eyebrow">{title}</p>
+      <h2>{message}</h2>
+    </section>
+  );
+}
+
+function AccessDenied({ roles }) {
+  return (
+    <section className="workspace-empty-state">
+      <p className="eyebrow">Access controlled</p>
+      <h2>You do not have access to this area.</h2>
+      <p>Required role: {roles.join(' or ')}</p>
+    </section>
+  );
+}
 
 function App() {
   const location = useLocation();
   const isStandardsRoute = location.pathname.startsWith('/standards');
 
   return (
-    <div className={`app-shell ${isStandardsRoute ? 'mode-standards' : 'mode-workspace'}`}>
-      <AmbientBackdrop />
-      <Header />
-      <main className="page-frame">
-        <Routes>
-          <Route path="/" element={<Navigate to="/workspace" replace />} />
-          <Route path="/workspace" element={<WorkspacePage />} />
-          <Route path="/reviews" element={<ReviewsPage />} />
-          <Route path="/rights" element={<RightsReviewPage />} />
-          <Route path="/standards" element={<StandardsPage />} />
-          <Route path="/standards/submit" element={<SubmissionPage />} />
-          <Route path="/support" element={<SupportPage />} />
-          <Route path="*" element={<Navigate to="/workspace" replace />} />
-        </Routes>
-      </main>
-    </div>
+    <AuthProvider>
+      <div className={`app-shell ${isStandardsRoute ? 'mode-standards' : 'mode-workspace'}`}>
+        <AmbientBackdrop />
+        <Header />
+        <main className="page-frame">
+          <Routes>
+            <Route path="/" element={<HomeRedirect />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/workspace" element={<RequireAnyRole roles={['admin']}><WorkspacePage /></RequireAnyRole>} />
+            <Route path="/reviews" element={<RequireAnyRole roles={['admin', 'reviewer']}><ReviewsPage /></RequireAnyRole>} />
+            {/* Route path="/rights" element={<RightsReviewPage />} protected by reviewer/admin auth. */}
+            <Route path="/rights" element={<RequireAnyRole roles={['admin', 'reviewer']}><RightsReviewPage /></RequireAnyRole>} />
+            <Route path="/standards" element={<RequireAuth><StandardsPage /></RequireAuth>} />
+            <Route path="/standards/submit" element={<RequireAnyRole roles={['admin', 'submitter']}><SubmissionPage /></RequireAnyRole>} />
+            <Route path="/support" element={<RequireAuth><SupportPage /></RequireAuth>} />
+            <Route path="*" element={<HomeRedirect />} />
+          </Routes>
+        </main>
+      </div>
+    </AuthProvider>
+  );
+}
+
+function HomeRedirect() {
+  const auth = useAuth();
+
+  if (auth.loading) {
+    return <StatusPanel title="Checking access" message="Opening your Symgov session…" />;
+  }
+
+  if (!auth.user) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <Navigate to={defaultPathForUser(auth.user)} replace />;
+}
+
+function LoginPage() {
+  const auth = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [email, setEmail] = useState('');
+  const [pin, setPin] = useState('');
+  const [message, setMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (auth.user) {
+      const fromPath = location.state?.from?.pathname;
+      navigate(fromPath && fromPath !== '/login' ? fromPath : defaultPathForUser(auth.user), { replace: true });
+    }
+  }, [auth.user, location.state, navigate]);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setIsSubmitting(true);
+    setMessage('');
+    const result = await auth.login({ email, pin });
+    setIsSubmitting(false);
+    if (!result.ok) {
+      setMessage(result.message || 'Login failed.');
+      return;
+    }
+    navigate(defaultPathForUser(result.user), { replace: true });
+  };
+
+  return (
+    <section className="submission-panel auth-panel">
+      <div>
+        <p className="eyebrow">Sign in</p>
+        <h2>Open Symgov</h2>
+        <p>Use your email address and 4 digit PIN.</p>
+      </div>
+      <form className="submission-form" onSubmit={handleSubmit}>
+        <label>
+          Email address
+          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
+        </label>
+        <label>
+          PIN
+          <input type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={pin} onChange={(event) => setPin(event.target.value)} autoComplete="current-password" required />
+        </label>
+        {message ? <p className="form-message error">{message}</p> : null}
+        <button type="submit" className="primary-button" disabled={isSubmitting || auth.loading}>
+          {isSubmitting || auth.loading ? 'Signing in…' : 'Sign in'}
+        </button>
+      </form>
+    </section>
   );
 }
 
 function Header() {
+  const auth = useAuth();
+  const navigate = useNavigate();
+  const user = auth.user;
+  const canSubmit = hasAnyRole(user, ['admin', 'submitter']);
+  const canReview = hasAnyRole(user, ['admin', 'reviewer']);
+  const canAdmin = hasAnyRole(user, ['admin']);
+
+  const handleLogout = async () => {
+    await auth.logout();
+    navigate('/login', { replace: true });
+  };
+
   return (
     <header className="glass-header">
       <div className="brand-block">
@@ -290,27 +489,41 @@ function Header() {
         </div>
       </div>
       <nav className="top-nav" aria-label="Primary navigation">
-        <NavLink to="/standards/submit" className={({ isActive }) => navClass(isActive)}>
-          Submissions
-        </NavLink>
-        <NavLink to="/rights" className={({ isActive }) => navClass(isActive)}>
-          Rights
-        </NavLink>
-        <NavLink to="/reviews" className={({ isActive }) => navClass(isActive)}>
-          Reviews
-        </NavLink>
-        <NavLink to="/standards" end className={({ isActive }) => navClass(isActive)}>
-          Catalog
-        </NavLink>
-        <NavLink to="/support" className={({ isActive }) => navClass(isActive)}>
-          Support
-        </NavLink>
+        {canSubmit && (
+          <NavLink to="/standards/submit" className={({ isActive }) => navClass(isActive)}>
+            Submissions
+          </NavLink>
+        )}
+        {canReview && (
+          <NavLink to="/rights" className={({ isActive }) => navClass(isActive)}>
+            Rights
+          </NavLink>
+        )}
+        {canReview && (
+          <NavLink to="/reviews" className={({ isActive }) => navClass(isActive)}>
+            Reviews
+          </NavLink>
+        )}
+        {user && (
+          <NavLink to="/standards" end className={({ isActive }) => navClass(isActive)}>
+            Catalog
+          </NavLink>
+        )}
+        {user && (
+          <NavLink to="/support" className={({ isActive }) => navClass(isActive)}>
+            Support
+          </NavLink>
+        )}
       </nav>
       <div className="header-actions">
+        {user ? <div className="build-chip">{user.displayName || user.email}</div> : null}
         <div className="build-chip">v{appConfig.version} · {appConfig.build || 'local'}</div>
-        <NavLink to="/workspace" className="icon-button" aria-label="Open workspace view">
-          <CogIcon />
-        </NavLink>
+        {user ? <button type="button" className="ghost-button" onClick={handleLogout}>Sign out</button> : null}
+        {canAdmin && (
+          <NavLink to="/workspace" className="icon-button" aria-label="Open workspace view">
+            <CogIcon />
+          </NavLink>
+        )}
       </div>
     </header>
   );
