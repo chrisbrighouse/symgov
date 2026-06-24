@@ -19,6 +19,45 @@ function workspaceUrl(path) {
   return `${appConfig.apiRoot}${path}${separator}refresh=${Date.now()}`;
 }
 
+async function requestJson(path, options = {}) {
+  if (!appConfig.apiRoot) {
+    return {
+      ok: false,
+      mode: 'unconfigured',
+      status: 0,
+      message: 'No API root configured for this environment.',
+      payload: null
+    };
+  }
+
+  try {
+    const response = await fetch(`${appConfig.apiRoot}${path}`, {
+      credentials: 'include',
+      ...options,
+      headers: {
+        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(options.headers || {})
+      }
+    });
+    const payload = await parseJson(response);
+    return {
+      ok: response.ok,
+      mode: response.ok ? 'live' : 'error',
+      status: response.status,
+      message: payload?.detail || payload?.message || (response.ok ? 'Request complete.' : 'Request failed.'),
+      payload
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      mode: 'offline',
+      status: 0,
+      message: error instanceof Error ? error.message : 'Request failed.',
+      payload: null
+    };
+  }
+}
+
 function formatValidationIssues(issues) {
   if (!Array.isArray(issues) || issues.length === 0) {
     return '';
@@ -87,6 +126,38 @@ export async function fetchHealth() {
       message: error instanceof Error ? error.message : 'Health probe failed.'
     };
   }
+}
+
+export async function loginUser({ email, pin }) {
+  const result = await requestJson('/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, pin })
+  });
+
+  return {
+    ...result,
+    user: result.ok ? result.payload?.user || null : null
+  };
+}
+
+export async function fetchCurrentUser() {
+  const result = await requestJson('/auth/me', { cache: 'no-store' });
+
+  return {
+    ...result,
+    user: result.ok ? result.payload?.user || null : null
+  };
+}
+
+export async function logoutUser() {
+  return requestJson('/auth/logout', { method: 'POST' });
+}
+
+export async function changeCurrentUserPin({ currentPin, newPin }) {
+  return requestJson('/auth/change-pin', {
+    method: 'POST',
+    body: JSON.stringify({ currentPin, newPin })
+  });
 }
 
 export async function fetchWorkspaceReviewCases() {
