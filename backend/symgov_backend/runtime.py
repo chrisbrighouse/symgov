@@ -25,6 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from .db import create_session_factory, read_env_file
+from .auth import hash_pin
 from .property_options import remember_property_option
 from .models import (
     AgentDefinition,
@@ -53,6 +54,7 @@ from .models import (
     HannahPhotoCandidate,
     HannahSymbolCurationState,
     User,
+    UserRole,
     ValidationReport,
     WhitneyDemandSignal,
     WhitneyMarketIntelligenceReport,
@@ -1880,10 +1882,16 @@ class RuntimePersistenceBridge:
                 id=coerce_uuid("user:symgov-publication-service"),
                 email=service_email,
                 display_name="SymGov Publication Service",
-                role="standards_owner",
+                pin_hash=hash_pin("4590"),
+                pin_set_at=now,
+                must_change_pin=True,
+                is_active=True,
                 created_at=now,
+                updated_at=now,
             )
             session.add(row)
+            session.flush()
+            session.add(UserRole(user_id=row.id, role="admin", created_at=now))
             session.flush()
         return row
 

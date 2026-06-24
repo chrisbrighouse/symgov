@@ -12,6 +12,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .routes.admin import legacy_router as legacy_admin_router
 from .routes.admin import router as admin_router
+from .routes.auth import legacy_router as legacy_auth_router
+from .routes.auth import router as auth_router
 from .routes.public import legacy_router as legacy_public_router
 from .routes.public import router as public_router
 from .routes.published import legacy_router as legacy_published_router
@@ -44,10 +46,12 @@ def create_app() -> FastAPI:
             content={"error": "validation_error", "detail": "Request validation failed.", "issues": exc.errors()},
         )
 
+    app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(admin_router, prefix=settings.api_prefix)
     app.include_router(public_router, prefix=settings.api_prefix)
     app.include_router(published_router, prefix=settings.api_prefix)
     app.include_router(workspace_router, prefix=settings.api_prefix)
+    app.include_router(legacy_auth_router, prefix="/api")
     app.include_router(legacy_admin_router, prefix="/api")
     app.include_router(legacy_public_router, prefix="/api")
     app.include_router(legacy_published_router, prefix="/api")

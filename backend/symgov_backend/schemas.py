@@ -20,6 +20,27 @@ class APIErrorResponse(BaseModel):
     detail: str
 
 
+class AuthLoginRequest(BaseModel):
+    email: str = Field(min_length=3)
+    pin: str = Field(min_length=4, max_length=4)
+
+
+class AuthUserResponse(BaseModel):
+    id: str
+    email: str
+    displayName: str
+    roles: list[str]
+    mustChangePin: bool
+
+
+class AuthLoginResponse(BaseModel):
+    user: AuthUserResponse
+
+
+class AuthMeResponse(BaseModel):
+    user: AuthUserResponse | None
+
+
 class ExternalSubmissionFileInput(BaseModel):
     name: str = Field(min_length=1)
     note: str = ""

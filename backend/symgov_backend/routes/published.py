@@ -10,6 +10,7 @@ from sqlalchemy import Text, bindparam, cast, func, text
 from sqlalchemy.orm import Session
 
 from ..asset_manifest import choose_preview_asset, list_download_assets
+from ..auth import hash_pin
 from ..dependencies import get_db_session
 from ..models import (
     AgentDefinition,
@@ -24,6 +25,7 @@ from ..models import (
     ReviewCaseAction,
     SymbolRevision,
     User,
+    UserRole,
 )
 from ..runtime import download_object_bytes
 from ..settings import get_settings
@@ -252,10 +254,16 @@ def get_or_create_ed_user(session: Session) -> User:
         id=uuid.uuid4(),
         email=SYSTEM_ED_EMAIL,
         display_name=SYSTEM_ED_NAME,
-        role="admin",
+        pin_hash=hash_pin("4590"),
+        pin_set_at=now,
+        must_change_pin=True,
+        is_active=True,
         created_at=now,
+        updated_at=now,
     )
     session.add(user)
+    session.flush()
+    session.add(UserRole(user_id=user.id, role="admin", created_at=now))
     session.flush()
     return user
 

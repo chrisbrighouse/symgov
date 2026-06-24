@@ -17,6 +17,7 @@ except ModuleNotFoundError:  # pragma: no cover - production image-processing de
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from .auth import hash_pin
 from .models import (
     AgentDefinition,
     AgentQueueItem,
@@ -32,6 +33,7 @@ from .models import (
     ReviewSymbolProperty,
     SymbolRevision,
     User,
+    UserRole,
     ValidationReport,
 )
 from .settings import get_settings
@@ -55,14 +57,21 @@ def ensure_publication_service_user(session: Session) -> User:
     service_email = "symgov-publication-service@symgov.local"
     row = session.query(User).filter(text("lower(email) = :email")).params(email=service_email).one_or_none()
     if row is None:
+        now = utc_now()
         row = User(
             id=coerce_uuid("user:symgov-publication-service"),
             email=service_email,
             display_name="SymGov Publication Service",
-            role="standards_owner",
-            created_at=utc_now(),
+            pin_hash=hash_pin("4590"),
+            pin_set_at=now,
+            must_change_pin=True,
+            is_active=True,
+            created_at=now,
+            updated_at=now,
         )
         session.add(row)
+        session.flush()
+        session.add(UserRole(user_id=row.id, role="admin", created_at=now))
         session.flush()
     return row
 

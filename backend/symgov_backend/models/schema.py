@@ -12,18 +12,43 @@ from .base import Base
 class User(Base):
     __tablename__ = "users"
     __table_args__ = (
-        CheckConstraint(
-            "role in ('admin', 'standards_owner', 'methods_lead', 'qa_admin', 'reviewer')",
-            name="users_role",
-        ),
         Index("uq_users_email_lower", text("lower(email)"), unique=True),
+        Index("uq_users_display_name_lower", text("lower(display_name)"), unique=True),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(Text, nullable=False)
     display_name: Mapped[str] = mapped_column(Text, nullable=False)
-    role: Mapped[str] = mapped_column(Text, nullable=False)
+    pin_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    pin_set_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    must_change_pin: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+    __table_args__ = (
+        CheckConstraint("role in ('admin', 'submitter', 'reviewer')", name="ck_user_roles_role"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    role: Mapped[str] = mapped_column(Text, primary_key=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+    __table_args__ = (Index("uq_user_sessions_token_hash", "token_hash", unique=True),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    auth_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class GovernedSymbol(Base):
