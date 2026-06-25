@@ -5147,7 +5147,8 @@ function useScottSourceDiscoveryControls({
 function AdminUsersPage() {
   const [state, setState] = useState({ loading: true, items: [], message: 'Loading users…' });
   const [form, setForm] = useState({ email: '', displayName: '', roles: ['submitter'], pin: '4590', isActive: true });
-  const [busy, setBusy] = useState(false);
+  const [createBusy, setCreateBusy] = useState(false);
+  const [rowBusyByUser, setRowBusyByUser] = useState({});
   const [toast, setToast] = useState({ kind: 'info', message: '' });
   const [pinResetDialog, setPinResetDialog] = useState({ open: false, user: null, pin: '4590' });
 
@@ -5157,6 +5158,20 @@ function AdminUsersPage() {
       setToast((current) => (current.message === message ? { kind: 'info', message: '' } : current));
     }, 2400);
   };
+
+  const markRowBusy = (userId, isBusy) => {
+    setRowBusyByUser((current) => {
+      const next = { ...current };
+      if (isBusy) {
+        next[userId] = true;
+      } else {
+        delete next[userId];
+      }
+      return next;
+    });
+  };
+
+  const isRowBusy = (userId) => Boolean(rowBusyByUser[userId]);
 
   const loadUsers = async () => {
     const result = await fetchAdminUsers();
@@ -5169,9 +5184,9 @@ function AdminUsersPage() {
 
   const handleCreate = async (event) => {
     event.preventDefault();
-    setBusy(true);
+    setCreateBusy(true);
     const result = await createAdminUser(form);
-    setBusy(false);
+    setCreateBusy(false);
     if (!result.ok) {
       const message = result.message || 'Could not create user.';
       setState((current) => ({ ...current, message }));
@@ -5184,9 +5199,9 @@ function AdminUsersPage() {
   };
 
   const toggleActive = async (user) => {
-    setBusy(true);
+    markRowBusy(user.id, true);
     const result = await updateAdminUser(user.id, { isActive: !user.isActive });
-    setBusy(false);
+    markRowBusy(user.id, false);
     if (!result.ok) {
       showToast('error', result.message || 'Could not update user status.');
       return;
@@ -5207,9 +5222,9 @@ function AdminUsersPage() {
       showToast('error', 'Each user needs at least one role.');
       return;
     }
-    setBusy(true);
+    markRowBusy(user.id, true);
     const result = await updateAdminUser(user.id, { roles: nextRoles });
-    setBusy(false);
+    markRowBusy(user.id, false);
     if (!result.ok) {
       showToast('error', result.message || 'Could not update roles.');
       return;
@@ -5231,9 +5246,9 @@ function AdminUsersPage() {
     if (!pinResetDialog.user) {
       return;
     }
-    setBusy(true);
+    markRowBusy(pinResetDialog.user.id, true);
     const result = await resetAdminUserPin(pinResetDialog.user.id, pinResetDialog.pin);
-    setBusy(false);
+    markRowBusy(pinResetDialog.user.id, false);
     if (!result.ok) {
       showToast('error', result.message || 'Could not reset PIN.');
       return;
@@ -5284,7 +5299,7 @@ function AdminUsersPage() {
         <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('admin')} onChange={(event) => setRole('admin', event.target.checked)} /><span>Admin</span></div>
         <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('submitter')} onChange={(event) => setRole('submitter', event.target.checked)} /><span>Submitter</span></div>
         <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('reviewer')} onChange={(event) => setRole('reviewer', event.target.checked)} /><span>Reviewer</span></div>
-        <button type="submit" className="action-button primary" disabled={busy}>{busy ? 'Saving…' : 'Create user'}</button>
+        <button type="submit" className="action-button primary" disabled={createBusy}>{createBusy ? 'Saving…' : 'Create user'}</button>
       </form>
       <section className="glass-panel pane">
         <SectionHeading title="Existing users" subtitle="Account status and role management" />
@@ -5300,6 +5315,7 @@ function AdminUsersPage() {
                       <input
                         type="checkbox"
                         checked={user.roles.includes(role)}
+                        disabled={isRowBusy(user.id)}
                         onChange={(event) => toggleUserRole(user, role, event.target.checked)}
                       />
                       <span>{role}</span>
@@ -5307,8 +5323,8 @@ function AdminUsersPage() {
                   ))}
                 </div>
                 <div className="action-stack horizontal">
-                  <button type="button" className="action-button" onClick={() => toggleActive(user)}>{user.isActive ? 'Deactivate' : 'Activate'}</button>
-                  <button type="button" className="action-button" onClick={() => openPinResetDialog(user)}>Reset PIN</button>
+                  <button type="button" className="action-button" disabled={isRowBusy(user.id)} onClick={() => toggleActive(user)}>{isRowBusy(user.id) ? 'Saving…' : (user.isActive ? 'Deactivate' : 'Activate')}</button>
+                  <button type="button" className="action-button" disabled={isRowBusy(user.id)} onClick={() => openPinResetDialog(user)}>{isRowBusy(user.id) ? 'Saving…' : 'Reset PIN'}</button>
                 </div>
               </div>
             ))}
@@ -5333,7 +5349,7 @@ function AdminUsersPage() {
                 />
               </label>
               <div className="action-stack horizontal">
-                <button type="submit" className="action-button primary" disabled={busy}>{busy ? 'Saving…' : 'Apply PIN reset'}</button>
+                <button type="submit" className="action-button primary" disabled={isRowBusy(pinResetDialog.user.id)}>{isRowBusy(pinResetDialog.user.id) ? 'Saving…' : 'Apply PIN reset'}</button>
                 <button type="button" className="action-button" onClick={closePinResetDialog}>Cancel</button>
               </div>
             </form>

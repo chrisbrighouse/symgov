@@ -40,6 +40,16 @@ def test_admin_user_management_shows_toast_feedback():
     assert "setToast(" in source
 
 
+def test_admin_user_management_uses_per_user_loading_state_not_global_busy_for_rows():
+    source = APP_JSX.read_text(encoding="utf-8")
+
+    assert "rowBusyByUser" in source
+    assert "isRowBusy" in source
+    assert "setRowBusyByUser" in source
+    assert "disabled={isRowBusy(user.id)}" in source
+    assert "disabled={createBusy}" in source
+
+
 def test_admin_user_management_api_client_methods_exist():
     source = API_JS.read_text(encoding="utf-8")
 
