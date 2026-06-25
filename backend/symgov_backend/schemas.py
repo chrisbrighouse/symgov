@@ -41,6 +41,15 @@ class AuthMeResponse(BaseModel):
     user: AuthUserResponse | None
 
 
+class AuthChangePinRequest(BaseModel):
+    currentPin: str = Field(min_length=4, max_length=4)
+    newPin: str = Field(min_length=4, max_length=4)
+
+
+class AuthChangePinResponse(BaseModel):
+    user: AuthUserResponse
+
+
 class ExternalSubmissionFileInput(BaseModel):
     name: str = Field(min_length=1)
     note: str = ""

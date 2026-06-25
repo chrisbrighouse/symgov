@@ -4,7 +4,7 @@ from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
 from symgov_backend.app import create_app
-from symgov_backend.auth import upsert_user
+from symgov_backend.auth import authenticate_user, upsert_user
 from symgov_backend.dependencies import get_db_session
 from symgov_backend.models import User, UserRole, UserSession
 
@@ -35,11 +35,11 @@ def build_client_with_user():
             yield session
 
     app.dependency_overrides[get_db_session] = override_db_session
-    return TestClient(app)
+    return TestClient(app), Session
 
 
 def test_login_sets_http_only_session_cookie_and_returns_user_roles():
-    client = build_client_with_user()
+    client, _ = build_client_with_user()
 
     response = client.post("/api/v1/auth/login", json={"email": "CHRIS.BRIGHOUSE@HOTMAIL.CO.UK", "pin": "4590"})
 
@@ -54,7 +54,7 @@ def test_login_sets_http_only_session_cookie_and_returns_user_roles():
 
 
 def test_login_rejects_wrong_pin():
-    client = build_client_with_user()
+    client, _ = build_client_with_user()
 
     response = client.post("/api/v1/auth/login", json={"email": "chris.brighouse@hotmail.co.uk", "pin": "1234"})
 
@@ -62,7 +62,7 @@ def test_login_rejects_wrong_pin():
 
 
 def test_me_returns_current_user_after_login():
-    client = build_client_with_user()
+    client, _ = build_client_with_user()
     login = client.post("/api/v1/auth/login", json={"email": "chris.brighouse@hotmail.co.uk", "pin": "4590"})
     assert login.status_code == 200
 
@@ -73,7 +73,7 @@ def test_me_returns_current_user_after_login():
 
 
 def test_logout_revokes_current_session():
-    client = build_client_with_user()
+    client, _ = build_client_with_user()
     login = client.post("/api/v1/auth/login", json={"email": "chris.brighouse@hotmail.co.uk", "pin": "4590"})
     assert login.status_code == 200
 
@@ -83,3 +83,27 @@ def test_logout_revokes_current_session():
     response = client.get("/api/v1/auth/me")
     assert response.status_code == 200
     assert response.json()["user"] is None
+
+
+def test_change_pin_requires_current_pin_and_clears_default_pin_flag():
+    client, Session = build_client_with_user()
+    login = client.post("/api/v1/auth/login", json={"email": "chris.brighouse@hotmail.co.uk", "pin": "4590"})
+    assert login.status_code == 200
+
+    response = client.post("/api/v1/auth/change-pin", json={"currentPin": "4590", "newPin": "6781"})
+
+    assert response.status_code == 200
+    assert response.json()["user"]["mustChangePin"] is False
+    with Session() as session:
+        assert authenticate_user(session, email="chris.brighouse@hotmail.co.uk", pin="4590") is None
+        assert authenticate_user(session, email="chris.brighouse@hotmail.co.uk", pin="6781") is not None
+
+
+def test_change_pin_rejects_wrong_current_pin():
+    client, _ = build_client_with_user()
+    login = client.post("/api/v1/auth/login", json={"email": "chris.brighouse@hotmail.co.uk", "pin": "4590"})
+    assert login.status_code == 200
+
+    response = client.post("/api/v1/auth/change-pin", json={"currentPin": "1234", "newPin": "6781"})
+
+    assert response.status_code == 400

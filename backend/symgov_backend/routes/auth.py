@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
-from ..auth import AuthenticatedUser, authenticate_user, create_user_session, current_user_from_token, revoke_session
+from ..auth import (
+    AuthenticatedUser,
+    authenticate_user,
+    create_user_session,
+    current_user_from_token,
+    hash_pin,
+    revoke_session,
+    utc_now,
+    verify_pin,
+)
 from ..dependencies import get_db_session
-from ..schemas import AuthLoginRequest, AuthLoginResponse, AuthMeResponse, AuthUserResponse
+from ..models import User
+from ..schemas import AuthChangePinRequest, AuthChangePinResponse, AuthLoginRequest, AuthLoginResponse, AuthMeResponse, AuthUserResponse
 
 
 SESSION_COOKIE_NAME = "symgov_session"
@@ -77,3 +89,28 @@ def logout(request: Request, response: Response, session: Session = Depends(get_
     session.commit()
     response.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return {"ok": True, "revoked": revoked}
+
+
+@router.post("/change-pin", response_model=AuthChangePinResponse)
+@legacy_router.post("/auth/change-pin", response_model=AuthChangePinResponse, include_in_schema=False)
+async def change_pin(request: Request, session: Session = Depends(get_db_session)) -> AuthChangePinResponse:
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    current = current_user_from_token(session, token)
+    if current is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    payload = await request.json()
+    pin_request = AuthChangePinRequest.model_validate(payload.get("payload") or payload)
+    user = session.get(User, uuid.UUID(current.id))
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    if not verify_pin(pin_request.currentPin, user.pin_hash):
+        raise HTTPException(status_code=400, detail="Current PIN is incorrect.")
+    user.pin_hash = hash_pin(pin_request.newPin)
+    user.pin_set_at = utc_now()
+    user.must_change_pin = False
+    user.updated_at = user.pin_set_at
+    session.commit()
+    refreshed = current_user_from_token(session, token)
+    if refreshed is None:
+        raise HTTPException(status_code=500, detail="Updated user session could not be loaded.")
+    return AuthChangePinResponse(user=auth_user_response(refreshed))
