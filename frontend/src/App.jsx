@@ -6,6 +6,7 @@ import {
   fetchHannahPhotoCandidates,
   fetchWhitneyDemandSignals,
   fetchHealth,
+  changeCurrentUserPin,
   fetchCurrentUser,
   loginUser,
   logoutUser,
@@ -307,6 +308,13 @@ function AuthProvider({ children }) {
       setAuthState({ loading: false, user: result.user || null, message: result.ok ? '' : result.message });
       return result;
     },
+    changePin: async ({ currentPin, newPin }) => {
+      const result = await changeCurrentUserPin({ currentPin, newPin });
+      if (result.ok) {
+        setAuthState({ loading: false, user: result.payload?.user || null, message: '' });
+      }
+      return result;
+    },
     logout: async () => {
       await logoutUser();
       setAuthState({ loading: false, user: null, message: '' });
@@ -334,6 +342,10 @@ function RequireAuth({ children }) {
 
   if (!auth.user) {
     return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+
+  if (auth.user?.mustChangePin && location.pathname !== '/change-pin') {
+    return <Navigate to="/change-pin" replace state={{ from: location }} />;
   }
 
   return children;
@@ -381,6 +393,7 @@ function App() {
           <Routes>
             <Route path="/" element={<HomeRedirect />} />
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/change-pin" element={<RequireAuth><ChangePinPage /></RequireAuth>} />
             <Route path="/workspace" element={<RequireAnyRole roles={['admin']}><WorkspacePage /></RequireAnyRole>} />
             <Route path="/reviews" element={<RequireAnyRole roles={['admin', 'reviewer']}><ReviewsPage /></RequireAnyRole>} />
             {/* Route path="/rights" element={<RightsReviewPage />} protected by reviewer/admin auth. */}
@@ -407,6 +420,10 @@ function HomeRedirect() {
     return <Navigate to="/login" replace />;
   }
 
+  if (auth.user?.mustChangePin) {
+    return <Navigate to="/change-pin" replace />;
+  }
+
   return <Navigate to={defaultPathForUser(auth.user)} replace />;
 }
 
@@ -422,7 +439,8 @@ function LoginPage() {
   useEffect(() => {
     if (auth.user) {
       const fromPath = location.state?.from?.pathname;
-      navigate(fromPath && fromPath !== '/login' ? fromPath : defaultPathForUser(auth.user), { replace: true });
+      const targetPath = auth.user.mustChangePin ? '/change-pin' : (fromPath && fromPath !== '/login' ? fromPath : defaultPathForUser(auth.user));
+      navigate(targetPath, { replace: true });
     }
   }, [auth.user, location.state, navigate]);
 
@@ -436,7 +454,7 @@ function LoginPage() {
       setMessage(result.message || 'Login failed.');
       return;
     }
-    navigate(defaultPathForUser(result.user), { replace: true });
+    navigate(result.user?.mustChangePin ? '/change-pin' : defaultPathForUser(result.user), { replace: true });
   };
 
   return (
@@ -458,6 +476,62 @@ function LoginPage() {
         {message ? <p className="form-message error">{message}</p> : null}
         <button type="submit" className="primary-button" disabled={isSubmitting || auth.loading}>
           {isSubmitting || auth.loading ? 'Signing in…' : 'Sign in'}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function ChangePinPage() {
+  const auth = useAuth();
+  const navigate = useNavigate();
+  const [currentPin, setCurrentPin] = useState('');
+  const [newPin, setNewPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
+  const [message, setMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+    setMessage('');
+    if (newPin !== confirmPin) {
+      setMessage('New PIN and confirmation do not match.');
+      return;
+    }
+    setIsSubmitting(true);
+    const result = await auth.changePin({ currentPin, newPin });
+    setIsSubmitting(false);
+    if (!result.ok) {
+      setMessage(result.message || 'PIN change failed.');
+      return;
+    }
+    setMessage('Your PIN has been changed.');
+    navigate(defaultPathForUser(result.payload?.user), { replace: true });
+  };
+
+  return (
+    <section className="submission-panel auth-panel">
+      <div>
+        <p className="eyebrow">Change default PIN</p>
+        <h2>Set your own 4 digit PIN</h2>
+        <p>You need to change the default PIN before using Symgov.</p>
+      </div>
+      <form className="submission-form" onSubmit={handleSubmit}>
+        <label>
+          Current PIN
+          <input type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={currentPin} onChange={(event) => setCurrentPin(event.target.value)} autoComplete="current-password" required />
+        </label>
+        <label>
+          New PIN
+          <input type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={newPin} onChange={(event) => setNewPin(event.target.value)} autoComplete="new-password" required />
+        </label>
+        <label>
+          Confirm new PIN
+          <input type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={confirmPin} onChange={(event) => setConfirmPin(event.target.value)} autoComplete="new-password" required />
+        </label>
+        {message ? <p className={`form-message ${message.includes('changed') ? 'success' : 'error'}`}>{message}</p> : null}
+        <button type="submit" className="primary-button" disabled={isSubmitting}>
+          {isSubmitting ? 'Changing PIN…' : 'Change PIN'}
         </button>
       </form>
     </section>
