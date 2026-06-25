@@ -5,7 +5,7 @@ import contextlib
 import json
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -21,6 +21,7 @@ from .routes.published import router as published_router
 from .routes.workspace import legacy_router as legacy_workspace_router
 from .routes.workspace import router as workspace_router
 from .agent_queue_worker import AgentQueueWorkerConfig, run_agent_queue_worker
+from .dependencies import require_any_role, require_user
 from .settings import get_settings
 
 
@@ -48,14 +49,30 @@ def create_app() -> FastAPI:
 
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(admin_router, prefix=settings.api_prefix)
-    app.include_router(public_router, prefix=settings.api_prefix)
-    app.include_router(published_router, prefix=settings.api_prefix)
-    app.include_router(workspace_router, prefix=settings.api_prefix)
+    app.include_router(
+        public_router,
+        prefix=settings.api_prefix,
+        dependencies=[Depends(require_any_role({"admin", "submitter"}))],
+    )
+    app.include_router(published_router, prefix=settings.api_prefix, dependencies=[Depends(require_user)])
+    app.include_router(
+        workspace_router,
+        prefix=settings.api_prefix,
+        dependencies=[Depends(require_any_role({"admin", "reviewer"}))],
+    )
     app.include_router(legacy_auth_router, prefix="/api")
     app.include_router(legacy_admin_router, prefix="/api")
-    app.include_router(legacy_public_router, prefix="/api")
-    app.include_router(legacy_published_router, prefix="/api")
-    app.include_router(legacy_workspace_router, prefix="/api")
+    app.include_router(
+        legacy_public_router,
+        prefix="/api",
+        dependencies=[Depends(require_any_role({"admin", "submitter"}))],
+    )
+    app.include_router(legacy_published_router, prefix="/api", dependencies=[Depends(require_user)])
+    app.include_router(
+        legacy_workspace_router,
+        prefix="/api",
+        dependencies=[Depends(require_any_role({"admin", "reviewer"}))],
+    )
 
     @app.on_event("startup")
     async def start_background_workers() -> None:
