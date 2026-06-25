@@ -50,6 +50,43 @@ class AuthChangePinResponse(BaseModel):
     user: AuthUserResponse
 
 
+class AdminUserResponse(BaseModel):
+    id: str
+    email: str
+    displayName: str
+    roles: list[str]
+    isActive: bool
+    mustChangePin: bool
+    createdAt: str
+    updatedAt: str
+
+
+class AdminUserListResponse(BaseModel):
+    items: list[AdminUserResponse]
+
+
+class AdminUserCreateRequest(BaseModel):
+    email: str = Field(min_length=3)
+    displayName: str = Field(min_length=1)
+    roles: list[str] = Field(min_length=1)
+    pin: str = Field(default="4590", min_length=4, max_length=4)
+    isActive: bool = True
+
+
+class AdminUserUpdateRequest(BaseModel):
+    displayName: str | None = Field(default=None, min_length=1)
+    roles: list[str] | None = Field(default=None, min_length=1)
+    isActive: bool | None = None
+
+
+class AdminUserResetPinRequest(BaseModel):
+    pin: str = Field(default="4590", min_length=4, max_length=4)
+
+
+class AdminUserMutationResponse(BaseModel):
+    user: AdminUserResponse
+
+
 class ExternalSubmissionFileInput(BaseModel):
     name: str = Field(min_length=1)
     note: str = ""

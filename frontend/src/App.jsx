@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  createAdminUser,
+  fetchAdminUsers,
   fetchReggieQueueControls,
   fetchScottSourceSites,
   fetchHannahPhotoCandidates,
@@ -27,6 +29,8 @@ import {
   submitWorkspaceReviewDecision,
   submitWorkspaceRightsReviewDecision,
   submitExternalSubmission,
+  updateAdminUser,
+  resetAdminUserPin,
   submitPublishedSymbolCommand,
   updateScottSourceSiteIncludeNextRun,
   updateScottSourceSitePrompt,
@@ -395,6 +399,7 @@ function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/change-pin" element={<RequireAuth><ChangePinPage /></RequireAuth>} />
             <Route path="/workspace" element={<RequireAnyRole roles={['admin']}><WorkspacePage /></RequireAnyRole>} />
+            <Route path="/workspace/users" element={<RequireAnyRole roles={['admin']}><AdminUsersPage /></RequireAnyRole>} />
             <Route path="/reviews" element={<RequireAnyRole roles={['admin', 'reviewer']}><ReviewsPage /></RequireAnyRole>} />
             {/* Route path="/rights" element={<RightsReviewPage />} protected by reviewer/admin auth. */}
             <Route path="/rights" element={<RequireAnyRole roles={['admin', 'reviewer']}><RightsReviewPage /></RequireAnyRole>} />
@@ -586,6 +591,11 @@ function Header() {
         {user && (
           <NavLink to="/support" className={({ isActive }) => navClass(isActive)}>
             Support
+          </NavLink>
+        )}
+        {canAdmin && (
+          <NavLink to="/workspace/users" className={({ isActive }) => navClass(isActive)}>
+            Manage users
           </NavLink>
         )}
       </nav>
@@ -5132,6 +5142,110 @@ function useScottSourceDiscoveryControls({
     updateSourceSiteStatus,
     handleScottSourcesScroll
   };
+}
+
+function AdminUsersPage() {
+  const [state, setState] = useState({ loading: true, items: [], message: 'Loading users…' });
+  const [form, setForm] = useState({ email: '', displayName: '', roles: ['submitter'], pin: '4590', isActive: true });
+  const [busy, setBusy] = useState(false);
+
+  const loadUsers = async () => {
+    const result = await fetchAdminUsers();
+    setState({ loading: false, items: result.items || [], message: result.ok ? 'User list loaded.' : result.message });
+  };
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  const handleCreate = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    const result = await createAdminUser(form);
+    setBusy(false);
+    if (!result.ok) {
+      setState((current) => ({ ...current, message: result.message || 'Could not create user.' }));
+      return;
+    }
+    setForm({ email: '', displayName: '', roles: ['submitter'], pin: '4590', isActive: true });
+    await loadUsers();
+  };
+
+  const toggleActive = async (user) => {
+    setBusy(true);
+    await updateAdminUser(user.id, { isActive: !user.isActive });
+    setBusy(false);
+    await loadUsers();
+  };
+
+  const resetPin = async (user) => {
+    setBusy(true);
+    await resetAdminUserPin(user.id, '4590');
+    setBusy(false);
+    await loadUsers();
+  };
+
+  const setRole = (role, checked) => {
+    setForm((current) => {
+      const roles = new Set(current.roles);
+      if (checked) {
+        roles.add(role);
+      } else {
+        roles.delete(role);
+      }
+      const next = Array.from(roles);
+      return { ...current, roles: next.length ? next : ['submitter'] };
+    });
+  };
+
+  return (
+    <section className="experience-shell">
+      <div className="hero-panel glass-panel workspace-hero">
+        <div>
+          <p className="eyebrow">Workspace administration</p>
+          <h2>Manage users</h2>
+          <p className="title-support">Create accounts, set role combinations, deactivate users, and reset default PINs.</p>
+        </div>
+      </div>
+      <p className="page-status-text">{state.message}</p>
+      <form className="glass-panel pane form-panel" onSubmit={handleCreate}>
+        <SectionHeading title="Create user" subtitle="New users are forced to change PIN on first login" />
+        <label className="field">
+          <span>Email</span>
+          <input required type="email" value={form.email} onChange={(event) => setForm((c) => ({ ...c, email: event.target.value }))} />
+        </label>
+        <label className="field">
+          <span>Display name</span>
+          <input required value={form.displayName} onChange={(event) => setForm((c) => ({ ...c, displayName: event.target.value }))} />
+        </label>
+        <label className="field">
+          <span>Initial PIN</span>
+          <input required inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={form.pin} onChange={(event) => setForm((c) => ({ ...c, pin: event.target.value }))} />
+        </label>
+        <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('admin')} onChange={(event) => setRole('admin', event.target.checked)} /><span>Admin</span></div>
+        <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('submitter')} onChange={(event) => setRole('submitter', event.target.checked)} /><span>Submitter</span></div>
+        <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('reviewer')} onChange={(event) => setRole('reviewer', event.target.checked)} /><span>Reviewer</span></div>
+        <button type="submit" className="action-button primary" disabled={busy}>{busy ? 'Saving…' : 'Create user'}</button>
+      </form>
+      <section className="glass-panel pane">
+        <SectionHeading title="Existing users" subtitle="Account status and role management" />
+        {state.loading ? <p>Loading…</p> : (
+          <div className="selected-file-list">
+            {state.items.map((user) => (
+              <div key={user.id} className="selected-file-row">
+                <strong>{user.displayName} · {user.email}</strong>
+                <span>Roles: {user.roles.join(', ')} · Active: {user.isActive ? 'yes' : 'no'} · Must change PIN: {user.mustChangePin ? 'yes' : 'no'}</span>
+                <div className="action-stack horizontal">
+                  <button type="button" className="action-button" onClick={() => toggleActive(user)}>{user.isActive ? 'Deactivate' : 'Activate'}</button>
+                  <button type="button" className="action-button" onClick={() => resetPin(user)}>Reset PIN</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </section>
+  );
 }
 
 function SubmissionPage() {

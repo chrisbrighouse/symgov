@@ -160,6 +160,47 @@ export async function changeCurrentUserPin({ currentPin, newPin }) {
   });
 }
 
+export async function fetchAdminUsers() {
+  const result = await requestJson('/admin/users', { cache: 'no-store' });
+  return {
+    ...result,
+    items: result.ok ? result.payload?.items || [] : []
+  };
+}
+
+export async function createAdminUser(payload) {
+  const result = await requestJson('/admin/users', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  return {
+    ...result,
+    user: result.ok ? result.payload?.user || null : null
+  };
+}
+
+export async function updateAdminUser(userId, payload) {
+  const result = await requestJson(`/admin/users/${encodeURIComponent(userId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  });
+  return {
+    ...result,
+    user: result.ok ? result.payload?.user || null : null
+  };
+}
+
+export async function resetAdminUserPin(userId, pin) {
+  const result = await requestJson(`/admin/users/${encodeURIComponent(userId)}/reset-pin`, {
+    method: 'POST',
+    body: JSON.stringify({ pin })
+  });
+  return {
+    ...result,
+    user: result.ok ? result.payload?.user || null : null
+  };
+}
+
 export async function fetchWorkspaceReviewCases() {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
