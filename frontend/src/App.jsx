@@ -5148,6 +5148,15 @@ function AdminUsersPage() {
   const [state, setState] = useState({ loading: true, items: [], message: 'Loading users…' });
   const [form, setForm] = useState({ email: '', displayName: '', roles: ['submitter'], pin: '4590', isActive: true });
   const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState({ kind: 'info', message: '' });
+  const [pinResetDialog, setPinResetDialog] = useState({ open: false, user: null, pin: '4590' });
+
+  const showToast = (kind, message) => {
+    setToast({ kind, message });
+    window.setTimeout(() => {
+      setToast((current) => (current.message === message ? { kind: 'info', message: '' } : current));
+    }, 2400);
+  };
 
   const loadUsers = async () => {
     const result = await fetchAdminUsers();
@@ -5164,25 +5173,74 @@ function AdminUsersPage() {
     const result = await createAdminUser(form);
     setBusy(false);
     if (!result.ok) {
-      setState((current) => ({ ...current, message: result.message || 'Could not create user.' }));
+      const message = result.message || 'Could not create user.';
+      setState((current) => ({ ...current, message }));
+      showToast('error', message);
       return;
     }
     setForm({ email: '', displayName: '', roles: ['submitter'], pin: '4590', isActive: true });
     await loadUsers();
+    showToast('success', `User ${result.user?.displayName || 'created'} added.`);
   };
 
   const toggleActive = async (user) => {
     setBusy(true);
-    await updateAdminUser(user.id, { isActive: !user.isActive });
+    const result = await updateAdminUser(user.id, { isActive: !user.isActive });
     setBusy(false);
+    if (!result.ok) {
+      showToast('error', result.message || 'Could not update user status.');
+      return;
+    }
     await loadUsers();
+    showToast('success', `${user.displayName} is now ${user.isActive ? 'inactive' : 'active'}.`);
   };
 
-  const resetPin = async (user) => {
+  const toggleUserRole = async (user, role, checked) => {
+    const roles = new Set(user.roles || []);
+    if (checked) {
+      roles.add(role);
+    } else {
+      roles.delete(role);
+    }
+    const nextRoles = Array.from(roles);
+    if (!nextRoles.length) {
+      showToast('error', 'Each user needs at least one role.');
+      return;
+    }
     setBusy(true);
-    await resetAdminUserPin(user.id, '4590');
+    const result = await updateAdminUser(user.id, { roles: nextRoles });
     setBusy(false);
+    if (!result.ok) {
+      showToast('error', result.message || 'Could not update roles.');
+      return;
+    }
     await loadUsers();
+    showToast('success', `${user.displayName} roles updated.`);
+  };
+
+  const openPinResetDialog = (user) => {
+    setPinResetDialog({ open: true, user, pin: '4590' });
+  };
+
+  const closePinResetDialog = () => {
+    setPinResetDialog({ open: false, user: null, pin: '4590' });
+  };
+
+  const submitCustomPinReset = async (event) => {
+    event.preventDefault();
+    if (!pinResetDialog.user) {
+      return;
+    }
+    setBusy(true);
+    const result = await resetAdminUserPin(pinResetDialog.user.id, pinResetDialog.pin);
+    setBusy(false);
+    if (!result.ok) {
+      showToast('error', result.message || 'Could not reset PIN.');
+      return;
+    }
+    closePinResetDialog();
+    await loadUsers();
+    showToast('success', `PIN reset for ${pinResetDialog.user.displayName}.`);
   };
 
   const setRole = (role, checked) => {
@@ -5208,6 +5266,7 @@ function AdminUsersPage() {
         </div>
       </div>
       <p className="page-status-text">{state.message}</p>
+      {toast.message ? <p className={`admin-toast ${toast.kind}`}>{toast.message}</p> : null}
       <form className="glass-panel pane form-panel" onSubmit={handleCreate}>
         <SectionHeading title="Create user" subtitle="New users are forced to change PIN on first login" />
         <label className="field">
@@ -5232,18 +5291,55 @@ function AdminUsersPage() {
         {state.loading ? <p>Loading…</p> : (
           <div className="selected-file-list">
             {state.items.map((user) => (
-              <div key={user.id} className="selected-file-row">
+              <div key={user.id} className="selected-file-row admin-user-row">
                 <strong>{user.displayName} · {user.email}</strong>
-                <span>Roles: {user.roles.join(', ')} · Active: {user.isActive ? 'yes' : 'no'} · Must change PIN: {user.mustChangePin ? 'yes' : 'no'}</span>
+                <span>Active: {user.isActive ? 'yes' : 'no'} · Must change PIN: {user.mustChangePin ? 'yes' : 'no'}</span>
+                <div className="action-stack horizontal role-pill-group">
+                  {['admin', 'submitter', 'reviewer'].map((role) => (
+                    <label key={`${user.id}-${role}`} className={`role-pill ${user.roles.includes(role) ? 'active' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={user.roles.includes(role)}
+                        onChange={(event) => toggleUserRole(user, role, event.target.checked)}
+                      />
+                      <span>{role}</span>
+                    </label>
+                  ))}
+                </div>
                 <div className="action-stack horizontal">
                   <button type="button" className="action-button" onClick={() => toggleActive(user)}>{user.isActive ? 'Deactivate' : 'Activate'}</button>
-                  <button type="button" className="action-button" onClick={() => resetPin(user)}>Reset PIN</button>
+                  <button type="button" className="action-button" onClick={() => openPinResetDialog(user)}>Reset PIN</button>
                 </div>
               </div>
             ))}
           </div>
         )}
       </section>
+
+      {pinResetDialog.open && pinResetDialog.user ? (
+        <div className="modal-backdrop" role="presentation" onClick={closePinResetDialog}>
+          <div className="modal-card" role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+            <h3>Reset PIN for {pinResetDialog.user.displayName}</h3>
+            <form onSubmit={submitCustomPinReset}>
+              <label className="field">
+                <span>Custom 4-digit PIN</span>
+                <input
+                  required
+                  inputMode="numeric"
+                  pattern="[0-9]{4}"
+                  maxLength="4"
+                  value={pinResetDialog.pin}
+                  onChange={(event) => setPinResetDialog((current) => ({ ...current, pin: event.target.value }))}
+                />
+              </label>
+              <div className="action-stack horizontal">
+                <button type="submit" className="action-button primary" disabled={busy}>{busy ? 'Saving…' : 'Apply PIN reset'}</button>
+                <button type="button" className="action-button" onClick={closePinResetDialog}>Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
