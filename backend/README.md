@@ -87,12 +87,10 @@ Current external submission API:
 - versioned route: `POST /api/v1/public/external-submissions`
 - compatibility alias: `POST /api/external-submissions`
 - accepts JSON with:
-  - `pin`
-  - `submitter_name`
-  - `submitter_email`
   - `overall_description`
+  - optional `source_notes`
   - `files[]` where each file includes `name`, `note`, `content_type`, and `content_base64`
-- validates the PIN, persists the external submitter identity and attachment metadata, writes uploaded files into the Scott runtime, runs `Scott` immediately, and continues into the downstream `Vlad`, `Tracy`, `Libby`, and `Daisy` paths when the routing and review outputs require them
+- requires an authenticated `admin` or `submitter` session and stamps submitter identity from the current session user
 - the current intake path now supports `.svg`, `.png`, `.jpg`, `.jpeg`, and `.json` uploads
 - accepted raster intake can now reach `Vlad` for `raster_sheet_analysis`, including JPEG inputs normalized through Pillow in the live Python runtime
 - one-symbol raster files now produce a `single_symbol_raster_candidate` artifact with filename-derived title, aliases, keywords, note-derived description hints, and attachment/object-key lineage; multi-symbol sheets still produce proposed child crops and `raster_split_review` follow-up
@@ -137,7 +135,7 @@ Planned API growth boundaries:
 - `/api/v1/workspace`
   - queue, review, audit, and publication actions
 - `/api/v1/admin`
-  - health and operational inspection
+  - health, operational inspection, and admin user management
 
 Smoke-test flow for the current local agent slice:
 
