@@ -58,7 +58,6 @@ class ExternalSubmissionFileInput(BaseModel):
 
 
 class ExternalSubmissionRequest(BaseModel):
-    pin: str = Field(min_length=4, max_length=4)
     submitter_name: str = Field(min_length=1)
     submitter_email: str = Field(min_length=3)
     overall_description: str = Field(min_length=1)

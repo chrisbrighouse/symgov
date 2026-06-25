@@ -77,17 +77,13 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 @dataclass
 class ExternalSubmissionService:
     bridge: RuntimePersistenceBridge
-    pin: str
     db_env_file: Path
     storage_env_file: Path | None = None
+    pin: str | None = None
     scott_runtime_root: Path = SCOTT_RUNTIME_ROOT
     upload_root: Path = SCOTT_UPLOAD_ROOT
 
     def submit(self, payload: dict[str, Any]) -> dict[str, Any]:
-        pin = str(payload.get("pin") or "").strip()
-        if len(pin) != 4 or pin != self.pin:
-            raise SubmissionError("Invalid submission PIN.")
-
         submitter_name = str(payload.get("submitter_name") or "").strip()
         submitter_email = str(payload.get("submitter_email") or "").strip().lower()
         overall_description = str(payload.get("overall_description") or "").strip()

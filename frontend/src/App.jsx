@@ -5169,7 +5169,6 @@ function SubmissionPage() {
   const [formState, setFormState] = useState({
     submitterName: rememberedDetails.submitterName || '',
     submitterEmail: rememberedDetails.submitterEmail || '',
-    pin: '',
     description: submissionPresets[0],
     source: '',
     files: []
@@ -5255,18 +5254,6 @@ function SubmissionPage() {
               onChange={(event) => updateField('submitterEmail', event.target.value)}
             />
           </label>
-          <label className="field">
-            <span>Submission PIN</span>
-            <input
-              required
-              type="password"
-              inputMode="numeric"
-              pattern="[0-9]{4}"
-              maxLength="4"
-              value={formState.pin}
-              onChange={(event) => updateField('pin', event.target.value)}
-            />
-          </label>
           <label className="checkbox-row remember-row">
             <input
               type="checkbox"
@@ -5275,7 +5262,7 @@ function SubmissionPage() {
             />
             <span>Remember these details</span>
           </label>
-          <p className="muted-text">Name and email can be remembered on this device. The PIN is never saved.</p>
+          <p className="muted-text">Name and email can be remembered on this device for your convenience.</p>
         </section>
 
         <section className="glass-panel pane form-panel">

@@ -1104,7 +1104,6 @@ export async function submitExternalSubmission(formState) {
   );
 
   const submissionPayload = {
-    pin: formState.pin.trim(),
     submitter_name: formState.submitterName.trim(),
     submitter_email: formState.submitterEmail.trim(),
     overall_description: formState.description.trim(),

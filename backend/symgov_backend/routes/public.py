@@ -4,7 +4,8 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 
-from ..dependencies import get_runtime_bridge
+from ..auth import AuthenticatedUser
+from ..dependencies import get_runtime_bridge, require_any_role
 from ..runtime import RuntimePersistenceBridge
 from ..schemas import APIErrorResponse, ExternalSubmissionRequest, ExternalSubmissionResponse
 from ..services.external_submissions import ExternalSubmissionService, SubmissionError
@@ -37,16 +38,18 @@ legacy_router = APIRouter(tags=["public"])
 def create_external_submission(
     request: dict[str, Any] = Body(...),
     bridge: RuntimePersistenceBridge = Depends(get_runtime_bridge),
+    current_user: AuthenticatedUser = Depends(require_any_role({"admin", "submitter"})),
 ) -> ExternalSubmissionResponse:
-    settings = get_settings()
     service = ExternalSubmissionService(
         bridge=bridge,
-        pin=settings.submission_pin,
-        db_env_file=settings.db_env_file,
-        storage_env_file=settings.storage_env_file,
+        db_env_file=get_settings().db_env_file,
+        storage_env_file=get_settings().storage_env_file,
     )
     try:
-        payload = request.get("request") if isinstance(request.get("request"), dict) else request
+        raw_payload = request.get("request") if isinstance(request.get("request"), dict) else request
+        payload: dict[str, Any] = dict(raw_payload or {})
+        payload["submitter_name"] = current_user.display_name
+        payload["submitter_email"] = current_user.email
         validated_request = ExternalSubmissionRequest.model_validate(payload)
         result = service.submit(validated_request.model_dump())
     except SubmissionError as exc:
