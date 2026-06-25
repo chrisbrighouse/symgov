@@ -18,6 +18,20 @@ def test_submission_ui_no_longer_collects_or_sends_submission_pin():
     assert "pin: formState.pin.trim()" not in api_source
 
 
+def test_submission_ui_uses_logged_in_identity_not_manual_submitter_fields():
+    app_source = APP_JSX.read_text(encoding="utf-8")
+    api_source = API_JS.read_text(encoding="utf-8")
+
+    assert "Submitter name" not in app_source
+    assert "Submitter email" not in app_source
+    assert "rememberDetails" not in app_source
+    assert "readSubmissionDetailsCookie" not in app_source
+    assert "writeSubmissionDetailsCookie" not in app_source
+    assert "clearSubmissionDetailsCookie" not in app_source
+    assert "submitter_name: formState.submitterName.trim()" not in api_source
+    assert "submitter_email: formState.submitterEmail.trim()" not in api_source
+
+
 def test_backend_submission_request_no_longer_accepts_pin_field():
     schema_source = SCHEMAS_PY.read_text(encoding="utf-8")
 

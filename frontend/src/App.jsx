@@ -4435,31 +4435,6 @@ function SplitSymbolPreview({ child, variant = false }) {
   );
 }
 
-function readSubmissionDetailsCookie() {
-  const cookie = document.cookie
-    .split('; ')
-    .find((item) => item.startsWith('symgov_submitter_details='));
-
-  if (!cookie) {
-    return {};
-  }
-
-  try {
-    return JSON.parse(decodeURIComponent(cookie.split('=').slice(1).join('=')));
-  } catch {
-    return {};
-  }
-}
-
-function writeSubmissionDetailsCookie(details) {
-  const encoded = encodeURIComponent(JSON.stringify(details));
-  document.cookie = `symgov_submitter_details=${encoded}; max-age=31536000; path=/; SameSite=Lax`;
-}
-
-function clearSubmissionDetailsCookie() {
-  document.cookie = 'symgov_submitter_details=; max-age=0; path=/; SameSite=Lax';
-}
-
 function formatFileSize(bytes) {
   if (!Number.isFinite(bytes)) {
     return 'Unknown size';
@@ -5160,15 +5135,12 @@ function useScottSourceDiscoveryControls({
 }
 
 function SubmissionPage() {
-  const rememberedDetails = useMemo(readSubmissionDetailsCookie, []);
+  const auth = useAuth();
   const [healthState, setHealthState] = useState({ loading: true, mode: 'loading', message: 'Checking API…' });
   const [isPending, startTransition] = useTransition();
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
-  const [rememberDetails, setRememberDetails] = useState(true);
   const [formState, setFormState] = useState({
-    submitterName: rememberedDetails.submitterName || '',
-    submitterEmail: rememberedDetails.submitterEmail || '',
     description: submissionPresets[0],
     source: '',
     files: []
@@ -5193,18 +5165,6 @@ function SubmissionPage() {
   function updateField(field, value) {
     setFormState((current) => ({ ...current, [field]: value }));
   }
-
-  useEffect(() => {
-    if (rememberDetails) {
-      writeSubmissionDetailsCookie({
-        submitterName: formState.submitterName,
-        submitterEmail: formState.submitterEmail
-      });
-      return;
-    }
-
-    clearSubmissionDetailsCookie();
-  }, [rememberDetails, formState.submitterName, formState.submitterEmail]);
 
   function handleSubmit(event) {
     event.preventDefault();
@@ -5236,33 +5196,12 @@ function SubmissionPage() {
 
       <form className="submission-grid" onSubmit={handleSubmit}>
         <section className="glass-panel pane form-panel">
-          <SectionHeading title="Your details" subtitle="Used by Symgov if we need to follow up" />
-          <label className="field">
-            <span>Submitter name</span>
-            <input
-              required
-              value={formState.submitterName}
-              onChange={(event) => updateField('submitterName', event.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span>Submitter email</span>
-            <input
-              required
-              type="email"
-              value={formState.submitterEmail}
-              onChange={(event) => updateField('submitterEmail', event.target.value)}
-            />
-          </label>
-          <label className="checkbox-row remember-row">
-            <input
-              type="checkbox"
-              checked={rememberDetails}
-              onChange={(event) => setRememberDetails(event.target.checked)}
-            />
-            <span>Remember these details</span>
-          </label>
-          <p className="muted-text">Name and email can be remembered on this device for your convenience.</p>
+          <SectionHeading title="Submitting account" subtitle="This submission is tied to your logged-in identity" />
+          <div className="identity-chip">
+            <strong>{auth.user?.displayName || auth.user?.email}</strong>
+            <span>{auth.user?.email}</span>
+          </div>
+          <p className="muted-text">Symgov records this submission under your authenticated account.</p>
         </section>
 
         <section className="glass-panel pane form-panel">
