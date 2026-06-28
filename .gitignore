@@ -3,6 +3,8 @@ dist/
 assets/
 /index.html
 
+/backups/
+
 .env.backend.database
 .env.backend.storage
 

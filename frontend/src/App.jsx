@@ -271,16 +271,7 @@ function hasAnyRole(user, roles) {
   return roles.some((role) => available.has(role));
 }
 
-function defaultPathForUser(user) {
-  if (hasAnyRole(user, ['admin'])) {
-    return '/workspace';
-  }
-  if (hasAnyRole(user, ['reviewer'])) {
-    return '/reviews';
-  }
-  if (hasAnyRole(user, ['submitter'])) {
-    return '/standards/submit';
-  }
+function defaultPathForUser() {
   return '/standards';
 }
 
@@ -385,32 +376,41 @@ function AccessDenied({ roles }) {
 }
 
 function App() {
-  const location = useLocation();
-  const isStandardsRoute = location.pathname.startsWith('/standards');
-
   return (
     <AuthProvider>
-      <div className={`app-shell ${isStandardsRoute ? 'mode-standards' : 'mode-workspace'}`}>
-        <AmbientBackdrop />
-        <Header />
-        <main className="page-frame">
-          <Routes>
-            <Route path="/" element={<HomeRedirect />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/change-pin" element={<RequireAuth><ChangePinPage /></RequireAuth>} />
-            <Route path="/workspace" element={<RequireAnyRole roles={['admin']}><WorkspacePage /></RequireAnyRole>} />
-            <Route path="/workspace/users" element={<RequireAnyRole roles={['admin']}><AdminUsersPage /></RequireAnyRole>} />
-            <Route path="/reviews" element={<RequireAnyRole roles={['admin', 'reviewer']}><ReviewsPage /></RequireAnyRole>} />
-            {/* Route path="/rights" element={<RightsReviewPage />} protected by reviewer/admin auth. */}
-            <Route path="/rights" element={<RequireAnyRole roles={['admin', 'reviewer']}><RightsReviewPage /></RequireAnyRole>} />
-            <Route path="/standards" element={<RequireAuth><StandardsPage /></RequireAuth>} />
-            <Route path="/standards/submit" element={<RequireAnyRole roles={['admin', 'submitter']}><SubmissionPage /></RequireAnyRole>} />
-            <Route path="/support" element={<RequireAuth><SupportPage /></RequireAuth>} />
-            <Route path="*" element={<HomeRedirect />} />
-          </Routes>
-        </main>
-      </div>
+      <AppContent />
     </AuthProvider>
+  );
+}
+
+function AppContent() {
+  const auth = useAuth();
+  const location = useLocation();
+  const isStandardsRoute = location.pathname.startsWith('/standards');
+  const showRail = Boolean(auth.user) && location.pathname !== '/login' && location.pathname !== '/change-pin';
+
+  return (
+    <div className={`app-shell ${isStandardsRoute ? 'mode-standards' : 'mode-workspace'} ${showRail ? 'has-side-rail' : ''}`}>
+      <AmbientBackdrop />
+      <Header />
+      {showRail ? <SideRail /> : null}
+      <main className="page-frame">
+        <Routes>
+          <Route path="/" element={<HomeRedirect />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/change-pin" element={<RequireAuth><ChangePinPage /></RequireAuth>} />
+          <Route path="/workspace" element={<RequireAnyRole roles={['admin']}><WorkspacePage /></RequireAnyRole>} />
+          <Route path="/workspace/users" element={<RequireAnyRole roles={['admin']}><AdminUsersPage /></RequireAnyRole>} />
+          <Route path="/reviews" element={<RequireAnyRole roles={['admin', 'reviewer']}><ReviewsPage /></RequireAnyRole>} />
+          {/* Route path="/rights" element={<RightsReviewPage />} protected by reviewer/admin auth. */}
+          <Route path="/rights" element={<RequireAnyRole roles={['admin', 'reviewer']}><RightsReviewPage /></RequireAnyRole>} />
+          <Route path="/standards" element={<RequireAuth><StandardsPage /></RequireAuth>} />
+          <Route path="/standards/submit" element={<RequireAnyRole roles={['admin', 'submitter']}><SubmissionPage /></RequireAnyRole>} />
+          <Route path="/support" element={<RequireAuth><SupportPage /></RequireAuth>} />
+          <Route path="*" element={<HomeRedirect />} />
+        </Routes>
+      </main>
+    </div>
   );
 }
 
@@ -440,6 +440,7 @@ function LoginPage() {
   const [pin, setPin] = useState('');
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPin, setShowPin] = useState(false);
 
   useEffect(() => {
     if (auth.user) {
@@ -462,25 +463,87 @@ function LoginPage() {
     navigate(result.user?.mustChangePin ? '/change-pin' : defaultPathForUser(result.user), { replace: true });
   };
 
+  const isBusy = isSubmitting || auth.loading;
+  const pinIsComplete = pin.length === 4;
+
   return (
-    <section className="submission-panel auth-panel">
-      <div>
-        <p className="eyebrow">Sign in</p>
-        <h2>Open Symgov</h2>
-        <p>Use your email address and 4 digit PIN.</p>
+    <section className="auth-screen" aria-labelledby="login-title">
+      <div className="auth-orbit auth-orbit-one" aria-hidden="true" />
+      <div className="auth-orbit auth-orbit-two" aria-hidden="true" />
+      <div className="auth-hero-card">
+        <div className="auth-hero-copy">
+          <p className="eyebrow">Symgov control room</p>
+          <h2 id="login-title">Welcome back</h2>
+          <p>
+            Sign in to review symbol work, manage submissions, and keep the governance pipeline moving.
+          </p>
+        </div>
+        <div className="auth-signal-grid" aria-hidden="true">
+          <span className="auth-signal active">Review queue</span>
+          <span className="auth-signal">Source intake</span>
+          <span className="auth-signal">Publication</span>
+          <span className="auth-signal active">Admin tools</span>
+        </div>
       </div>
-      <form className="submission-form" onSubmit={handleSubmit}>
-        <label>
-          Email address
-          <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="email" required />
+
+      <form className="auth-card" onSubmit={handleSubmit}>
+        <div className="auth-card-header">
+          <span className="auth-lock-mark" aria-hidden="true">⌁</span>
+          <div>
+            <p className="eyebrow">Secure access</p>
+            <h3>Sign in with your email and PIN</h3>
+          </div>
+        </div>
+
+        <label className="auth-field">
+          <span>Email address</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            autoComplete="email"
+            placeholder="Enter your email"
+            autoFocus
+            required
+          />
         </label>
-        <label>
-          PIN
-          <input type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={pin} onChange={(event) => setPin(event.target.value)} autoComplete="current-password" required />
+
+        <label className="auth-field">
+          <span>4-digit PIN</span>
+          <div className="pin-input-wrap">
+            <input
+              type={showPin ? 'text' : 'password'}
+              inputMode="numeric"
+              pattern="[0-9]{4}"
+              maxLength="4"
+              value={pin}
+              onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 4))}
+              autoComplete="current-password"
+              placeholder="Enter PIN"
+              required
+            />
+            <button type="button" className="pin-visibility-button" onClick={() => setShowPin((current) => !current)}>
+              {showPin ? 'Hide' : 'Show'}
+            </button>
+          </div>
         </label>
-        {message ? <p className="form-message error">{message}</p> : null}
-        <button type="submit" className="primary-button" disabled={isSubmitting || auth.loading}>
-          {isSubmitting || auth.loading ? 'Signing in…' : 'Sign in'}
+
+        <div className="pin-progress" aria-label={`PIN entry ${pin.length} of 4 digits complete`}>
+          {[0, 1, 2, 3].map((index) => (
+            <span key={index} className={index < pin.length ? 'filled' : ''} />
+          ))}
+        </div>
+
+        <div className="auth-helper-row">
+          <span>{pinIsComplete ? 'PIN ready' : 'Enter the four digits from your invitation'}</span>
+          <strong>First login may ask you to change it</strong>
+        </div>
+
+        {message ? <p className="form-message error" role="alert">{message}</p> : null}
+
+        <button type="submit" className="auth-submit-button" disabled={isBusy}>
+          <span>{isBusy ? 'Signing in…' : 'Open Symgov'}</span>
+          <span aria-hidden="true">→</span>
         </button>
       </form>
     </section>
@@ -547,9 +610,6 @@ function Header() {
   const auth = useAuth();
   const navigate = useNavigate();
   const user = auth.user;
-  const canSubmit = hasAnyRole(user, ['admin', 'submitter']);
-  const canReview = hasAnyRole(user, ['admin', 'reviewer']);
-  const canAdmin = hasAnyRole(user, ['admin']);
 
   const handleLogout = async () => {
     await auth.logout();
@@ -567,50 +627,107 @@ function Header() {
           <h1>symgov</h1>
         </div>
       </div>
-      <nav className="top-nav" aria-label="Primary navigation">
-        {canSubmit && (
-          <NavLink to="/standards/submit" className={({ isActive }) => navClass(isActive)}>
-            Submissions
-          </NavLink>
-        )}
-        {canReview && (
-          <NavLink to="/rights" className={({ isActive }) => navClass(isActive)}>
-            Rights
-          </NavLink>
-        )}
-        {canReview && (
-          <NavLink to="/reviews" className={({ isActive }) => navClass(isActive)}>
-            Reviews
-          </NavLink>
-        )}
-        {user && (
-          <NavLink to="/standards" end className={({ isActive }) => navClass(isActive)}>
-            Catalog
-          </NavLink>
-        )}
-        {user && (
-          <NavLink to="/support" className={({ isActive }) => navClass(isActive)}>
-            Support
-          </NavLink>
-        )}
-        {canAdmin && (
-          <NavLink to="/workspace/users" className={({ isActive }) => navClass(isActive)}>
-            Manage users
-          </NavLink>
-        )}
-      </nav>
       <div className="header-actions">
         {user ? <div className="build-chip">{user.displayName || user.email}</div> : null}
         <div className="build-chip">v{appConfig.version} · {appConfig.build || 'local'}</div>
-        {user ? <button type="button" className="ghost-button" onClick={handleLogout}>Sign out</button> : null}
-        {canAdmin && (
-          <NavLink to="/workspace" className="icon-button" aria-label="Open workspace view">
-            <CogIcon />
-          </NavLink>
+        {user ? (
+          <button type="button" className="ghost-button" onClick={handleLogout}>Sign out</button>
+        ) : (
+          <button type="button" className="ghost-button" onClick={() => navigate('/login')}>Sign in</button>
         )}
       </div>
     </header>
   );
+}
+
+function SideRail() {
+  const auth = useAuth();
+  const user = auth.user;
+  const canSubmit = hasAnyRole(user, ['admin', 'submitter']);
+  const canReview = hasAnyRole(user, ['admin', 'reviewer']);
+  const canAdmin = hasAnyRole(user, ['admin']);
+
+  return (
+    <aside className="side-rail" aria-label="Primary navigation">
+      <nav className="rail-nav rail-nav-primary">
+        <RailNavLink to="/standards" label="Catalog" end icon="catalog" />
+        {canSubmit ? <RailNavLink to="/standards/submit" label="Submissions" icon="submissions" /> : null}
+        {canReview ? <RailNavLink to="/rights" label="Rights" icon="rights" /> : null}
+        {canReview ? <RailNavLink to="/reviews" label="Reviews" icon="reviews" /> : null}
+        <RailNavLink to="/support" label="Support" icon="support" />
+      </nav>
+      {canAdmin ? (
+        <nav className="rail-nav rail-nav-admin" aria-label="Administration">
+          <RailNavLink to="/workspace" label="Admin" icon="admin" />
+        </nav>
+      ) : null}
+    </aside>
+  );
+}
+
+function RailNavLink({ to, label, icon, end = false }) {
+  return (
+    <NavLink
+      to={to}
+      end={end}
+      className={({ isActive }) => `rail-link ${isActive ? 'active' : ''}`.trim()}
+      aria-label={label}
+      title={label}
+    >
+      <NavIcon name={icon} />
+      <span className="rail-tooltip" role="tooltip">{label}</span>
+    </NavLink>
+  );
+}
+
+function NavIcon({ name }) {
+  switch (name) {
+    case 'catalog':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 4.5h10.5a3.5 3.5 0 0 1 3.5 3.5v11.5H8.5A3.5 3.5 0 0 1 5 16V4.5Z" />
+          <path d="M8.5 4.5v11A3.5 3.5 0 0 0 12 19" />
+          <path d="M9 8h6" />
+          <path d="M9 11h5" />
+        </svg>
+      );
+    case 'submissions':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4v10" />
+          <path d="m8 8 4-4 4 4" />
+          <path d="M5 14v3.5A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5V14" />
+        </svg>
+      );
+    case 'rights':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 3 5 6v5c0 4.5 2.8 8 7 10 4.2-2 7-5.5 7-10V6l-7-3Z" />
+          <path d="m9 12 2 2 4-5" />
+        </svg>
+      );
+    case 'reviews':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M5 4.5h14v15H5z" />
+          <path d="M8 8h8" />
+          <path d="M8 12h5" />
+          <path d="m14 16 1.5 1.5L19 14" />
+        </svg>
+      );
+    case 'support':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 20a8 8 0 1 0-8-8" />
+          <path d="M4 20v-4h4" />
+          <path d="M9.5 9a2.7 2.7 0 0 1 5 1.4c0 2-2.5 2.1-2.5 4" />
+          <path d="M12 18h.01" />
+        </svg>
+      );
+    case 'admin':
+    default:
+      return <CogIcon />;
+  }
 }
 
 function EngineeringSymbolLogo() {
@@ -1929,6 +2046,9 @@ function WorkspacePage() {
               Intelligence
             </button>
           </div>
+          <NavLink to="/workspace/users" className="workspace-admin-link">
+            Manage users
+          </NavLink>
         </div>
       </div>
 
@@ -5151,6 +5271,7 @@ function AdminUsersPage() {
   const [rowBusyByUser, setRowBusyByUser] = useState({});
   const [toast, setToast] = useState({ kind: 'info', message: '' });
   const [pinResetDialog, setPinResetDialog] = useState({ open: false, user: null, pin: '4590' });
+  const [userSort, setUserSort] = useState({ key: 'displayName', direction: 'asc' });
 
   const showToast = (kind, message) => {
     setToast({ kind, message });
@@ -5271,6 +5392,35 @@ function AdminUsersPage() {
     });
   };
 
+  const sortAdminUsers = (key) => {
+    setUserSort((current) => ({
+      key,
+      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const sortedUsers = useMemo(() => {
+    const valueForSort = (user) => {
+      switch (userSort.key) {
+        case 'email':
+          return user.email || '';
+        case 'status':
+          return user.isActive ? 'active' : 'inactive';
+        case 'pin':
+          return user.mustChangePin ? 'change required' : 'set';
+        case 'roles':
+          return (user.roles || []).slice().sort().join(', ');
+        case 'displayName':
+        default:
+          return user.displayName || user.email || '';
+      }
+    };
+    const direction = userSort.direction === 'asc' ? 1 : -1;
+    return [...state.items].sort((left, right) => String(valueForSort(left)).localeCompare(String(valueForSort(right)), undefined, { sensitivity: 'base' }) * direction);
+  }, [state.items, userSort.direction, userSort.key]);
+
+  const sortIndicator = (key) => (userSort.key === key ? (userSort.direction === 'asc' ? 'Up' : 'Down') : '');
+
   return (
     <section className="experience-shell">
       <div className="hero-panel glass-panel workspace-hero">
@@ -5296,38 +5446,92 @@ function AdminUsersPage() {
           <span>Initial PIN</span>
           <input required inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={form.pin} onChange={(event) => setForm((c) => ({ ...c, pin: event.target.value }))} />
         </label>
-        <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('admin')} onChange={(event) => setRole('admin', event.target.checked)} /><span>Admin</span></div>
-        <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('submitter')} onChange={(event) => setRole('submitter', event.target.checked)} /><span>Submitter</span></div>
-        <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('reviewer')} onChange={(event) => setRole('reviewer', event.target.checked)} /><span>Reviewer</span></div>
-        <button type="submit" className="action-button primary" disabled={createBusy}>{createBusy ? 'Saving…' : 'Create user'}</button>
+        <div className="create-user-actions">
+          <div className="create-user-role-group" aria-label="User roles">
+            <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('admin')} onChange={(event) => setRole('admin', event.target.checked)} /><span>Admin</span></div>
+            <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('submitter')} onChange={(event) => setRole('submitter', event.target.checked)} /><span>Submitter</span></div>
+            <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('reviewer')} onChange={(event) => setRole('reviewer', event.target.checked)} /><span>Reviewer</span></div>
+          </div>
+          <button type="submit" className="action-button primary create-user-submit" disabled={createBusy}>{createBusy ? 'Saving…' : 'Create user'}</button>
+        </div>
       </form>
       <section className="glass-panel pane">
         <SectionHeading title="Existing users" subtitle="Account status and role management" />
         {state.loading ? <p>Loading…</p> : (
-          <div className="selected-file-list">
-            {state.items.map((user) => (
-              <div key={user.id} className="selected-file-row admin-user-row">
-                <strong>{user.displayName} · {user.email}</strong>
-                <span>Active: {user.isActive ? 'yes' : 'no'} · Must change PIN: {user.mustChangePin ? 'yes' : 'no'}</span>
-                <div className="action-stack horizontal role-pill-group">
-                  {['admin', 'submitter', 'reviewer'].map((role) => (
-                    <label key={`${user.id}-${role}`} className={`role-pill ${user.roles.includes(role) ? 'active' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={user.roles.includes(role)}
-                        disabled={isRowBusy(user.id)}
-                        onChange={(event) => toggleUserRole(user, role, event.target.checked)}
-                      />
-                      <span>{role}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="action-stack horizontal">
-                  <button type="button" className="action-button" disabled={isRowBusy(user.id)} onClick={() => toggleActive(user)}>{isRowBusy(user.id) ? 'Saving…' : (user.isActive ? 'Deactivate' : 'Activate')}</button>
-                  <button type="button" className="action-button" disabled={isRowBusy(user.id)} onClick={() => openPinResetDialog(user)}>{isRowBusy(user.id) ? 'Saving…' : 'Reset PIN'}</button>
-                </div>
-              </div>
-            ))}
+          <div className="admin-users-table-shell">
+            <table className="admin-users-grid">
+              <thead>
+                <tr>
+                  <th scope="col">
+                    <button type="button" className="source-column-sort" onClick={() => sortAdminUsers('displayName')}>
+                      <span>Name</span>
+                      <span className="source-sort-indicator">{sortIndicator('displayName')}</span>
+                    </button>
+                  </th>
+                  <th scope="col">
+                    <button type="button" className="source-column-sort" onClick={() => sortAdminUsers('email')}>
+                      <span>Email</span>
+                      <span className="source-sort-indicator">{sortIndicator('email')}</span>
+                    </button>
+                  </th>
+                  <th scope="col">
+                    <button type="button" className="source-column-sort" onClick={() => sortAdminUsers('status')}>
+                      <span>Status</span>
+                      <span className="source-sort-indicator">{sortIndicator('status')}</span>
+                    </button>
+                  </th>
+                  <th scope="col">
+                    <button type="button" className="source-column-sort" onClick={() => sortAdminUsers('pin')}>
+                      <span>PIN</span>
+                      <span className="source-sort-indicator">{sortIndicator('pin')}</span>
+                    </button>
+                  </th>
+                  <th scope="col">
+                    <button type="button" className="source-column-sort" onClick={() => sortAdminUsers('roles')}>
+                      <span>Roles</span>
+                      <span className="source-sort-indicator">{sortIndicator('roles')}</span>
+                    </button>
+                  </th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedUsers.map((user) => (
+                  <tr key={user.id} className="admin-user-row">
+                    <td><strong>{user.displayName}</strong></td>
+                    <td><span>{user.email}</span></td>
+                    <td><span className={`admin-status-pill ${user.isActive ? 'active' : 'inactive'}`}>{user.isActive ? 'Active' : 'Inactive'}</span></td>
+                    <td><span>{user.mustChangePin ? 'Change required' : 'Set'}</span></td>
+                    <td>
+                      <div className="action-stack horizontal role-pill-group">
+                        {['admin', 'submitter', 'reviewer'].map((role) => (
+                          <label key={`${user.id}-${role}`} className={`role-pill ${user.roles.includes(role) ? 'active' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={user.roles.includes(role)}
+                              disabled={isRowBusy(user.id)}
+                              onChange={(event) => toggleUserRole(user, role, event.target.checked)}
+                            />
+                            <span>{role}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="action-stack horizontal admin-user-row-actions">
+                        <button type="button" className="action-button compact" disabled={isRowBusy(user.id)} onClick={() => toggleActive(user)}>{isRowBusy(user.id) ? 'Saving…' : (user.isActive ? 'Deactivate' : 'Activate')}</button>
+                        <button type="button" className="action-button compact" disabled={isRowBusy(user.id)} onClick={() => openPinResetDialog(user)}>{isRowBusy(user.id) ? 'Saving…' : 'Reset PIN'}</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!sortedUsers.length ? (
+                  <tr>
+                    <td colSpan="6" className="admin-users-empty">No users found.</td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
           </div>
         )}
       </section>
@@ -6239,10 +6443,6 @@ function SymbolGlyph({ symbolId, large = false, variant = false }) {
       <polygon points="142,42 110,60 142,78" />
     </svg>
   );
-}
-
-function navClass(isActive) {
-  return `nav-pill ${isActive ? 'active' : ''}`.trim();
 }
 
 export default App;

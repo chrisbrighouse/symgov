@@ -7,7 +7,7 @@ from typing import Sequence
 
 from sqlalchemy.orm import Session
 
-from .auth import upsert_user
+from .auth import upsert_user, user_roles
 from .db import create_session_factory
 from .models import User
 from .settings import get_settings
@@ -70,7 +70,7 @@ def main(argv: Sequence[str] | None = None) -> None:
                         "id": str(user.id),
                         "email": user.email,
                         "displayName": user.display_name,
-                        "roles": sorted(role.role for role in user.roles),
+                        "roles": list(user_roles(session, user.id)),
                         "mustChangePin": bool(user.must_change_pin),
                     },
                     indent=2,
