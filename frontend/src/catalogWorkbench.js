@@ -369,6 +369,84 @@ export function buildCatalogSearchText(symbol = {}) {
   ]).join(' ');
 }
 
+export function interpretEdCatalogPrompt(prompt = '') {
+  const rawPrompt = String(prompt || '').trim();
+  const normalizedPrompt = rawPrompt.toLowerCase();
+  const disciplines = [];
+  const categories = [];
+  const useCases = [];
+  const formats = [];
+  const matchedTerms = [];
+
+  const match = (pattern, onMatch, label) => {
+    if (pattern.test(normalizedPrompt)) {
+      onMatch();
+      matchedTerms.push(label);
+    }
+  };
+
+  match(/\b(fire|alarm|smoke|heat detector|break\s?glass|call\s?point|sounder|beacon)\b/, () => {
+    disciplines.push('Fire & Life Safety');
+    categories.push('Fire Alarm Devices');
+  }, 'fire alarm');
+  match(/\b(detector|sensor|smoke|heat|co\b|carbon monoxide)\b/, () => {
+    categories.push('Sensors / Detectors');
+  }, 'detector/sensor');
+  match(/\b(electrical|elec|switchgear|distribution|lighting)\b/, () => {
+    disciplines.push('Electrical');
+  }, 'electrical');
+  match(/\b(p\s?&\s?id|pid|piping|pipework|process)\b/, () => {
+    disciplines.push('Piping / P&ID');
+  }, 'piping/p&id');
+  match(/\b(valve|valves)\b/, () => {
+    categories.push('Valves');
+  }, 'valves');
+  match(/\b(pump|pumps)\b/, () => {
+    categories.push('Pumps');
+  }, 'pumps');
+  match(/\b(cad|dxf|dwg|insert|editable)\b/, () => {
+    useCases.push('Insert into CAD drawing');
+  }, 'cad');
+  match(/\b(markup|annotate|annotation|redline|png|jpg|jpeg)\b/, () => {
+    useCases.push('Mark up / annotate drawing');
+  }, 'markup');
+  match(/\b(pdf|report|document|documentation)\b/, () => {
+    useCases.push('Use in PDF/report');
+  }, 'documentation');
+
+  FORMAT_ORDER.forEach((format) => {
+    const pattern = new RegExp(`\\b${format.toLowerCase()}\\b`, 'i');
+    if (pattern.test(rawPrompt)) {
+      formats.push(format === 'JPEG' ? 'JPG' : format);
+      matchedTerms.push(format);
+    }
+  });
+
+  const facetFilters = {
+    catalogDisciplines: sortByPreferredOrder(disciplines, CATALOG_DISCIPLINE_ORDER),
+    catalogCategories: sortByPreferredOrder(categories, CATALOG_CATEGORY_ORDER),
+    useCases: sortByPreferredOrder(useCases, CATALOG_USE_CASE_ORDER),
+    availableFormats: sortByPreferredOrder(formats, FORMAT_ORDER)
+  };
+
+  Object.keys(facetFilters).forEach((key) => {
+    if (!facetFilters[key].length) {
+      delete facetFilters[key];
+    }
+  });
+
+  return {
+    query: rawPrompt,
+    facetFilters,
+    preferredFormats: facetFilters.availableFormats || [],
+    matchedTerms: compactUnique(matchedTerms),
+    explanation: matchedTerms.length
+      ? `Ed mapped ${compactUnique(matchedTerms).join(', ')} to Catalog filters. No records were changed.`
+      : 'Ed did not find exact filter matches, so the prompt was applied as a Catalog search only. No records were changed.',
+    mutatesRecords: false
+  };
+}
+
 export function sortSymbolsByPreferredFormats(symbols = [], preferredFormats = []) {
   const preferred = (preferredFormats || []).map((format) => String(format || '').toUpperCase()).filter(Boolean);
   if (!preferred.length) {

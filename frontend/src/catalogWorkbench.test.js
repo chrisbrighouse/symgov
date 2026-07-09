@@ -10,6 +10,7 @@ import {
   catalogTaxonomyForSymbol,
   normalizeCatalogCategory,
   normalizeCatalogDiscipline,
+  interpretEdCatalogPrompt,
   removeSymbolFromClipboard,
   serializeCatalogPreferences
 } from './catalogWorkbench.js';
@@ -121,4 +122,18 @@ test('Catalog search text includes normalized taxonomy and format fields', () =>
   assert.ok(text.includes('fire & life safety'));
   assert.ok(text.includes('fire alarm devices'));
   assert.ok(text.includes('dxf'));
+});
+
+test('Ed guided search maps natural language to non-mutating Catalog filters', () => {
+  const interpretation = interpretEdCatalogPrompt('Find fire alarm detector symbols I can insert into CAD as DXF');
+
+  assert.deepEqual(interpretation.facetFilters, {
+    catalogDisciplines: ['Fire & Life Safety'],
+    catalogCategories: ['Fire Alarm Devices', 'Sensors / Detectors'],
+    useCases: ['Insert into CAD drawing'],
+    availableFormats: ['DXF']
+  });
+  assert.deepEqual(interpretation.preferredFormats, ['DXF']);
+  assert.match(interpretation.query, /fire alarm detector/i);
+  assert.equal(interpretation.mutatesRecords, false);
 });

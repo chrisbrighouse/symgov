@@ -1969,7 +1969,7 @@ a {
 
 .catalog-workbench-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(12rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
   gap: 0.85rem;
   align-items: start;
 }
@@ -2006,6 +2006,27 @@ a {
   padding: 0.55rem 0.65rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-sm);
+}
+
+.catalog-ed-card textarea {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+  color: var(--text-main);
+  font: inherit;
+  line-height: 1.35;
+}
+
+.ed-interpretation-text {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.35;
 }
 
 .saved-view-list {

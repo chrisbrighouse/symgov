@@ -161,14 +161,94 @@ Catalog files changed/created by this session:
 
 The backend/API/test files already shown modified in status were not part of this Catalog pass and should be inspected before any commit to avoid mixing unrelated work.
 
+## 2026-07-09 continuation update
+
+Implemented the first non-mutating Ed guided-search prompt in the Catalog workbench.
+
+Changed:
+
+- `frontend/src/catalogWorkbench.js`
+- `frontend/src/catalogWorkbench.test.js`
+- `frontend/src/App.jsx`
+- `frontend/src/styles.css`
+- `docs/plans/2026-07-09-catalog-workbench-stage1-restart.md`
+
+Behavior added:
+
+- Ed prompt card labelled **Ask Ed to find symbols**.
+- Natural-language prompt is interpreted locally into Catalog search + filters only.
+- Initial mappings include fire/life-safety, detectors/sensors, electrical, P&ID/piping, valves, pumps, CAD/markup/documentation use-cases, and explicit formats such as DXF/PNG/PDF.
+- UI explicitly states Ed changes no records.
+- Ed preferred formats feed the existing preferred-format prioritisation.
+
+Verification completed from `/data/symgov`:
+
+```bash
+node --test frontend/src/catalogWorkbench.test.js
+```
+
+Result: 9 tests passed.
+
+```bash
+git diff --check -- frontend/src/App.jsx frontend/src/styles.css frontend/src/catalogWorkbench.js frontend/src/catalogWorkbench.test.js
+```
+
+Result: no output / passed.
+
+```bash
+npm run build
+```
+
+Result:
+
+- Vite build passed.
+- Output included:
+  - `../dist/assets/index-DynNVAtd.css`
+  - `../dist/assets/index-BrAbx_Vw.js`
+
+```bash
+./scripts/publish-static.sh
+```
+
+Result:
+
+- published from `/data/symgov/dist` to `/data/symgov`
+- published from `/data/symgov/dist` to `/data/.openclaw/workspace/symgov`
+
+Live bundle marker check with browser-like User-Agent confirmed the public JS bundle `./assets/index-BrAbx_Vw.js` contains:
+
+- `Ask Ed to find symbols`
+- `No records are changed`
+- `Ed mapped`
+- `Catalog clipboard`
+
+API health checks passed:
+
+```json
+{"ok":true,"service":"symgov-api","time":"2026-07-09T10:01:36Z"}
+```
+
+Browser/manual note: direct navigation to `https://apps.chrisbrighouse.com/#/standards` in the automation browser currently lands on the sign-in screen, so the authenticated visual pass still needs Chris/session credentials or a logged-in browser context. Public static bundle verification succeeded.
+
+Current uncommitted Catalog state after this continuation:
+
+```text
+## main...origin/main
+ M docs/plans/2026-07-09-catalog-workbench-stage1-restart.md
+ M frontend/src/App.jsx
+ M frontend/src/catalogWorkbench.js
+ M frontend/src/catalogWorkbench.test.js
+ M frontend/src/styles.css
+```
+
 ## Known limitations / next actions
 
 1. The taxonomy cleanup is currently a frontend presentation layer only. Backend data still contains raw values such as `general`, `symbol`, and `process_instrumentation`.
 2. Saved views and preferences are local-browser only via `localStorage`.
 3. Clipboard is application-level only via `localStorage`, not OS Windows/macOS clipboard integration.
 4. Download/bundle behavior is deliberately deferred until the engineering model is agreed.
-5. Ed prompt/search is still design-only; no Ed UI prompt has been implemented yet.
-6. The current UI is functional but should get UX refinement after Chris tries it.
+5. Ed prompt/search is now frontend-only and non-mutating; mappings are simple local keyword rules, not an LLM or backend Ed workflow.
+6. The current UI is functional but should get UX refinement after Chris tries it in an authenticated browser session.
 
 ## Suggested Stage 1 continuation
 
@@ -181,4 +261,4 @@ The backend/API/test files already shown modified in status were not part of thi
 
 ## Copyable restart prompt
 
-Continue the Symgov Catalog workbench work from `/data/symgov`. Load `symgov-agent-operations`, `react-ui-patterns`, and `test-driven-development`. Read `docs/plans/2026-07-09-catalog-workbench-taxonomy-preferences-plan.md` and `docs/plans/2026-07-09-catalog-workbench-stage1-restart.md`. Inspect `git status --short --branch` first because unrelated backend files were already modified before the Catalog pass. Continue Stage 1: review the live Catalog UI, refine preferences/saved views/application clipboard UX, and start the non-mutating Ed guided-search prompt only after adding focused tests. Verify with `node --test frontend/src/catalogWorkbench.test.js`, `npm run build`, `./scripts/publish-static.sh`, and live bundle marker checks.
+Continue the Symgov Catalog workbench work from `/data/symgov`. Load `symgov-agent-operations`, `react-ui-patterns`, and `test-driven-development`. Read `docs/plans/2026-07-09-catalog-workbench-taxonomy-preferences-plan.md` and `docs/plans/2026-07-09-catalog-workbench-stage1-restart.md`. Inspect `git status --short --branch` first. Current Stage 1 continuation adds a frontend-only, non-mutating Ed guided-search prompt plus tests and has been published live. Next useful work: do an authenticated browser/manual pass on the Catalog, refine preferences/saved views/application clipboard/Ed UX from real use, then consider compact/card browsing before backend taxonomy work or download bundles. Verify with `node --test frontend/src/catalogWorkbench.test.js`, `npm run build`, `./scripts/publish-static.sh`, live bundle marker checks, and API health checks.

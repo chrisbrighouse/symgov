@@ -52,6 +52,7 @@ import {
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
   catalogTaxonomyForSymbol,
+  interpretEdCatalogPrompt,
   removeSymbolFromClipboard,
   serializeCatalogPreferences,
   sortSymbolsByPreferredFormats
@@ -861,6 +862,8 @@ function StandardsPage() {
   );
   const [clipboardOpen, setClipboardOpen] = useState(false);
   const [workbenchStatus, setWorkbenchStatus] = useState({ mode: '', message: '' });
+  const [edCatalogPrompt, setEdCatalogPrompt] = useState('');
+  const [edCatalogInterpretation, setEdCatalogInterpretation] = useState(null);
   const [standardsState, setStandardsState] = useState({
     loading: true,
     mode: appConfig.apiRoot ? 'loading' : 'seeded',
@@ -1296,6 +1299,22 @@ function StandardsPage() {
     setSavedCatalogViews((current) => current.filter((view) => view.id !== viewId));
   }
 
+  function askEdToFindCatalogSymbols() {
+    const interpretation = interpretEdCatalogPrompt(edCatalogPrompt);
+    if (!interpretation.query.trim()) {
+      setWorkbenchStatus({ mode: 'error', message: 'Ask Ed what kind of Catalog symbol you need first.' });
+      return;
+    }
+    setQuery(interpretation.query);
+    setFacetFilters((current) => ({ ...current, ...interpretation.facetFilters }));
+    setCatalogPreferences((current) => serializeCatalogPreferences({
+      ...current,
+      formats: interpretation.preferredFormats.length ? interpretation.preferredFormats : current.formats
+    }));
+    setEdCatalogInterpretation(interpretation);
+    setWorkbenchStatus({ mode: 'success', message: interpretation.explanation });
+  }
+
   function addSelectedToCatalogClipboard() {
     const candidates = selectedSymbols.length ? selectedSymbols : activeSymbol ? [activeSymbol] : [];
     if (!candidates.length) {
@@ -1428,6 +1447,23 @@ function StandardsPage() {
             ) : (
               <p className="muted-text">No saved Catalog views yet.</p>
             )}
+          </div>
+          <div className="catalog-preference-card catalog-ed-card">
+            <h4>Ask Ed to find symbols</h4>
+            <p className="muted-text">Ed translates plain-language needs into search and filters only. No records are changed.</p>
+            <textarea
+              value={edCatalogPrompt}
+              onChange={(event) => setEdCatalogPrompt(event.target.value)}
+              placeholder="e.g. fire alarm detector DXF for CAD"
+              aria-label="Ask Ed to find Catalog symbols"
+              rows={3}
+            />
+            <button type="button" className="action-button compact" onClick={askEdToFindCatalogSymbols}>
+              Ask Ed
+            </button>
+            {edCatalogInterpretation ? (
+              <p className="ed-interpretation-text">{edCatalogInterpretation.explanation}</p>
+            ) : null}
           </div>
         </div>
         <div className="catalog-clipboard-panel">
