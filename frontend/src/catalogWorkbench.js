@@ -369,6 +369,21 @@ export function buildCatalogSearchText(symbol = {}) {
   ]).join(' ');
 }
 
+export function buildCatalogCardSummary(symbol = {}) {
+  const taxonomy = catalogTaxonomyForSymbol(symbol);
+  return {
+    id: String(symbol.id || symbol.symbolId || symbol.slug || '').trim(),
+    displayId: displaySymbolId(symbol),
+    name: displaySymbolName(symbol),
+    categories: taxonomy.categories,
+    disciplines: taxonomy.disciplines,
+    formats: taxonomy.availableFormats,
+    useCases: taxonomy.useCases,
+    hasPhotos: Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length > 0,
+    commentCount: Number(symbol.commentCount || 0) || (symbol.hasComments ? 1 : 0)
+  };
+}
+
 export function interpretEdCatalogPrompt(prompt = '') {
   const rawPrompt = String(prompt || '').trim();
   const normalizedPrompt = rawPrompt.toLowerCase();

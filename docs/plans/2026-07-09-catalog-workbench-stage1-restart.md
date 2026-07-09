@@ -230,10 +230,66 @@ API health checks passed:
 
 Browser/manual note: direct navigation to `https://apps.chrisbrighouse.com/#/standards` in the automation browser currently lands on the sign-in screen, so the authenticated visual pass still needs Chris/session credentials or a logged-in browser context. Public static bundle verification succeeded.
 
-Current uncommitted Catalog state after this continuation:
+## 2026-07-09 compact-browsing update
+
+Implemented Catalog browsing refinements requested by Chris:
+
+- The Engineer workbench / preferences panel is now collapsible and starts collapsed so more symbol records are visible immediately.
+- The Catalog result area now defaults to a **Compact cards** view with a Table toggle retained for detailed column filtering/sorting.
+- Compact cards show symbol short ID, name, preview, normalized categories/disciplines, available format chips, and 📷/💬 indicators.
+- Added `buildCatalogCardSummary()` to keep compact-card identity/taxonomy/format fields testable in the pure helper module.
+
+Verification completed from `/data/symgov`:
+
+```bash
+node --test frontend/src/catalogWorkbench.test.js
+```
+
+Result: 10 tests passed.
+
+```bash
+git diff --check -- frontend/src/App.jsx frontend/src/styles.css frontend/src/catalogWorkbench.js frontend/src/catalogWorkbench.test.js
+```
+
+Result: no output / passed.
+
+```bash
+npm run build
+```
+
+Result:
+
+- Vite build passed.
+- Output included:
+  - `../dist/assets/index-CNff4Msy.css`
+  - `../dist/assets/index-R3qbNAVg.js`
+
+```bash
+./scripts/publish-static.sh
+```
+
+Result:
+
+- published from `/data/symgov/dist` to `/data/symgov`
+- published from `/data/symgov/dist` to `/data/.openclaw/workspace/symgov`
+
+Live bundle marker check with browser-like User-Agent confirmed:
+
+- public JS bundle `./assets/index-R3qbNAVg.js` contains `Compact cards`, `Show preferences`, and `Collapse preferences`.
+- public CSS bundle `./assets/index-CNff4Msy.css` contains `catalog-symbol-card`, `catalog-view-toggle`, and `catalog-workbench-panel.collapsed`.
+
+API health check passed at `2026-07-09T10:14:31Z`:
+
+```json
+{"ok":true,"service":"symgov-api","time":"2026-07-09T10:14:31Z"}
+```
+
+Browser/manual note remains: direct automation browser navigation to `https://apps.chrisbrighouse.com/#/standards` requires an authenticated session; public static bundle verification succeeded.
+
+Current uncommitted Catalog state after the compact-browsing continuation:
 
 ```text
-## main...origin/main
+## main...origin/main [ahead 1]
  M docs/plans/2026-07-09-catalog-workbench-stage1-restart.md
  M frontend/src/App.jsx
  M frontend/src/catalogWorkbench.js

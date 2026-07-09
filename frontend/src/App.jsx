@@ -49,6 +49,7 @@ import {
 import {
   addSymbolsToClipboard,
   applySavedCatalogView,
+  buildCatalogCardSummary,
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
   catalogTaxonomyForSymbol,
@@ -861,6 +862,8 @@ function StandardsPage() {
     readLocalStorageJson(CATALOG_CLIPBOARD_STORAGE_KEY, [])
   );
   const [clipboardOpen, setClipboardOpen] = useState(false);
+  const [workbenchExpanded, setWorkbenchExpanded] = useState(false);
+  const [catalogResultView, setCatalogResultView] = useState('cards');
   const [workbenchStatus, setWorkbenchStatus] = useState({ mode: '', message: '' });
   const [edCatalogPrompt, setEdCatalogPrompt] = useState('');
   const [edCatalogInterpretation, setEdCatalogInterpretation] = useState(null);
@@ -1367,131 +1370,149 @@ function StandardsPage() {
         <p className={`inline-status ${workbenchStatus.mode || 'info'}`}>{workbenchStatus.message}</p>
       ) : null}
 
-      <section className="glass-panel pane catalog-workbench-panel">
-        <div className="detail-heading">
+      <section className={`glass-panel pane catalog-workbench-panel ${workbenchExpanded ? 'expanded' : 'collapsed'}`}>
+        <div className="detail-heading catalog-workbench-heading">
           <div>
             <p className="eyebrow">Engineer workbench</p>
             <h3>Preferences, saved views & Catalog clipboard</h3>
-            <p>Set your usual disciplines, categories and formats, then collect symbols into an in-app clipboard for later bundle/download work.</p>
+            <p>
+              {workbenchExpanded
+                ? 'Set your usual disciplines, categories and formats, then collect symbols into an in-app clipboard for later bundle/download work.'
+                : `${catalogPreferences.disciplines.length + catalogPreferences.categories.length + catalogPreferences.formats.length + catalogPreferences.useCases.length} preference(s) set · ${savedCatalogViews.length} saved view(s) · ${catalogClipboard.length} clipboard item(s)`}
+            </p>
           </div>
-          <button type="button" className="action-button compact" onClick={addSelectedToCatalogClipboard}>
-            Add selected to clipboard ({catalogClipboard.length})
-          </button>
-        </div>
-        <div className="catalog-workbench-grid">
-          <div className="catalog-preference-card">
-            <h4>Preferred disciplines</h4>
-            {(facetOptions.find((facet) => facet.key === 'catalogDisciplines')?.values || []).slice(0, 12).map((value) => (
-              <label key={`pref-discipline-${value}`} className="checkbox-row compact">
-                <input
-                  type="checkbox"
-                  checked={catalogPreferences.disciplines.includes(value)}
-                  onChange={() => toggleCatalogPreference('disciplines', value)}
-                />
-                <span>{value}</span>
-              </label>
-            ))}
-          </div>
-          <div className="catalog-preference-card">
-            <h4>Preferred categories</h4>
-            {(facetOptions.find((facet) => facet.key === 'catalogCategories')?.values || []).slice(0, 12).map((value) => (
-              <label key={`pref-category-${value}`} className="checkbox-row compact">
-                <input
-                  type="checkbox"
-                  checked={catalogPreferences.categories.includes(value)}
-                  onChange={() => toggleCatalogPreference('categories', value)}
-                />
-                <span>{value}</span>
-              </label>
-            ))}
-          </div>
-          <div className="catalog-preference-card">
-            <h4>Preferred formats</h4>
-            {(facetOptions.find((facet) => facet.key === 'availableFormats')?.values || ['DXF', 'SVG', 'PNG']).slice(0, 10).map((value) => (
-              <label key={`pref-format-${value}`} className="checkbox-row compact">
-                <input
-                  type="checkbox"
-                  checked={catalogPreferences.formats.includes(value)}
-                  onChange={() => toggleCatalogPreference('formats', value)}
-                />
-                <span>{value}</span>
-              </label>
-            ))}
-            <button type="button" className="action-button secondary compact" onClick={applyCatalogPreferences}>
-              Apply preferences
+          <div className="catalog-workbench-actions">
+            <button
+              type="button"
+              className="action-button secondary compact"
+              onClick={() => setWorkbenchExpanded((current) => !current)}
+              aria-expanded={workbenchExpanded}
+            >
+              {workbenchExpanded ? 'Collapse preferences' : 'Show preferences'}
+            </button>
+            <button type="button" className="action-button compact" onClick={addSelectedToCatalogClipboard}>
+              Add selected to clipboard ({catalogClipboard.length})
             </button>
           </div>
-          <div className="catalog-preference-card catalog-saved-views-card">
-            <h4>Saved views</h4>
-            <div className="saved-view-row">
-              <input
-                type="text"
-                value={catalogViewName}
-                onChange={(event) => setCatalogViewName(event.target.value)}
-                placeholder="e.g. Fire alarm DXF"
-                aria-label="Catalog view name"
-              />
-              <button type="button" className="action-button secondary compact" onClick={saveCurrentCatalogView}>
-                Save
-              </button>
-            </div>
-            {savedCatalogViews.length ? (
-              <ul className="saved-view-list">
-                {savedCatalogViews.map((view) => (
-                  <li key={view.id}>
-                    <button type="button" className="text-button" onClick={() => applyCatalogView(view)}>{view.name}</button>
-                    <button type="button" className="icon-button compact" aria-label={`Delete ${view.name}`} onClick={() => deleteCatalogView(view.id)}>×</button>
-                  </li>
+        </div>
+        {workbenchExpanded ? (
+          <>
+            <div className="catalog-workbench-grid">
+              <div className="catalog-preference-card">
+                <h4>Preferred disciplines</h4>
+                {(facetOptions.find((facet) => facet.key === 'catalogDisciplines')?.values || []).slice(0, 12).map((value) => (
+                  <label key={`pref-discipline-${value}`} className="checkbox-row compact">
+                    <input
+                      type="checkbox"
+                      checked={catalogPreferences.disciplines.includes(value)}
+                      onChange={() => toggleCatalogPreference('disciplines', value)}
+                    />
+                    <span>{value}</span>
+                  </label>
                 ))}
-              </ul>
-            ) : (
-              <p className="muted-text">No saved Catalog views yet.</p>
-            )}
-          </div>
-          <div className="catalog-preference-card catalog-ed-card">
-            <h4>Ask Ed to find symbols</h4>
-            <p className="muted-text">Ed translates plain-language needs into search and filters only. No records are changed.</p>
-            <textarea
-              value={edCatalogPrompt}
-              onChange={(event) => setEdCatalogPrompt(event.target.value)}
-              placeholder="e.g. fire alarm detector DXF for CAD"
-              aria-label="Ask Ed to find Catalog symbols"
-              rows={3}
-            />
-            <button type="button" className="action-button compact" onClick={askEdToFindCatalogSymbols}>
-              Ask Ed
-            </button>
-            {edCatalogInterpretation ? (
-              <p className="ed-interpretation-text">{edCatalogInterpretation.explanation}</p>
-            ) : null}
-          </div>
-        </div>
-        <div className="catalog-clipboard-panel">
-          <button type="button" className="text-button" onClick={() => setClipboardOpen((current) => !current)}>
-            {clipboardOpen ? 'Hide' : 'Show'} Catalog clipboard · {catalogClipboard.length} item(s)
-          </button>
-          {clipboardOpen ? (
-            <div className="catalog-clipboard-list">
-              {catalogClipboard.length ? catalogClipboard.map((item) => (
-                <div key={item.id} className="catalog-clipboard-item">
-                  <div>
-                    <strong>{item.displayName}</strong>
-                    <span>{item.name}</span>
-                    <small>{item.availableFormats.length ? item.availableFormats.join(' · ') : 'Formats pending'}</small>
-                  </div>
-                  <button type="button" className="action-button secondary compact" onClick={() => removeCatalogClipboardItem(item.id)}>
-                    Remove
+              </div>
+              <div className="catalog-preference-card">
+                <h4>Preferred categories</h4>
+                {(facetOptions.find((facet) => facet.key === 'catalogCategories')?.values || []).slice(0, 12).map((value) => (
+                  <label key={`pref-category-${value}`} className="checkbox-row compact">
+                    <input
+                      type="checkbox"
+                      checked={catalogPreferences.categories.includes(value)}
+                      onChange={() => toggleCatalogPreference('categories', value)}
+                    />
+                    <span>{value}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="catalog-preference-card">
+                <h4>Preferred formats</h4>
+                {(facetOptions.find((facet) => facet.key === 'availableFormats')?.values || ['DXF', 'SVG', 'PNG']).slice(0, 10).map((value) => (
+                  <label key={`pref-format-${value}`} className="checkbox-row compact">
+                    <input
+                      type="checkbox"
+                      checked={catalogPreferences.formats.includes(value)}
+                      onChange={() => toggleCatalogPreference('formats', value)}
+                    />
+                    <span>{value}</span>
+                  </label>
+                ))}
+                <button type="button" className="action-button secondary compact" onClick={applyCatalogPreferences}>
+                  Apply preferences
+                </button>
+              </div>
+              <div className="catalog-preference-card catalog-saved-views-card">
+                <h4>Saved views</h4>
+                <div className="saved-view-row">
+                  <input
+                    type="text"
+                    value={catalogViewName}
+                    onChange={(event) => setCatalogViewName(event.target.value)}
+                    placeholder="e.g. Fire alarm DXF"
+                    aria-label="Catalog view name"
+                  />
+                  <button type="button" className="action-button secondary compact" onClick={saveCurrentCatalogView}>
+                    Save
                   </button>
                 </div>
-              )) : <p className="muted-text">Clipboard is empty. Select symbols and add them here before later download/bundle support.</p>}
-              {catalogClipboard.length ? (
-                <button type="button" className="action-button secondary compact" onClick={() => setCatalogClipboard([])}>
-                  Clear clipboard
+                {savedCatalogViews.length ? (
+                  <ul className="saved-view-list">
+                    {savedCatalogViews.map((view) => (
+                      <li key={view.id}>
+                        <button type="button" className="text-button" onClick={() => applyCatalogView(view)}>{view.name}</button>
+                        <button type="button" className="icon-button compact" aria-label={`Delete ${view.name}`} onClick={() => deleteCatalogView(view.id)}>×</button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="muted-text">No saved Catalog views yet.</p>
+                )}
+              </div>
+              <div className="catalog-preference-card catalog-ed-card">
+                <h4>Ask Ed to find symbols</h4>
+                <p className="muted-text">Ed translates plain-language needs into search and filters only. No records are changed.</p>
+                <textarea
+                  value={edCatalogPrompt}
+                  onChange={(event) => setEdCatalogPrompt(event.target.value)}
+                  placeholder="e.g. fire alarm detector DXF for CAD"
+                  aria-label="Ask Ed to find Catalog symbols"
+                  rows={3}
+                />
+                <button type="button" className="action-button compact" onClick={askEdToFindCatalogSymbols}>
+                  Ask Ed
                 </button>
+                {edCatalogInterpretation ? (
+                  <p className="ed-interpretation-text">{edCatalogInterpretation.explanation}</p>
+                ) : null}
+              </div>
+            </div>
+            <div className="catalog-clipboard-panel">
+              <button type="button" className="text-button" onClick={() => setClipboardOpen((current) => !current)}>
+                {clipboardOpen ? 'Hide' : 'Show'} Catalog clipboard · {catalogClipboard.length} item(s)
+              </button>
+              {clipboardOpen ? (
+                <div className="catalog-clipboard-list">
+                  {catalogClipboard.length ? catalogClipboard.map((item) => (
+                    <div key={item.id} className="catalog-clipboard-item">
+                      <div>
+                        <strong>{item.displayName}</strong>
+                        <span>{item.name}</span>
+                        <small>{item.availableFormats.length ? item.availableFormats.join(' · ') : 'Formats pending'}</small>
+                      </div>
+                      <button type="button" className="action-button secondary compact" onClick={() => removeCatalogClipboardItem(item.id)}>
+                        Remove
+                      </button>
+                    </div>
+                  )) : <p className="muted-text">Clipboard is empty. Select symbols and add them here before later download/bundle support.</p>}
+                  {catalogClipboard.length ? (
+                    <button type="button" className="action-button secondary compact" onClick={() => setCatalogClipboard([])}>
+                      Clear clipboard
+                    </button>
+                  ) : null}
+                </div>
               ) : null}
             </div>
-          ) : null}
-        </div>
+          </>
+        ) : null}
       </section>
 
       <div className={`standards-browser-grid ${activeId && activeSymbol ? 'has-detail' : ''}`}>
@@ -1520,8 +1541,26 @@ function StandardsPage() {
 
         <section className="glass-panel pane standards-grid-panel">
           <div className="standards-result-meta">
-            <strong>{filteredSymbols.length} approved symbols</strong>
-            <span>{visibleSymbols.length < filteredSymbols.length ? `Showing ${visibleSymbols.length}; scroll for more` : 'All visible'}</span>
+            <div>
+              <strong>{filteredSymbols.length} approved symbols</strong>
+              <span>{visibleSymbols.length < filteredSymbols.length ? `Showing ${visibleSymbols.length}; scroll for more` : 'All visible'}</span>
+            </div>
+            <div className="catalog-view-toggle" role="group" aria-label="Catalog result view">
+              <button
+                type="button"
+                className={catalogResultView === 'cards' ? 'active' : ''}
+                onClick={() => setCatalogResultView('cards')}
+              >
+                Compact cards
+              </button>
+              <button
+                type="button"
+                className={catalogResultView === 'table' ? 'active' : ''}
+                onClick={() => setCatalogResultView('table')}
+              >
+                Table
+              </button>
+            </div>
           </div>
           <div className="published-command-bar">
             <div>
@@ -1557,93 +1596,146 @@ function StandardsPage() {
             onKeyDown={handleStandardsGridKeyDown}
             tabIndex={0}
             role="region"
-            aria-label="Published symbols table"
+            aria-label={catalogResultView === 'cards' ? 'Published symbols compact cards' : 'Published symbols table'}
           >
-            <table>
-              <thead>
-                <tr>
-                  <th aria-label="Select symbols" className="select-column">Select</th>
-                  <th>Preview</th>
-                  {standardsColumns.map(([key, label]) => (
-                    <th key={key}>
-                      <button type="button" className="column-sort-button" onClick={() => toggleSort(key)}>
-                        {label}
-                        {sortState.key === key ? <span>{sortState.direction === 'asc' ? '↑' : '↓'}</span> : null}
-                      </button>
-                      <input
-                        aria-label={`Filter ${label}`}
-                        value={columnFilters[key] || ''}
-                        onChange={(event) => updateColumnFilter(key, event.target.value)}
-                        placeholder="Filter"
-                      />
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {visibleSymbols.map((symbol) => (
-                  <tr
-                    key={symbol.id}
-                    data-symbol-id={symbol.id}
-                    className={symbol.id === activeId ? 'active' : ''}
-                    tabIndex={0}
-                    aria-selected={symbol.id === activeId}
-                    onClick={() => {
-                      selectSymbol(symbol.id);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') {
-                        event.preventDefault();
-                        selectSymbol(symbol.id);
-                      }
-                    }}
-                  >
-                    <td className="select-column" onClick={(event) => event.stopPropagation()}>
-                      <input
-                        type="checkbox"
-                        aria-label={`Select ${displaySymbolId(symbol)}`}
-                        checked={selectedSymbolIds.includes(symbol.id)}
-                        disabled={!selectedSymbolIds.includes(symbol.id) && selectionLimitReached}
-                        onChange={() => toggleSymbolSelection(symbol.id)}
-                      />
-                    </td>
-                    <td className="preview-cell">
-                      <div className="preview-indicator-wrapper">
-                        <PublishedSymbolPreview symbol={symbol} />
-                        {symbol.supplementalPhotos?.length > 0 && (
-                          <div className="photo-indicator-dot" title="Has equipment photos">
-                            <CameraIconMini />
-                          </div>
-                        )}
+            {catalogResultView === 'cards' ? (
+              <div className="catalog-card-grid" role="list" aria-label="Published symbol compact cards">
+                {visibleSymbols.map((symbol) => {
+                  const card = buildCatalogCardSummary(symbol);
+                  return (
+                    <article
+                      key={symbol.id}
+                      data-symbol-id={symbol.id}
+                      className={`catalog-symbol-card ${symbol.id === activeId ? 'active' : ''}`}
+                      tabIndex={0}
+                      role="button"
+                      aria-pressed={symbol.id === activeId}
+                      onClick={() => selectSymbol(symbol.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          selectSymbol(symbol.id);
+                        }
+                      }}
+                    >
+                      <div className="catalog-card-select" onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${card.displayId}`}
+                          checked={selectedSymbolIds.includes(symbol.id)}
+                          disabled={!selectedSymbolIds.includes(symbol.id) && selectionLimitReached}
+                          onChange={() => toggleSymbolSelection(symbol.id)}
+                        />
                       </div>
-                    </td>
-                    {standardsColumns.map(([key]) => (
-                      <td key={`${symbol.id}-${key}`}>
-                        {key === 'photoStatus' ? (
-                          <span
-                            className={`table-icon-indicator ${Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? 'positive' : 'muted'}`}
-                            title={Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? `${symbol.supplementalPhotos.length} photo(s)` : 'No photos yet'}
-                            aria-label={Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? `${symbol.supplementalPhotos.length} photo(s)` : 'No photos yet'}
-                          >
-                            {Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? '📷' : '—'}
+                      <div className="catalog-card-preview">
+                        <PublishedSymbolPreview symbol={symbol} />
+                      </div>
+                      <div className="catalog-card-body">
+                        <div className="catalog-card-title-row">
+                          <strong>{card.displayId}</strong>
+                          <span className="catalog-card-icons">
+                            <span title={card.hasPhotos ? `${symbol.supplementalPhotos.length} photo(s)` : 'No photos yet'}>{card.hasPhotos ? '📷' : '—'}</span>
+                            <span title={card.commentCount ? `${card.commentCount} comment(s)` : 'No comments yet'}>{card.commentCount ? '💬' : '—'}</span>
                           </span>
-                        ) : key === 'commentStatus' ? (
-                          <span
-                            className={`table-icon-indicator ${symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? 'positive' : 'muted'}`}
-                            title={symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? `${symbol.commentCount || 1} comment(s)` : 'No comments yet'}
-                            aria-label={symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? `${symbol.commentCount || 1} comment(s)` : 'No comments yet'}
-                          >
-                            {symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? '💬' : '—'}
-                          </span>
-                        ) : (
-                          getSymbolField(symbol, key) || 'Pending'
-                        )}
-                      </td>
+                        </div>
+                        <h4>{card.name || 'Unnamed symbol'}</h4>
+                        <p>{card.categories.slice(0, 2).join(' · ') || 'Category pending'}</p>
+                        <div className="catalog-card-chip-row" aria-label="Disciplines and formats">
+                          {card.disciplines.slice(0, 2).map((value) => <span key={`${symbol.id}-discipline-${value}`}>{value}</span>)}
+                          {card.formats.slice(0, 3).map((value) => <span key={`${symbol.id}-format-${value}`} className="format-chip">{value}</span>)}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th aria-label="Select symbols" className="select-column">Select</th>
+                    <th>Preview</th>
+                    {standardsColumns.map(([key, label]) => (
+                      <th key={key}>
+                        <button type="button" className="column-sort-button" onClick={() => toggleSort(key)}>
+                          {label}
+                          {sortState.key === key ? <span>{sortState.direction === 'asc' ? '↑' : '↓'}</span> : null}
+                        </button>
+                        <input
+                          aria-label={`Filter ${label}`}
+                          value={columnFilters[key] || ''}
+                          onChange={(event) => updateColumnFilter(key, event.target.value)}
+                          placeholder="Filter"
+                        />
+                      </th>
                     ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {visibleSymbols.map((symbol) => (
+                    <tr
+                      key={symbol.id}
+                      data-symbol-id={symbol.id}
+                      className={symbol.id === activeId ? 'active' : ''}
+                      tabIndex={0}
+                      aria-selected={symbol.id === activeId}
+                      onClick={() => {
+                        selectSymbol(symbol.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          selectSymbol(symbol.id);
+                        }
+                      }}
+                    >
+                      <td className="select-column" onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${displaySymbolId(symbol)}`}
+                          checked={selectedSymbolIds.includes(symbol.id)}
+                          disabled={!selectedSymbolIds.includes(symbol.id) && selectionLimitReached}
+                          onChange={() => toggleSymbolSelection(symbol.id)}
+                        />
+                      </td>
+                      <td className="preview-cell">
+                        <div className="preview-indicator-wrapper">
+                          <PublishedSymbolPreview symbol={symbol} />
+                          {symbol.supplementalPhotos?.length > 0 && (
+                            <div className="photo-indicator-dot" title="Has equipment photos">
+                              <CameraIconMini />
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      {standardsColumns.map(([key]) => (
+                        <td key={`${symbol.id}-${key}`}>
+                          {key === 'photoStatus' ? (
+                            <span
+                              className={`table-icon-indicator ${Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? 'positive' : 'muted'}`}
+                              title={Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? `${symbol.supplementalPhotos.length} photo(s)` : 'No photos yet'}
+                              aria-label={Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? `${symbol.supplementalPhotos.length} photo(s)` : 'No photos yet'}
+                            >
+                              {Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? '📷' : '—'}
+                            </span>
+                          ) : key === 'commentStatus' ? (
+                            <span
+                              className={`table-icon-indicator ${symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? 'positive' : 'muted'}`}
+                              title={symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? `${symbol.commentCount || 1} comment(s)` : 'No comments yet'}
+                              aria-label={symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? `${symbol.commentCount || 1} comment(s)` : 'No comments yet'}
+                            >
+                              {symbol.hasComments || Number(symbol.commentCount || 0) > 0 ? '💬' : '—'}
+                            </span>
+                          ) : (
+                            getSymbolField(symbol, key) || 'Pending'
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
             {!visibleSymbols.length ? (
               <EmptyState title="No published records" body="Adjust the search or filters to find approved symbols." />
             ) : null}

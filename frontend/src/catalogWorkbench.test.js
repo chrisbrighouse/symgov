@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   addSymbolsToClipboard,
   applySavedCatalogView,
+  buildCatalogCardSummary,
   buildCatalogFacetValues,
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
@@ -122,6 +123,22 @@ test('Catalog search text includes normalized taxonomy and format fields', () =>
   assert.ok(text.includes('fire & life safety'));
   assert.ok(text.includes('fire alarm devices'));
   assert.ok(text.includes('dxf'));
+});
+
+test('builds compact card summaries for symbol browsing', () => {
+  const summary = buildCatalogCardSummary(fireAlarmSymbol);
+
+  assert.deepEqual(summary, {
+    id: 'smoke-detector',
+    displayId: '007F-2',
+    name: 'Smoke Detector',
+    categories: ['Fire Alarm Devices', 'Sensors / Detectors', 'Drawing Symbols'],
+    disciplines: ['Electrical', 'Fire & Life Safety'],
+    formats: ['DXF', 'PNG'],
+    useCases: ['Insert into CAD drawing', 'Mark up / annotate drawing', 'Use in PDF/report'],
+    hasPhotos: false,
+    commentCount: 0
+  });
 });
 
 test('Ed guided search maps natural language to non-mutating Catalog filters', () => {
