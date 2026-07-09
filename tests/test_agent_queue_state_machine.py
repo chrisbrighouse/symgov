@@ -116,6 +116,8 @@ class AgentQueueStateMachineTests(unittest.TestCase):
                         "agent": "scott",
                         "db_status": "queued",
                         "source_type": "external_submission",
+                        "created_at": "2026-07-08T09:15:00+00:00",
+                        "candidate_symbol_id": "TRACY-SMOKE-RESTRICTED-V2",
                     }
                 ],
                 skipped=[],
@@ -130,6 +132,8 @@ class AgentQueueStateMachineTests(unittest.TestCase):
         self.assertEqual(dumped["runtimeRecordsSeen"], 3)
         self.assertEqual(dumped["controlSuggestionCount"], 1)
         self.assertEqual(dumped["items"][0]["sourceId"], str(queue_id))
+        self.assertEqual(dumped["items"][0]["createdAt"], "2026-07-08T09:15:00+00:00")
+        self.assertEqual(dumped["items"][0]["evidence"]["candidate_symbol_id"], "TRACY-SMOKE-RESTRICTED-V2")
         self.assertEqual(dumped["items"][0]["ruleCode"], "agent_queue_active_db_missing_runtime")
         self.assertTrue(dumped["items"][0]["observationalOnly"])
 

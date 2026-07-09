@@ -1961,6 +1961,101 @@ a {
   text-align: center;
 }
 
+.catalog-workbench-panel {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.catalog-workbench-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(12rem, 1fr));
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.catalog-preference-card {
+  display: grid;
+  gap: 0.45rem;
+  min-height: 100%;
+  padding: 0.85rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.catalog-preference-card h4 {
+  margin: 0 0 0.25rem;
+  font-size: 0.92rem;
+}
+
+.checkbox-row.compact {
+  gap: 0.45rem;
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.saved-view-row {
+  display: flex;
+  gap: 0.45rem;
+}
+
+.saved-view-row input {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-sm);
+}
+
+.saved-view-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.saved-view-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+}
+
+.catalog-clipboard-panel {
+  display: grid;
+  gap: 0.65rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--stroke);
+}
+
+.catalog-clipboard-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.catalog-clipboard-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-md);
+  background: rgba(238, 246, 251, 0.68);
+}
+
+.catalog-clipboard-item > div {
+  display: grid;
+  gap: 0.12rem;
+}
+
+.catalog-clipboard-item span,
+.catalog-clipboard-item small {
+  color: var(--text-soft);
+}
+
 .standards-browser-grid {
   display: grid;
   grid-template-columns: minmax(12rem, 0.24fr) minmax(0, 1.36fr);

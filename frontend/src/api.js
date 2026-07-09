@@ -326,7 +326,7 @@ export async function fetchReggieQueueControls() {
       ok: true,
       mode: 'live',
       message: count ? `Reggie found ${count} queue control suggestion${count === 1 ? '' : 's'}.` : 'Reggie queue controls clear.',
-      items: Array.isArray(payload?.items) ? payload.items : [],
+      items: Array.isArray(payload?.items) ? payload.items.map((item) => ({ ...item, generatedAt: payload.generatedAt })) : [],
       summary: payload
     };
   } catch (error) {

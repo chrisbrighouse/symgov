@@ -79,6 +79,20 @@ def test_rights_screen_uses_picklists_for_corrected_status_and_disposition():
     assert "['review_required', 'Review required']" not in source.split("const RIGHTS_DISPOSITION_OPTIONS = [", 1)[1].split("];", 1)[0]
 
 
+def test_reggie_cards_use_workspace_date_label_and_symbol_display_title():
+    source = APP_JSX.read_text(encoding="utf-8")
+    api_source = (Path(__file__).resolve().parents[1] / "frontend" / "src" / "api.js").read_text(encoding="utf-8")
+
+    assert "label: resolveReggieSuggestionLabel(suggestion)" in source
+    assert "title: resolveReggieSuggestionTitle(suggestion)" in source
+    assert "function resolveReggieSuggestionLabel(suggestion)" in source
+    assert "function resolveReggieSuggestionTitle(suggestion)" in source
+    assert "function resolveReggieSuggestionSymbolId(suggestion)" in source
+    assert "evidence.candidate_symbol_id" in source
+    assert "aqi-[^-]+-(\\d{4})" in source
+    assert "generatedAt: payload.generatedAt" in api_source
+
+
 def test_provenance_rights_stage_is_human_visible_but_separate_lane():
     source = WORKSPACE_PY.read_text(encoding="utf-8")
     app_source = APP_JSX.read_text(encoding="utf-8")

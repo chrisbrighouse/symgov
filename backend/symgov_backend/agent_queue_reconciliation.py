@@ -75,6 +75,25 @@ def _coerce_optional_uuid(value: Any):
     return parsed if parsed is not None else coerce_uuid("00000000-0000-0000-0000-000000000000")
 
 
+def _queue_payload_identity(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    return {
+        key: value
+        for key, value in {
+            "candidate_symbol_id": payload.get("candidate_symbol_id"),
+            "published_display_id": payload.get("published_display_id"),
+            "symbol_display_id": payload.get("symbol_display_id"),
+            "display_name": payload.get("display_name") or payload.get("displayName"),
+            "workspace_display_name": payload.get("workspace_display_name"),
+            "symbol_slug": payload.get("symbol_slug"),
+            "package_display_id": payload.get("package_display_id") or payload.get("packageDisplayId"),
+            "package_symbol_sequence": payload.get("package_symbol_sequence") or payload.get("packageSymbolSequence"),
+        }.items()
+        if value is not None
+    }
+
+
 def _queue_suggestion(
     *,
     rule_code: str,
@@ -249,6 +268,9 @@ def reconcile_agent_queue_state(
                         "agent": agent_slug,
                         "db_status": db_status,
                         "source_type": row.source_type,
+                        "source_id": str(row.source_id) if row.source_id else None,
+                        "created_at": row.created_at.isoformat() if row.created_at else None,
+                        **_queue_payload_identity(row.payload_json),
                     }
                 )
                 continue
@@ -276,8 +298,13 @@ def reconcile_agent_queue_state(
                 "runtime_path": str(runtime.path),
                 "db_status": db_status,
                 "runtime_status": runtime.status,
+                "source_type": row.source_type,
+                "source_id": str(row.source_id) if row.source_id else runtime_source_id,
+                "created_at": row.created_at.isoformat() if row.created_at else runtime_payload.get("created_at"),
                 "db_completed_at": row.completed_at.isoformat() if row.completed_at else None,
                 "runtime_completed_at": runtime_payload.get("completed_at"),
+                **_queue_payload_identity(row.payload_json),
+                **_queue_payload_identity(runtime_payload.get("payload") if isinstance(runtime_payload.get("payload"), dict) else runtime_payload),
             }
             if reasons:
                 skipped.append({**record, "reasons": reasons})
@@ -297,6 +324,10 @@ def reconcile_agent_queue_state(
                 "agent": runtime.agent,
                 "runtime_path": str(runtime.path),
                 "runtime_status": runtime.status,
+                "source_type": runtime.payload.get("source_type"),
+                "source_id": runtime.source_id,
+                "created_at": runtime.payload.get("created_at") or runtime.payload.get("createdAt"),
+                **_queue_payload_identity(runtime.payload.get("payload") if isinstance(runtime.payload.get("payload"), dict) else runtime.payload),
             }
         )
 

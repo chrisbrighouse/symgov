@@ -46,6 +46,16 @@ import {
   formatCountdown,
   setDurationPart
 } from './timerControls.js';
+import {
+  addSymbolsToClipboard,
+  applySavedCatalogView,
+  buildCatalogSearchText,
+  buildCatalogViewSnapshot,
+  catalogTaxonomyForSymbol,
+  removeSymbolFromClipboard,
+  serializeCatalogPreferences,
+  sortSymbolsByPreferredFormats
+} from './catalogWorkbench.js';
 
 const REVIEW_ITEM_ACTION_OPTIONS = [
   ['approve', 'Approve'],
@@ -796,6 +806,34 @@ function DurationStepper({ ariaLabel, durationSeconds, disabled = false, onChang
   );
 }
 
+const CATALOG_PREFERENCES_STORAGE_KEY = 'symgov.catalog.preferences.v1';
+const CATALOG_SAVED_VIEWS_STORAGE_KEY = 'symgov.catalog.savedViews.v1';
+const CATALOG_CLIPBOARD_STORAGE_KEY = 'symgov.catalog.clipboard.v1';
+
+function readLocalStorageJson(key, fallback) {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return fallback;
+  }
+  try {
+    const value = window.localStorage.getItem(key);
+    return value ? JSON.parse(value) : fallback;
+  } catch (error) {
+    console.warn(`Unable to read ${key} from local storage`, error);
+    return fallback;
+  }
+}
+
+function writeLocalStorageJson(key, value) {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.warn(`Unable to write ${key} to local storage`, error);
+  }
+}
+
 function StandardsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
@@ -811,6 +849,18 @@ function StandardsPage() {
   const [activeDetailTab, setActiveDetailTab] = useState('details');
   const [commentHistoryState, setCommentHistoryState] = useState({ symbolId: '', loading: false, mode: '', message: '', items: [] });
   const [displayCount, setDisplayCount] = useState(60);
+  const [catalogPreferences, setCatalogPreferences] = useState(() =>
+    serializeCatalogPreferences(readLocalStorageJson(CATALOG_PREFERENCES_STORAGE_KEY, {}))
+  );
+  const [savedCatalogViews, setSavedCatalogViews] = useState(() =>
+    readLocalStorageJson(CATALOG_SAVED_VIEWS_STORAGE_KEY, [])
+  );
+  const [catalogViewName, setCatalogViewName] = useState('');
+  const [catalogClipboard, setCatalogClipboard] = useState(() =>
+    readLocalStorageJson(CATALOG_CLIPBOARD_STORAGE_KEY, [])
+  );
+  const [clipboardOpen, setClipboardOpen] = useState(false);
+  const [workbenchStatus, setWorkbenchStatus] = useState({ mode: '', message: '' });
   const [standardsState, setStandardsState] = useState({
     loading: true,
     mode: appConfig.apiRoot ? 'loading' : 'seeded',
@@ -826,17 +876,19 @@ function StandardsPage() {
     ['lastUpdatedAt', 'Last update'],
     ['photoStatus', 'Photos'],
     ['commentStatus', 'Comments'],
-    ['category', 'Category'],
-    ['discipline', 'Discipline'],
+    ['catalogCategories', 'Catalog categories'],
+    ['catalogDisciplines', 'Catalog disciplines'],
+    ['availableFormats', 'Formats'],
     ['pack', 'Pack'],
     ['revision', 'Revision'],
     ['effectiveDate', 'Effective']
   ];
   const facetDefinitions = [
-    ['category', 'Category'],
-    ['discipline', 'Discipline'],
+    ['catalogDisciplines', 'Discipline'],
+    ['catalogCategories', 'Category'],
+    ['useCases', 'Use case'],
+    ['availableFormats', 'Format'],
     ['pack', 'Pack'],
-    ['format', 'Format'],
     ['symbolFamily', 'Symbol family']
   ];
 
@@ -858,22 +910,7 @@ function StandardsPage() {
     const normalizedQuery = query.trim().toLowerCase();
 
     const filtered = standardsSymbols.filter((symbol) => {
-      const matchesSearch = !normalizedQuery || [
-        displaySymbolId(symbol),
-        symbol.id,
-        symbol.symbolId,
-        displaySymbolName(symbol),
-        symbol.category,
-        symbol.discipline,
-        symbol.pack,
-        symbol.packCode,
-        symbol.pageCode,
-        ...(symbol.keywords || [])
-      ].some((value) =>
-        String(value || '')
-          .toLowerCase()
-          .includes(normalizedQuery)
-      );
+      const matchesSearch = !normalizedQuery || buildCatalogSearchText(symbol).toLowerCase().includes(normalizedQuery);
 
       if (!matchesSearch) {
         return false;
@@ -900,13 +937,14 @@ function StandardsPage() {
       });
     });
 
-    return filtered.sort((left, right) => {
+    const sorted = filtered.sort((left, right) => {
       const leftValue = getSymbolField(left, sortState.key);
       const rightValue = getSymbolField(right, sortState.key);
       const result = leftValue.localeCompare(rightValue, undefined, { numeric: true, sensitivity: 'base' });
       return sortState.direction === 'asc' ? result : -result;
     });
-  }, [standardsSymbols, query, columnFilters, facetFilters, sortState]);
+    return sortSymbolsByPreferredFormats(sorted, catalogPreferences.formats);
+  }, [standardsSymbols, query, columnFilters, facetFilters, sortState, catalogPreferences.formats]);
 
   const visibleSymbols = filteredSymbols.slice(0, displayCount);
   const selectedSymbols = selectedSymbolIds
@@ -944,6 +982,18 @@ function StandardsPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    writeLocalStorageJson(CATALOG_PREFERENCES_STORAGE_KEY, catalogPreferences);
+  }, [catalogPreferences]);
+
+  useEffect(() => {
+    writeLocalStorageJson(CATALOG_SAVED_VIEWS_STORAGE_KEY, savedCatalogViews);
+  }, [savedCatalogViews]);
+
+  useEffect(() => {
+    writeLocalStorageJson(CATALOG_CLIPBOARD_STORAGE_KEY, catalogClipboard);
+  }, [catalogClipboard]);
 
   useEffect(() => {
     if (!filteredSymbols.some((symbol) => symbol.id === activeId)) {
@@ -1199,6 +1249,68 @@ function StandardsPage() {
     });
   }
 
+  function toggleCatalogPreference(kind, value) {
+    setCatalogPreferences((current) => {
+      const selected = new Set(current[kind] || []);
+      if (selected.has(value)) {
+        selected.delete(value);
+      } else {
+        selected.add(value);
+      }
+      return serializeCatalogPreferences({ ...current, [kind]: Array.from(selected) });
+    });
+  }
+
+  function applyCatalogPreferences() {
+    setFacetFilters((current) => ({
+      ...current,
+      catalogDisciplines: catalogPreferences.disciplines,
+      catalogCategories: catalogPreferences.categories,
+      useCases: catalogPreferences.useCases,
+      availableFormats: catalogPreferences.formats
+    }));
+    setWorkbenchStatus({ mode: 'success', message: 'Catalog preferences applied to filters.' });
+  }
+
+  function saveCurrentCatalogView() {
+    const snapshot = buildCatalogViewSnapshot({
+      name: catalogViewName,
+      query,
+      facetFilters,
+      preferredFormats: catalogPreferences.formats
+    });
+    setSavedCatalogViews((current) => [snapshot, ...current.filter((view) => view.name !== snapshot.name)].slice(0, 12));
+    setCatalogViewName('');
+    setWorkbenchStatus({ mode: 'success', message: `Saved Catalog view “${snapshot.name}”.` });
+  }
+
+  function applyCatalogView(view) {
+    const next = applySavedCatalogView(view);
+    setQuery(next.query);
+    setFacetFilters(next.facetFilters);
+    setCatalogPreferences((current) => serializeCatalogPreferences({ ...current, formats: next.preferredFormats }));
+    setWorkbenchStatus({ mode: 'success', message: `Applied Catalog view “${view.name}”.` });
+  }
+
+  function deleteCatalogView(viewId) {
+    setSavedCatalogViews((current) => current.filter((view) => view.id !== viewId));
+  }
+
+  function addSelectedToCatalogClipboard() {
+    const candidates = selectedSymbols.length ? selectedSymbols : activeSymbol ? [activeSymbol] : [];
+    if (!candidates.length) {
+      setWorkbenchStatus({ mode: 'error', message: 'Select or open a symbol before adding it to the Catalog clipboard.' });
+      return;
+    }
+    setCatalogClipboard((current) => addSymbolsToClipboard(current, candidates));
+    setClipboardOpen(true);
+    setWorkbenchStatus({ mode: 'success', message: `${candidates.length} symbol(s) added to the application clipboard.` });
+  }
+
+  function removeCatalogClipboardItem(symbolId) {
+    setCatalogClipboard((current) => removeSymbolFromClipboard(current, symbolId));
+  }
+
   function toggleSort(key) {
     setSortState((current) => ({
       key,
@@ -1217,21 +1329,134 @@ function StandardsPage() {
     <section className="experience-shell">
       <div className="hero-panel glass-panel standards-hero page-title-row">
         <div>
-          <p className="eyebrow">Published-only Standards View</p>
-          <h2>Browse approved symbols</h2>
+          <p className="eyebrow">Published Catalog</p>
+          <h2>Find approved engineering symbols</h2>
         </div>
         <label className="field search-field" aria-label="Search published symbols">
           <input
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search by symbol, pack, page, or guidance topic"
+            placeholder="Search by symbol, discipline, category, format, or guidance topic"
           />
         </label>
       </div>
       <p className={`page-status-text status-${standardsState.mode}`}>
         {standardsState.loading ? 'Loading published symbols...' : `${standardsState.message} Showing ${filteredSymbols.length} records.`}
       </p>
+      {workbenchStatus.message ? (
+        <p className={`inline-status ${workbenchStatus.mode || 'info'}`}>{workbenchStatus.message}</p>
+      ) : null}
+
+      <section className="glass-panel pane catalog-workbench-panel">
+        <div className="detail-heading">
+          <div>
+            <p className="eyebrow">Engineer workbench</p>
+            <h3>Preferences, saved views & Catalog clipboard</h3>
+            <p>Set your usual disciplines, categories and formats, then collect symbols into an in-app clipboard for later bundle/download work.</p>
+          </div>
+          <button type="button" className="action-button compact" onClick={addSelectedToCatalogClipboard}>
+            Add selected to clipboard ({catalogClipboard.length})
+          </button>
+        </div>
+        <div className="catalog-workbench-grid">
+          <div className="catalog-preference-card">
+            <h4>Preferred disciplines</h4>
+            {(facetOptions.find((facet) => facet.key === 'catalogDisciplines')?.values || []).slice(0, 12).map((value) => (
+              <label key={`pref-discipline-${value}`} className="checkbox-row compact">
+                <input
+                  type="checkbox"
+                  checked={catalogPreferences.disciplines.includes(value)}
+                  onChange={() => toggleCatalogPreference('disciplines', value)}
+                />
+                <span>{value}</span>
+              </label>
+            ))}
+          </div>
+          <div className="catalog-preference-card">
+            <h4>Preferred categories</h4>
+            {(facetOptions.find((facet) => facet.key === 'catalogCategories')?.values || []).slice(0, 12).map((value) => (
+              <label key={`pref-category-${value}`} className="checkbox-row compact">
+                <input
+                  type="checkbox"
+                  checked={catalogPreferences.categories.includes(value)}
+                  onChange={() => toggleCatalogPreference('categories', value)}
+                />
+                <span>{value}</span>
+              </label>
+            ))}
+          </div>
+          <div className="catalog-preference-card">
+            <h4>Preferred formats</h4>
+            {(facetOptions.find((facet) => facet.key === 'availableFormats')?.values || ['DXF', 'SVG', 'PNG']).slice(0, 10).map((value) => (
+              <label key={`pref-format-${value}`} className="checkbox-row compact">
+                <input
+                  type="checkbox"
+                  checked={catalogPreferences.formats.includes(value)}
+                  onChange={() => toggleCatalogPreference('formats', value)}
+                />
+                <span>{value}</span>
+              </label>
+            ))}
+            <button type="button" className="action-button secondary compact" onClick={applyCatalogPreferences}>
+              Apply preferences
+            </button>
+          </div>
+          <div className="catalog-preference-card catalog-saved-views-card">
+            <h4>Saved views</h4>
+            <div className="saved-view-row">
+              <input
+                type="text"
+                value={catalogViewName}
+                onChange={(event) => setCatalogViewName(event.target.value)}
+                placeholder="e.g. Fire alarm DXF"
+                aria-label="Catalog view name"
+              />
+              <button type="button" className="action-button secondary compact" onClick={saveCurrentCatalogView}>
+                Save
+              </button>
+            </div>
+            {savedCatalogViews.length ? (
+              <ul className="saved-view-list">
+                {savedCatalogViews.map((view) => (
+                  <li key={view.id}>
+                    <button type="button" className="text-button" onClick={() => applyCatalogView(view)}>{view.name}</button>
+                    <button type="button" className="icon-button compact" aria-label={`Delete ${view.name}`} onClick={() => deleteCatalogView(view.id)}>×</button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="muted-text">No saved Catalog views yet.</p>
+            )}
+          </div>
+        </div>
+        <div className="catalog-clipboard-panel">
+          <button type="button" className="text-button" onClick={() => setClipboardOpen((current) => !current)}>
+            {clipboardOpen ? 'Hide' : 'Show'} Catalog clipboard · {catalogClipboard.length} item(s)
+          </button>
+          {clipboardOpen ? (
+            <div className="catalog-clipboard-list">
+              {catalogClipboard.length ? catalogClipboard.map((item) => (
+                <div key={item.id} className="catalog-clipboard-item">
+                  <div>
+                    <strong>{item.displayName}</strong>
+                    <span>{item.name}</span>
+                    <small>{item.availableFormats.length ? item.availableFormats.join(' · ') : 'Formats pending'}</small>
+                  </div>
+                  <button type="button" className="action-button secondary compact" onClick={() => removeCatalogClipboardItem(item.id)}>
+                    Remove
+                  </button>
+                </div>
+              )) : <p className="muted-text">Clipboard is empty. Select symbols and add them here before later download/bundle support.</p>}
+              {catalogClipboard.length ? (
+                <button type="button" className="action-button secondary compact" onClick={() => setCatalogClipboard([])}>
+                  Clear clipboard
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      </section>
 
       <div className={`standards-browser-grid ${activeId && activeSymbol ? 'has-detail' : ''}`}>
         <section className="glass-panel pane facets-panel">
@@ -1437,9 +1662,11 @@ function StandardsPage() {
                   <Fact label="Effective" value={formatPublishedDate(activeSymbol.effectiveDate)} />
                   <Fact label="Published Page" value={activeSymbol.pageCode} />
                   <Fact label="Pack" value={activeSymbol.pack} />
-                  <Fact label="Category" value={activeSymbol.category} />
-                  <Fact label="Discipline" value={activeSymbol.discipline} />
-                  <Fact label="Format" value={activeSymbol.format || activeSymbol.contentType || 'Pending'} />
+                  <Fact label="Catalog categories" value={getSymbolField(activeSymbol, 'catalogCategories')} />
+                  <Fact label="Catalog disciplines" value={getSymbolField(activeSymbol, 'catalogDisciplines')} />
+                  <Fact label="Raw category" value={activeSymbol.category} />
+                  <Fact label="Raw discipline" value={activeSymbol.discipline} />
+                  <Fact label="Formats" value={getSymbolField(activeSymbol, 'availableFormats') || 'Pending'} />
                 </div>
                 <div className="copy-block">
                   <h4>Governance rationale</h4>
@@ -1514,8 +1741,17 @@ function getSymbolField(symbol, key) {
   if (key === 'name') {
     return displaySymbolName(symbol);
   }
-  if (key === 'format') {
-    return symbol.format || symbol.contentType || (symbol.downloads || []).join(', ');
+  if (key === 'format' || key === 'availableFormats') {
+    return catalogTaxonomyForSymbol(symbol).availableFormats.join(', ');
+  }
+  if (key === 'catalogDisciplines') {
+    return catalogTaxonomyForSymbol(symbol).disciplines.join(', ');
+  }
+  if (key === 'catalogCategories') {
+    return catalogTaxonomyForSymbol(symbol).categories.join(', ');
+  }
+  if (key === 'useCases') {
+    return catalogTaxonomyForSymbol(symbol).useCases.join(', ');
   }
   if (key === 'photoStatus') {
     const count = Array.isArray(symbol.supplementalPhotos) ? symbol.supplementalPhotos.length : 0;
@@ -1652,16 +1888,18 @@ function displayReviewOriginalFilename(record) {
 }
 
 function getSymbolFacetValues(symbol, key) {
-  if (key === 'format') {
-    const formats = [];
-    if (symbol.format) {
-      formats.push(symbol.format);
-    }
-    if (symbol.contentType) {
-      formats.push(symbol.contentType);
-    }
-    (symbol.downloads || []).forEach((download) => formats.push(download));
-    return formats;
+  const taxonomy = catalogTaxonomyForSymbol(symbol);
+  if (key === 'format' || key === 'availableFormats') {
+    return taxonomy.availableFormats;
+  }
+  if (key === 'catalogDisciplines') {
+    return taxonomy.disciplines;
+  }
+  if (key === 'catalogCategories') {
+    return taxonomy.categories;
+  }
+  if (key === 'useCases') {
+    return taxonomy.useCases;
   }
   const value = getSymbolField(symbol, key);
   return value ? [value] : [];
@@ -2437,8 +2675,8 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
     const evidence = suggestion.evidence || {};
     byId.control_audit.items.push({
       id: suggestion.id,
-      label: suggestion.severity || 'info',
-      title: compactTitle(suggestion.detail || suggestion.ruleCode || 'Queue control suggestion'),
+      label: resolveReggieSuggestionLabel(suggestion),
+      title: resolveReggieSuggestionTitle(suggestion),
       meta: suggestion.ruleCode || suggestion.sourceType || 'Reggie control',
       status: suggestion.status || 'open',
       priority: suggestion.severity || 'info',
@@ -2447,21 +2685,58 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
         suggestion.ruleCode,
         suggestion.severity,
         suggestion.status,
+        suggestion.createdAt,
+        suggestion.generatedAt,
         suggestion.detail,
         suggestion.suggestedRemediation,
         suggestion.sourceType,
         suggestion.sourceId,
+        resolveReggieSuggestionSymbolId(suggestion),
+        displaySymbolId(evidence),
         evidence.agent,
         evidence.db_status,
         evidence.runtime_status,
         evidence.runtime_path,
         JSON.stringify(evidence)
       ].join(' '),
-      detail: suggestion.suggestedRemediation || 'Observational only; inspect before applying any remediation.'
+      detail: suggestion.detail || suggestion.suggestedRemediation || 'Observational only; inspect before applying any remediation.'
     });
   });
 
   return columns;
+}
+
+function resolveReggieSuggestionLabel(suggestion) {
+  const evidence = suggestion?.evidence || {};
+  const createdAt = suggestion?.createdAt || evidence.createdAt || evidence.created_at || evidence.db_created_at || evidence.runtime_created_at || suggestion?.generatedAt;
+  return formatWorkspaceDisplayDate(createdAt, { ...suggestion, ...evidence, payload: evidence });
+}
+
+function resolveReggieSuggestionTitle(suggestion) {
+  const evidence = suggestion?.evidence || {};
+  return compactTitle(
+    resolveReggieSuggestionSymbolId(suggestion) ||
+    suggestion?.detail ||
+    suggestion?.ruleCode ||
+    'Queue control suggestion'
+  );
+}
+
+function resolveReggieSuggestionSymbolId(suggestion) {
+  const evidence = suggestion?.evidence || {};
+  const packageId = evidence.packageDisplayId || evidence.package_display_id;
+  const sequence = evidence.packageSymbolSequence ?? evidence.package_symbol_sequence;
+  const packageDisplay = packageId && sequence != null ? `${packageId}-${sequence}` : '';
+  const pathMatch = String(evidence.runtime_path || '').match(/(?:^|\/)aqi-[^-]+-(\d{4})(?:-|$)/i);
+  const sourceId = evidence.source_id || suggestion?.sourceId;
+  return (
+    displaySymbolId(evidence) ||
+    evidence.candidateSymbolId ||
+    evidence.candidate_symbol_id ||
+    packageDisplay ||
+    (pathMatch ? pathMatch[1] : '') ||
+    (sourceId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(sourceId)) ? sourceId : '')
+  );
 }
 
 function resolveQueueItemTitle(queueItem) {

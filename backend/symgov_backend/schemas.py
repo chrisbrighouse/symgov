@@ -325,6 +325,7 @@ class WorkspaceReggieQueueControlSuggestionResponse(BaseModel):
     status: str
     suggestedRemediation: str
     observationalOnly: bool = True
+    createdAt: str | None = None
     evidence: dict[str, Any] = Field(default_factory=dict)
 
 

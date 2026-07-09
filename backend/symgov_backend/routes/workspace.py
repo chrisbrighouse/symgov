@@ -2185,6 +2185,12 @@ def _build_reggie_queue_control_response(
         display_label = display_lookup.get(source_id_text or "")
         raw_evidence = suggestion.get("evidence")
         evidence = dict(raw_evidence) if isinstance(raw_evidence, dict) else {}
+        created_at = (
+            evidence.get("createdAt")
+            or evidence.get("created_at")
+            or evidence.get("db_created_at")
+            or evidence.get("runtime_created_at")
+        )
         if display_label:
             evidence.setdefault("display_name", display_label)
             evidence.setdefault("symbol_display_id", display_label)
@@ -2205,6 +2211,7 @@ def _build_reggie_queue_control_response(
                 status=str(suggestion.get("status") or "open"),
                 suggestedRemediation=str(suggestion.get("suggested_remediation") or "Inspect manually before changing state."),
                 observationalOnly=bool(suggestion.get("observational_only", True)),
+                createdAt=str(created_at) if created_at else None,
                 evidence=evidence,
             )
         )
