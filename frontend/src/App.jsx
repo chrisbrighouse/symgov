@@ -3,6 +3,8 @@ import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchPa
 import {
   createAdminUser,
   fetchAdminUsers,
+  fetchAdminLlmSettings,
+  fetchOpenRouterModels,
   fetchReggieQueueControls,
   fetchScottSourceSites,
   fetchHannahPhotoCandidates,
@@ -30,7 +32,9 @@ import {
   submitWorkspaceRightsReviewDecision,
   submitExternalSubmission,
   updateAdminUser,
+  updateAdminLlmSettings,
   resetAdminUserPin,
+  testAdminLlmPrompt,
   submitPublishedSymbolCommand,
   updateScottSourceSiteIncludeNextRun,
   updateScottSourceSitePrompt,
@@ -413,6 +417,7 @@ function AppContent() {
           <Route path="/change-pin" element={<RequireAuth><ChangePinPage /></RequireAuth>} />
           <Route path="/workspace" element={<RequireAnyRole roles={['admin']}><WorkspacePage /></RequireAnyRole>} />
           <Route path="/workspace/users" element={<RequireAnyRole roles={['admin']}><AdminUsersPage /></RequireAnyRole>} />
+          <Route path="/workspace/llm" element={<RequireAnyRole roles={['admin']}><AdminLlmPage /></RequireAnyRole>} />
           <Route path="/reviews" element={<RequireAnyRole roles={['admin', 'reviewer']}><ReviewsPage /></RequireAnyRole>} />
           {/* Route path="/rights" element={<RightsReviewPage />} protected by reviewer/admin auth. */}
           <Route path="/rights" element={<RequireAnyRole roles={['admin', 'reviewer']}><RightsReviewPage /></RequireAnyRole>} />
@@ -2412,9 +2417,14 @@ function WorkspacePage() {
               Intelligence
             </button>
           </div>
-          <NavLink to="/workspace/users" className="workspace-admin-link">
-            Manage users
-          </NavLink>
+          <div className="workspace-admin-link-group">
+            <NavLink to="/workspace/users" className="workspace-admin-link">
+              Manage users
+            </NavLink>
+            <NavLink to="/workspace/llm" className="workspace-admin-link">
+              Manage LLM
+            </NavLink>
+          </div>
         </div>
       </div>
 
@@ -5963,6 +5973,267 @@ function AdminUsersPage() {
           </div>
         </div>
       ) : null}
+    </section>
+  );
+}
+
+function AdminLlmPage() {
+  const [state, setState] = useState({
+    loading: true,
+    message: 'Loading LLM settings…',
+    settings: null
+  });
+  const [modelsState, setModelsState] = useState({
+    loading: true,
+    message: 'Loading OpenRouter models…',
+    items: []
+  });
+  const [form, setForm] = useState({
+    defaultProvider: 'openai',
+    defaultModel: '',
+    edProvider: 'openai',
+    edConciergeModel: ''
+  });
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [testBusy, setTestBusy] = useState(false);
+  const [testPrompt, setTestPrompt] = useState('Summarize why controlled engineering symbols improve safety and governance in 2 bullet points.');
+  const [testResult, setTestResult] = useState('');
+
+  const providerForModel = (modelId) => {
+    const normalized = String(modelId || '').trim();
+    if (!normalized) {
+      return 'other';
+    }
+    const [provider] = normalized.split('/');
+    return provider || 'other';
+  };
+
+  const modelOptions = useMemo(() => {
+    const ids = new Set((modelsState.items || []).map((item) => item.id).filter(Boolean));
+    const configured = state.settings?.configuredModels || [];
+    configured.forEach((modelId) => {
+      if (modelId) {
+        ids.add(modelId);
+      }
+    });
+    if (form.defaultModel) {
+      ids.add(form.defaultModel);
+    }
+    if (form.edConciergeModel) {
+      ids.add(form.edConciergeModel);
+    }
+    return Array.from(ids).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [form.defaultModel, form.edConciergeModel, modelsState.items, state.settings]);
+
+  const providerOptions = useMemo(() => {
+    return Array.from(new Set(modelOptions.map((modelId) => providerForModel(modelId))))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+  }, [modelOptions]);
+
+  const modelsForDefaultProvider = useMemo(() => {
+    return modelOptions.filter((modelId) => providerForModel(modelId) === form.defaultProvider);
+  }, [form.defaultProvider, modelOptions]);
+
+  const modelsForEdProvider = useMemo(() => {
+    const provider = form.edProvider || form.defaultProvider;
+    return modelOptions.filter((modelId) => providerForModel(modelId) === provider);
+  }, [form.edProvider, form.defaultProvider, modelOptions]);
+
+  const loadSettings = async () => {
+    setState((current) => ({ ...current, loading: true, message: 'Loading LLM settings…' }));
+    const result = await fetchAdminLlmSettings();
+    if (!result.ok) {
+      setState({ loading: false, message: result.message || 'Could not load LLM settings.', settings: null });
+      return;
+    }
+    const settings = result.settings || {};
+    const defaultModel = settings.defaultModel || '';
+    const edConciergeModel = settings.featureModels?.edConcierge || '';
+    setForm({
+      defaultProvider: providerForModel(defaultModel),
+      defaultModel,
+      edProvider: providerForModel(edConciergeModel || defaultModel),
+      edConciergeModel
+    });
+    setState({
+      loading: false,
+      message: settings.openrouterApiKeyConfigured
+        ? 'OpenRouter key detected on the server.'
+        : 'OpenRouter key not configured on the server yet.',
+      settings
+    });
+  };
+
+  const loadModels = async () => {
+    setModelsState({ loading: true, message: 'Loading OpenRouter models…', items: [] });
+    const result = await fetchOpenRouterModels();
+    if (!result.ok) {
+      setModelsState({ loading: false, message: result.message || 'Could not load OpenRouter models.', items: [] });
+      return;
+    }
+    setModelsState({ loading: false, message: `Loaded ${result.items.length} OpenRouter model(s).`, items: result.items });
+  };
+
+  useEffect(() => {
+    loadSettings();
+    loadModels();
+  }, []);
+
+  const handleDefaultProviderChange = (nextProvider) => {
+    const matchingModels = modelOptions.filter((modelId) => providerForModel(modelId) === nextProvider);
+    setForm((current) => ({
+      ...current,
+      defaultProvider: nextProvider,
+      defaultModel: matchingModels.includes(current.defaultModel) ? current.defaultModel : (matchingModels[0] || '')
+    }));
+  };
+
+  const handleEdProviderChange = (nextProvider) => {
+    const matchingModels = modelOptions.filter((modelId) => providerForModel(modelId) === nextProvider);
+    setForm((current) => ({
+      ...current,
+      edProvider: nextProvider,
+      edConciergeModel: matchingModels.includes(current.edConciergeModel) ? current.edConciergeModel : (matchingModels[0] || '')
+    }));
+  };
+
+  const handleSave = async (event) => {
+    event.preventDefault();
+    setSaveBusy(true);
+    const payload = {
+      provider: 'openrouter',
+      defaultModel: form.defaultModel,
+      featureModels: form.edConciergeModel ? { edConcierge: form.edConciergeModel } : {}
+    };
+    const result = await updateAdminLlmSettings(payload);
+    setSaveBusy(false);
+    if (!result.ok) {
+      setState((current) => ({ ...current, message: result.message || 'Could not save LLM settings.' }));
+      return;
+    }
+    setState((current) => ({
+      ...current,
+      message: 'LLM settings saved.',
+      settings: result.settings || current.settings
+    }));
+  };
+
+  const runSmokeTest = async (event) => {
+    event.preventDefault();
+    setTestBusy(true);
+    setTestResult('');
+    const result = await testAdminLlmPrompt({
+      prompt: testPrompt,
+      model: form.edConciergeModel || form.defaultModel,
+      feature: 'edConcierge',
+      maxTokens: 500,
+      temperature: 0.2
+    });
+    setTestBusy(false);
+    if (!result.ok) {
+      const details = [result.message, result.payload?.detail, result.payload?.error, result.payload?.raw]
+        .map((item) => String(item || '').trim())
+        .filter(Boolean);
+      setTestResult(details.length ? details.join('\n') : 'LLM test failed.');
+      return;
+    }
+    const output = result.output || {};
+    setTestResult(`${output.model || form.defaultModel}\n\n${output.outputText || '(No text returned)'}`);
+  };
+
+  return (
+    <section className="experience-shell">
+      <div className="hero-panel glass-panel workspace-hero">
+        <div>
+          <p className="eyebrow">Workspace administration</p>
+          <h2>Manage LLM</h2>
+          <p className="title-support">Configure OpenRouter models for shared Symgov LLM routing.</p>
+        </div>
+      </div>
+
+      <p className="page-status-text">{state.message}</p>
+      <p className="page-status-text">{modelsState.message}</p>
+
+      <form className="glass-panel pane form-panel" onSubmit={handleSave}>
+        <SectionHeading title="OpenRouter routing" subtitle="Server-side LLM settings used across Symgov areas" />
+        <label className="field">
+          <span>Provider</span>
+          <input value="openrouter" disabled />
+        </label>
+        <label className="field">
+          <span>Default provider</span>
+          <select
+            value={form.defaultProvider}
+            onChange={(event) => handleDefaultProviderChange(event.target.value)}
+          >
+            {providerOptions.map((provider) => (
+              <option key={provider} value={provider}>{provider}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Default model</span>
+          <select
+            required
+            value={form.defaultModel}
+            onChange={(event) => setForm((current) => ({ ...current, defaultModel: event.target.value }))}
+          >
+            {modelsForDefaultProvider.map((modelId) => (
+              <option key={modelId} value={modelId}>{modelId}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Ed concierge provider</span>
+          <select
+            value={form.edProvider}
+            onChange={(event) => handleEdProviderChange(event.target.value)}
+          >
+            <option value="">Use default provider</option>
+            {providerOptions.map((provider) => (
+              <option key={provider} value={provider}>{provider}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Ed concierge override model (optional)</span>
+          <select
+            value={form.edConciergeModel}
+            onChange={(event) => setForm((current) => ({ ...current, edConciergeModel: event.target.value }))}
+          >
+            <option value="">Use default model</option>
+            {modelsForEdProvider.map((modelId) => (
+              <option key={modelId} value={modelId}>{modelId}</option>
+            ))}
+          </select>
+        </label>
+        <div className="action-stack horizontal">
+          <button type="submit" className="action-button primary" disabled={saveBusy || !form.defaultModel}>
+            {saveBusy ? 'Saving…' : 'Save LLM settings'}
+          </button>
+          <button type="button" className="action-button" disabled={modelsState.loading} onClick={loadModels}>
+            {modelsState.loading ? 'Refreshing…' : 'Refresh model list'}
+          </button>
+        </div>
+      </form>
+
+      <form className="glass-panel pane form-panel" onSubmit={runSmokeTest}>
+        <SectionHeading title="Test connection" subtitle="Run a smoke prompt against the current model selection" />
+        <label className="field">
+          <span>Prompt</span>
+          <textarea value={testPrompt} onChange={(event) => setTestPrompt(event.target.value)} />
+        </label>
+        <button type="submit" className="action-button primary" disabled={testBusy || !testPrompt.trim()}>
+          {testBusy ? 'Running…' : 'Run LLM test'}
+        </button>
+        {testResult ? (
+          <label className="field">
+            <span>Result</span>
+            <textarea value={testResult} readOnly rows={8} />
+          </label>
+        ) : null}
+      </form>
     </section>
   );
 }

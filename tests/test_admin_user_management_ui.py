@@ -10,8 +10,12 @@ def test_admin_user_management_page_and_navigation_exist():
 
     assert 'path="/workspace/users"' in source
     assert 'to="/workspace/users"' in source
+    assert 'path="/workspace/llm"' in source
+    assert 'to="/workspace/llm"' in source
     assert "function AdminUsersPage()" in source
+    assert "function AdminLlmPage()" in source
     assert "Manage users" in source
+    assert "Manage LLM" in source
 
 
 def test_admin_user_management_ui_uses_admin_user_api_calls():
@@ -58,3 +62,13 @@ def test_admin_user_management_api_client_methods_exist():
     assert "export async function updateAdminUser(" in source
     assert "export async function resetAdminUserPin(" in source
     assert "requestJson('/admin/users'" in source
+
+
+def test_admin_llm_management_api_client_methods_exist():
+    source = API_JS.read_text(encoding="utf-8")
+
+    assert "export async function fetchAdminLlmSettings()" in source
+    assert "export async function updateAdminLlmSettings(" in source
+    assert "export async function fetchOpenRouterModels()" in source
+    assert "export async function testAdminLlmPrompt(" in source
+    assert "requestJson('/admin/llm/settings'" in source

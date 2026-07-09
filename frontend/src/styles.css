@@ -619,6 +619,14 @@ a {
   text-decoration: none;
 }
 
+.workspace-admin-link-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .workspace-tab.active,
 .workspace-admin-link:hover {
   background: #17685d;

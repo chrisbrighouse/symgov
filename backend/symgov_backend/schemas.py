@@ -87,6 +87,50 @@ class AdminUserMutationResponse(BaseModel):
     user: AdminUserResponse
 
 
+class LLMSettingsResponse(BaseModel):
+    provider: str
+    defaultModel: str
+    featureModels: dict[str, str] = Field(default_factory=dict)
+    configuredModels: list[str] = Field(default_factory=list)
+    openrouterApiKeyConfigured: bool = False
+    updatedAt: str | None = None
+
+
+class LLMSettingsUpdateRequest(BaseModel):
+    provider: str = "openrouter"
+    defaultModel: str = Field(min_length=3)
+    featureModels: dict[str, str] = Field(default_factory=dict)
+
+
+class OpenRouterModelResponse(BaseModel):
+    id: str
+    name: str
+    contextLength: int = 0
+    promptPricePerToken: str = ""
+    completionPricePerToken: str = ""
+    description: str = ""
+
+
+class OpenRouterModelListResponse(BaseModel):
+    items: list[OpenRouterModelResponse]
+
+
+class LLMChatRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=20000)
+    model: str | None = None
+    feature: str | None = None
+    temperature: float = Field(default=0.2, ge=0, le=2)
+    maxTokens: int = Field(default=700, ge=50, le=4000)
+
+
+class LLMChatResponse(BaseModel):
+    provider: str
+    model: str
+    outputText: str
+    latencyMs: int
+    usage: dict[str, Any] = Field(default_factory=dict)
+
+
 class ExternalSubmissionFileInput(BaseModel):
     name: str = Field(min_length=1)
     note: str = ""

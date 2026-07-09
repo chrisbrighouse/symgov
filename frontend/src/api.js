@@ -201,6 +201,44 @@ export async function resetAdminUserPin(userId, pin) {
   };
 }
 
+export async function fetchAdminLlmSettings() {
+  const result = await requestJson('/admin/llm/settings', { cache: 'no-store' });
+  return {
+    ...result,
+    settings: result.ok ? result.payload || null : null
+  };
+}
+
+export async function updateAdminLlmSettings(payload) {
+  const result = await requestJson('/admin/llm/settings', {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  });
+  return {
+    ...result,
+    settings: result.ok ? result.payload || null : null
+  };
+}
+
+export async function fetchOpenRouterModels() {
+  const result = await requestJson('/admin/llm/openrouter-models', { cache: 'no-store' });
+  return {
+    ...result,
+    items: result.ok ? result.payload?.items || [] : []
+  };
+}
+
+export async function testAdminLlmPrompt(payload) {
+  const result = await requestJson('/admin/llm/test', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  return {
+    ...result,
+    output: result.ok ? result.payload || null : null
+  };
+}
+
 export async function fetchWorkspaceReviewCases() {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };

@@ -18,6 +18,8 @@ from .routes.public import legacy_router as legacy_public_router
 from .routes.public import router as public_router
 from .routes.published import legacy_router as legacy_published_router
 from .routes.published import router as published_router
+from .routes.llm import legacy_router as legacy_llm_router
+from .routes.llm import router as llm_router
 from .routes.workspace import legacy_router as legacy_workspace_router
 from .routes.workspace import router as workspace_router
 from .agent_queue_worker import AgentQueueWorkerConfig, run_agent_queue_worker
@@ -60,6 +62,7 @@ def create_app() -> FastAPI:
         prefix=settings.api_prefix,
         dependencies=[Depends(require_any_role({"admin", "reviewer"}))],
     )
+    app.include_router(llm_router, prefix=settings.api_prefix)
     app.include_router(legacy_auth_router, prefix="/api")
     app.include_router(legacy_admin_router, prefix="/api")
     app.include_router(
@@ -73,6 +76,7 @@ def create_app() -> FastAPI:
         prefix="/api",
         dependencies=[Depends(require_any_role({"admin", "reviewer"}))],
     )
+    app.include_router(legacy_llm_router, prefix="/api")
 
     @app.on_event("startup")
     async def start_background_workers() -> None:
