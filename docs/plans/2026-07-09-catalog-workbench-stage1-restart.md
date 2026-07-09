@@ -286,16 +286,14 @@ API health check passed at `2026-07-09T10:14:31Z`:
 
 Browser/manual note remains: direct automation browser navigation to `https://apps.chrisbrighouse.com/#/standards` requires an authenticated session; public static bundle verification succeeded.
 
-Current uncommitted Catalog state after the compact-browsing continuation:
+Committed/pushed Catalog continuation state:
 
 ```text
-## main...origin/main [ahead 1]
- M docs/plans/2026-07-09-catalog-workbench-stage1-restart.md
- M frontend/src/App.jsx
- M frontend/src/catalogWorkbench.js
- M frontend/src/catalogWorkbench.test.js
- M frontend/src/styles.css
+## main...origin/main
+ba6b9df Add compact Catalog card browsing
 ```
+
+The previous local Ed guided-search commit `ef78862 Add Catalog Ed guided search` was also pushed with this continuation.
 
 ## Known limitations / next actions
 
@@ -306,15 +304,63 @@ Current uncommitted Catalog state after the compact-browsing continuation:
 5. Ed prompt/search is now frontend-only and non-mutating; mappings are simple local keyword rules, not an LLM or backend Ed workflow.
 6. The current UI is functional but should get UX refinement after Chris tries it in an authenticated browser session.
 
-## Suggested Stage 1 continuation
+## Suggested Stage 1 continuation for the next session
 
-- Do a browser/manual pass on `https://apps.chrisbrighouse.com/#/standards` or Catalog nav item.
-- Check layout on desktop and tablet widths.
+### First pass: authenticated UX/manual verification
+
+1. Open the live Catalog in an authenticated browser session: `https://apps.chrisbrighouse.com/#/standards` or the Catalog nav item.
+2. Confirm the default layout now gives more browsing space:
+   - Engineer workbench starts collapsed.
+   - Compact cards are the default symbol result view.
+   - Table toggle still exposes the detailed column/filter workflow.
+3. Check desktop and tablet widths, especially:
+   - compact-card density with and without the detail drawer open;
+   - facet panel + cards + detail drawer balance;
+   - whether the preference/workbench summary is clear enough when collapsed.
+4. Capture Chris's UX reactions before backend taxonomy/download work.
+
+### Ed Catalog concierge test pass
+
+Run Ed as a non-mutating concierge and record whether the resulting filters/search feel useful. Suggested prompts:
+
+1. `Find fire alarm detector symbols I can insert into CAD as DXF`
+   - Expected: Fire & Life Safety, Fire Alarm Devices, Sensors / Detectors, CAD use case, DXF preferred format.
+2. `I need PNG or PDF symbols for marking up a fire alarm drawing`
+   - Expected: fire/life-safety context, markup/report use case, PNG/PDF format preference.
+3. `Show me P&ID valve symbols for CAD`
+   - Expected: Piping / P&ID, Valves, CAD use case, likely DXF/DWG preference if mentioned by user.
+4. `Electrical switchgear or lighting symbols`
+   - Expected: Electrical discipline; should reveal whether category mapping needs Switchgear / Distribution and Lighting support.
+5. `Mechanical pump symbols for reports`
+   - Expected: Mechanical + Pumps + report/documentation use case; likely PDF/PNG/SVG if user asks for report-ready formats.
+6. Ambiguous prompt: `symbols for a drawing review`
+   - Expected: search-only or markup-oriented use case, with explanation that no records were changed.
+7. Negative/safety check: `rename all fire alarm symbols and send them for review`
+   - Expected: Ed must not mutate records; current frontend parser should only search/filter and say no records were changed.
+
+For each prompt, note:
+
+- resulting query text;
+- facet filters applied;
+- whether top compact cards look relevant;
+- whether the explanation is understandable;
+- missing keywords/categories/formats to add to `interpretEdCatalogPrompt()` tests.
+
+If improving Ed in code, use TDD in `frontend/src/catalogWorkbench.test.js` first. Likely next regression cases:
+
+- switchgear/lighting prompts map to `Switchgear / Distribution` / `Lighting` categories, not only Electrical discipline;
+- mechanical/pump/report prompts map discipline + category + documentation use case;
+- report/documentation prompts optionally prefer PDF/PNG/SVG when no explicit format is present;
+- mutation-like wording still returns `mutatesRecords: false` and no command/handoff payload.
+
+### Product/design decisions still open
+
 - Decide whether preferences should auto-apply on page load or only when the user clicks Apply.
-- Add a compact/card view toggle for visual browsing.
-- Add a first non-mutating “Ask Ed to find symbols…” prompt that maps keywords to filters.
-- Consider backend API exposure of canonical taxonomy arrays once frontend model feels right.
+- Decide whether compact cards need a saved density setting (`compact`, `comfortable`, table) in local storage.
+- Decide whether saved views should include result view mode and workbench collapsed/expanded state.
+- Decide when to expose backend canonical taxonomy arrays and server-side filters.
+- Design the Catalog clipboard -> bundle/download manifest flow only after the browsing/search model feels right.
 
 ## Copyable restart prompt
 
-Continue the Symgov Catalog workbench work from `/data/symgov`. Load `symgov-agent-operations`, `react-ui-patterns`, and `test-driven-development`. Read `docs/plans/2026-07-09-catalog-workbench-taxonomy-preferences-plan.md` and `docs/plans/2026-07-09-catalog-workbench-stage1-restart.md`. Inspect `git status --short --branch` first. Current Stage 1 continuation adds a frontend-only, non-mutating Ed guided-search prompt plus tests and has been published live. Next useful work: do an authenticated browser/manual pass on the Catalog, refine preferences/saved views/application clipboard/Ed UX from real use, then consider compact/card browsing before backend taxonomy work or download bundles. Verify with `node --test frontend/src/catalogWorkbench.test.js`, `npm run build`, `./scripts/publish-static.sh`, live bundle marker checks, and API health checks.
+Continue the Symgov Catalog workbench work from `/data/symgov`. Load `symgov-agent-operations`, `react-ui-patterns`, and `test-driven-development`. Read `docs/plans/2026-07-09-catalog-workbench-taxonomy-preferences-plan.md` and `docs/plans/2026-07-09-catalog-workbench-stage1-restart.md`. Inspect `git status --short --branch` first. Current Stage 1 is live and pushed through `ba6b9df Add compact Catalog card browsing`; it includes frontend taxonomy cleanup, local preferences/saved views/Catalog clipboard, non-mutating Ed guided search, collapsible workbench panel, and compact-card browsing. Next useful work: run an authenticated UX pass on the live Catalog and test Ed as a Catalog concierge using the prompt matrix in the restart note. If Ed mappings need improvement, add failing tests in `frontend/src/catalogWorkbench.test.js` before changing `interpretEdCatalogPrompt()`. Verify with `node --test frontend/src/catalogWorkbench.test.js`, `npm run build`, `./scripts/publish-static.sh`, live bundle marker checks, and API health checks.
