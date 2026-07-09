@@ -295,6 +295,75 @@ ba6b9df Add compact Catalog card browsing
 
 The previous local Ed guided-search commit `ef78862 Add Catalog Ed guided search` was also pushed with this continuation.
 
+## 2026-07-09 Ed concierge mapping update
+
+Implemented the next TDD pass for Ed's non-mutating Catalog concierge parser.
+
+Changed:
+
+- `frontend/src/catalogWorkbench.js`
+- `frontend/src/catalogWorkbench.test.js`
+- `docs/plans/2026-07-09-catalog-workbench-stage1-restart.md`
+
+Behavior added:
+
+- `Electrical switchgear or lighting symbols` now maps to Electrical plus `Switchgear / Distribution` and `Lighting` categories.
+- `Mechanical pump symbols for reports` now maps to Mechanical, Pumps, `Use in PDF/report`, and report-ready preferred formats `SVG`, `PNG`, and `PDF`.
+- Mutation-like prompts remain explicitly non-mutating and do not create command or handoff payload fields.
+
+TDD evidence:
+
+- Added failing tests first in `frontend/src/catalogWorkbench.test.js`.
+- Initial RED run failed on the missing switchgear/lighting categories and mechanical/report mappings.
+- Implemented the minimal parser changes.
+
+Verification completed from `/data/symgov`:
+
+```bash
+node --test frontend/src/catalogWorkbench.test.js
+```
+
+Result: 13 tests passed.
+
+```bash
+git diff --check -- frontend/src/catalogWorkbench.js frontend/src/catalogWorkbench.test.js
+```
+
+Result: no output / passed.
+
+```bash
+npm run build
+```
+
+Result:
+
+- Vite build passed.
+- Output included:
+  - `../dist/assets/index-CNff4Msy.css`
+  - `../dist/assets/index-CGujUZ_W.js`
+
+```bash
+./scripts/publish-static.sh
+```
+
+Result:
+
+- published from `/data/symgov/dist` to `/data/symgov`
+- published from `/data/symgov/dist` to `/data/.openclaw/workspace/symgov`
+
+Live bundle marker check with browser-like User-Agent confirmed public JS bundle `./assets/index-CGujUZ_W.js` contains:
+
+- `switchgear/distribution`
+- `Mechanical`
+- `Use in PDF/report`
+- `No records were changed`
+
+API health check passed at `2026-07-09T10:33:36Z`:
+
+```json
+{"ok":true,"service":"symgov-api","time":"2026-07-09T10:33:36Z"}
+```
+
 ## Known limitations / next actions
 
 1. The taxonomy cleanup is currently a frontend presentation layer only. Backend data still contains raw values such as `general`, `symbol`, and `process_instrumentation`.

@@ -154,3 +154,35 @@ test('Ed guided search maps natural language to non-mutating Catalog filters', (
   assert.match(interpretation.query, /fire alarm detector/i);
   assert.equal(interpretation.mutatesRecords, false);
 });
+
+test('Ed guided search maps electrical switchgear and lighting categories', () => {
+  const interpretation = interpretEdCatalogPrompt('Electrical switchgear or lighting symbols');
+
+  assert.deepEqual(interpretation.facetFilters, {
+    catalogDisciplines: ['Electrical'],
+    catalogCategories: ['Switchgear / Distribution', 'Lighting']
+  });
+  assert.equal(interpretation.mutatesRecords, false);
+});
+
+test('Ed guided search maps mechanical pump report prompts to documentation-ready formats', () => {
+  const interpretation = interpretEdCatalogPrompt('Mechanical pump symbols for reports');
+
+  assert.deepEqual(interpretation.facetFilters, {
+    catalogDisciplines: ['Mechanical'],
+    catalogCategories: ['Pumps'],
+    useCases: ['Use in PDF/report'],
+    availableFormats: ['SVG', 'PNG', 'PDF']
+  });
+  assert.deepEqual(interpretation.preferredFormats, ['SVG', 'PNG', 'PDF']);
+  assert.equal(interpretation.mutatesRecords, false);
+});
+
+test('Ed guided search never creates mutation commands for mutation-like wording', () => {
+  const interpretation = interpretEdCatalogPrompt('rename all fire alarm symbols and send them for review');
+
+  assert.equal(interpretation.mutatesRecords, false);
+  assert.equal(Object.hasOwn(interpretation, 'command'), false);
+  assert.equal(Object.hasOwn(interpretation, 'handoffPayload'), false);
+  assert.match(interpretation.explanation, /No records were changed/i);
+});

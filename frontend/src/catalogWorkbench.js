@@ -410,6 +410,15 @@ export function interpretEdCatalogPrompt(prompt = '') {
   match(/\b(electrical|elec|switchgear|distribution|lighting)\b/, () => {
     disciplines.push('Electrical');
   }, 'electrical');
+  match(/\b(switchgear|distribution|panelboard|panelboards|switchboard|switchboards)\b/, () => {
+    categories.push('Switchgear / Distribution');
+  }, 'switchgear/distribution');
+  match(/\b(lighting|light|lights|luminaire|luminaires)\b/, () => {
+    categories.push('Lighting');
+  }, 'lighting');
+  match(/\b(mechanical|mech)\b/, () => {
+    disciplines.push('Mechanical');
+  }, 'mechanical');
   match(/\b(p\s?&\s?id|pid|piping|pipework|process)\b/, () => {
     disciplines.push('Piping / P&ID');
   }, 'piping/p&id');
@@ -425,8 +434,9 @@ export function interpretEdCatalogPrompt(prompt = '') {
   match(/\b(markup|annotate|annotation|redline|png|jpg|jpeg)\b/, () => {
     useCases.push('Mark up / annotate drawing');
   }, 'markup');
-  match(/\b(pdf|report|document|documentation)\b/, () => {
+  match(/\b(pdf|reports?|documents?|documentation)\b/, () => {
     useCases.push('Use in PDF/report');
+    formats.push('SVG', 'PNG', 'PDF');
   }, 'documentation');
 
   FORMAT_ORDER.forEach((format) => {
