@@ -1308,7 +1308,7 @@ function StandardsPage() {
       setWorkbenchStatus({ mode: 'error', message: 'Ask Ed what kind of Catalog symbol you need first.' });
       return;
     }
-    setQuery(interpretation.query);
+    setQuery(interpretation.searchQuery || interpretation.query);
     setFacetFilters((current) => ({ ...current, ...interpretation.facetFilters }));
     setCatalogPreferences((current) => serializeCatalogPreferences({
       ...current,

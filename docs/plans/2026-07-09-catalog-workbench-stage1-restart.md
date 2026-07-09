@@ -364,6 +364,77 @@ API health check passed at `2026-07-09T10:33:36Z`:
 {"ok":true,"service":"symgov-api","time":"2026-07-09T10:33:36Z"}
 ```
 
+## 2026-07-09 Ed prompt disambiguation update
+
+Implemented a focused TDD refinement for Ed concierge behavior around ambiguous review wording and explicit format intent.
+
+Changed:
+
+- `frontend/src/catalogWorkbench.js`
+- `frontend/src/catalogWorkbench.test.js`
+- `docs/plans/2026-07-09-catalog-workbench-stage1-restart.md`
+
+Behavior added:
+
+- Prompt `I need PNG or PDF symbols for marking up a fire alarm drawing` now keeps explicit format intent (`PNG`, `PDF`) without injecting implicit `SVG`.
+- Prompt `symbols for a drawing review` now maps to markup use-case (`Mark up / annotate drawing`) as a non-mutating search/filter interpretation.
+- Documentation/report prompts still auto-prefer `SVG`/`PNG`/`PDF` when no explicit format is requested.
+- Ed remains explicitly non-mutating (`mutatesRecords: false`; no command/handoff payload fields).
+
+TDD evidence:
+
+- Added failing tests first in `frontend/src/catalogWorkbench.test.js` for explicit-format preservation and drawing-review mapping.
+- RED run failed on both new tests.
+- Implemented minimal parser updates in `interpretEdCatalogPrompt()`.
+- GREEN run passed all tests.
+
+Verification completed from `/data/symgov`:
+
+```bash
+node --test frontend/src/catalogWorkbench.test.js
+```
+
+Result: 15 tests passed after parser updates (RED run had 2 expected failing tests first).
+
+```bash
+git diff --check -- frontend/src/catalogWorkbench.js frontend/src/catalogWorkbench.test.js
+```
+
+Result: no output / passed.
+
+```bash
+npm run build
+```
+
+Result:
+
+- Vite build passed.
+- Output included:
+  - `../dist/assets/index-CNff4Msy.css`
+  - `../dist/assets/index-BXLtgAnX.js`
+
+```bash
+./scripts/publish-static.sh
+```
+
+Result:
+
+- published from `/data/symgov/dist` to `/data/symgov`
+- published from `/data/symgov/dist` to `/data/.openclaw/workspace/symgov`
+
+Live bundle marker check with browser-like User-Agent confirmed public JS bundle `./assets/index-BXLtgAnX.js` contains:
+
+- `drawing review`
+- `marking up`
+- `No records were changed`
+- `Ask Ed to find symbols`
+
+API health check passed at `2026-07-09T10:53:12Z`:
+
+```json
+{"ok":true,"service":"symgov-api","time":"2026-07-09T10:53:12Z"}
+```
+
 ## Known limitations / next actions
 
 1. The taxonomy cleanup is currently a frontend presentation layer only. Backend data still contains raw values such as `general`, `symbol`, and `process_instrumentation`.

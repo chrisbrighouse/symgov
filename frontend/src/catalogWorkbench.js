@@ -392,6 +392,10 @@ export function interpretEdCatalogPrompt(prompt = '') {
   const useCases = [];
   const formats = [];
   const matchedTerms = [];
+  const hasExplicitFormatMention = FORMAT_ORDER.some((format) => {
+    const pattern = new RegExp(`\\b${format.toLowerCase()}\\b`, 'i');
+    return pattern.test(rawPrompt);
+  });
 
   const match = (pattern, onMatch, label) => {
     if (pattern.test(normalizedPrompt)) {
@@ -419,6 +423,10 @@ export function interpretEdCatalogPrompt(prompt = '') {
   match(/\b(mechanical|mech)\b/, () => {
     disciplines.push('Mechanical');
   }, 'mechanical');
+  match(/\b(motor|motors|drive|drives|vfd|starter|starters)\b/, () => {
+    disciplines.push('Electrical');
+    categories.push('Motors / Drives');
+  }, 'motors/drives');
   match(/\b(p\s?&\s?id|pid|piping|pipework|process)\b/, () => {
     disciplines.push('Piping / P&ID');
   }, 'piping/p&id');
@@ -431,12 +439,14 @@ export function interpretEdCatalogPrompt(prompt = '') {
   match(/\b(cad|dxf|dwg|insert|editable)\b/, () => {
     useCases.push('Insert into CAD drawing');
   }, 'cad');
-  match(/\b(markup|annotate|annotation|redline|png|jpg|jpeg)\b/, () => {
+  match(/\b(markup|marking up|drawing review|review|annotate|annotation|redline|png|jpg|jpeg)\b/, () => {
     useCases.push('Mark up / annotate drawing');
   }, 'markup');
   match(/\b(pdf|reports?|documents?|documentation)\b/, () => {
     useCases.push('Use in PDF/report');
-    formats.push('SVG', 'PNG', 'PDF');
+    if (!hasExplicitFormatMention) {
+      formats.push('SVG', 'PNG', 'PDF');
+    }
   }, 'documentation');
 
   FORMAT_ORDER.forEach((format) => {
@@ -460,8 +470,16 @@ export function interpretEdCatalogPrompt(prompt = '') {
     }
   });
 
+  const searchTerms = compactUnique([
+    ...(facetFilters.catalogDisciplines || []),
+    ...(facetFilters.catalogCategories || []),
+    ...(facetFilters.useCases || []),
+    ...(facetFilters.availableFormats || [])
+  ]);
+
   return {
     query: rawPrompt,
+    searchQuery: searchTerms.join(' ') || rawPrompt,
     facetFilters,
     preferredFormats: facetFilters.availableFormats || [],
     matchedTerms: compactUnique(matchedTerms),

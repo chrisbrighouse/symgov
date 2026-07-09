@@ -162,6 +162,28 @@ test('Ed guided search maps electrical switchgear and lighting categories', () =
     catalogDisciplines: ['Electrical'],
     catalogCategories: ['Switchgear / Distribution', 'Lighting']
   });
+  assert.match(interpretation.searchQuery, /electrical/i);
+  assert.equal(interpretation.mutatesRecords, false);
+});
+
+test('Ed guided search converts natural-language electrical requests into searchable query terms', () => {
+  const interpretation = interpretEdCatalogPrompt('I need electrical symbols');
+
+  assert.deepEqual(interpretation.facetFilters, {
+    catalogDisciplines: ['Electrical']
+  });
+  assert.equal(interpretation.searchQuery, 'Electrical');
+  assert.equal(interpretation.mutatesRecords, false);
+});
+
+test('Ed guided search maps motor requests to motors and drives filters', () => {
+  const interpretation = interpretEdCatalogPrompt('I need motor symbols');
+
+  assert.deepEqual(interpretation.facetFilters, {
+    catalogDisciplines: ['Electrical'],
+    catalogCategories: ['Motors / Drives']
+  });
+  assert.match(interpretation.searchQuery, /motors\s*\/\s*drives/i);
   assert.equal(interpretation.mutatesRecords, false);
 });
 
@@ -176,6 +198,29 @@ test('Ed guided search maps mechanical pump report prompts to documentation-read
   });
   assert.deepEqual(interpretation.preferredFormats, ['SVG', 'PNG', 'PDF']);
   assert.equal(interpretation.mutatesRecords, false);
+});
+
+test('Ed guided search keeps explicit report formats without adding implicit extras', () => {
+  const interpretation = interpretEdCatalogPrompt('I need PNG or PDF symbols for marking up a fire alarm drawing');
+
+  assert.deepEqual(interpretation.facetFilters, {
+    catalogDisciplines: ['Fire & Life Safety'],
+    catalogCategories: ['Fire Alarm Devices'],
+    useCases: ['Mark up / annotate drawing', 'Use in PDF/report'],
+    availableFormats: ['PNG', 'PDF']
+  });
+  assert.deepEqual(interpretation.preferredFormats, ['PNG', 'PDF']);
+  assert.equal(interpretation.mutatesRecords, false);
+});
+
+test('Ed guided search treats drawing review prompts as non-mutating markup intent', () => {
+  const interpretation = interpretEdCatalogPrompt('symbols for a drawing review');
+
+  assert.deepEqual(interpretation.facetFilters, {
+    useCases: ['Mark up / annotate drawing']
+  });
+  assert.equal(interpretation.mutatesRecords, false);
+  assert.match(interpretation.explanation, /No records were changed/i);
 });
 
 test('Ed guided search never creates mutation commands for mutation-like wording', () => {
