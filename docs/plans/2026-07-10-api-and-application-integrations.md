@@ -971,28 +971,29 @@ This gives Symgov a credible customer integration story without waiting for symb
 
 ## Restart status
 
-Task 2 is complete and ready to commit in this workstream: customer/integration Catalog API key storage now lives in `backend/symgov_backend/models/schema.py` as `CatalogApiKey`, is exported from `backend/symgov_backend/models/__init__.py`, and is backed by Alembic revision `backend/alembic/versions/20260710_0018_catalog_api_keys.py`. Tests live in `tests/test_catalog_api_keys.py` and assert key hash/prefix storage, customer/integration labels, scope metadata, status/expiry/timestamps, and no raw key columns.
+Task 2 is complete and committed in this workstream: customer/integration Catalog API key storage now lives in `backend/symgov_backend/models/schema.py` as `CatalogApiKey`, is exported from `backend/symgov_backend/models/__init__.py`, and is backed by Alembic revision `backend/alembic/versions/20260710_0018_catalog_api_keys.py`. Tests live in `tests/test_catalog_api_keys.py` and assert key hash/prefix storage, customer/integration labels, scope metadata, status/expiry/timestamps, and no raw key columns.
 
-Latest verification before commit:
+Latest verification after the Task 2 commit:
 
 ```bash
 PYTHONPATH=backend pytest tests/test_catalog_api_keys.py -q
 PYTHONPATH=backend pytest tests/test_user_auth_models.py tests/test_auth_service.py -q
+npm run build
 cd backend && PYTHONPATH=. alembic -c alembic.ini heads
 cd backend && PYTHONPATH=. alembic -c alembic.ini upgrade head --sql >/tmp/symgov_alembic_upgrade_head.sql
 ```
 
-All passed/generated successfully. The Alembic head is `20260710_0018` and the generated SQL includes `catalog_api_keys` with `key_hash`, `key_prefix`, customer/integration fields, JSONB scopes/origins metadata, status check, and no raw key storage.
+All passed/generated successfully. The Alembic head is `20260710_0018` and the generated SQL includes `catalog_api_keys` with `key_hash`, `key_prefix`, customer/integration fields, JSONB scopes/origins metadata, status check, and no raw key storage. `npm run build` also passed after the backend/model changes.
 
 Next session should start at Task 3: add the API key auth helper/dependency in `backend/symgov_backend/catalog_api_auth.py` with coverage in `tests/test_catalog_api_auth.py`. Keep API keys as customer/integration credentials, prefer `Authorization: Bearer ***`, optionally support `X-Symgov-Api-Key`, hash before lookup, and reject disabled/revoked/expired/insufficient-scope keys with 401/403 as appropriate.
 
-Uncommitted state expected after this commit: none, unless a later session starts Task 3.
+Uncommitted state expected after this docs commit: none, unless a later session starts Task 3.
 
 ## Restart checklist
 
 If continuing this work in a new session:
 
-1. Read this plan and confirm Task 1 is marked done.
+1. Read this plan and confirm Tasks 1 and 2 are marked done.
 2. Inspect current repo state:
 
 ```bash
