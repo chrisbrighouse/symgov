@@ -512,23 +512,26 @@ PYTHONPATH=backend pytest tests/test_catalog_api_keys.py -q
 
 Expected: model/helper tests pass.
 
-### Task 3: Add API key auth helper/dependency
+### Task 3: Add API key auth helper/dependency — DONE 2026-07-10
 
 Objective: allow integration endpoints to authenticate with customer API keys and scope checks.
 
+Status: complete in this workstream. `backend/symgov_backend/catalog_api_auth.py` now provides customer/integration API-key auth helpers and FastAPI dependencies.
+
 Files:
 
-- Create: `backend/symgov_backend/catalog_api_auth.py`
-- Modify: `backend/symgov_backend/dependencies.py` if shared dependencies are preferred
+- Created: `backend/symgov_backend/catalog_api_auth.py`
 - Test: `tests/test_catalog_api_auth.py`
 
-Behavior:
+Behavior implemented:
 
 - Read bearer token from `Authorization`.
 - Optionally accept `X-Symgov-Api-Key`.
 - Hash and lookup token.
-- Reject disabled, revoked, expired, or insufficient-scope keys.
-- Return an authenticated integration context with customer/integration metadata.
+- Reject missing, unknown, disabled, revoked, or expired keys with 401.
+- Reject insufficient-scope keys with 403.
+- Return an authenticated integration context with API key ID, customer/integration metadata, scopes, and safe key prefix.
+- Keep raw API keys out of storage/loggable context; lookup uses a SHA-256 digest of the presented token.
 
 Verification:
 
@@ -538,7 +541,22 @@ PYTHONPATH=backend pytest tests/test_catalog_api_auth.py -q
 
 Expected: valid key passes; invalid/missing/expired/insufficient-scope cases fail with 401/403 as appropriate.
 
+Task 3 verification passed:
+
+```bash
+PYTHONPATH=backend pytest tests/test_catalog_api_auth.py -q
+# 12 passed
+
+PYTHONPATH=backend pytest tests/test_catalog_api_keys.py tests/test_auth_service.py tests/test_auth_dependencies.py tests/test_route_auth_enforcement.py -q
+# 18 passed, 16 warnings
+
+npm run build
+# vite build completed successfully
+```
+
 ### Task 4: Add usage event logging
+
+Restart notes for Task 4: start with strict TDD in `tests/test_catalog_usage_logging.py`. Model the new `catalog_api_usage_events` table and logger around the Task 3 `IntegrationAuthContext` fields (`api_key_id`, `customer_name`, `integration_name`, `scopes`, `key_prefix`) so events can snapshot customer/integration labels without exposing raw keys. Keep logging best-effort: endpoint responses must not fail just because usage logging fails. Sanitize/truncate query/message fields and hash or omit client IPs unless a later policy explicitly requires raw IP storage.
 
 Objective: log API usage for future customer reporting.
 
@@ -971,29 +989,31 @@ This gives Symgov a credible customer integration story without waiting for symb
 
 ## Restart status
 
-Task 2 is complete and committed in this workstream: customer/integration Catalog API key storage now lives in `backend/symgov_backend/models/schema.py` as `CatalogApiKey`, is exported from `backend/symgov_backend/models/__init__.py`, and is backed by Alembic revision `backend/alembic/versions/20260710_0018_catalog_api_keys.py`. Tests live in `tests/test_catalog_api_keys.py` and assert key hash/prefix storage, customer/integration labels, scope metadata, status/expiry/timestamps, and no raw key columns.
+Tasks 1, 2, and 3 are complete in this workstream.
 
-Latest verification after the Task 2 commit:
+Task 2 delivered customer/integration Catalog API key storage in `backend/symgov_backend/models/schema.py` as `CatalogApiKey`, exported from `backend/symgov_backend/models/__init__.py`, and backed by Alembic revision `backend/alembic/versions/20260710_0018_catalog_api_keys.py`. Tests live in `tests/test_catalog_api_keys.py` and assert key hash/prefix storage, customer/integration labels, scope metadata, status/expiry/timestamps, and no raw key columns.
+
+Task 3 delivered API key auth helpers/dependencies in `backend/symgov_backend/catalog_api_auth.py`, with TDD coverage in `tests/test_catalog_api_auth.py`. The helper treats API keys as customer/integration credentials, prefers `Authorization: Bearer ***`, optionally supports `X-Symgov-Api-Key`, hashes presented tokens before lookup, returns `IntegrationAuthContext`, rejects missing/unknown/disabled/revoked/expired keys with 401, and rejects insufficient scopes with 403.
+
+Latest verification after Task 3:
 
 ```bash
-PYTHONPATH=backend pytest tests/test_catalog_api_keys.py -q
-PYTHONPATH=backend pytest tests/test_user_auth_models.py tests/test_auth_service.py -q
+PYTHONPATH=backend pytest tests/test_catalog_api_auth.py -q
+PYTHONPATH=backend pytest tests/test_catalog_api_keys.py tests/test_auth_service.py tests/test_auth_dependencies.py tests/test_route_auth_enforcement.py -q
 npm run build
-cd backend && PYTHONPATH=. alembic -c alembic.ini heads
-cd backend && PYTHONPATH=. alembic -c alembic.ini upgrade head --sql >/tmp/symgov_alembic_upgrade_head.sql
 ```
 
-All passed/generated successfully. The Alembic head is `20260710_0018` and the generated SQL includes `catalog_api_keys` with `key_hash`, `key_prefix`, customer/integration fields, JSONB scopes/origins metadata, status check, and no raw key storage. `npm run build` also passed after the backend/model changes.
+All passed successfully: `tests/test_catalog_api_auth.py` reported 12 passed, the adjacent auth/model suite reported 18 passed with existing FastAPI lifespan deprecation warnings, and `npm run build` completed the Vite production build.
 
-Next session should start at Task 3: add the API key auth helper/dependency in `backend/symgov_backend/catalog_api_auth.py` with coverage in `tests/test_catalog_api_auth.py`. Keep API keys as customer/integration credentials, prefer `Authorization: Bearer ***`, optionally support `X-Symgov-Api-Key`, hash before lookup, and reject disabled/revoked/expired/insufficient-scope keys with 401/403 as appropriate.
+Next session should start at Task 4: add usage event logging. Begin with failing tests in `tests/test_catalog_usage_logging.py`, then add `catalog_api_usage_events` model/migration and `backend/symgov_backend/catalog_usage.py`. Use the Task 3 `IntegrationAuthContext` for safe customer/integration snapshots, keep logging best-effort, sanitize/truncate query/message text, and avoid raw IP storage unless a later policy requires it.
 
-Uncommitted state expected after this docs commit: none, unless a later session starts Task 3.
+Uncommitted state expected after this docs commit: none, unless a later session starts Task 4.
 
 ## Restart checklist
 
 If continuing this work in a new session:
 
-1. Read this plan and confirm Tasks 1 and 2 are marked done.
+1. Read this plan and confirm Tasks 1, 2, and 3 are marked done.
 2. Inspect current repo state:
 
 ```bash
