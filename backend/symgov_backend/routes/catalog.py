@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from time import perf_counter
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -405,6 +406,132 @@ def _catalog_symbol_filters(
         params["updated_since"] = updated_since
         response_filters["updatedSince"] = updated_since
     return filters, params, response_filters
+
+
+def _contextual_search_context(context: object) -> tuple[dict, list[str]]:
+    context = context if isinstance(context, dict) else {}
+    warnings: list[str] = []
+    discipline = context.get("discipline")
+    catalog_disciplines = catalog_taxonomy_for_symbol({"discipline": discipline})["disciplines"] if discipline else []
+    preferred_formats = [str(value).strip().upper() for value in context.get("preferredFormats", []) if str(value).strip()]
+    preferred_formats = list(dict.fromkeys(preferred_formats))
+    interpreted = {
+        "application": str(context.get("application") or "").strip() or None,
+        "catalogDisciplines": catalog_disciplines,
+        "drawingType": str(context.get("drawingType") or "").strip() or None,
+        "selectedLayer": str(context.get("selectedLayer") or "").strip() or None,
+        "units": str(context.get("units") or "").strip() or None,
+        "preferredFormats": preferred_formats,
+    }
+    return {key: value for key, value in interpreted.items() if value not in (None, [], "")}, warnings
+
+
+def _contextual_search_score(row, summary: dict, *, query: str, interpreted_filters: dict) -> int:
+    searchable = " ".join(
+        [
+            str(row.slug or ""),
+            str(row.canonical_name or ""),
+            str(summary.get("summary") or ""),
+            " ".join(str(value) for value in (row.payload_json or {}).get("keywords", [])),
+        ]
+    ).lower()
+    score = sum(3 for token in re.findall(r"[a-z0-9]+", query.lower()) if token in searchable)
+    requested_disciplines = set(interpreted_filters.get("catalogDisciplines", []))
+    score += 10 * len(requested_disciplines.intersection(summary.get("catalogDisciplines", [])))
+    requested_formats = set(interpreted_filters.get("preferredFormats", []))
+    score += 4 * len(requested_formats.intersection(summary.get("availableFormats", [])))
+    selected_layer = str(interpreted_filters.get("selectedLayer") or "").replace("_", " ").lower()
+    score += sum(1 for token in re.findall(r"[a-z0-9]+", selected_layer) if token in searchable)
+    return score
+
+
+@router.post("/search")
+async def contextual_catalog_search(
+    request: Request,
+    auth_context: IntegrationAuthContext = Depends(require_catalog_scope(CATALOG_READ_SCOPE)),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    started_at = perf_counter()
+    try:
+        body = await request.json()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Request body must be valid JSON.") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+
+    query = str(body.get("query") or "").strip()
+    context = body.get("context") or {}
+    if not isinstance(context, dict):
+        raise HTTPException(status_code=400, detail="context must be a JSON object.")
+    try:
+        limit = min(max(int(body.get("limit", 20)), 1), 100)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="limit must be an integer.") from exc
+
+    interpreted_filters, warnings = _contextual_search_context(context)
+    discipline = (interpreted_filters.get("catalogDisciplines") or [None])[0]
+    filters, params, _ = _catalog_symbol_filters(
+        q=None,
+        discipline=discipline,
+        category=None,
+        use_case=None,
+        format_=None,
+        pack=None,
+        symbol_family=None,
+        has_preview=None,
+        updated_since=None,
+    )
+    where_extension = (" AND " + " AND ".join(filters)) if filters else ""
+    params["limit"] = 100
+    rows = session.execute(
+        text(
+            PUBLISHED_SYMBOLS_SQL
+            + where_extension
+            + """
+            ORDER BY pk.effective_date DESC, pk.pack_code, pe.sort_order, gs.canonical_name
+            LIMIT :limit
+            """
+        ),
+        params,
+    ).all()
+    ranked = [(_contextual_search_score(row, _catalog_symbol_summary(row), query=query, interpreted_filters=interpreted_filters), row) for row in rows]
+    ranked.sort(key=lambda entry: (-entry[0], str(entry[1].canonical_name).lower()))
+    items = [_catalog_symbol_summary(row) for _, row in ranked[:limit]]
+
+    requested_formats = interpreted_filters.get("preferredFormats", [])
+    available_formats = {format_ for item in items for format_ in item["availableFormats"]}
+    for format_ in requested_formats:
+        if format_ not in available_formats:
+            warnings.append(f"Preferred format {format_} is not available among the ranked results.")
+    ranking_explanation = ["Results are ranked by query term matches."]
+    if interpreted_filters.get("catalogDisciplines"):
+        ranking_explanation.append("Requested discipline is applied as a Catalog filter and ranking preference.")
+    if requested_formats:
+        ranking_explanation.append("Preferred formats boost matching symbols but do not enable downloads.")
+    if interpreted_filters.get("selectedLayer"):
+        ranking_explanation.append("Selected layer terms provide an additional ranking signal.")
+
+    response = {
+        "query": query,
+        "items": items,
+        "interpretedFilters": interpreted_filters,
+        "rankingExplanation": ranking_explanation,
+        "warnings": warnings,
+        "downloadAvailable": False,
+        "noDownloadNotice": "Symbol downloads are not available through the Catalog integration API.",
+    }
+    log_catalog_usage_event_best_effort(
+        session,
+        auth_context,
+        request=request,
+        scope_used=CATALOG_READ_SCOPE,
+        route_name="catalog_contextual_search",
+        status_code=200,
+        latency_ms=_latency_ms(started_at),
+        query_text=query,
+        result_count=len(items),
+    )
+    return response
 
 
 @router.get("/symbols")

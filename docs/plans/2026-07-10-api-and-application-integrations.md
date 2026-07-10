@@ -709,7 +709,7 @@ npm run build
 # vite build completed successfully
 ```
 
-### Task 8: Add contextual search endpoint
+### Task 8: Add contextual search endpoint — DONE 2026-07-10
 
 Objective: support CAD/review-tool search context such as application, discipline, drawing type, layer, and preferred formats.
 
@@ -737,6 +737,27 @@ PYTHONPATH=backend pytest tests/test_catalog_contextual_search.py -q
 ```
 
 Expected: context influences interpreted filters and preferred formats without mutating records.
+
+Task 8 delivered `POST /api/v1/catalog/search` in `backend/symgov_backend/routes/catalog.py`, with strict-TDD coverage in `tests/test_catalog_contextual_search.py`. The endpoint remains exclusively in the curated `/api/v1/catalog/` customer integration namespace and requires `catalog.read`; missing/invalid keys return 401, while valid keys without that scope return 403. It accepts a query plus application, discipline, drawing type, selected layer, units, and preferred-format context. Explicit discipline is normalized into Catalog taxonomy filtering, while query terms, discipline, preferred formats, and selected-layer terms influence deterministic ranking. Responses contain Catalog summary items only, interpreted filters, ranking explanation, warnings for unmatched preferred formats, `downloadAvailable: false`, a no-download notice, and curated Catalog links only. Successful responses use best-effort Task 4 usage logging and do not fail when logging is unavailable.
+
+Task 8 TDD/verification passed:
+
+```bash
+PYTHONPATH=backend pytest tests/test_catalog_contextual_search.py::test_catalog_contextual_search_requires_valid_catalog_read_key -q
+# RED before implementation: failed as expected with 404 Not Found for the missing route.
+
+PYTHONPATH=backend pytest tests/test_catalog_contextual_search.py -q
+# 4 passed, 20 warnings
+
+PYTHONPATH=backend pytest tests/test_catalog_contextual_search.py tests/test_catalog_symbol_detail.py tests/test_catalog_symbol_search.py tests/test_catalog_routes_auth.py -q
+# 21 passed, 100 warnings
+
+PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py tests/test_catalog_usage_logging.py -q
+# 22 passed
+
+npm run build
+# vite build completed successfully
+```
 
 ### Task 9: Add Ed query endpoint
 
@@ -1029,7 +1050,7 @@ This gives Symgov a credible customer integration story without waiting for symb
 
 ## Restart status
 
-Tasks 1, 2, 3, 4, 5, 6, and 7 are complete in this workstream.
+Tasks 1, 2, 3, 4, 5, 6, 7, and 8 are complete in this workstream.
 
 Task 2 delivered customer/integration Catalog API key storage in `backend/symgov_backend/models/schema.py` as `CatalogApiKey`, exported from `backend/symgov_backend/models/__init__.py`, and backed by Alembic revision `backend/alembic/versions/20260710_0018_catalog_api_keys.py`. Tests live in `tests/test_catalog_api_keys.py` and assert key hash/prefix storage, customer/integration labels, scope metadata, status/expiry/timestamps, and no raw key columns.
 
@@ -1043,91 +1064,27 @@ Task 6 delivered `GET /api/v1/catalog/symbols` in `backend/symgov_backend/routes
 
 Task 7 delivered symbol detail and preview aliases in `backend/symgov_backend/routes/catalog.py`, with strict-TDD coverage in `tests/test_catalog_symbol_detail.py`. The implemented endpoints are `GET /api/v1/catalog/symbols/{symbol_ref}`, `GET /api/v1/catalog/symbols/{symbol_ref}/thumbnail`, and `GET /api/v1/catalog/symbols/{symbol_ref}/preview`. They remain within the curated `/api/v1/catalog/` namespace, require a valid Catalog API key with `catalog.read`, return 401 for missing/invalid keys, and return 403 for valid keys without `catalog.read`. Symbol refs resolve by human-readable display ID (for example `0003-12`), slug, or UUID. Detail responses include identity fields, backend-derived taxonomy, raw category/discipline audit fields, governance/revision metadata, available formats, `downloadAvailable: false`, curated/provenance fields, preview links where available, and curated `/api/v1/catalog/` links only. Preview and thumbnail aliases reuse the existing published preview asset selection path and stream the selected preview asset without exposing private `/published`, `/admin`, `/workspace`, or download links. Usage logging remains best-effort and records route/symbol-ref/result metadata where practical.
 
-Latest verification after Task 7:
+Latest verification after Task 8 is recorded in the completed Task 8 section above. The required targeted Catalog suite passed 21 tests, adjacent auth/key/usage tests passed 22 tests, and `npm run build` completed successfully.
 
-```bash
-PYTHONPATH=backend pytest tests/test_catalog_symbol_detail.py::test_catalog_symbol_detail_requires_valid_catalog_read_key -q
-# RED before implementation: failed as expected with 404 Not Found for the missing route.
+Next session should start at Task 9: add the Ed query endpoint. Keep the public/customer integration API limited to `/api/v1/catalog/`; do not expose/administer/document private Symgov APIs as public integration APIs unless intentionally promoted, scope-protected, documented/linked, and tested.
 
-PYTHONPATH=backend pytest tests/test_catalog_symbol_detail.py -q
-# 6 passed, 40 warnings
+Task 9 restart notes:
 
-PYTHONPATH=backend pytest tests/test_catalog_symbol_detail.py tests/test_catalog_symbol_search.py tests/test_catalog_routes_auth.py -q
-# 17 passed, 84 warnings
+- Endpoint: `POST /api/v1/catalog/ed/query` only.
+- Create `backend/symgov_backend/catalog_ed.py` if helpful; modify `backend/symgov_backend/routes/catalog.py`; create `tests/test_catalog_ed_query.py` first.
+- Require `catalog.ed.query`: missing/invalid API keys return 401 and valid keys without the scope return 403.
+- Follow strict TDD: add a focused failing endpoint/auth test, run it to confirm RED, then implement the smallest deterministic behavior and re-run to GREEN.
+- Reuse Task 8 Catalog summary/search behavior where practical, but ensure Ed responses include `answer`, `searchQuery`, `interpretedFilters`, `symbols`, `suggestedFollowups`, and `mutatesRecords: false`.
+- Keep usage logging best-effort, including sanitized message, `ed_query_type`, result count, and latency.
+- Verify the Task 9 tests, the relevant Catalog/auth/usage suite, and `npm run build`; then update this plan and commit only after verification passes.
 
-PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py tests/test_catalog_usage_logging.py -q
-# 22 passed
-
-npm run build
-# vite build completed successfully
-```
-
-Next session should start at Task 8: add the contextual Catalog search endpoint. Continue to keep the public/customer integration API limited to `/api/v1/catalog/`. Do not expose/administer/document private Symgov APIs as public integration APIs unless they are intentionally promoted into `/api/v1/catalog/`, protected by Catalog API-key scopes, documented/linked, and covered by tests.
-
-Task 8 target:
-
-- Endpoint: `POST /api/v1/catalog/search`
-- Files to modify: `backend/symgov_backend/routes/catalog.py`; create or modify `backend/symgov_backend/catalog_search.py` if helpful.
-- Test to create: `tests/test_catalog_contextual_search.py`
-- Scope: require `catalog.read` unless a more specific search scope is intentionally introduced.
-- Auth behavior: missing/invalid key 401; valid key without required scope 403.
-- Request behavior: accept query plus context such as application, discipline, drawing type, selected layer, units, and preferred formats.
-- Search behavior: merge explicit context into filters/ranking and reuse existing Catalog symbol summary/detail helpers where practical.
-- Response behavior: return ranked symbols, interpreted filters, ranking explanation/warnings, `downloadAvailable: false`, and curated `/api/v1/catalog/` links only.
-- Usage logging: best-effort route/status/scope/latency/request metadata plus sanitized query/result count/context summary where practical.
-
-Suggested next-session prompt:
-
-```text
-Use strict TDD for Task 8 in /data/symgov.
-
-Plan doc:
-docs/plans/2026-07-10-api-and-application-integrations.md
-
-Task 8: Add contextual search endpoint.
-
-Important API surface decision:
-- Keep the public/customer integration API limited to the /api/v1/catalog/ namespace.
-- Implement only POST /api/v1/catalog/search for this task.
-- Do not expose/administer/document internal Symgov APIs as public integration APIs.
-- Existing /api/v1/published, /api/v1/admin, /api/v1/workspace, browser UI, and agent/operator endpoints are private unless explicitly promoted into /api/v1/catalog/.
-
-Requirements:
-- First inspect the completed Task 7 work:
-  - backend/symgov_backend/routes/catalog.py
-  - tests/test_catalog_symbol_search.py
-  - tests/test_catalog_symbol_detail.py
-  - backend/symgov_backend/routes/published.py
-  - backend/symgov_backend/catalog_taxonomy.py
-  - docs/plans/2026-07-10-api-and-application-integrations.md
-- Create tests first in tests/test_catalog_contextual_search.py.
-- Require valid Catalog API key with catalog.read unless a more specific search scope is intentionally introduced.
-- Missing/invalid key returns 401.
-- Valid key without required scope returns 403.
-- Accept query plus context such as application, discipline, drawing type, selected layer, units, and preferred formats.
-- Merge explicit context into filters/ranking and return ranked symbols, interpreted filters, ranking explanation/warnings, downloadAvailable: false, and curated /api/v1/catalog/ links only.
-- Reuse existing Catalog symbol summary/detail helpers where practical.
-- Use the Task 4 usage logger best-effort; endpoint responses must not fail if usage logging fails.
-
-Strict TDD flow:
-1. Add failing tests in tests/test_catalog_contextual_search.py first.
-2. Run the specific test and confirm it fails for the expected missing endpoint/implementation reason.
-3. Implement the minimal route behavior.
-4. Re-run targeted tests until green.
-5. Run an appropriate targeted Catalog suite including contextual search, symbol detail, symbol search, and route auth tests.
-6. Also run adjacent auth/key/usage tests.
-7. Run npm run build.
-8. Update docs/plans/2026-07-10-api-and-application-integrations.md to mark Task 8 done and add restart notes for Task 9.
-9. Commit only after verification passes.
-```
-
-Uncommitted state expected after this Task 7 handoff: `backend/symgov_backend/routes/catalog.py`, `tests/test_catalog_symbol_detail.py`, and this plan doc unless the current session commits them.
+Uncommitted state expected at this handoff: `backend/symgov_backend/routes/catalog.py`, `tests/test_catalog_contextual_search.py`, and this plan doc until the current session commits them.
 
 ## Restart checklist
 
 If continuing this work in a new session:
 
-1. Read this plan and confirm Tasks 1, 2, 3, 4, 5, 6, and 7 are marked done.
+1. Read this plan and confirm Tasks 1 through 8 are marked done.
 2. Inspect current repo state:
 
 ```bash
@@ -1153,4 +1110,4 @@ git status --short --branch
 - `tests/test_catalog_symbol_detail.py`
 - `frontend/src/catalogWorkbench.js`
 
-5. Start with Task 8 and keep each task independently tested.
+5. Start with Task 9 and keep each task independently tested.
