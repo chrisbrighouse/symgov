@@ -666,35 +666,48 @@ Expected:
 - Response includes `displayId`, taxonomy, preview links, `downloadAvailable: false`.
 - Usage event includes query and result count.
 
-### Task 7: Add symbol detail and preview aliases
+### Task 7: Add symbol detail and preview aliases — DONE 2026-07-10
 
 Objective: let integrations resolve one symbol and get preview URLs by display ID, slug, or UUID.
 
-Files:
+Files delivered:
 
-- Modify: `backend/symgov_backend/routes/catalog.py`
-- Test: `tests/test_catalog_symbol_detail.py`
+- Modified: `backend/symgov_backend/routes/catalog.py`
+- Created: `tests/test_catalog_symbol_detail.py`
 
-Endpoints:
+Endpoints delivered:
 
 - `GET /api/v1/catalog/symbols/{symbol_ref}`
 - `GET /api/v1/catalog/symbols/{symbol_ref}/thumbnail`
 - `GET /api/v1/catalog/symbols/{symbol_ref}/preview`
 
-Behavior:
+Behavior implemented:
 
-- Reuse existing preview logic from `published.py` where possible.
-- Avoid duplicating asset selection logic.
-- Return 404 for unknown symbol refs.
-- Log usage events.
+- The public/customer integration API remains limited to the curated `/api/v1/catalog/` namespace for this task.
+- Detail and preview/thumbnail aliases require a valid Catalog API key with `catalog.read`; missing/invalid keys return 401 and valid keys without `catalog.read` return 403.
+- Symbol refs resolve by human-readable display ID, slug, or UUID.
+- Detail responses include `displayId`, `symbolId`, `slug`, name/summary, backend-derived taxonomy, raw category/discipline audit fields, governance/revision metadata, available formats, `downloadAvailable: false`, preview links where available, curated/provenance fields, and curated `/api/v1/catalog/` links only.
+- Preview and thumbnail aliases reuse the existing published preview asset selection path (`choose_published_preview_asset`) and stream the selected asset without exposing `/api/v1/published`, admin, workspace, or download links.
+- Usage logging remains best-effort and records route/symbol-ref/result metadata without failing endpoint responses if logging fails.
 
-Verification:
+Task 7 TDD/verification passed:
 
 ```bash
-PYTHONPATH=backend pytest tests/test_catalog_symbol_detail.py -q
-```
+PYTHONPATH=backend pytest tests/test_catalog_symbol_detail.py::test_catalog_symbol_detail_requires_valid_catalog_read_key -q
+# RED before implementation: failed as expected with 404 Not Found for the missing route.
 
-Expected: display ID, slug, and UUID resolution paths work in tests.
+PYTHONPATH=backend pytest tests/test_catalog_symbol_detail.py -q
+# 6 passed, 40 warnings
+
+PYTHONPATH=backend pytest tests/test_catalog_symbol_detail.py tests/test_catalog_symbol_search.py tests/test_catalog_routes_auth.py -q
+# 17 passed, 84 warnings
+
+PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py tests/test_catalog_usage_logging.py -q
+# 22 passed
+
+npm run build
+# vite build completed successfully
+```
 
 ### Task 8: Add contextual search endpoint
 
@@ -1016,7 +1029,7 @@ This gives Symgov a credible customer integration story without waiting for symb
 
 ## Restart status
 
-Tasks 1, 2, 3, 4, 5, and 6 are complete in this workstream.
+Tasks 1, 2, 3, 4, 5, 6, and 7 are complete in this workstream.
 
 Task 2 delivered customer/integration Catalog API key storage in `backend/symgov_backend/models/schema.py` as `CatalogApiKey`, exported from `backend/symgov_backend/models/__init__.py`, and backed by Alembic revision `backend/alembic/versions/20260710_0018_catalog_api_keys.py`. Tests live in `tests/test_catalog_api_keys.py` and assert key hash/prefix storage, customer/integration labels, scope metadata, status/expiry/timestamps, and no raw key columns.
 
@@ -1028,97 +1041,93 @@ Task 5 delivered the first public/customer Catalog integration route module in `
 
 Task 6 delivered `GET /api/v1/catalog/symbols` in `backend/symgov_backend/routes/catalog.py`, with strict-TDD coverage in `tests/test_catalog_symbol_search.py`. The endpoint lives only under the curated `/api/v1/catalog/` integration namespace, requires a valid Catalog API key with `catalog.read`, returns 401 for missing/invalid keys, and returns 403 for valid keys without `catalog.read`. It supports keyword search, discipline/category/useCase/format/pack/symbolFamily/hasPreview/updatedSince filters, capped `limit` pagination with an offset-style `cursor`, and returns integration-friendly summaries with human-readable `displayId`, stable symbol IDs/slugs, name/summary, backend-derived taxonomy fields, available formats, `downloadAvailable: false`, preview/thumbnail links where a preview is available, and curated `/api/v1/catalog/` links only. Usage logging remains best-effort and records query/result-count metadata when practical.
 
-Latest verification after Task 6:
+Task 7 delivered symbol detail and preview aliases in `backend/symgov_backend/routes/catalog.py`, with strict-TDD coverage in `tests/test_catalog_symbol_detail.py`. The implemented endpoints are `GET /api/v1/catalog/symbols/{symbol_ref}`, `GET /api/v1/catalog/symbols/{symbol_ref}/thumbnail`, and `GET /api/v1/catalog/symbols/{symbol_ref}/preview`. They remain within the curated `/api/v1/catalog/` namespace, require a valid Catalog API key with `catalog.read`, return 401 for missing/invalid keys, and return 403 for valid keys without `catalog.read`. Symbol refs resolve by human-readable display ID (for example `0003-12`), slug, or UUID. Detail responses include identity fields, backend-derived taxonomy, raw category/discipline audit fields, governance/revision metadata, available formats, `downloadAvailable: false`, curated/provenance fields, preview links where available, and curated `/api/v1/catalog/` links only. Preview and thumbnail aliases reuse the existing published preview asset selection path and stream the selected preview asset without exposing private `/published`, `/admin`, `/workspace`, or download links. Usage logging remains best-effort and records route/symbol-ref/result metadata where practical.
+
+Latest verification after Task 7:
 
 ```bash
-PYTHONPATH=backend pytest tests/test_catalog_symbol_search.py -q
-# RED before implementation: 5 failed as expected with 404 Not Found for the missing endpoint.
+PYTHONPATH=backend pytest tests/test_catalog_symbol_detail.py::test_catalog_symbol_detail_requires_valid_catalog_read_key -q
+# RED before implementation: failed as expected with 404 Not Found for the missing route.
 
-PYTHONPATH=backend pytest tests/test_catalog_symbol_search.py -q
-# 5 passed, 24 warnings
+PYTHONPATH=backend pytest tests/test_catalog_symbol_detail.py -q
+# 6 passed, 40 warnings
 
-PYTHONPATH=backend pytest tests/test_catalog_symbol_search.py tests/test_catalog_routes_auth.py tests/test_catalog_taxonomy.py tests/test_catalog_usage_logging.py tests/test_catalog_api_auth.py -q
-# 34 passed, 48 warnings
+PYTHONPATH=backend pytest tests/test_catalog_symbol_detail.py tests/test_catalog_symbol_search.py tests/test_catalog_routes_auth.py -q
+# 17 passed, 84 warnings
 
-PYTHONPATH=backend pytest tests -q
-# 262 passed, 2 failed, 116 warnings
-# Failures were existing/order-dependent LLM route tests in tests/test_admin_llm_management_routes.py;
-# rerunning those two tests directly passed:
-# PYTHONPATH=backend pytest tests/test_admin_llm_management_routes.py::test_admin_openrouter_model_list_and_test_endpoint tests/test_admin_llm_management_routes.py::test_authenticated_users_can_call_llm_chat -q
-# 2 passed, 12 warnings
+PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py tests/test_catalog_usage_logging.py -q
+# 22 passed
 
 npm run build
 # vite build completed successfully
 ```
 
-Next session should start at Task 7: add symbol detail and preview aliases. Continue to keep the public/customer integration API limited to `/api/v1/catalog/`. Do not expose/administer/document private Symgov APIs as public integration APIs unless they are intentionally promoted into `/api/v1/catalog/`, protected by Catalog API-key scopes, documented/linked, and covered by tests.
+Next session should start at Task 8: add the contextual Catalog search endpoint. Continue to keep the public/customer integration API limited to `/api/v1/catalog/`. Do not expose/administer/document private Symgov APIs as public integration APIs unless they are intentionally promoted into `/api/v1/catalog/`, protected by Catalog API-key scopes, documented/linked, and covered by tests.
 
-Task 7 target:
+Task 8 target:
 
-- Endpoints: `GET /api/v1/catalog/symbols/{symbol_ref}`, `GET /api/v1/catalog/symbols/{symbol_ref}/thumbnail`, and `GET /api/v1/catalog/symbols/{symbol_ref}/preview`
-- File to modify: `backend/symgov_backend/routes/catalog.py`
-- Test to create: `tests/test_catalog_symbol_detail.py`
-- Scope: require `catalog.read` for detail and appropriate read/preview scope behavior if preview scope is introduced now
-- Auth behavior: missing/invalid key 401; valid key without required scope 403
-- Resolution behavior: resolve symbols by display ID (for example `0003-12`), slug, or UUID
-- Response: detail object with identity fields, backend-derived taxonomy fields, raw category/discipline audit fields where useful, governance/revision metadata, preview links, available format metadata, provenance/evidence summary if available, supplemental photo metadata if available, and curated `/api/v1/catalog/` links only
-- Preview behavior: reuse existing preview logic from `backend/symgov_backend/routes/published.py` and avoid duplicating asset-selection logic
-- Usage logging: best-effort route/status/scope/latency/request metadata plus symbol ref where practical
+- Endpoint: `POST /api/v1/catalog/search`
+- Files to modify: `backend/symgov_backend/routes/catalog.py`; create or modify `backend/symgov_backend/catalog_search.py` if helpful.
+- Test to create: `tests/test_catalog_contextual_search.py`
+- Scope: require `catalog.read` unless a more specific search scope is intentionally introduced.
+- Auth behavior: missing/invalid key 401; valid key without required scope 403.
+- Request behavior: accept query plus context such as application, discipline, drawing type, selected layer, units, and preferred formats.
+- Search behavior: merge explicit context into filters/ranking and reuse existing Catalog symbol summary/detail helpers where practical.
+- Response behavior: return ranked symbols, interpreted filters, ranking explanation/warnings, `downloadAvailable: false`, and curated `/api/v1/catalog/` links only.
+- Usage logging: best-effort route/status/scope/latency/request metadata plus sanitized query/result count/context summary where practical.
 
 Suggested next-session prompt:
 
 ```text
-Use strict TDD for Task 7 in /data/symgov.
+Use strict TDD for Task 8 in /data/symgov.
 
 Plan doc:
 docs/plans/2026-07-10-api-and-application-integrations.md
 
-Task 7: Add symbol detail and preview aliases.
+Task 8: Add contextual search endpoint.
 
 Important API surface decision:
 - Keep the public/customer integration API limited to the /api/v1/catalog/ namespace.
-- Implement only GET /api/v1/catalog/symbols/{symbol_ref}, GET /api/v1/catalog/symbols/{symbol_ref}/thumbnail, and GET /api/v1/catalog/symbols/{symbol_ref}/preview for this task.
+- Implement only POST /api/v1/catalog/search for this task.
 - Do not expose/administer/document internal Symgov APIs as public integration APIs.
 - Existing /api/v1/published, /api/v1/admin, /api/v1/workspace, browser UI, and agent/operator endpoints are private unless explicitly promoted into /api/v1/catalog/.
 
 Requirements:
-- First inspect the completed Task 6 work:
+- First inspect the completed Task 7 work:
   - backend/symgov_backend/routes/catalog.py
   - tests/test_catalog_symbol_search.py
+  - tests/test_catalog_symbol_detail.py
   - backend/symgov_backend/routes/published.py
   - backend/symgov_backend/catalog_taxonomy.py
   - docs/plans/2026-07-10-api-and-application-integrations.md
-- Create tests first in tests/test_catalog_symbol_detail.py.
-- Require valid Catalog API key with catalog.read unless the preview alias intentionally requires catalog.preview.
+- Create tests first in tests/test_catalog_contextual_search.py.
+- Require valid Catalog API key with catalog.read unless a more specific search scope is intentionally introduced.
 - Missing/invalid key returns 401.
 - Valid key without required scope returns 403.
-- Resolve symbol refs by human-readable display ID, slug, or UUID.
-- Return detail with displayId, symbolId, slug, name, summary, taxonomy, raw audit fields, governance/revision metadata, availableFormats, downloadAvailable: false, preview links where available, and curated /api/v1/catalog/ links only.
-- Reuse existing preview/asset selection from published.py where practical.
+- Accept query plus context such as application, discipline, drawing type, selected layer, units, and preferred formats.
+- Merge explicit context into filters/ranking and return ranked symbols, interpreted filters, ranking explanation/warnings, downloadAvailable: false, and curated /api/v1/catalog/ links only.
+- Reuse existing Catalog symbol summary/detail helpers where practical.
 - Use the Task 4 usage logger best-effort; endpoint responses must not fail if usage logging fails.
 
 Strict TDD flow:
-1. Add failing tests in tests/test_catalog_symbol_detail.py first.
+1. Add failing tests in tests/test_catalog_contextual_search.py first.
 2. Run the specific test and confirm it fails for the expected missing endpoint/implementation reason.
 3. Implement the minimal route behavior.
 4. Re-run targeted tests until green.
-5. Run:
-   PYTHONPATH=backend pytest tests/test_catalog_symbol_detail.py tests/test_catalog_symbol_search.py tests/test_catalog_routes_auth.py -q
-6. Also run adjacent tests:
-   PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py tests/test_catalog_usage_logging.py -q
-7. Run:
-   npm run build
-8. Update docs/plans/2026-07-10-api-and-application-integrations.md to mark Task 7 done and add restart notes for Task 8.
+5. Run an appropriate targeted Catalog suite including contextual search, symbol detail, symbol search, and route auth tests.
+6. Also run adjacent auth/key/usage tests.
+7. Run npm run build.
+8. Update docs/plans/2026-07-10-api-and-application-integrations.md to mark Task 8 done and add restart notes for Task 9.
 9. Commit only after verification passes.
 ```
 
-Uncommitted state expected after this Task 6 handoff: `backend/symgov_backend/routes/catalog.py`, `tests/test_catalog_symbol_search.py`, and this plan doc unless the current session commits them.
+Uncommitted state expected after this Task 7 handoff: `backend/symgov_backend/routes/catalog.py`, `tests/test_catalog_symbol_detail.py`, and this plan doc unless the current session commits them.
 
 ## Restart checklist
 
 If continuing this work in a new session:
 
-1. Read this plan and confirm Tasks 1, 2, 3, 4, 5, and 6 are marked done.
+1. Read this plan and confirm Tasks 1, 2, 3, 4, 5, 6, and 7 are marked done.
 2. Inspect current repo state:
 
 ```bash
@@ -1141,6 +1150,7 @@ git status --short --branch
 - `backend/symgov_backend/catalog_taxonomy.py`
 - `tests/test_catalog_routes_auth.py`
 - `tests/test_catalog_symbol_search.py`
+- `tests/test_catalog_symbol_detail.py`
 - `frontend/src/catalogWorkbench.js`
 
-5. Start with Task 7 and keep each task independently tested.
+5. Start with Task 8 and keep each task independently tested.
