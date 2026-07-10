@@ -591,33 +591,50 @@ npm run build
 
 Expected: events are created with sanitized/truncated fields and adjacent API key/auth behavior remains green.
 
-### Task 5: Create Catalog integration route module
+### Task 5: Create Catalog integration route module — DONE 2026-07-10
 
 Objective: introduce `/api/v1/catalog` endpoints without changing the existing `/published` UI endpoints.
 
-Files:
+Files delivered:
 
-- Create: `backend/symgov_backend/routes/catalog.py`
-- Modify: `backend/symgov_backend/app.py`
-- Modify: `backend/symgov_backend/schemas.py` or create route-local Pydantic models
-- Test: `tests/test_catalog_routes_auth.py`
+- Created: `backend/symgov_backend/routes/catalog.py`
+- Modified: `backend/symgov_backend/app.py`
+- Created: `tests/test_catalog_routes_auth.py`
+- Shared schemas were not changed; Task 5 uses route-local response dictionaries for the thin initial API shell.
 
-Initial endpoints:
+Initial endpoints delivered:
 
 - `GET /api/v1/catalog/capabilities`
 - `GET /api/v1/catalog/taxonomy`
 
-Verification:
+Behavior implemented:
+
+- Both routes are registered only under the curated public/customer integration namespace `/api/v1/catalog/`.
+- Both routes require a valid Catalog API key with `catalog.read` through the existing API-key auth dependency.
+- Missing or invalid keys return 401.
+- Valid keys without `catalog.read` return 403.
+- Capabilities describes the public Catalog integration menu only: current Task 5 endpoints plus intended future Catalog integration capabilities.
+- Capabilities does not link or advertise private/admin/workspace/browser/published APIs.
+- Capabilities and taxonomy both state `downloadAvailable: false`.
+- Taxonomy returns backend-owned facet metadata from `backend/symgov_backend/catalog_taxonomy.py` constants.
+- Successful route usage is logged through the Task 4 best-effort usage logger with route/status/scope/latency/request/application metadata.
+- Usage logging failures are swallowed so successful route responses still return 200.
+
+Task 5 TDD/verification passed:
 
 ```bash
+PYTHONPATH=backend pytest tests/test_catalog_routes_auth.py::test_catalog_capabilities_requires_valid_catalog_read_key -q
+# RED before implementation: failed as expected with 404 Not Found for the missing route.
+
 PYTHONPATH=backend pytest tests/test_catalog_routes_auth.py -q
+# 6 passed, 28 warnings
+
+PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py tests/test_catalog_usage_logging.py -q
+# 22 passed
+
+npm run build
+# vite build completed successfully
 ```
-
-Expected:
-
-- Missing key gets 401.
-- Valid key with `catalog.read` can call capabilities/taxonomy.
-- Valid key without required scope gets 403.
 
 ### Task 6: Add paginated symbol search endpoint
 
@@ -999,7 +1016,7 @@ This gives Symgov a credible customer integration story without waiting for symb
 
 ## Restart status
 
-Tasks 1, 2, 3, and 4 are complete in this workstream.
+Tasks 1, 2, 3, 4, and 5 are complete in this workstream.
 
 Task 2 delivered customer/integration Catalog API key storage in `backend/symgov_backend/models/schema.py` as `CatalogApiKey`, exported from `backend/symgov_backend/models/__init__.py`, and backed by Alembic revision `backend/alembic/versions/20260710_0018_catalog_api_keys.py`. Tests live in `tests/test_catalog_api_keys.py` and assert key hash/prefix storage, customer/integration labels, scope metadata, status/expiry/timestamps, and no raw key columns.
 
@@ -1007,78 +1024,96 @@ Task 3 delivered API key auth helpers/dependencies in `backend/symgov_backend/ca
 
 Task 4 delivered usage event logging in `backend/symgov_backend/catalog_usage.py`, the `CatalogApiUsageEvent` ORM model in `backend/symgov_backend/models/schema.py`, export wiring in `backend/symgov_backend/models/__init__.py`, Alembic revision `backend/alembic/versions/20260710_0019_catalog_api_usage_events.py`, and TDD coverage in `tests/test_catalog_usage_logging.py`. Usage events snapshot customer/integration metadata from `IntegrationAuthContext`, capture route/status/latency/request/application metadata, sanitize/truncate query/message text, hash client IPs, avoid raw API keys, and use best-effort logging so endpoint responses are not failed by usage logging problems.
 
-Latest verification after Task 4:
+Task 5 delivered the first public/customer Catalog integration route module in `backend/symgov_backend/routes/catalog.py`, registered from `backend/symgov_backend/app.py`, with TDD coverage in `tests/test_catalog_routes_auth.py`. Only the curated `/api/v1/catalog/` public integration namespace was exposed. The initial endpoints are `GET /api/v1/catalog/capabilities` and `GET /api/v1/catalog/taxonomy`; both require a valid Catalog API key with `catalog.read`, return 401 for missing/invalid keys, and return 403 for valid keys without `catalog.read`. Capabilities advertises only current/future public Catalog integration capabilities and links, not private/admin/workspace/browser/published APIs. Taxonomy returns backend-owned facet constants from `backend/symgov_backend/catalog_taxonomy.py`. Both endpoints state `downloadAvailable: false` and log successful route usage best-effort.
+
+Latest verification after Task 5:
 
 ```bash
-PYTHONPATH=backend pytest tests/test_catalog_usage_logging.py -q
-# 6 passed
+PYTHONPATH=backend pytest tests/test_catalog_routes_auth.py::test_catalog_capabilities_requires_valid_catalog_read_key -q
+# RED before implementation: failed as expected with 404 Not Found for the missing route.
 
-PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py -q
-# 16 passed
+PYTHONPATH=backend pytest tests/test_catalog_routes_auth.py -q
+# 6 passed, 28 warnings
+
+PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py tests/test_catalog_usage_logging.py -q
+# 22 passed
 
 npm run build
 # vite build completed successfully
 ```
 
-Next session should start at Task 5: create the Catalog integration route module. Begin with strict TDD in `tests/test_catalog_routes_auth.py`, then create `backend/symgov_backend/routes/catalog.py`, register it in `backend/symgov_backend/app.py`, and add route-local or shared Pydantic response models as needed. Initial endpoints are `GET /api/v1/catalog/capabilities` and `GET /api/v1/catalog/taxonomy`; both should require a valid Catalog API key with the `catalog.read` scope. Use the existing `require_catalog_scope()` dependency from Task 3 and the usage logger from Task 4 where practical, keeping logging best-effort.
+Next session should start at Task 6: add the paginated symbol search endpoint. Continue to keep the public/customer integration API limited to `/api/v1/catalog/`. Do not expose/administer/document private Symgov APIs as public integration APIs unless they are intentionally promoted into `/api/v1/catalog/`, protected by Catalog API-key scopes, documented/linked, and covered by tests.
+
+Task 6 target:
+
+- Endpoint: `GET /api/v1/catalog/symbols`
+- File to modify: `backend/symgov_backend/routes/catalog.py`
+- Test to create: `tests/test_catalog_symbol_search.py`
+- Scope: require `catalog.read`
+- Auth behavior: missing/invalid key 401; valid key without `catalog.read` 403
+- Response: integration-friendly symbol summaries with human-readable `displayId`, stable IDs/slugs, name/summary, taxonomy fields, preview links where available, `downloadAvailable: false`, and curated `/api/v1/catalog/` links only
+- Search/filter behavior: support `q`, `discipline`, `category`, `useCase`, `format`, `pack`, `limit`, and pagination cursor or an initial offset-style cursor if that is safer for the first pass
+- Taxonomy: reuse `backend/symgov_backend/catalog_taxonomy.py`
+- Source query: reuse or extract safe pieces from `backend/symgov_backend/routes/published.py` without making `/api/v1/published` part of the public integration surface
+- Usage logging: best-effort route/status/scope/latency/request metadata, plus query/result-count fields where practical
 
 Suggested next-session prompt:
 
 ```text
-Use strict TDD for Task 5 in /data/symgov.
+Use strict TDD for Task 6 in /data/symgov.
 
 Plan doc:
 docs/plans/2026-07-10-api-and-application-integrations.md
 
-Task 5: Create Catalog integration route module.
+Task 6: Add paginated symbol search endpoint.
+
+Important API surface decision:
+- Keep the public/customer integration API limited to the /api/v1/catalog/ namespace.
+- Implement GET /api/v1/catalog/symbols only for this task.
+- Do not expose/administer/document internal Symgov APIs as public integration APIs.
+- Capabilities should continue to advertise only curated public Catalog integration links and intended future Catalog capabilities.
+- Existing /api/v1/published, /api/v1/admin, /api/v1/workspace, browser UI, and agent/operator endpoints are private unless explicitly promoted into /api/v1/catalog/.
 
 Requirements:
-- First inspect the existing Catalog API key/auth/usage work:
-  - backend/symgov_backend/models/schema.py
-  - backend/symgov_backend/catalog_api_auth.py
-  - backend/symgov_backend/catalog_usage.py
-  - tests/test_catalog_api_keys.py
-  - tests/test_catalog_api_auth.py
-  - tests/test_catalog_usage_logging.py
-  - backend/alembic/versions/20260710_0018_catalog_api_keys.py
-  - backend/alembic/versions/20260710_0019_catalog_api_usage_events.py
-- Create/update:
+- First inspect the completed Task 5 work:
   - backend/symgov_backend/routes/catalog.py
   - backend/symgov_backend/app.py
-  - backend/symgov_backend/schemas.py or route-local Pydantic models
   - tests/test_catalog_routes_auth.py
-- Add initial `/api/v1/catalog` endpoints:
-  - GET /api/v1/catalog/capabilities
-  - GET /api/v1/catalog/taxonomy
-- Missing or invalid API keys should return 401.
-- Valid keys with `catalog.read` should call capabilities/taxonomy.
-- Valid keys without `catalog.read` should return 403.
-- Prefer the Authorization bearer-token header; preserve optional `X-Symgov-Api-Key` support through the existing auth dependency.
-- Responses must continue to state that download is unavailable.
-- Follow existing Symgov code style.
+  - backend/symgov_backend/routes/published.py
+  - backend/symgov_backend/catalog_taxonomy.py
+  - docs/plans/2026-07-10-api-and-application-integrations.md
+- Create tests first in tests/test_catalog_symbol_search.py.
+- Implement GET /api/v1/catalog/symbols in backend/symgov_backend/routes/catalog.py.
+- Require valid Catalog API key with catalog.read.
+- Missing/invalid key returns 401.
+- Valid key without catalog.read returns 403.
+- Support q, discipline, category, useCase, format, pack, limit, and a pagination cursor or simple offset cursor.
+- Return integration-friendly symbol summaries with displayId, symbolId, slug, name, summary, catalogDisciplines, catalogCategories, useCases, availableFormats, downloadAvailable: false, preview links where available, and curated /api/v1/catalog/ links only.
+- Reuse backend taxonomy helpers where practical.
+- Use the Task 4 usage logger best-effort; endpoint responses must not fail if usage logging fails.
 
 Strict TDD flow:
-1. Add failing tests in tests/test_catalog_routes_auth.py first.
-2. Run the specific test and confirm it fails for the expected missing route/implementation reason.
-3. Implement the minimal route module, app registration, and schemas.
+1. Add failing tests in tests/test_catalog_symbol_search.py first.
+2. Run the specific test and confirm it fails for the expected missing endpoint/implementation reason.
+3. Implement the minimal route behavior.
 4. Re-run targeted tests until green.
 5. Run:
-   PYTHONPATH=backend pytest tests/test_catalog_routes_auth.py -q
+   PYTHONPATH=backend pytest tests/test_catalog_symbol_search.py tests/test_catalog_routes_auth.py -q
 6. Also run adjacent tests:
    PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py tests/test_catalog_usage_logging.py -q
 7. Run:
    npm run build
-8. Update docs/plans/2026-07-10-api-and-application-integrations.md to mark Task 5 done and add restart notes for Task 6.
+8. Update docs/plans/2026-07-10-api-and-application-integrations.md to mark Task 6 done and add restart notes for Task 7.
 9. Commit only after verification passes.
 ```
 
-Uncommitted state expected after this docs commit: none, unless a later session starts Task 5.
+Uncommitted state expected after this docs commit: none, unless a later session starts Task 6.
 
 ## Restart checklist
 
 If continuing this work in a new session:
 
-1. Read this plan and confirm Tasks 1, 2, 3, and 4 are marked done.
+1. Read this plan and confirm Tasks 1, 2, 3, 4, and 5 are marked done.
 2. Inspect current repo state:
 
 ```bash
@@ -1088,16 +1123,18 @@ git status --short --branch
 
 3. Load relevant skills:
 
-- `symgov-agent-operations`
 - `test-driven-development`
+- `implementation-verification`
+- `github-operations` before committing
+- `requesting-code-review` if a pre-commit review is requested
 - `subagent-driven-development` if delegating implementation
-- `requesting-code-review` before committing/deploying
 
 4. Review current Catalog files:
 
+- `backend/symgov_backend/routes/catalog.py`
 - `backend/symgov_backend/routes/published.py`
+- `backend/symgov_backend/catalog_taxonomy.py`
+- `tests/test_catalog_routes_auth.py`
 - `frontend/src/catalogWorkbench.js`
-- `frontend/src/App.jsx`
-- `docs/plans/2026-07-09-catalog-workbench-taxonomy-preferences-plan.md`
 
-5. Start with Milestone 1 and keep each task independently tested.
+5. Start with Task 6 and keep each task independently tested.
