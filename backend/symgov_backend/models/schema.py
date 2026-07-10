@@ -80,6 +80,37 @@ class CatalogApiKey(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class CatalogApiUsageEvent(Base):
+    __tablename__ = "catalog_api_usage_events"
+    __table_args__ = (
+        Index("ix_catalog_api_usage_events_api_key_created", "api_key_id", "created_at"),
+        Index("ix_catalog_api_usage_events_customer_created", "customer_name_snapshot", "integration_name_snapshot", "created_at"),
+        Index("ix_catalog_api_usage_events_route_created", "route_name", "status_code", "created_at"),
+        Index("ix_catalog_api_usage_events_symbol_created", "symbol_ref", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    api_key_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("catalog_api_keys.id", ondelete="CASCADE"), nullable=False)
+    customer_name_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    integration_name_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    scope_used: Mapped[str | None] = mapped_column(Text, nullable=True)
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    path: Mapped[str] = mapped_column(Text, nullable=False)
+    route_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    request_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    query_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    symbol_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ed_query_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    client_ip_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    application_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    application_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class GovernedSymbol(Base):
     __tablename__ = "governed_symbols"
 

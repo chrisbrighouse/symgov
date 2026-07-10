@@ -554,32 +554,42 @@ npm run build
 # vite build completed successfully
 ```
 
-### Task 4: Add usage event logging
-
-Restart notes for Task 4: start with strict TDD in `tests/test_catalog_usage_logging.py`. Model the new `catalog_api_usage_events` table and logger around the Task 3 `IntegrationAuthContext` fields (`api_key_id`, `customer_name`, `integration_name`, `scopes`, `key_prefix`) so events can snapshot customer/integration labels without exposing raw keys. Keep logging best-effort: endpoint responses must not fail just because usage logging fails. Sanitize/truncate query/message fields and hash or omit client IPs unless a later policy explicitly requires raw IP storage.
+### Task 4: Add usage event logging — done 2026-07-10
 
 Objective: log API usage for future customer reporting.
 
-Files:
+Files delivered:
 
-- Modify: `backend/symgov_backend/models/schema.py`
-- Create: Alembic migration for `catalog_api_usage_events`
-- Create: `backend/symgov_backend/catalog_usage.py`
-- Test: `tests/test_catalog_usage_logging.py`
+- Modified: `backend/symgov_backend/models/schema.py`
+- Modified: `backend/symgov_backend/models/__init__.py`
+- Created: `backend/alembic/versions/20260710_0019_catalog_api_usage_events.py`
+- Created: `backend/symgov_backend/catalog_usage.py`
+- Created: `tests/test_catalog_usage_logging.py`
 
-Behavior:
+Behavior implemented:
 
-- Log route, status, latency, key/customer snapshots, sanitized query/message text, symbol ref, result count, app headers.
-- Do not block endpoint response if logging fails; log internally and continue.
-- Avoid storing raw IP addresses unless a later policy requires them.
+- Adds `CatalogApiUsageEvent` / `catalog_api_usage_events` for API key usage reporting.
+- Snapshots customer/integration metadata from `IntegrationAuthContext` using `api_key_id`, `customer_name_snapshot`, and `integration_name_snapshot`.
+- Captures scope, method, path, route name, status code, latency, request ID, symbol ref, result count, Ed query type, user agent, integration application headers, and creation time.
+- Sanitizes/truncates query/message text, including API-key and bearer-token redaction.
+- Hashes client IP addresses into `client_ip_hash`; no raw IP column is present.
+- Does not store raw API keys or key hashes in usage events.
+- Keeps usage logging best-effort through `log_catalog_usage_event_best_effort()`, rolling back/swallowing logging failures so endpoint responses can still succeed.
 
-Verification:
+Task 4 TDD/verification passed:
 
 ```bash
 PYTHONPATH=backend pytest tests/test_catalog_usage_logging.py -q
+# 6 passed
+
+PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py -q
+# 16 passed
+
+npm run build
+# vite build completed successfully
 ```
 
-Expected: events are created with sanitized/truncated fields.
+Expected: events are created with sanitized/truncated fields and adjacent API key/auth behavior remains green.
 
 ### Task 5: Create Catalog integration route module
 
@@ -989,76 +999,86 @@ This gives Symgov a credible customer integration story without waiting for symb
 
 ## Restart status
 
-Tasks 1, 2, and 3 are complete in this workstream.
+Tasks 1, 2, 3, and 4 are complete in this workstream.
 
 Task 2 delivered customer/integration Catalog API key storage in `backend/symgov_backend/models/schema.py` as `CatalogApiKey`, exported from `backend/symgov_backend/models/__init__.py`, and backed by Alembic revision `backend/alembic/versions/20260710_0018_catalog_api_keys.py`. Tests live in `tests/test_catalog_api_keys.py` and assert key hash/prefix storage, customer/integration labels, scope metadata, status/expiry/timestamps, and no raw key columns.
 
 Task 3 delivered API key auth helpers/dependencies in `backend/symgov_backend/catalog_api_auth.py`, with TDD coverage in `tests/test_catalog_api_auth.py`. The helper treats API keys as customer/integration credentials, prefers the Authorization bearer-token header, optionally supports `X-Symgov-Api-Key`, hashes presented tokens before lookup, returns `IntegrationAuthContext`, rejects missing/unknown/disabled/revoked/expired keys with 401, and rejects insufficient scopes with 403.
 
-Latest verification after Task 3:
+Task 4 delivered usage event logging in `backend/symgov_backend/catalog_usage.py`, the `CatalogApiUsageEvent` ORM model in `backend/symgov_backend/models/schema.py`, export wiring in `backend/symgov_backend/models/__init__.py`, Alembic revision `backend/alembic/versions/20260710_0019_catalog_api_usage_events.py`, and TDD coverage in `tests/test_catalog_usage_logging.py`. Usage events snapshot customer/integration metadata from `IntegrationAuthContext`, capture route/status/latency/request/application metadata, sanitize/truncate query/message text, hash client IPs, avoid raw API keys, and use best-effort logging so endpoint responses are not failed by usage logging problems.
+
+Latest verification after Task 4:
 
 ```bash
-PYTHONPATH=backend pytest tests/test_catalog_api_auth.py -q
-PYTHONPATH=backend pytest tests/test_catalog_api_keys.py tests/test_auth_service.py tests/test_auth_dependencies.py tests/test_route_auth_enforcement.py -q
+PYTHONPATH=backend pytest tests/test_catalog_usage_logging.py -q
+# 6 passed
+
+PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py -q
+# 16 passed
+
 npm run build
+# vite build completed successfully
 ```
 
-All passed successfully: `tests/test_catalog_api_auth.py` reported 12 passed, the adjacent auth/model suite reported 18 passed with existing FastAPI lifespan deprecation warnings, and `npm run build` completed the Vite production build.
-
-Next session should start at Task 4: add usage event logging. Begin with failing tests in `tests/test_catalog_usage_logging.py`, then add `catalog_api_usage_events` model/migration and `backend/symgov_backend/catalog_usage.py`. Use the Task 3 `IntegrationAuthContext` for safe customer/integration snapshots, keep logging best-effort, sanitize/truncate query/message text, and avoid raw IP storage unless a later policy requires it.
+Next session should start at Task 5: create the Catalog integration route module. Begin with strict TDD in `tests/test_catalog_routes_auth.py`, then create `backend/symgov_backend/routes/catalog.py`, register it in `backend/symgov_backend/app.py`, and add route-local or shared Pydantic response models as needed. Initial endpoints are `GET /api/v1/catalog/capabilities` and `GET /api/v1/catalog/taxonomy`; both should require a valid Catalog API key with the `catalog.read` scope. Use the existing `require_catalog_scope()` dependency from Task 3 and the usage logger from Task 4 where practical, keeping logging best-effort.
 
 Suggested next-session prompt:
 
 ```text
-Use strict TDD for Task 4 in /data/symgov.
+Use strict TDD for Task 5 in /data/symgov.
 
 Plan doc:
 docs/plans/2026-07-10-api-and-application-integrations.md
 
-Task 4: Add usage event logging.
+Task 5: Create Catalog integration route module.
 
 Requirements:
-- First inspect the existing Catalog API key/auth work:
+- First inspect the existing Catalog API key/auth/usage work:
   - backend/symgov_backend/models/schema.py
   - backend/symgov_backend/catalog_api_auth.py
+  - backend/symgov_backend/catalog_usage.py
   - tests/test_catalog_api_keys.py
   - tests/test_catalog_api_auth.py
-  - backend/alembic/versions/20260710_0018_catalog_api_keys.py
-- Create/update:
-  - backend/symgov_backend/models/schema.py
-  - backend/alembic/versions/<timestamp>_catalog_api_usage_events.py
-  - backend/symgov_backend/catalog_usage.py
   - tests/test_catalog_usage_logging.py
-- Usage events should snapshot customer/integration metadata from IntegrationAuthContext.
-- Include fields for api_key_id, customer_name_snapshot, integration_name_snapshot, scope_used, method, path, route_name, status_code, latency_ms, request_id, sanitized/truncated query/message text, symbol_ref, result_count, ed_query_type, user_agent, client_ip_hash, application_name, application_version, and created_at where practical.
-- Do not store raw API keys.
-- Avoid raw IP storage; hash or omit client IP unless a policy explicitly requires raw IP.
-- Logging must be best-effort: endpoint responses must not fail if usage logging fails.
-- Sanitize/truncate sensitive text fields.
+  - backend/alembic/versions/20260710_0018_catalog_api_keys.py
+  - backend/alembic/versions/20260710_0019_catalog_api_usage_events.py
+- Create/update:
+  - backend/symgov_backend/routes/catalog.py
+  - backend/symgov_backend/app.py
+  - backend/symgov_backend/schemas.py or route-local Pydantic models
+  - tests/test_catalog_routes_auth.py
+- Add initial `/api/v1/catalog` endpoints:
+  - GET /api/v1/catalog/capabilities
+  - GET /api/v1/catalog/taxonomy
+- Missing or invalid API keys should return 401.
+- Valid keys with `catalog.read` should call capabilities/taxonomy.
+- Valid keys without `catalog.read` should return 403.
+- Prefer the Authorization bearer-token header; preserve optional `X-Symgov-Api-Key` support through the existing auth dependency.
+- Responses must continue to state that download is unavailable.
 - Follow existing Symgov code style.
 
 Strict TDD flow:
-1. Add failing tests in tests/test_catalog_usage_logging.py first.
-2. Run the specific test and confirm it fails for the expected missing implementation reason.
-3. Implement the minimal usage model/migration/logger.
+1. Add failing tests in tests/test_catalog_routes_auth.py first.
+2. Run the specific test and confirm it fails for the expected missing route/implementation reason.
+3. Implement the minimal route module, app registration, and schemas.
 4. Re-run targeted tests until green.
 5. Run:
-   PYTHONPATH=backend pytest tests/test_catalog_usage_logging.py -q
+   PYTHONPATH=backend pytest tests/test_catalog_routes_auth.py -q
 6. Also run adjacent tests:
-   PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py -q
+   PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py tests/test_catalog_usage_logging.py -q
 7. Run:
    npm run build
-8. Update docs/plans/2026-07-10-api-and-application-integrations.md to mark Task 4 done and add restart notes for Task 5.
+8. Update docs/plans/2026-07-10-api-and-application-integrations.md to mark Task 5 done and add restart notes for Task 6.
 9. Commit only after verification passes.
 ```
 
-Uncommitted state expected after this docs commit: none, unless a later session starts Task 4.
+Uncommitted state expected after this docs commit: none, unless a later session starts Task 5.
 
 ## Restart checklist
 
 If continuing this work in a new session:
 
-1. Read this plan and confirm Tasks 1, 2, and 3 are marked done.
+1. Read this plan and confirm Tasks 1, 2, 3, and 4 are marked done.
 2. Inspect current repo state:
 
 ```bash
