@@ -993,7 +993,7 @@ Tasks 1, 2, and 3 are complete in this workstream.
 
 Task 2 delivered customer/integration Catalog API key storage in `backend/symgov_backend/models/schema.py` as `CatalogApiKey`, exported from `backend/symgov_backend/models/__init__.py`, and backed by Alembic revision `backend/alembic/versions/20260710_0018_catalog_api_keys.py`. Tests live in `tests/test_catalog_api_keys.py` and assert key hash/prefix storage, customer/integration labels, scope metadata, status/expiry/timestamps, and no raw key columns.
 
-Task 3 delivered API key auth helpers/dependencies in `backend/symgov_backend/catalog_api_auth.py`, with TDD coverage in `tests/test_catalog_api_auth.py`. The helper treats API keys as customer/integration credentials, prefers `Authorization: Bearer ***`, optionally supports `X-Symgov-Api-Key`, hashes presented tokens before lookup, returns `IntegrationAuthContext`, rejects missing/unknown/disabled/revoked/expired keys with 401, and rejects insufficient scopes with 403.
+Task 3 delivered API key auth helpers/dependencies in `backend/symgov_backend/catalog_api_auth.py`, with TDD coverage in `tests/test_catalog_api_auth.py`. The helper treats API keys as customer/integration credentials, prefers the Authorization bearer-token header, optionally supports `X-Symgov-Api-Key`, hashes presented tokens before lookup, returns `IntegrationAuthContext`, rejects missing/unknown/disabled/revoked/expired keys with 401, and rejects insufficient scopes with 403.
 
 Latest verification after Task 3:
 
@@ -1006,6 +1006,51 @@ npm run build
 All passed successfully: `tests/test_catalog_api_auth.py` reported 12 passed, the adjacent auth/model suite reported 18 passed with existing FastAPI lifespan deprecation warnings, and `npm run build` completed the Vite production build.
 
 Next session should start at Task 4: add usage event logging. Begin with failing tests in `tests/test_catalog_usage_logging.py`, then add `catalog_api_usage_events` model/migration and `backend/symgov_backend/catalog_usage.py`. Use the Task 3 `IntegrationAuthContext` for safe customer/integration snapshots, keep logging best-effort, sanitize/truncate query/message text, and avoid raw IP storage unless a later policy requires it.
+
+Suggested next-session prompt:
+
+```text
+Use strict TDD for Task 4 in /data/symgov.
+
+Plan doc:
+docs/plans/2026-07-10-api-and-application-integrations.md
+
+Task 4: Add usage event logging.
+
+Requirements:
+- First inspect the existing Catalog API key/auth work:
+  - backend/symgov_backend/models/schema.py
+  - backend/symgov_backend/catalog_api_auth.py
+  - tests/test_catalog_api_keys.py
+  - tests/test_catalog_api_auth.py
+  - backend/alembic/versions/20260710_0018_catalog_api_keys.py
+- Create/update:
+  - backend/symgov_backend/models/schema.py
+  - backend/alembic/versions/<timestamp>_catalog_api_usage_events.py
+  - backend/symgov_backend/catalog_usage.py
+  - tests/test_catalog_usage_logging.py
+- Usage events should snapshot customer/integration metadata from IntegrationAuthContext.
+- Include fields for api_key_id, customer_name_snapshot, integration_name_snapshot, scope_used, method, path, route_name, status_code, latency_ms, request_id, sanitized/truncated query/message text, symbol_ref, result_count, ed_query_type, user_agent, client_ip_hash, application_name, application_version, and created_at where practical.
+- Do not store raw API keys.
+- Avoid raw IP storage; hash or omit client IP unless a policy explicitly requires raw IP.
+- Logging must be best-effort: endpoint responses must not fail if usage logging fails.
+- Sanitize/truncate sensitive text fields.
+- Follow existing Symgov code style.
+
+Strict TDD flow:
+1. Add failing tests in tests/test_catalog_usage_logging.py first.
+2. Run the specific test and confirm it fails for the expected missing implementation reason.
+3. Implement the minimal usage model/migration/logger.
+4. Re-run targeted tests until green.
+5. Run:
+   PYTHONPATH=backend pytest tests/test_catalog_usage_logging.py -q
+6. Also run adjacent tests:
+   PYTHONPATH=backend pytest tests/test_catalog_api_auth.py tests/test_catalog_api_keys.py -q
+7. Run:
+   npm run build
+8. Update docs/plans/2026-07-10-api-and-application-integrations.md to mark Task 4 done and add restart notes for Task 5.
+9. Commit only after verification passes.
+```
 
 Uncommitted state expected after this docs commit: none, unless a later session starts Task 4.
 
