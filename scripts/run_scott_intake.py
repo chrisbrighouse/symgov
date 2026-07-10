@@ -35,6 +35,7 @@ SUPPORTED_FORMATS = {
     ".jpg": "jpeg",
     ".jpeg": "jpeg",
     ".dxf": "dxf",
+    ".btx": "btx",
     ".zip": "zip",
 }
 DEFAULT_ENV_PATH = Path("/data/.openclaw/workspace/symgov/.env.backend.database")
@@ -53,6 +54,7 @@ SYMBOL_FORMAT_KEYWORDS = {
     "PNG": (".png", "png"),
     "JPEG": (".jpg", ".jpeg", "jpeg"),
     "DXF": (".dxf", "dxf"),
+    "BTX": (".btx", "btx", "bluebeam tool set", "bluebeam revu"),
     "DWG": (".dwg", "dwg"),
     "PDF": (".pdf", "pdf"),
     "JSON": (".json", "json"),
@@ -1199,7 +1201,7 @@ def build_routing(decision, eligibility_status, guessed_format, queue_priority):
         recommendation["route_to_agents"] = ["tracy"]
         recommendation["next_queue_families"] = ["provenance"]
         recommendation["reason_codes"].append("SCOTT-ROUTE-ACCEPTED")
-        if guessed_format in {"svg", "png", "jpeg", "dxf"}:
+        if guessed_format in {"svg", "png", "jpeg", "dxf", "btx"}:
             recommendation["route_to_agents"].insert(0, "vlad")
             recommendation["next_queue_families"].insert(0, "validation")
             recommendation["reason_codes"].append(f"SCOTT-ROUTE-{guessed_format.upper()}")
@@ -1463,6 +1465,8 @@ def run_intake_task(task):
         eligibility_flags.append("technical_validation_candidate")
     if guessed_format == "dxf" and decision == "accepted":
         eligibility_flags.append("dxf_validation_candidate")
+    if guessed_format == "btx" and decision == "accepted":
+        eligibility_flags.append("btx_library_expansion_candidate")
     if guessed_format in {"png", "jpeg"} and decision == "accepted":
         eligibility_flags.append("raster_sheet_analysis_candidate")
     if submission_kind == "imported_symbol_library" and guessed_format == "json" and decision == "accepted":

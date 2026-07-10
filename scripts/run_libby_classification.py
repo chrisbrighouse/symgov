@@ -575,6 +575,16 @@ def infer_classification(task):
         symbol_family = f"candidate:{candidate_symbol_id.lower()}"
         add_trace(evidence_trace, "taxonomy_match", "warning", "No strong family match found; Libby created a provisional taxonomy term.")
 
+    btx_subject = normalize_label(task.get("btx_subject"))
+    classification_hints = task.get("classification_hints") if isinstance(task.get("classification_hints"), dict) else {}
+    if btx_subject and "door" in btx_subject.casefold() and classification_hints == {"category": "Doors", "discipline": "Architectural"}:
+        category = "Doors"
+        discipline = "Architectural"
+        symbol_family = "door"
+        industry = "architectural"
+        confidence = max(confidence, 0.84)
+        add_trace(evidence_trace, "btx_subject_architectural_match", "passed", f"Authoritative BTX subject {btx_subject} classified as Doors / Architectural.")
+
     if rights_disposition == "cleared":
         source_classification = "contributor_asserted" if source_classification == "unknown" else source_classification
         confidence = max(confidence, 0.8)

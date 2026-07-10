@@ -257,6 +257,8 @@ class WorkspaceSubmissionContextResponse(BaseModel):
 class WorkspaceReviewCaseResponse(BaseModel):
     id: str
     reviewItemType: str = "review_case"
+    reviewKind: str = "symbol_review"
+    sourcePreviewUnavailable: bool = False
     parentReviewCaseId: str | None = None
     splitItemId: str | None = None
     splitChildKey: str | None = None

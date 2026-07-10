@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="240.6076pt" height="40.10118pt" viewBox="0 0 240.6076 40.10118">
+  <title>Sliding Door</title>
+  <desc>Extracted from Bluebeam BTX; source dimensions 240.6076 × 40.10118 PDF points.</desc>
+  <clipPath id="symbol-clip"><rect x="0" y="0" width="240.6076" height="40.10118"/></clipPath>
+  <g clip-path="url(#symbol-clip)" transform="translate(0 40.10118) scale(1 -1)">
+    <path d="M80.0358,13.6319 L80.0358,18.6719 M80.0358,26.4719 L80.0358,21.4319" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M80.0358,18.6719 L80.0358,23.9519 L131.0358,23.9519" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M215.8758,26.4719 L181.9158,26.4719 L181.9158,13.6319" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M80.0358,26.4719 L46.0758,26.4719 M80.0358,13.6319 L46.0758,13.6319 M181.9158,13.6319 L215.8758,13.6319" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M131.0358,23.9519 L131.0358,21.0719 L80.0358,21.0719" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M181.9158,18.3119 L131.0358,18.3119" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M131.0358,21.0719 L181.9158,21.0719 L181.9158,18.3119" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M131.0358,21.0719 L131.0358,18.3119" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

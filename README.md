@@ -16,6 +16,7 @@ Current architecture/design references:
 - `symgov-governance-architecture.md`
 - `symgov-agent-architecture.md`
 - `symgov-review-decision-orchestration.md`
+- `docs/btx-submission-workflow.md` — supported Bluebeam BTX intake, conversion, storage, and review contract
 
 ## Current implementation target
 

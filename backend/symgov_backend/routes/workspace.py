@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import Text, and_, cast, func, inspect as inspect_database, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
@@ -54,6 +54,7 @@ from ..agent_feedback import (
     build_symbol_property_feedback_events,
 )
 from ..agent_queue_reconciliation import reconcile_agent_queue_state
+from ..agent_queue_worker import AgentQueueWorkerState, agent_worker_health_payload
 from ..tracy_operations import tracy_status_summary
 from ..publication_handoff import execute_publication_handoff
 from ..property_options import remember_property_option
@@ -1940,6 +1941,8 @@ def build_provenance_workspace_item(
     summary = classification_record.review_summary if classification_record else provenance_assessment.summary
     payload = {
         "id": str(review_case.id),
+        "reviewKind": "library_provenance",
+        "sourcePreviewUnavailable": source_preview_asset is None,
         "symbolId": symbol_id,
         "displayName": package_display_name,
         "packageDisplayId": package_id,
@@ -2248,6 +2251,22 @@ def get_workspace_tracy_status() -> WorkspaceTracyStatusResponse:
     except Exception as exc:  # pragma: no cover - production API guard
         raise HTTPException(status_code=500, detail="Tracy status could not be loaded.") from exc
     return WorkspaceTracyStatusResponse(**payload)
+
+
+@router.get(
+    "/agent-worker-health",
+    responses={500: {"description": "Server error"}},
+)
+@legacy_router.get(
+    "/workspace/agent-worker-health",
+    include_in_schema=False,
+)
+def get_workspace_agent_worker_health(request: Request) -> dict:
+    state = getattr(request.app.state, "agent_worker_state", None)
+    if state is None:
+        state = AgentQueueWorkerState(configured_agents=())
+    task = getattr(request.app.state, "agent_worker_task", None)
+    return agent_worker_health_payload(state, task_done=task.done() if task is not None else None)
 
 
 @router.get(

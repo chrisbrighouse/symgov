@@ -3394,7 +3394,8 @@ function formatReviewAssetChip(asset) {
 
 function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, onSaveProperties, propertyOptions, workspaceMode }) {
   const primaryChild = activeChildren[0];
-  const resolvedPreviewUrl = resolveWorkspaceAssetUrl(activeChange?.sourcePreviewUrl || primaryChild?.previewUrl);
+  const isLibraryProvenance = activeChange?.reviewKind === 'library_provenance';
+  const resolvedPreviewUrl = resolveWorkspaceAssetUrl(activeChange?.sourcePreviewUrl || (!isLibraryProvenance ? primaryChild?.previewUrl : null));
   const [imageUnavailable, setImageUnavailable] = useState(!resolvedPreviewUrl);
   const [propertyDraft, setPropertyDraft] = useState({
     name: '',
@@ -3521,8 +3522,8 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
             />
           ) : (
             <div className="review-source-fallback">
-              <SymbolGlyph symbolId={activeChange?.symbolId || 'SYMBOL'} large />
-              <small>Preview unavailable</small>
+              {isLibraryProvenance ? null : <SymbolGlyph symbolId={activeChange?.symbolId || 'SYMBOL'} large />}
+              <small>{isLibraryProvenance ? 'No symbol preview is available for this library provenance case.' : 'Preview unavailable'}</small>
             </div>
           )}
         </div>
@@ -6291,7 +6292,8 @@ function SubmissionPage() {
         <div>
           <p className="eyebrow">External intake</p>
           <h2>Upload symbol files for processing</h2>
-          <p className="title-support">Accepted: SVG, PNG, JPG, JPEG, JSON, DXF, ZIP</p>
+          <p className="title-support">Accepted: SVG, PNG, JPG, JPEG, JSON, DXF, BTX, ZIP</p>
+          <p className="title-support">Bluebeam BTX tool sets are safely unpacked into individual SVG, DXF, and PNG symbol candidates for review.</p>
         </div>
       </div>
       <p className={`page-status-text status-${healthState.mode}`}>
@@ -6332,7 +6334,7 @@ function SubmissionPage() {
             <input
               required
               type="file"
-              accept=".svg,.png,.jpg,.jpeg,.json,.dxf,.zip"
+              accept=".svg,.png,.jpg,.jpeg,.json,.dxf,.btx,.zip"
               multiple
               onChange={(event) => updateField('files', Array.from(event.target.files || []))}
             />

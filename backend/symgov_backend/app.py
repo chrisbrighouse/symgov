@@ -23,7 +23,7 @@ from .routes.llm import legacy_router as legacy_llm_router
 from .routes.llm import router as llm_router
 from .routes.workspace import legacy_router as legacy_workspace_router
 from .routes.workspace import router as workspace_router
-from .agent_queue_worker import AgentQueueWorkerConfig, run_agent_queue_worker
+from .agent_queue_worker import AgentQueueWorkerConfig, AgentQueueWorkerState, run_agent_queue_worker
 from .dependencies import require_any_role, require_user
 from .settings import get_settings
 
@@ -82,9 +82,10 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def start_background_workers() -> None:
-        if not settings.enable_agent_workers and not settings.enable_libby_worker:
+        agents = settings.agent_workers if settings.enable_agent_workers else (("libby",) if settings.enable_libby_worker else ())
+        app.state.agent_worker_state = AgentQueueWorkerState(configured_agents=agents)
+        if not agents:
             return
-        agents = settings.agent_workers if settings.enable_agent_workers else ("libby",)
         stop_event = asyncio.Event()
         config = AgentQueueWorkerConfig(
             agents=agents,
@@ -102,7 +103,9 @@ def create_app() -> FastAPI:
             hermes_container_openclaw_root=settings.hermes_container_openclaw_root,
         )
         app.state.agent_worker_stop_event = stop_event
-        app.state.agent_worker_task = asyncio.create_task(run_agent_queue_worker(config, stop_event))
+        app.state.agent_worker_task = asyncio.create_task(
+            run_agent_queue_worker(config, stop_event, app.state.agent_worker_state)
+        )
 
     @app.on_event("shutdown")
     async def stop_background_workers() -> None:

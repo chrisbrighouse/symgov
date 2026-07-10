@@ -18,6 +18,7 @@ from symgov_backend.routes.workspace import (  # noqa: E402
     choose_workspace_source_preview_asset,
 )
 from symgov_backend.models import Attachment, IntakeRecord, ReviewCase, ValidationReport  # noqa: E402
+from symgov_backend.schemas import WorkspaceReviewCaseResponse  # noqa: E402
 
 
 def test_submission_context_exposes_manual_summary_for_reviewers():
@@ -42,6 +43,22 @@ def test_submission_context_exposes_manual_summary_for_reviewers():
         "submittedBy": "Tester <tester@example.test>",
         "submissionBatchId": "subext-test",
     }
+
+
+
+def test_review_case_schema_preserves_provenance_without_symbol_preview():
+    response = WorkspaceReviewCaseResponse(
+        id="case-1", symbolId="0087", title="Library provenance review", owner="Unassigned", due="2026-07-10",
+        priority="Medium", risk="Medium", pages=1, packs=0, status="Classification Review", summary="", clarifications=[],
+        currentStage="classification_review", escalationLevel="medium", openedAt="2026-07-10T14:00:00Z",
+        validationStatus="classification_pending", defectCount=0, sourceFileName="01-Doors.btx", intakeRecordId="intake-1",
+        childCount=0, children=[], reviewKind="library_provenance", sourcePreviewUnavailable=True,
+    )
+
+    payload = response.model_dump()
+    assert payload["reviewKind"] == "library_provenance"
+    assert payload["sourcePreviewUnavailable"] is True
+    assert payload["sourcePreviewUrl"] is None
 
 
 def test_workspace_source_preview_uses_generated_svg_for_dxf_validation_report():

@@ -35,3 +35,11 @@ def test_filename_inference_is_conservative_for_generic_sheet_names():
     assert inferred["discipline_hint"] is None
     assert inferred["confidence"] <= 0.45
     assert "generic_token" in inferred["evidence"]
+
+
+def test_filename_inference_recognizes_explicit_architectural_prefix_only():
+    inferred = infer_filename_metadata("Architectural-Doors.btx")
+    generic = infer_filename_metadata("Doors.btx")
+
+    assert inferred["discipline_hint"] == "Architectural"
+    assert generic["discipline_hint"] is None

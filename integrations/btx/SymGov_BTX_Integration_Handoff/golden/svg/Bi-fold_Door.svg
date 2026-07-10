@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="224.8535pt" height="68.74503pt" viewBox="0 0 224.8535 68.74503">
+  <title>Bi-fold Door</title>
+  <desc>Extracted from Bluebeam BTX; source dimensions 224.8535 × 68.74503 PDF points.</desc>
+  <clipPath id="symbol-clip"><rect x="0" y="0" width="224.8535" height="68.74503"/></clipPath>
+  <g clip-path="url(#symbol-clip)" transform="translate(0 68.74503) scale(1 -1)">
+    <path d="M57.1208,34.6355 L23.1608,34.6355 M159.0008,34.6355 L192.9608,34.6355" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M57.1208,34.6355 L82.5608,9.0755 L102.7208,29.2355" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M113.0408,29.2355 L133.5608,9.0755 L159.0008,34.6355" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

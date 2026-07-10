@@ -48,6 +48,8 @@ def guess_declared_format(filename: str) -> str:
         return "json"
     if suffix == ".dxf":
         return "dxf"
+    if suffix == ".btx":
+        return "btx"
     if suffix == ".zip":
         return "zip"
     return "unknown"

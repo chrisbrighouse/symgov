@@ -1,0 +1,17 @@
+table_name,count
+source_packages,3
+intake_records,4
+agent_queue_items,10
+validation_reports,1
+provenance_assessments,3
+review_cases,3
+review_split_items,0
+review_symbol_properties,3
+review_case_actions,0
+human_review_decisions,0
+classification_records,3
+source_package_entries,0
+agent_runs,8
+agent_output_artifacts,9
+attachments,18
+audit_events,3

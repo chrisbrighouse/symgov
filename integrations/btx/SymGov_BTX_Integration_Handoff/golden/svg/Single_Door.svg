@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="75.60001pt" height="90pt" viewBox="0 0 75.60001 90">
+  <title>Single Door</title>
+  <desc>Extracted from Bluebeam BTX; source dimensions 75.60001 × 90 PDF points.</desc>
+  <clipPath id="symbol-clip"><rect x="0" y="0" width="75.60001" height="90"/></clipPath>
+  <g clip-path="url(#symbol-clip)" transform="translate(0 90) scale(1 -1)">
+    <path d="M11.1599,76.3199 L11.1599,21.9599" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M8.8799,76.3199 L8.8799,21.9599 L11.1599,21.9599" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M8.8799,76.3199 L11.1599,76.3199" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M63.2399,21.9599 L62.9999,26.8799 L62.3999,31.6799 L61.3199,36.4799 L59.7599,41.1599 L57.8399,45.5999 L55.5599,49.9199 L52.7999,53.9999 L49.7999,57.8399 L46.3199,61.3199 L42.7199,64.5599 L38.7599,67.4399 L34.5599,69.8399 L30.1199,71.9999 L25.5599,73.6799 L20.8799,74.9999 L15.9599,75.8399 L11.1599,76.3199" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

@@ -17,6 +17,7 @@ DISCIPLINE_PREFIXES: dict[str, str] = {
     "piping": "Piping",
     "pipe": "Piping",
     "fire": "Fire Protection",
+    "architectural": "Architectural",
 }
 
 PRESERVE_UPPER_TOKENS = {"BMS", "DP", "DXF", "FCU", "HVAC", "JPG", "MCC", "PDF", "PNG", "SVG", "UPS", "VAV", "VFD"}

@@ -8,8 +8,9 @@ API_JS = Path(__file__).resolve().parents[1] / "frontend" / "src" / "api.js"
 def test_submission_file_picker_accepts_zip_packages():
     source = APP_JSX.read_text(encoding="utf-8")
 
-    assert 'accept=".svg,.png,.jpg,.jpeg,.json,.dxf,.zip"' in source
-    assert "Accepted: SVG, PNG, JPG, JPEG, JSON, DXF, ZIP" in source
+    assert 'accept=".svg,.png,.jpg,.jpeg,.json,.dxf,.btx,.zip"' in source
+    assert "Accepted: SVG, PNG, JPG, JPEG, JSON, DXF, BTX, ZIP" in source
+    assert "Bluebeam BTX tool sets are safely unpacked" in source
 
 
 def test_submission_page_has_multiline_source_field():

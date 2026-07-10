@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import pathlib
 import sys
 import unittest
+from types import SimpleNamespace
 from uuid import UUID
 
 BACKEND_ROOT = pathlib.Path(__file__).resolve().parents[1] / "backend"
@@ -13,7 +15,13 @@ from symgov_backend.agent_queue_reconciliation import (
     build_reggie_queue_control_suggestions,
     queue_status_group,
 )
-from symgov_backend.routes.workspace import _build_reggie_queue_control_response
+from symgov_backend.routes.workspace import _build_reggie_queue_control_response, get_workspace_agent_worker_health
+from symgov_backend.agent_queue_worker import (
+    AgentQueueWorkerConfig,
+    AgentQueueWorkerState,
+    agent_worker_health_payload,
+    run_agent_queue_worker,
+)
 
 
 class AgentQueueStateMachineTests(unittest.TestCase):
@@ -173,6 +181,66 @@ class AgentQueueStateMachineTests(unittest.TestCase):
         self.assertIn("ed queue item 0009-18", item["detail"])
         self.assertIn(str(queue_id), item["detail"])
         self.assertEqual(item["evidence"]["symbol_display_id"], "0009-18")
+
+    def test_agent_worker_survives_a_failed_drain_cycle_and_records_health(self) -> None:
+        async def exercise_worker() -> None:
+            stop_event = asyncio.Event()
+            state = AgentQueueWorkerState(configured_agents=("vlad",))
+            calls: list[int] = []
+
+            def drain(_config: AgentQueueWorkerConfig) -> dict:
+                calls.append(len(calls) + 1)
+                if len(calls) == 1:
+                    raise RuntimeError("synthetic worker failure")
+                stop_event.set()
+                return {"processedCount": 1, "errorCount": 0}
+
+            from unittest.mock import patch
+
+            with patch("symgov_backend.agent_queue_worker.drain_agent_queues", side_effect=drain):
+                await run_agent_queue_worker(
+                    AgentQueueWorkerConfig(agents=("vlad",), drain=True, interval_seconds=0),
+                    stop_event,
+                    state,
+                )
+
+            self.assertEqual(calls, [1, 2])
+            self.assertEqual(state.last_error, "synthetic worker failure")
+            self.assertIsNotNone(state.last_started_at)
+            self.assertIsNotNone(state.last_success_at)
+            self.assertEqual(state.last_result, {"processedCount": 1, "errorCount": 0})
+
+        asyncio.run(exercise_worker())
+
+    def test_agent_worker_health_payload_reports_configuration_activity_error_and_task_status(self) -> None:
+        state = AgentQueueWorkerState(
+            configured_agents=("scott", "vlad"),
+            last_started_at="2026-07-10T14:02:00Z",
+            last_success_at="2026-07-10T14:02:01Z",
+            last_error="synthetic worker failure",
+            last_result={"processedCount": 1, "errorCount": 0},
+        )
+
+        payload = agent_worker_health_payload(state, task_done=False)
+
+        self.assertEqual(payload["configuredAgents"], ["scott", "vlad"])
+        self.assertEqual(payload["lastStartedAt"], "2026-07-10T14:02:00Z")
+        self.assertEqual(payload["lastSuccessAt"], "2026-07-10T14:02:01Z")
+        self.assertEqual(payload["lastError"], "synthetic worker failure")
+        self.assertEqual(payload["lastResult"], {"processedCount": 1, "errorCount": 0})
+        self.assertTrue(payload["taskRunning"])
+        self.assertFalse(payload["taskDone"])
+
+    def test_workspace_agent_worker_health_exposes_live_state_without_queue_mutation(self) -> None:
+        state = AgentQueueWorkerState(configured_agents=("vlad",), last_success_at="2026-07-10T14:02:01Z")
+        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(agent_worker_state=state, agent_worker_task=None)))
+
+        payload = get_workspace_agent_worker_health(request)
+
+        self.assertEqual(payload["configuredAgents"], ["vlad"])
+        self.assertEqual(payload["lastSuccessAt"], "2026-07-10T14:02:01Z")
+        self.assertFalse(payload["taskRunning"])
+        self.assertIsNone(payload["taskDone"])
 
 
 if __name__ == "__main__":

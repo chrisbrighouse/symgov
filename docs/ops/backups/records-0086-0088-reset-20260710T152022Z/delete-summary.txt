@@ -1,0 +1,40 @@
+Records reset: 0086, 0087, 0088
+UTC backup/reset timestamp: 20260710T152022Z
+
+Scope
+- Removed the July 10, 2026 BTX retry records for package codes 0086, 0087, and 0088.
+- Target submission batches:
+  - subext-20260710T134247Z (0086 / Doors.btx)
+  - subext-20260710T135948Z (0087 / Doors.btx)
+  - subext-20260710T144404Z (0088 / btx_landscape-fixtures.zip)
+
+Rows backed up and deleted
+- source_packages: 3
+- intake_records: 4
+- agent_queue_items: 10
+- validation_reports: 1
+- provenance_assessments: 3
+- review_cases: 3
+- review_split_items: 0
+- review_symbol_properties: 3
+- review_case_actions: 0
+- human_review_decisions: 0
+- classification_records: 3
+- source_package_entries: 0
+- agent_runs: 8
+- agent_output_artifacts: 9
+- attachments: 18
+- audit_events: 3
+
+Runtime cleanup
+- Removed /data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260710T134247Z
+- Removed /data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260710T135948Z
+- Removed /data/.openclaw/workspaces/scott/runtime/external_uploads/subext-20260710T144404Z
+
+Verification after deletion
+- Remaining matching DB rows for target packages, intakes, queue items, validation/provenance/review/classification, attachments, and audit events: 0
+- Runtime extraction directories: absent
+- Symgov API health: {"ok":true,"service":"symgov-api"}
+- Frontend build verification after documentation check: npm run build passed
+
+Backup files in this directory contain JSONL exports for each affected table plus reset_0086_0088.sql.

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="207.6672pt" height="64.44839pt" viewBox="0 0 207.6672 64.44839">
+  <title>Pocket Door</title>
+  <desc>Extracted from Bluebeam BTX; source dimensions 207.6672 × 64.44839 PDF points.</desc>
+  <clipPath id="symbol-clip"><rect x="0" y="0" width="207.6672" height="64.44839"/></clipPath>
+  <g clip-path="url(#symbol-clip)" transform="translate(0 64.44839) scale(1 -1)">
+    <path d="M161.8651,18.3972 L195.8251,18.3972 M59.9851,18.3972 L26.0251,18.3972 M59.9851,31.1172 L26.0251,31.1172" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M161.8651,18.3972 L161.8651,31.1172 L195.8251,31.1172" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M40.5451,26.1972 L142.4251,26.1972" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M40.5451,23.4372 L142.4251,23.4372 L142.4251,26.1972" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M40.5451,26.1972 L40.5451,23.4372 M59.9851,31.1172 L59.9851,26.1972 M59.9851,18.3972 L59.9851,23.4372" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

@@ -1,0 +1,161 @@
+{
+  "tool_set_title": "Door Symbols",
+  "dxf_units": "mm",
+  "symbols": [
+    {
+      "ordinal": 0,
+      "subject": "Single Door",
+      "internal_name": "KSUHAVWPZEUUAFJB",
+      "annotation_type": "Bluebeam.PDF.Annotations.AnnotationBRXStamp",
+      "rect_points": [
+        0.0,
+        0.0,
+        75.60001,
+        90.0
+      ],
+      "width_points": 75.60001,
+      "height_points": 90.0,
+      "bbox": [
+        453.6,
+        234.0,
+        529.2,
+        324.0
+      ],
+      "form_matrix": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        -453.6001,
+        -234.0001
+      ],
+      "painted_paths": 4,
+      "svg": "Single_Door.svg",
+      "dxf": "Single_Door.dxf"
+    },
+    {
+      "ordinal": 1,
+      "subject": "Double Door",
+      "internal_name": "XLCHDOPONKMTLXTI",
+      "annotation_type": "Bluebeam.PDF.Annotations.AnnotationBRXStamp",
+      "rect_points": [
+        0.0,
+        0.0,
+        133.2,
+        86.39999
+      ],
+      "width_points": 133.2,
+      "height_points": 86.39999,
+      "bbox": [
+        234.0,
+        237.6,
+        367.2,
+        324.0
+      ],
+      "form_matrix": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        -234.0001,
+        -237.6
+      ],
+      "painted_paths": 3,
+      "svg": "Double_Door.svg",
+      "dxf": "Double_Door.dxf"
+    },
+    {
+      "ordinal": 2,
+      "subject": "Sliding Door",
+      "internal_name": "YKZSTZTPUNQIEULP",
+      "annotation_type": "Bluebeam.PDF.Annotations.AnnotationBRXStamp",
+      "rect_points": [
+        0.0,
+        0.0,
+        240.6076,
+        40.10118
+      ],
+      "width_points": 240.6076,
+      "height_points": 40.10118,
+      "bbox": [
+        153.2441,
+        185.208,
+        393.8517,
+        225.3092
+      ],
+      "form_matrix": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        -153.2442,
+        -185.2081
+      ],
+      "painted_paths": 8,
+      "svg": "Sliding_Door.svg",
+      "dxf": "Sliding_Door.dxf"
+    },
+    {
+      "ordinal": 3,
+      "subject": "Bi-fold Door",
+      "internal_name": "XHSMZSKARPLYCUUW",
+      "annotation_type": "Bluebeam.PDF.Annotations.AnnotationBRXStamp",
+      "rect_points": [
+        0.0,
+        0.0,
+        224.8535,
+        68.74503
+      ],
+      "width_points": 224.8535,
+      "height_points": 68.74503,
+      "bbox": [
+        176.1591,
+        339.8843,
+        401.0126,
+        408.6293
+      ],
+      "form_matrix": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        -176.1592,
+        -339.8845
+      ],
+      "painted_paths": 3,
+      "svg": "Bi-fold_Door.svg",
+      "dxf": "Bi-fold_Door.dxf"
+    },
+    {
+      "ordinal": 4,
+      "subject": "Pocket Door",
+      "internal_name": "FQOQCVPWZYPFAZZQ",
+      "annotation_type": "Bluebeam.PDF.Annotations.AnnotationBRXStamp",
+      "rect_points": [
+        0.0,
+        0.0,
+        207.6672,
+        64.44839
+      ],
+      "width_points": 207.6672,
+      "height_points": 64.44839,
+      "bbox": [
+        173.2948,
+        266.8427,
+        380.962,
+        331.2911
+      ],
+      "form_matrix": [
+        1.0,
+        0.0,
+        0.0,
+        1.0,
+        -173.2949,
+        -266.8428
+      ],
+      "painted_paths": 5,
+      "svg": "Pocket_Door.svg",
+      "dxf": "Pocket_Door.dxf"
+    }
+  ]
+}

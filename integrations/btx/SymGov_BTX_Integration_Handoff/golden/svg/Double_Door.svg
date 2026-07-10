@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="133.2pt" height="86.39999pt" viewBox="0 0 133.2 86.39999">
+  <title>Double Door</title>
+  <desc>Extracted from Bluebeam BTX; source dimensions 133.2 × 86.39999 PDF points.</desc>
+  <clipPath id="symbol-clip"><rect x="0" y="0" width="133.2" height="86.39999"/></clipPath>
+  <g clip-path="url(#symbol-clip)" transform="translate(0 86.39999) scale(1 -1)">
+    <path d="M110.8799,70.44 L106.1999,69.96 L101.6399,69.12 L97.0799,67.92 L92.7599,66.24 L88.4399,64.2 L84.4799,61.92 L80.6399,59.16 L77.1599,56.04 L73.9199,52.68 L71.0399,48.96 L68.3999,45.12 L66.2399,41.04 L64.3199,36.72 L62.8799,32.28 L61.9199,27.72 L61.1999,23.04 L61.0799,18.36 L60.8399,23.04 L60.2399,27.72 L59.1599,32.28 L57.7199,36.72 L55.9199,41.04 L53.6399,45.12 L51.1199,48.96 L48.1199,52.68 L44.8799,56.04 L41.3999,59.16 L37.5599,61.92 L33.5999,64.2 L29.3999,66.24 L24.9599,67.92 L20.5199,69.12 L15.8399,69.96 L11.2799,70.44" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M8.9999,18.36 L11.2799,18.36 L11.2799,70.44 L8.9999,70.44 Z" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M110.8799,18.36 L113.1599,18.36 L113.1599,70.44 L110.8799,70.44 Z" stroke="#000000" fill="none" stroke-width="0.72" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>

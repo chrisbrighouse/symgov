@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import logging
 import os
 import re
 import subprocess
@@ -96,6 +97,31 @@ class AgentQueueWorkerConfig:
     hermes_container_openclaw_root: Path = Path("/data/.openclaw")
 
 
+@dataclass
+class AgentQueueWorkerState:
+    configured_agents: tuple[str, ...]
+    last_started_at: str | None = None
+    last_success_at: str | None = None
+    last_error: str | None = None
+    last_result: dict[str, Any] | None = None
+
+
+def _worker_timestamp() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def agent_worker_health_payload(state: AgentQueueWorkerState, *, task_done: bool | None) -> dict[str, Any]:
+    return {
+        "configuredAgents": list(state.configured_agents),
+        "lastStartedAt": state.last_started_at,
+        "lastSuccessAt": state.last_success_at,
+        "lastError": state.last_error,
+        "lastResult": state.last_result,
+        "taskRunning": task_done is False,
+        "taskDone": task_done,
+    }
+
+
 def _load_module(module_name: str, path: Path):
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
@@ -147,6 +173,14 @@ def process_scott_downstream(result: dict[str, Any], config: AgentQueueWorkerCon
     if not intake_record_path:
         return None
 
+    intake_record = load_queue_item(Path(intake_record_path))
+    if not intake_record:
+        raise RuntimeError(f"Unable to load Scott intake record: {intake_record_path}")
+    normalized_submission = intake_record.get("normalized_submission_json") or {}
+    is_btx = normalized_submission.get("declared_format") == "btx"
+    if is_btx:
+        return _process_scott_btx_downstream(intake_record, config)
+
     scott_spec = AGENT_SPECS["scott"]
     downstream_path = scott_spec["downstream_path"]
     if config.agent_runtime == "hermes":
@@ -178,6 +212,56 @@ def process_scott_downstream(result: dict[str, Any], config: AgentQueueWorkerCon
             db_created["tracy"] = RuntimePersistenceBridge(env_file=config.db_env_file).upsert_agent_queue_item(item)
 
     return {"route_to_agents": route_to_agents, "created": created, "dbCreated": db_created}
+
+
+def _process_scott_btx_downstream(intake_record: dict[str, Any], config: AgentQueueWorkerConfig) -> dict[str, Any]:
+    """Create the tracked BTX queue contract without depending on a legacy worker."""
+    if intake_record.get("intake_status") != "accepted" or intake_record.get("eligibility_status") != "eligible":
+        return {"created": {}, "reason": "intake_not_accepted_or_eligible"}
+    submission = intake_record.get("normalized_submission_json") or {}
+    routes = (intake_record.get("routing_recommendation_json") or {}).get("route_to_agents") or []
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    created: dict[str, str] = {}
+    db_created: dict[str, Any] = {}
+    base_payload = {
+        "intake_record_id": intake_record.get("id"),
+        "source_ref": intake_record.get("source_ref"),
+        "asset_path": submission.get("raw_input_path"),
+        "asset_format": "btx",
+        "original_filename": submission.get("original_filename"),
+        "candidate_symbol_id": submission.get("candidate_symbol_id"),
+        "candidate_title": submission.get("candidate_title"),
+        "raw_object_key": intake_record.get("raw_object_key"),
+        "attachment_id": submission.get("attachment_id"),
+        "attachment_ids": submission.get("attachment_ids") or [],
+        "source_notes": submission.get("source_notes"),
+        "contributor_declaration": submission.get("contributor_declaration"),
+        "source_package_id": submission.get("source_package_id"),
+        "package_member": submission.get("package_member"),
+    }
+    if "vlad" in routes:
+        item = {
+            "id": f"aqi-vlad-btx-{str(intake_record.get('id'))[:18]}-{timestamp}", "agent_id": "vlad",
+            "source_type": "intake_record", "source_id": intake_record.get("id"), "status": "queued", "priority": "medium",
+            "payload_json": {**base_payload, "expected_checks": ["integrity", "btx_library_expansion"]},
+            "confidence": None, "escalation_reason": None, "created_at": _utc_now(), "started_at": None, "completed_at": None,
+        }
+        path = runtime_root_for("vlad", config) / "agent_queue_items" / f"{item['id']}.json"
+        path.parent.mkdir(parents=True, exist_ok=True); path.write_text(json.dumps(item, indent=2) + "\n", encoding="utf-8")
+        created["vlad_queue_item_path"] = str(path)
+        if config.db_env_file: db_created["vlad"] = RuntimePersistenceBridge(env_file=config.db_env_file).upsert_agent_queue_item(item)
+    if "tracy" in routes:
+        item = {
+            "id": f"aqi-tracy-btx-{str(intake_record.get('id'))[:18]}-{timestamp}", "agent_id": "tracy",
+            "source_type": "intake_record", "source_id": intake_record.get("id"), "status": "queued", "priority": "medium",
+            "payload_json": {**base_payload, "source_format": "btx", "provenance_scope": "library_and_extracted_symbols"},
+            "confidence": None, "escalation_reason": None, "created_at": _utc_now(), "started_at": None, "completed_at": None,
+        }
+        path = runtime_root_for("tracy", config) / "agent_queue_items" / f"{item['id']}.json"
+        path.parent.mkdir(parents=True, exist_ok=True); path.write_text(json.dumps(item, indent=2) + "\n", encoding="utf-8")
+        created["tracy_queue_item_path"] = str(path)
+        if config.db_env_file: db_created["tracy"] = RuntimePersistenceBridge(env_file=config.db_env_file).upsert_agent_queue_item(item)
+    return {"route_to_agents": routes, "created": created, "dbCreated": db_created}
 
 
 def _utc_now() -> str:
@@ -448,12 +532,26 @@ def process_libby_queue_once(config: AgentQueueWorkerConfig) -> dict[str, Any]:
     return process_agent_queue_once("libby", AgentQueueWorkerConfig(**{**config.__dict__, "agents": ("libby",)}))
 
 
-async def run_agent_queue_worker(config: AgentQueueWorkerConfig, stop_event: asyncio.Event | None = None) -> None:
+async def run_agent_queue_worker(
+    config: AgentQueueWorkerConfig,
+    stop_event: asyncio.Event | None = None,
+    state: AgentQueueWorkerState | None = None,
+) -> None:
+    worker_state = state or AgentQueueWorkerState(configured_agents=config.agents)
+    logger = logging.getLogger(__name__)
     while stop_event is None or not stop_event.is_set():
-        if config.drain:
-            await asyncio.to_thread(drain_agent_queues, config)
+        worker_state.last_started_at = _worker_timestamp()
+        try:
+            if config.drain:
+                result = await asyncio.to_thread(drain_agent_queues, config)
+            else:
+                result = await asyncio.to_thread(process_agent_queues_once, config)
+        except Exception as exc:
+            worker_state.last_error = str(exc)
+            logger.exception("Symgov agent queue worker cycle failed")
         else:
-            await asyncio.to_thread(process_agent_queues_once, config)
+            worker_state.last_success_at = _worker_timestamp()
+            worker_state.last_result = result
         try:
             if stop_event is None:
                 await asyncio.sleep(config.interval_seconds)

@@ -17,6 +17,7 @@ import urllib.error
 import urllib.request
 import zlib
 import binascii
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -33,6 +34,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from symgov_backend.runtime import RuntimePersistenceBridge, env_flag
 from symgov_backend.notifications import send_agent_status_update
+from symgov_backend.services.btx_converter import BtxConversionError, convert_btx
 
 try:
     from PIL import Image, ImageDraw, ImageOps
@@ -74,6 +76,25 @@ def stamp_id(prefix, base_id):
 
 def add_trace(trace, check, status, detail):
     trace.append({"check": check, "status": status, "detail": detail})
+
+
+def new_persistence_boundary(*, queue_item_id, report_id, expected_derivatives, expected_children, expected_libby):
+    return {
+        "correlation_id": f"pb-{uuid.uuid4().hex[:16]}",
+        "queue_item_id": queue_item_id,
+        "report_id": report_id,
+        "expected_derivative_count": expected_derivatives,
+        "expected_child_count": expected_children,
+        "expected_libby_queue_count": expected_libby,
+        "actual_derivative_count": 0,
+        "actual_child_count": 0,
+        "actual_libby_queue_count": 0,
+        "events": [],
+    }
+
+
+def add_persistence_event(boundary, phase, status, detail, **extra):
+    boundary["events"].append({"phase": phase, "status": status, "detail": detail, **extra})
 
 
 def add_defect(defects, code, severity, detail):
@@ -119,7 +140,7 @@ def sha256_file(path):
 
 def infer_asset_format(asset_path_raw, declared_format):
     normalized_declared = (declared_format or "").strip().lower()
-    if normalized_declared in {"svg", "png", "jpeg", "json", "dxf"}:
+    if normalized_declared in {"svg", "png", "jpeg", "json", "dxf", "btx"}:
         return normalized_declared
     if asset_path_raw:
         suffix = Path(asset_path_raw).suffix.lstrip(".").lower()
@@ -1668,6 +1689,8 @@ def run_validation_task(task):
     )
     if asset_format in {"png", "jpeg"} and "raster_sheet_analysis" not in expected_checks and not already_isolated_package_symbol:
         expected_checks = ["integrity", "raster_sheet_analysis"]
+    if asset_format == "btx" and "btx_library_expansion" not in expected_checks:
+        expected_checks = ["integrity", "btx_library_expansion"]
 
     defects = []
     evidence_trace = []
@@ -1722,6 +1745,133 @@ def run_validation_task(task):
         normalized["sha256"] = file_hash
         normalized["file_size_bytes"] = asset_path.stat().st_size
         add_trace(evidence_trace, "integrity", "passed", f"Resolved asset and computed sha256 {file_hash}.")
+
+    if asset_path and asset_path.exists() and asset_format == "btx" and "btx_library_expansion" in expected_checks:
+        output_root = Path(task.get("runtime_root") or asset_path.parent) / "btx_derivatives" / queue_item_id
+        try:
+            manifest = convert_btx(asset_path, output_root)
+            children = []
+            for symbol in manifest["symbols"]:
+                if symbol.get("status") == "failed":
+                    add_trace(evidence_trace, "btx_symbol_conversion", "warning", f"BTX symbol {symbol.get('ordinal')} was not converted: {symbol['warnings'][0]['detail']}")
+                    continue
+                child_id = f"btx:{manifest['source_sha256']}:{symbol['ordinal']}"
+                assets = []
+                for format_name, content_type in (("svg", "image/svg+xml"), ("dxf", "application/dxf"), ("png", "image/png")):
+                    filename = symbol.get(format_name)
+                    if not filename:
+                        continue
+                    generated_path = output_root / filename
+                    payload = generated_path.read_bytes()
+                    assets.append({
+                        "format": format_name,
+                        "file_name": filename,
+                        "path": str(generated_path),
+                        "content_type": content_type,
+                        "sha256": hashlib.sha256(payload).hexdigest(),
+                        "size_bytes": len(payload),
+                        "object_key": f"btx-derivatives/{queue_item_id}/{symbol['ordinal']:03d}/{filename}",
+                    })
+                children.append({
+                    "child_symbol_id": child_id,
+                    "ordinal": symbol["ordinal"],
+                    "candidate_title": symbol["subject"],
+                    "internal_name": symbol.get("internal_name"),
+                    "annotation_type": symbol.get("annotation_type"),
+                    "rect_points": symbol.get("rect_points"),
+                    "source_btx_sha256": manifest["source_sha256"],
+                    "source_package_id": task.get("source_package_id"),
+                    "package_member": task.get("package_member"),
+                    "warnings": symbol.get("warnings", []),
+                    "assets": assets,
+                })
+            derivative_children = []
+            all_derivatives = [asset for child in children for asset in child["assets"]]
+            for child in children:
+                preview_asset = next((asset for asset in child["assets"] if asset["format"] == "png"), None)
+                if preview_asset is None:
+                    continue
+                derivative_children.append({
+                    "proposed_symbol_id": child["child_symbol_id"],
+                    "proposed_symbol_name": child["candidate_title"],
+                    "file_name": preview_asset["file_name"],
+                    "attachment_object_key": preview_asset["object_key"],
+                    "size_bytes": preview_asset["size_bytes"],
+                    "sha256": preview_asset["sha256"],
+                    "path": preview_asset["path"],
+                    "content_type": preview_asset["content_type"],
+                    "name_source": "btx_annotation_subject",
+                    "btx_ordinal": child["ordinal"],
+                    "btx_subject": child["candidate_title"],
+                    "btx_internal_name": child.get("internal_name"),
+                    "source_btx_sha256": child["source_btx_sha256"],
+                    "source_object_key": task.get("raw_object_key"),
+                    "warnings": child.get("warnings", []),
+                    "assets": child["assets"],
+                    "visual_assets": {
+                        "preview": preview_asset,
+                        "derivatives": child["assets"],
+                        "source_assets": [
+                            {
+                                "object_key": task.get("raw_object_key"),
+                                "filename": asset_path.name,
+                                "format": "btx",
+                                "role": "source",
+                                "downloadable": True,
+                            }
+                        ],
+                    },
+                })
+            conversion_trace = {
+                "queue_item_id": queue_item_id,
+                "source_sha256": manifest["source_sha256"],
+                "source_filename": task.get("original_filename") or manifest["source_filename"],
+                "source_object_key": task.get("raw_object_key"),
+                "btx_version": manifest["btx_version"],
+                "tool_set_title": manifest["tool_set_title"],
+                "total_symbol_count": len(manifest["symbols"]),
+                "successful_symbol_count": manifest["successful_symbol_count"],
+                "failed_symbol_count": manifest["failed_symbol_count"],
+                "output_directory": str(output_root),
+                "symbols": [
+                    {
+                        "ordinal": child["ordinal"],
+                        "subject": child["candidate_title"],
+                        "internal_name": child.get("internal_name"),
+                        "assets": child["assets"],
+                    }
+                    for child in children
+                ],
+            }
+            normalized["btx_library"] = {**manifest, "output_dir": str(output_root), "children": children}
+            normalized["btx_conversion_trace"] = conversion_trace
+            normalized["derivative_manifest"] = {"children": derivative_children}
+            normalized["visual_assets"] = {
+                "preview": next((asset for asset in all_derivatives if asset["format"] == "png"), None),
+                "source_assets": [{"object_key": task.get("raw_object_key"), "filename": asset_path.name, "format": "btx", "role": "source", "downloadable": True}],
+                "derivatives": all_derivatives,
+            }
+            additional_artifacts.append({"artifact_type": "btx_library_manifest", "payload_json": normalized["btx_library"]})
+            additional_artifacts.append({"artifact_type": "derivative_manifest", "payload_json": normalized["derivative_manifest"]})
+            add_trace(evidence_trace, "btx_conversion", "passed", f"BTX conversion trace recorded for {manifest['successful_symbol_count']} successful and {manifest['failed_symbol_count']} failed symbol(s).")
+            add_trace(evidence_trace, "btx_library_expansion", "passed", f"Extracted {len(children)} usable symbol(s) from BTX library; {manifest['failed_symbol_count']} symbol(s) failed.")
+            if children:
+                decision = "escalate"
+                escalation_target = "human_reviewer"
+                confidence = min(confidence, 0.9)
+                review_recommendation = {
+                    "current_stage": "raster_split_review",
+                    "escalation_level": "medium",
+                    "detail": f"Extracted {len(children)} BTX symbols for individual review.",
+                }
+            if manifest["failed_symbol_count"]:
+                confidence = min(confidence, 0.82)
+        except BtxConversionError as exc:
+            add_defect(defects, "VLAD-BTX-001", "high", f"BTX conversion failed ({exc.code}): {exc.detail}")
+            add_trace(evidence_trace, "btx_conversion", "failed", f"BTX conversion failed for queue {queue_item_id}: {exc.code}: {exc.detail}")
+            add_trace(evidence_trace, "btx_library_expansion", "failed", exc.detail)
+            decision = "fail"
+            confidence = min(confidence, 0.98)
 
     if asset_path and asset_path.exists() and asset_format == "dxf" and "dxf_parse" in expected_checks:
         if ezdxf_recover is None:
@@ -2089,6 +2239,52 @@ def build_libby_return_queue_item(queue_item, task, artifact, timestamp):
     }
 
 
+def build_btx_libby_queue_item(queue_item, task, child, timestamp):
+    """Hand each extracted BTX symbol to Libby as an isolated candidate."""
+    preview = next((asset for asset in child["assets"] if asset["format"] == "png"), None)
+    vector = next((asset for asset in child["assets"] if asset["format"] == "svg"), None)
+    queue_id = f"aqi-libby-btx-{str(queue_item['id'])[:18]}-{child['ordinal']:03d}-{timestamp}"
+    btx_subject = str(child.get("candidate_title") or "").strip()
+    is_door_subject = "door" in btx_subject.casefold()
+    classification_hints = {"category": "Doors", "discipline": "Architectural"} if is_door_subject else {}
+    return {
+        "id": queue_id,
+        "agent_id": "libby",
+        "source_type": "btx_extracted_symbol",
+        "source_id": child["child_symbol_id"],
+        "status": "queued",
+        "priority": queue_item.get("priority") or "medium",
+        "payload_json": {
+            "task_type": "btx_extracted_symbol",
+            "candidate_symbol_id": child["child_symbol_id"],
+            "candidate_title": child["candidate_title"],
+            "btx_subject": btx_subject,
+            "btx_annotation_type": child.get("annotation_type"),
+            "classification_hints": classification_hints,
+            "origin_file_name": task.get("original_filename") or task.get("asset_path"),
+            "asset_path": (preview or vector or child["assets"][0])["path"],
+            "asset_format": (preview or vector or child["assets"][0])["format"],
+            "visual_assets": {
+                "preview": preview,
+                "derivatives": child["assets"],
+            },
+            "source_btx_sha256": child["source_btx_sha256"],
+            "source_package_id": child.get("source_package_id"),
+            "package_member": child.get("package_member"),
+            "btx_ordinal": child["ordinal"],
+            "btx_internal_name": child.get("internal_name"),
+            "btx_warnings": child.get("warnings", []),
+            "source_notes": task.get("source_notes"),
+            "contributor_declaration": task.get("contributor_declaration"),
+        },
+        "confidence": None,
+        "escalation_reason": None,
+        "created_at": utc_now(),
+        "started_at": None,
+        "completed_at": None,
+    }
+
+
 def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_file=None, storage_env_file=None):
     queue_item_path = Path(queue_item_path)
     runtime_root = Path(runtime_root)
@@ -2166,43 +2362,142 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
     additional_db_records = {"artifacts": [], "review_case": None, "control_exceptions": []}
     should_persist_db = persist_db or env_flag("SYMGOV_PERSIST_TO_DB")
     bridge = RuntimePersistenceBridge(env_file=db_env_file) if should_persist_db else None
+    derivative_children = (artifact["normalized_technical_metadata"].get("derivative_manifest") or {}).get("children", [])
+    btx_children = (artifact["normalized_technical_metadata"].get("btx_library") or {}).get("children", [])
+    expected_derivatives = len(derivative_children) + sum(len(child.get("assets") or []) for child in btx_children)
+    expected_children = len(derivative_children)
+    expected_libby = len(btx_children)
+    persistence_boundary = None
+    if should_persist_db:
+        persistence_boundary = new_persistence_boundary(
+            queue_item_id=queue_item["id"],
+            report_id=report_id,
+            expected_derivatives=expected_derivatives,
+            expected_children=expected_children,
+            expected_libby=expected_libby,
+        )
+        additional_db_records["persistence_boundary"] = persistence_boundary
+        add_persistence_event(
+            persistence_boundary,
+            "persistence_started",
+            "started",
+            "Beginning durable Vlad persistence boundary execution.",
+        )
     if should_persist_db:
         assert bridge is not None
-        for child in (artifact["normalized_technical_metadata"].get("derivative_manifest") or {}).get("children", []):
-            region_index = child.get("region_index")
-            if isinstance(region_index, int):
-                object_name = f"{region_index:03d}-{child['file_name']}"
-            else:
-                object_name = child["file_name"]
-            object_key = f"derived-splits/{queue_item['id']}/{object_name}"
-            attachment = bridge.create_attachment(
-                parent_type="validation_report",
-                parent_id=report_id,
-                filename=child["file_name"],
-                object_key=object_key,
-                content_type="image/png",
-                size_bytes=child["size_bytes"],
-                sha256=child["sha256"],
+        phase = "persistence_started"
+        try:
+            for child in derivative_children:
+                region_index = child.get("region_index")
+                if isinstance(region_index, int):
+                    object_name = f"{region_index:03d}-{child['file_name']}"
+                else:
+                    object_name = child["file_name"]
+                object_key = f"derived-splits/{queue_item['id']}/{object_name}"
+                phase = "attachment_created"
+                attachment = bridge.create_attachment(
+                    parent_type="validation_report",
+                    parent_id=report_id,
+                    filename=child["file_name"],
+                    object_key=object_key,
+                    content_type=child.get("content_type") or "image/png",
+                    size_bytes=child["size_bytes"],
+                    sha256=child["sha256"],
+                )
+                add_persistence_event(
+                    persistence_boundary,
+                    "attachment_created",
+                    "passed",
+                    "Created derivative attachment record.",
+                    object_key=object_key,
+                )
+                phase = "upload_completed"
+                storage_result = bridge.upload_file(
+                    object_key=object_key,
+                    path=child["path"],
+                    content_type=child.get("content_type") or "image/png",
+                    env_file=storage_env_file,
+                )
+                add_persistence_event(
+                    persistence_boundary,
+                    "upload_completed",
+                    "passed",
+                    "Uploaded derivative asset to object storage.",
+                    object_key=object_key,
+                )
+                child["attachment_id"] = attachment["id"]
+                child["attachment_object_key"] = attachment["object_key"]
+                child["attachment_storage"] = storage_result
+                persistence_boundary["actual_derivative_count"] += 1
+                persistence_boundary["actual_child_count"] += 1
+            dxf_derivative = artifact["normalized_technical_metadata"].get("dxf_derivative")
+            if dxf_derivative:
+                phase = "attachment_created"
+                persist_dxf_derivative_assets(
+                    bridge,
+                    report_id=report_id,
+                    derivative_manifest=dxf_derivative,
+                    storage_env_file=storage_env_file,
+                )
+                add_persistence_event(
+                    persistence_boundary,
+                    "upload_completed",
+                    "passed",
+                    "Uploaded DXF-derived preview asset.",
+                    object_key=dxf_derivative.get("object_key"),
+                )
+                persistence_boundary["actual_derivative_count"] += 1
+            for child in btx_children:
+                for generated_asset in child.get("assets") or []:
+                    phase = "attachment_created"
+                    attachment = bridge.create_attachment(
+                        parent_type="validation_report",
+                        parent_id=report_id,
+                        filename=generated_asset["file_name"],
+                        object_key=generated_asset["object_key"],
+                        content_type=generated_asset["content_type"],
+                        size_bytes=generated_asset["size_bytes"],
+                        sha256=generated_asset["sha256"],
+                    )
+                    add_persistence_event(
+                        persistence_boundary,
+                        "attachment_created",
+                        "passed",
+                        "Created BTX generated-asset attachment record.",
+                        object_key=generated_asset["object_key"],
+                    )
+                    phase = "upload_completed"
+                    storage_result = bridge.upload_file(
+                        object_key=generated_asset["object_key"], path=generated_asset["path"],
+                        content_type=generated_asset["content_type"], env_file=storage_env_file,
+                    )
+                    add_persistence_event(
+                        persistence_boundary,
+                        "upload_completed",
+                        "passed",
+                        "Uploaded BTX generated asset to object storage.",
+                        object_key=generated_asset["object_key"],
+                    )
+                    generated_asset["attachment_id"] = attachment["id"]
+                    generated_asset["attachment_object_key"] = attachment["object_key"]
+                    generated_asset["attachment_storage"] = storage_result
+                    persistence_boundary["actual_derivative_count"] += 1
+            validation_report["normalized_payload_json"] = artifact["normalized_technical_metadata"]
+            output_artifact_record["payload_json"] = artifact
+        except Exception as exc:
+            add_persistence_event(
+                persistence_boundary,
+                "terminal_durable_failure",
+                "failed",
+                f"Persistence boundary failed during {phase}: {exc}",
+                failed_phase=phase,
             )
-            storage_result = bridge.upload_file(
-                object_key=object_key,
-                path=child["path"],
-                content_type="image/png",
-                env_file=storage_env_file,
-            )
-            child["attachment_id"] = attachment["id"]
-            child["attachment_object_key"] = attachment["object_key"]
-            child["attachment_storage"] = storage_result
-        dxf_derivative = artifact["normalized_technical_metadata"].get("dxf_derivative")
-        if dxf_derivative:
-            persist_dxf_derivative_assets(
-                bridge,
-                report_id=report_id,
-                derivative_manifest=dxf_derivative,
-                storage_env_file=storage_env_file,
-            )
-        validation_report["normalized_payload_json"] = artifact["normalized_technical_metadata"]
-        output_artifact_record["payload_json"] = artifact
+            raise RuntimeError(
+                f"VLAD persistence boundary failure [{phase}] correlation={persistence_boundary['correlation_id']} "
+                f"queue={queue_item['id']} report={report_id} expected_derivatives={expected_derivatives} "
+                f"actual_derivatives={persistence_boundary['actual_derivative_count']} "
+                f"expected_children={expected_children} actual_children={persistence_boundary['actual_child_count']}: {exc}"
+            ) from exc
 
     write_json(runtime_root / "agent_runs" / f"{run_id}.json", run_record)
     write_json(runtime_root / "agent_output_artifacts" / f"{artifact_id}.json", output_artifact_record)
@@ -2224,15 +2519,26 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
         additional_artifact_paths.append(str(extra_path))
 
     downstream_queue_path = None
+    downstream_queue_paths = []
     if task.get("task_type") == "symbol_graphic_change_request":
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         libby_queue_item = build_libby_return_queue_item(queue_item, task, artifact, timestamp)
         libby_runtime_root = Path("/data/.openclaw/workspaces/libby/runtime")
         downstream_queue_path = libby_runtime_root / "agent_queue_items" / f"{libby_queue_item['id']}.json"
         write_json(downstream_queue_path, libby_queue_item)
+        downstream_queue_paths.append(str(downstream_queue_path))
+    elif artifact["normalized_technical_metadata"].get("btx_library", {}).get("children"):
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        libby_runtime_root = Path("/data/.openclaw/workspaces/libby/runtime")
+        for child in artifact["normalized_technical_metadata"]["btx_library"]["children"]:
+            libby_queue_item = build_btx_libby_queue_item(queue_item, task, child, timestamp)
+            child_path = libby_runtime_root / "agent_queue_items" / f"{libby_queue_item['id']}.json"
+            write_json(child_path, libby_queue_item)
+            downstream_queue_paths.append(str(child_path))
 
     if should_persist_db:
         assert bridge is not None
+        add_persistence_event(persistence_boundary, "validation_report_persisted", "started", "Persisting validation report and execution records.")
         db_persistence = bridge.persist_agent_execution(
             queue_item=queue_item,
             run_record=run_record,
@@ -2240,8 +2546,22 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
             durable_record=validation_report,
             durable_kind="validation_report",
         )
+        add_persistence_event(persistence_boundary, "validation_report_persisted", "passed", "Persisted validation report and execution records.")
         if downstream_queue_path:
             additional_db_records["downstream_queue_item"] = bridge.upsert_agent_queue_item(libby_queue_item)
+        elif downstream_queue_paths:
+            additional_db_records["downstream_queue_items"] = []
+            for child in artifact["normalized_technical_metadata"]["btx_library"]["children"]:
+                queued = build_btx_libby_queue_item(queue_item, task, child, timestamp)
+                additional_db_records["downstream_queue_items"].append(bridge.upsert_agent_queue_item(queued))
+            persistence_boundary["actual_libby_queue_count"] = len(additional_db_records["downstream_queue_items"])
+        add_persistence_event(
+            persistence_boundary,
+            "libby_queue_records_persisted",
+            "passed",
+            "Persisted downstream Libby queue records.",
+            actual_count=persistence_boundary["actual_libby_queue_count"],
+        )
         edited_asset_records = []
         for edited_asset in artifact["normalized_technical_metadata"].get("edited_assets") or []:
             attachment = bridge.create_attachment(
@@ -2283,6 +2603,9 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
                 escalation_level=review_recommendation["escalation_level"],
                 opened_at=completed_at,
             )
+            add_persistence_event(persistence_boundary, "review_case_created", "passed", "Created durable review case.", review_case_id=additional_db_records["review_case"].get("id"))
+        else:
+            add_persistence_event(persistence_boundary, "review_case_created", "skipped", "No review recommendation required a durable review case.")
         for item in artifact.get("control_exceptions", []):
             created = bridge.create_control_exception(
                 source_type="validation_report",
@@ -2293,6 +2616,7 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
                 created_at=completed_at,
             )
             additional_db_records["control_exceptions"].append(created)
+        add_persistence_event(persistence_boundary, "terminal_durable_success", "passed", "Completed all durable Vlad persistence phases.")
         write_json(runtime_root / "validation_reports" / f"{report_id}.json", validation_report)
 
     notification_status["completed"] = send_agent_status_update(
@@ -2310,6 +2634,7 @@ def process_queue_item(queue_item_path, runtime_root, persist_db=False, db_env_f
         "artifact_record_path": str(runtime_root / "agent_output_artifacts" / f"{artifact_id}.json"),
         "additional_artifact_paths": additional_artifact_paths,
         "downstream_queue_item_path": str(downstream_queue_path) if downstream_queue_path else None,
+        "downstream_queue_item_paths": downstream_queue_paths,
         "downstream_agent": "libby" if downstream_queue_path else None,
         "validation_report_path": str(runtime_root / "validation_reports" / f"{report_id}.json"),
         "db_persistence": db_persistence,

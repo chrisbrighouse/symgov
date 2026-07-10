@@ -36,6 +36,7 @@ CATALOG_CATEGORY_ORDER = [
     "Safety Devices",
     "Annotations / Tags",
     "Drawing Symbols",
+    "Doors",
     "Equipment",
     "Miscellaneous / Unclassified",
 ]
@@ -115,6 +116,8 @@ _CATEGORY_MAP = {
     "stirrer": ["Equipment"],
     "symbol": ["Drawing Symbols"],
     "symbol_sheet": ["Drawing Symbols"],
+    "door": ["Doors"],
+    "doors": ["Doors"],
     "annotation": ["Annotations / Tags"],
     "tag": ["Annotations / Tags"],
     "tags": ["Annotations / Tags"],
