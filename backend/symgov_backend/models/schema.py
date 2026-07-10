@@ -51,6 +51,35 @@ class UserSession(Base):
     last_seen_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class CatalogApiKey(Base):
+    __tablename__ = "catalog_api_keys"
+    __table_args__ = (
+        CheckConstraint("status in ('active', 'disabled', 'revoked')", name="status"),
+        Index("uq_catalog_api_keys_key_hash", "key_hash", unique=True),
+        Index("ix_catalog_api_keys_key_prefix", "key_prefix"),
+        Index("ix_catalog_api_keys_customer_integration", "customer_name", "integration_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    customer_name: Mapped[str] = mapped_column(Text, nullable=False)
+    integration_name: Mapped[str] = mapped_column(Text, nullable=False)
+    key_prefix: Mapped[str] = mapped_column(Text, nullable=False)
+    key_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    scopes_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    contact_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    contact_email: Mapped[str | None] = mapped_column(Text, nullable=True)
+    allowed_origins_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    rate_limit_per_minute: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    expires_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class GovernedSymbol(Base):
     __tablename__ = "governed_symbols"
 
