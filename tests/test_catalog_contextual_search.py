@@ -234,6 +234,19 @@ def test_catalog_contextual_search_merges_context_into_ranked_results_and_public
     assert session.added[-1].result_count == 1
 
 
+def test_catalog_contextual_search_caps_requested_limit_at_one_hundred():
+    rows = [symbol_row(canonical_name=f"Symbol {index:03}", slug=f"symbol-{index:03}") for index in range(105)]
+    client, session = build_client(key_rows=[api_key_row("valid-token")], symbol_rows=rows)
+    request = contextual_request()
+    request["limit"] = 500
+
+    response = client.post("/api/v1/catalog/search", headers=auth_headers(), json=request)
+
+    assert response.status_code == 200
+    assert len(response.json()["items"]) == 100
+    assert session.executed[-1][1]["limit"] == 100
+
+
 def test_catalog_contextual_search_usage_logging_failure_does_not_fail_response():
     client, session = build_client(
         key_rows=[api_key_row("valid-token")],
