@@ -172,6 +172,51 @@ def test_verifier_reads_only_poc_prefixed_api_credentials() -> None:
     assert base64.b64decode(basic_auth_token(env)) == b"poc-public:poc-secret"
 
 
+def test_poc_does_not_emit_an_unconsumed_retention_variable() -> None:
+    for path in (
+        Path(__file__).parents[1] / "docker-compose.yml",
+        Path(__file__).parents[1] / "scripts" / "create_poc_env.sh",
+        Path(__file__).parents[1] / ".env.example",
+    ):
+        assert "POC_TRACE_RETENTION_DAYS" not in path.read_text(encoding="utf-8")
+
+
+def test_live_evidence_preserves_the_ingestion_response_status(monkeypatch) -> None:
+    import verify_poc
+
+    responses = iter(
+        [
+            (200, {"status": "OK", "version": "test"}),
+            (207, {}),
+            (200, {"data": [{"id": "poc-observation-retry-1"}, {"id": "poc-observation-retry-2"}]}),
+            (201, {}),
+            (204, {}),
+        ]
+    )
+    traces = [
+        {
+            "id": "poc-trace-gemini-vision",
+            "metadata": {
+                "agent": "libby",
+                "usecase": "symbol_property_vision",
+                "queueitemid": "poc-queue-vision",
+                "symboldisplayid": "0003-12",
+            },
+        }
+    ]
+    monkeypatch.setattr(verify_poc, "_read_env", lambda path: {})
+    monkeypatch.setattr(verify_poc, "_request", lambda *args, **kwargs: next(responses))
+    monkeypatch.setattr(verify_poc, "_wait_for_trace", lambda *args, **kwargs: traces)
+
+    evidence = verify_poc.verify(
+        "http://127.0.0.1:13000",
+        Path("unused.env"),
+        FIXTURE_PATH,
+    )
+
+    assert evidence["ingestion_http_status"] == 207
+
+
 def test_verifier_rejects_non_loopback_base_urls() -> None:
     import pytest
     from verify_poc import validate_poc_base_url

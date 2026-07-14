@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented and verified without a commit, push, public exposure, production Compose edit, production route/runner edit, or use of provider/production credentials.
+Implemented and verified as an isolated synthetic POC. The initial Phase 0/1 artifact set was committed as `71da256dc66942a22a683d8af4b1865cc55c7890`; this report includes the subsequent evidence-correctness remediation. Nothing was pushed or exposed publicly, and no production Compose, route, runner, network, data, or credential was changed or used.
 
 ## Exact repository files added/changed
 
@@ -25,13 +25,13 @@ Generated but intentionally ignored/not committed:
 
 ## Commands run and result
 
-- `PYTHONPATH=langfuse-poc/scripts pytest langfuse-poc/tests/test_synthetic_contract.py -q` → `10 passed`.
+- `PYTHONPATH=langfuse-poc/scripts pytest langfuse-poc/tests/test_synthetic_contract.py -q` → `12 passed`.
 - `python3 langfuse-poc/scripts/verify_poc.py --base-url http://127.0.0.1:13000 --env-file langfuse-poc/.env --evidence-file langfuse-poc/evidence/phase-1-verification.json` → passed.
 - `python3 -m py_compile langfuse-poc/scripts/langfuse_poc_contract.py langfuse-poc/scripts/verify_poc.py` → passed.
 - POC Compose config validation → passed.
 - `git diff --check` → passed.
 
-The verifier recorded only five synthetic events and confirmed: OpenRouter-like text telemetry; Gemini-like vision telemetry; image-edit image units without text tokens; persisted approved trace metadata; no fake email/bearer/long-note leakage; two retry observations; reproducible UTC week/month aggregates; exactly `$5.000000` reconciliation delta (not greater than the threshold); asynchronous API deletion of an expired synthetic trace; and synthetic-only operation.
+The verifier recorded only five synthetic events and confirmed: OpenRouter-like text telemetry; Gemini-like vision telemetry; image-edit image units without text tokens; persisted approved trace metadata; no fake email/bearer/long-note leakage; two retry observations; reproducible UTC week/month aggregates; exactly `$5.000000` reconciliation delta (not greater than the threshold); asynchronous API deletion of a synthetic deletion fixture; and synthetic-only operation. The deletion lifecycle does not prove automatic age-based expiry.
 
 ## Current isolated POC container status
 
@@ -53,14 +53,9 @@ No POC data-service port is published. The web container is attached only to the
 - `symgov-postgres` and `symgov-minio` remain running.
 - No production database, object-store bucket, secret, application route, or runner was changed.
 
-## Remaining uncommitted files
+## Repository state
 
-Pre-existing untracked files, not modified by this Phase 1 work:
-
-- `.hermes/plans/2026-07-14_161810Z-langfuse-phase-0-governance.md`
-- `backend/nginx.conf`
-
-Phase 1 uncommitted additions are the plan and all tracked-safe files under `langfuse-poc/` listed above. `langfuse-poc/.env` is ignored.
+The only unrelated uncommitted path is the pre-existing untracked `backend/nginx.conf`; it was not modified or staged by this work. `langfuse-poc/.env` and generated JSON evidence remain ignored.
 
 ## Restart prompt
 

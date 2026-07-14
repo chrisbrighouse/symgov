@@ -36,9 +36,9 @@ Forbidden changes:
 
 ## Operational retention decision for this synthetic POC
 
-- All records are synthetic, marked `environment=poc`, and retained for **one day maximum**.
-- The verifier creates an expired synthetic trace and runs the POC deletion procedure immediately, proving deletion without waiting a day.
-- The operator runbook requires `docker compose ... down -v` after verification; this removes every POC database/object-store volume. This is stricter than the approved 14-day non-production trace policy, and does not alter the approved production 30-day / aggregate 24-month policy.
+- All records are synthetic and marked `environment=poc`; this Compose stack does not configure or claim an automatic Langfuse TTL.
+- The verifier creates a synthetic deletion fixture, confirms it is visible, deletes it through the public API, and polls until absent. This proves the deletion lifecycle, not automatic age-based expiry.
+- The operator runbook requires `docker compose ... down -v` when the disposable POC is no longer needed; this removes every POC database/object-store volume. Automatic Phase 0 development/production retention enforcement remains future deployment work.
 
 ## Implementation tasks
 
@@ -93,7 +93,7 @@ Forbidden changes:
 - Create: `langfuse-poc/evidence/phase-1-verification.md`
 - Create: `.hermes/plans/2026-07-14_...-langfuse-phase-1-final-report.md`
 
-1. Document startup, health checks, loopback-only access restriction, POC-only backup caveat, one-day retention/deletion action, evidence reproduction, and full teardown.
+1. Document startup, health checks, loopback-only access restriction, POC-only backup caveat, deletion lifecycle/teardown action, evidence reproduction, and full teardown.
 2. Record all exact commands and fresh output summaries, changed files, POC container status, acceptance-criterion evidence, and repository status.
 3. Never put generated secrets, raw API output containing an API key, or `.env` contents in documentation.
 
@@ -120,7 +120,7 @@ sha256sum /docker/symgov-hermes/docker-compose.yml
 6. Retry: two distinct observation IDs/attempt numbers and expected cost sum.
 7. Aggregates: deterministic UTC week/month group-by output checked against fixture.
 8. Reconciliation: expected event/provider statement delta exactly `$5.00`, therefore not greater than the investigation threshold.
-9. Retention: create/query/delete/query-missing trace under the documented POC one-day retention procedure.
+9. Retention/deletion: create/query/delete/query-missing trace under the documented POC deletion procedure. This validates API deletion, not automatic age-based expiry.
 10. Isolation: static secret/fixture checks plus Docker network, port, project and production-Compose hash checks.
 
 ## Risks and controls

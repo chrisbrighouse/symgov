@@ -51,7 +51,7 @@ The verifier uses only `fixtures/synthetic_events.json`, the POC public ingestio
 
 ## Retention and backup
 
-POC retention is explicitly non-production: one day maximum (`POC_TRACE_RETENTION_DAYS=1` in the POC env) and synthetic data only. Each verifier run creates an expired synthetic retention fixture, confirms it is visible, deletes it through the Langfuse public API, and polls until it is absent. Langfuse deletion is asynchronous and can take up to two minutes.
+POC retention is explicitly operational rather than an automatic Langfuse TTL: this Compose stack does not claim or emit an unconsumed retention environment variable. Each verifier run creates a synthetic deletion fixture, confirms it is visible, deletes it through the Langfuse public API, and polls until it is absent. This proves the deletion lifecycle, not automatic age-based expiry. Langfuse deletion is asynchronous and can take up to two minutes. The operator must use the teardown command below when the disposable POC is no longer needed; teardown removes all POC data volumes.
 
 Do not make normal backups of this disposable POC. If a diagnostic snapshot is genuinely needed, it may include only the POC volumes and must remain locally encrypted; never mix it with Symgov production backups. The normal retention action is teardown.
 

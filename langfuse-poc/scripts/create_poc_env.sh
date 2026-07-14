@@ -44,7 +44,6 @@ POC_ENCRYPTION_KEY=$(random_hex 32)
 POC_SALT=$(random_hex 16)
 POC_NEXTAUTH_URL=http://127.0.0.1:13000
 POC_TELEMETRY_ENABLED=false
-POC_TRACE_RETENTION_DAYS=1
 EOF
 chmod 600 "$env_file"
 printf 'Created POC-only env file with mode 600: %s\n' "$env_file"

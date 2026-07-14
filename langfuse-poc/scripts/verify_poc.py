@@ -136,6 +136,7 @@ def verify(base_url: str, env_file: Path, fixture_file: Path) -> dict:
     status, ingestion = _request(base_url, "/api/public/ingestion", env, "POST", {"batch": to_ingestion_batch(events)})
     if status not in (200, 201, 207):
         raise RuntimeError(f"ingestion failed: HTTP {status}, {ingestion}")
+    ingestion_status = status
 
     traces = _wait_for_trace(base_url, env, "poc-trace-gemini-vision", True)
     vision_trace = next(trace for trace in traces if trace["id"] == "poc-trace-gemini-vision")
@@ -176,7 +177,7 @@ def verify(base_url: str, env_file: Path, fixture_file: Path) -> dict:
 
     return {
         "langfuse_version": health.get("version"),
-        "ingestion_http_status": status,
+        "ingestion_http_status": ingestion_status,
         "fixture_event_count": len(events),
         "trace_filter_metadata": required_filters,
         "redaction_probe_values_absent": True,
