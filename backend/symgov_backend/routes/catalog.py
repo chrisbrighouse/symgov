@@ -24,9 +24,9 @@ from ..catalog_taxonomy import (
 from ..catalog_usage import log_catalog_usage_event_best_effort
 from ..dependencies import get_db_session
 from ..models import Attachment
+from ..published_catalog import PUBLISHED_SYMBOLS_SQL, choose_published_preview_asset
 from ..runtime import download_object_bytes
 from ..settings import get_settings
-from .published import PUBLISHED_SYMBOLS_SQL, choose_published_preview_asset
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 

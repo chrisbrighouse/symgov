@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .catalog_taxonomy import catalog_taxonomy_for_symbol
-from .routes.published import PUBLISHED_SYMBOLS_SQL, choose_published_preview_asset, published_symbol_display_id
+from .published_catalog import PUBLISHED_SYMBOLS_SQL, choose_published_preview_asset, published_symbol_display_id
 
 
 @dataclass(frozen=True)

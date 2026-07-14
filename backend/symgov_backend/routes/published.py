@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import Text, bindparam, cast, func, text
 from sqlalchemy.orm import Session
 
-from ..asset_manifest import choose_preview_asset, list_download_assets
+from ..asset_manifest import list_download_assets
 from ..auth import hash_pin
 from ..dependencies import get_db_session
 from ..models import (
@@ -27,6 +27,12 @@ from ..models import (
     User,
     UserRole,
 )
+from ..published_catalog import (
+    PUBLISHED_SYMBOLS_SQL,
+    choose_published_preview_asset,
+    published_fallback_source_asset,
+    published_symbol_display_id,
+)
 from ..runtime import download_object_bytes
 from ..settings import get_settings
 
@@ -39,81 +45,6 @@ PUBLISHED_SYMBOL_COMMANDS = {"comment", "send_for_review"}
 SYSTEM_ED_EMAIL = "ed@symgov.local"
 SYSTEM_ED_NAME = "Ed"
 ED_RUNTIME_QUEUE_DIR = Path("/data/.openclaw/workspaces/ed/runtime/agent_queue_items")
-
-
-PUBLISHED_SYMBOLS_SQL = """
-    SELECT
-        gs.id::text AS symbol_id,
-        gs.slug,
-        gs.canonical_name,
-        gs.category,
-        gs.discipline,
-        sr.id::text AS symbol_revision_id,
-        sr.revision_label,
-        sr.created_at AS revision_created_at,
-        sr.payload_json,
-        sr.rationale,
-        pp.id::text AS page_id,
-        pp.page_code,
-        pp.title AS page_title,
-        pp.effective_date,
-        pp.updated_at AS page_updated_at,
-        pk.id::text AS pack_id,
-        pk.pack_code,
-        pk.title AS pack_title,
-        pk.audience,
-        pk.updated_at AS pack_updated_at,
-        pe.sort_order,
-        GREATEST(gs.updated_at, sr.created_at, pp.updated_at, pk.updated_at) AS last_updated_at
-    FROM published_pages pp
-    JOIN publication_packs pk ON pk.id = pp.pack_id
-    JOIN pack_entries pe ON pe.pack_id = pk.id
-        AND pe.published_page_id = pp.id
-        AND pe.symbol_revision_id = pp.current_symbol_revision_id
-    JOIN symbol_revisions sr ON sr.id = pp.current_symbol_revision_id
-    JOIN governed_symbols gs ON gs.id = sr.symbol_id
-    WHERE pk.status = 'published'
-        AND pk.audience = 'public'
-        AND sr.lifecycle_state = 'published'
-"""
-
-
-def published_symbol_display_id(row) -> str:
-    payload = row.payload_json or {}
-    package_id = payload.get("package_display_id") or getattr(row, "pack_code", None)
-    sequence = payload.get("package_symbol_sequence")
-    if sequence is None:
-        sequence = getattr(row, "sort_order", None)
-
-    if package_id and sequence is not None:
-        try:
-            sequence_value = int(sequence)
-            return f"{package_id}-{sequence_value}"
-        except (TypeError, ValueError):
-            pass
-
-    return (
-        payload.get("display_name")
-        or payload.get("workspace_display_name")
-        or payload.get("symbol_display_id")
-        or row.slug
-    )
-
-
-def _published_fallback_source_asset(payload: dict | None) -> dict:
-    payload = payload or {}
-    return {
-        "object_key": payload.get("source_object_key") or payload.get("raw_object_key") or payload.get("origin_object_key"),
-        "filename": payload.get("source_file_name") or payload.get("filename"),
-        "content_type": payload.get("source_content_type") or payload.get("content_type"),
-        "format": payload.get("source_format") or payload.get("format"),
-        "role": "source",
-    }
-
-
-def choose_published_preview_asset(payload: dict | None) -> dict | None:
-    payload = payload or {}
-    return choose_preview_asset(payload, fallback_source_asset=_published_fallback_source_asset(payload))
 
 
 def published_download_labels(downloads: list) -> list[str]:
@@ -173,7 +104,7 @@ def published_symbol_row(
         "pack": row.pack_title,
         "keywords": keywords,
         "downloads": published_download_labels(downloads),
-        "downloadAssets": list_download_assets(payload, fallback_source_asset=_published_fallback_source_asset(payload)),
+        "downloadAssets": list_download_assets(payload, fallback_source_asset=published_fallback_source_asset(payload)),
         "sortOrder": row.sort_order,
         "previewUrl": f"/api/v1/published/symbols/{row.slug}/preview" if preview_asset else None,
         "previewAsset": preview_asset,

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import ast
 from datetime import datetime, timezone
+import importlib.util
+from pathlib import Path
 from types import SimpleNamespace
 import uuid
 
@@ -60,10 +63,27 @@ def symbol_row(*, name: str, discipline: str, formats: list[str], keywords: list
     )
 
 
-def test_search_catalog_symbols_normalizes_context_ranks_and_warns_about_missing_formats():
-    lower_ranked = symbol_row(name="Smoke Detector", discipline="Electrical", formats=["SVG"], keywords=["smoke", "detector"])
-    higher_ranked = symbol_row(name="Fire Alarm", discipline="Fire & Life Safety", formats=["DXF"], keywords=["alarm"])
-    session = CapturingSession([lower_ranked, higher_ranked])
+def test_catalog_search_service_does_not_import_from_route_modules():
+    module_spec = importlib.util.find_spec("symgov_backend.catalog_search")
+    assert module_spec is not None and module_spec.origin is not None
+    module_path = Path(module_spec.origin)
+    tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+
+    route_imports = [
+        node.module
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom)
+        and node.level == 1
+        and node.module is not None
+        and node.module.startswith("routes")
+    ]
+
+    assert route_imports == []
+
+
+def test_search_catalog_symbols_normalizes_context_and_applies_discipline_sql_filter():
+    matching_row = symbol_row(name="Fire Alarm", discipline="Fire & Life Safety", formats=["DXF"], keywords=["alarm"])
+    session = CapturingSession([matching_row])
 
     result = search_catalog_symbols_for_context(
         session,
@@ -83,11 +103,30 @@ def test_search_catalog_symbols_normalizes_context_ranks_and_warns_about_missing
         "selectedLayer": "FIRE_ALARM",
         "preferredFormats": ["DXF", "DWG"],
     }
-    assert [item["name"] for item in result.items] == ["Fire Alarm", "Smoke Detector"]
+    statement, params = session.executed[-1]
+    assert "gs.discipline ILIKE :discipline" in statement
+    assert params["discipline"] == "%Fire & Life Safety%"
+    assert [item["name"] for item in result.items] == ["Fire Alarm"]
     assert any("DWG" in warning for warning in result.warnings)
     assert any("query" in explanation.lower() for explanation in result.ranking_explanation)
     assert any("discipline" in explanation.lower() for explanation in result.ranking_explanation)
     assert any("format" in explanation.lower() for explanation in result.ranking_explanation)
+
+
+def test_search_catalog_symbols_ranks_relative_results_without_a_discipline_filter():
+    lower_ranked = symbol_row(name="Smoke Detector", discipline="Electrical", formats=["SVG"], keywords=["smoke", "detector"])
+    higher_ranked = symbol_row(name="Fire Alarm", discipline="Electrical", formats=["DXF"], keywords=["alarm"])
+    session = CapturingSession([lower_ranked, higher_ranked])
+
+    result = search_catalog_symbols_for_context(
+        session,
+        query="alarm",
+        context={"selectedLayer": "FIRE_ALARM", "preferredFormats": ["DXF"]},
+        limit=20,
+    )
+
+    assert "discipline" not in session.executed[-1][1]
+    assert [item["name"] for item in result.items] == ["Fire Alarm", "Smoke Detector"]
 
 
 def test_search_catalog_symbols_caps_limit_and_returns_public_symbol_summaries():
