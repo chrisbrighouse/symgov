@@ -17,11 +17,20 @@ PREFIX = "symgov_live_once-onl"
 
 
 class FakeSession:
-    def __init__(self, *, commit_error: Exception | None = None, before_commit=None):
+    def __init__(
+        self,
+        *,
+        commit_error: Exception | None = None,
+        rollback_error: Exception | None = None,
+        close_error: Exception | None = None,
+        before_commit=None,
+    ):
         self.commits = 0
         self.rollbacks = 0
         self.closed = 0
         self.commit_error = commit_error
+        self.rollback_error = rollback_error
+        self.close_error = close_error
         self.before_commit = before_commit
 
     def commit(self):
@@ -33,9 +42,13 @@ class FakeSession:
 
     def rollback(self):
         self.rollbacks += 1
+        if self.rollback_error is not None:
+            raise self.rollback_error
 
     def close(self):
         self.closed += 1
+        if self.close_error is not None:
+            raise self.close_error
 
 
 def safe_dto(**overrides):
@@ -168,6 +181,29 @@ def test_create_outputs_raw_key_once_only_after_commit_and_forwards_values(monke
     assert session.closed == 1
 
 
+def test_create_close_failure_after_commit_emits_one_time_key_and_reports_cleanup(monkeypatch, capsys):
+    session = FakeSession(close_error=RuntimeError(f"close leaked {RAW_KEY}"))
+    install_factory(monkeypatch, session)
+    monkeypatch.setattr(
+        manage_symgov,
+        "create_catalog_api_key",
+        lambda *_args, **_kwargs: CatalogApiKeyCreateDTO(key=safe_dto(), raw_key=RAW_KEY),
+    )
+
+    result = manage_symgov.main(
+        ["create-catalog-api-key", "--customer", "Acme", "--integration", "CAD", "--scope", "catalog.read"]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert json.loads(captured.out)["rawKey"] == RAW_KEY
+    assert captured.out.count(RAW_KEY) == 1
+    assert captured.err == "Catalog API key session cleanup failed.\n"
+    assert session.commits == 1
+    assert session.rollbacks == 0
+    assert session.closed == 1
+
+
 def test_list_outputs_safe_metadata_and_forwards_filters(monkeypatch, capsys):
     session = FakeSession()
     factory_calls = install_factory(monkeypatch, session)
@@ -288,6 +324,35 @@ def test_create_failures_rollback_and_never_print_generated_secret(monkeypatch, 
     assert captured.out == ""
     assert RAW_KEY not in captured.err
     assert session.rollbacks == 1
+
+
+def test_failed_create_with_rollback_and_close_failures_never_emits_payload(monkeypatch, capsys):
+    session = FakeSession(
+        rollback_error=RuntimeError(f"rollback leaked {RAW_KEY}"),
+        close_error=RuntimeError(f"close leaked {RAW_KEY}"),
+    )
+    install_factory(monkeypatch, session)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError(f"operation leaked {RAW_KEY}")
+
+    monkeypatch.setattr(manage_symgov, "create_catalog_api_key", fail)
+
+    result = manage_symgov.main(
+        ["create-catalog-api-key", "--customer", "Acme", "--integration", "CAD", "--scope", "catalog.read"]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 1
+    assert captured.out == ""
+    assert captured.err == (
+        "Catalog API key operation failed.\n"
+        "Catalog API key session cleanup failed.\n"
+    )
+    assert RAW_KEY not in captured.err
+    assert session.commits == 0
+    assert session.rollbacks == 1
+    assert session.closed == 1
 
 
 @pytest.mark.parametrize("command", ["create", "list", "revoke"])

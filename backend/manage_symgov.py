@@ -307,24 +307,32 @@ def _run_catalog_command(
         session_factory = create_session_factory(env_file=env_file, nopool=True)
         session = session_factory()
         result = operation(session)
-        payload = serialize(result)
+        payload = json.dumps(serialize(result), indent=2)
         session.commit()
     except Exception:
+        cleanup_failed = False
         if session is not None:
             try:
                 session.rollback()
             except Exception:
-                pass
-        print("Catalog API key operation failed.", file=sys.stderr)
-        return 1
-    finally:
-        if session is not None:
+                cleanup_failed = True
             try:
                 session.close()
             except Exception:
-                pass
+                cleanup_failed = True
+        print("Catalog API key operation failed.", file=sys.stderr)
+        if cleanup_failed:
+            print("Catalog API key session cleanup failed.", file=sys.stderr)
+        return 1
 
-    print(json.dumps(payload, indent=2))
+    try:
+        session.close()
+    except Exception:
+        print(payload)
+        print("Catalog API key session cleanup failed.", file=sys.stderr)
+        return 1
+
+    print(payload)
     return 0
 
 
