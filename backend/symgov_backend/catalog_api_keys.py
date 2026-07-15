@@ -127,7 +127,7 @@ def _normalized_scopes(scopes: object) -> tuple[str, ...]:
         if not scope or scope in seen:
             continue
         if scope not in PLANNED_CATALOG_API_SCOPES:
-            raise CatalogApiKeyError(f"unsupported Catalog API scope: {scope}")
+            raise CatalogApiKeyError("unsupported Catalog API scope")
         seen.add(scope)
         normalized.append(scope)
     if not normalized:
@@ -239,7 +239,7 @@ def list_catalog_api_keys(
             raise CatalogApiKeyError("status must be a string")
         status_filter = status.strip().lower()
         if status_filter not in _VALID_STATUSES:
-            raise CatalogApiKeyError(f"unsupported Catalog API key status: {status}")
+            raise CatalogApiKeyError("unsupported Catalog API key status")
 
     query = session.query(CatalogApiKey)
     if customer_filter is not None:

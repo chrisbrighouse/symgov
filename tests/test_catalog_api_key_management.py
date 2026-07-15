@@ -221,6 +221,27 @@ def test_create_validates_required_names_scopes_and_expiry_before_adding():
     assert result.key.expires_at == NOW + timedelta(hours=2)
 
 
+def test_create_rejected_scope_error_does_not_render_the_rejected_value():
+    raw_key = "symgov_live_scope-secret-marker"
+    session = FakeSession()
+
+    with pytest.raises(CatalogApiKeyError) as caught:
+        create_catalog_api_key(
+            session,
+            customer_name="Acme",
+            integration_name="CAD",
+            scopes=[raw_key],
+            now=NOW,
+        )
+
+    rendered = "".join(traceback.format_exception(caught.value))
+    assert raw_key not in str(caught.value)
+    assert raw_key not in repr(caught.value)
+    assert raw_key not in rendered
+    assert session.rows == session.added == session.queries == []
+    assert session.flushes == session.commits == session.rollbacks == 0
+
+
 def test_list_filters_safely_and_has_stable_order_and_serialization():
     older_id = uuid.UUID("00000000-0000-0000-0000-000000000002")
     newer_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -271,6 +292,21 @@ def test_list_rejects_non_string_filters_before_querying(filters, message):
         list_catalog_api_keys(session, **filters)
 
     assert session.queries == []
+
+
+def test_list_rejected_status_error_does_not_render_the_rejected_value():
+    raw_key = "symgov_live_status-secret-marker"
+    session = FakeSession()
+
+    with pytest.raises(CatalogApiKeyError) as caught:
+        list_catalog_api_keys(session, status=raw_key)
+
+    rendered = "".join(traceback.format_exception(caught.value))
+    assert raw_key not in str(caught.value)
+    assert raw_key not in repr(caught.value)
+    assert raw_key not in rendered
+    assert session.rows == session.added == session.queries == []
+    assert session.flushes == session.commits == session.rollbacks == 0
 
 
 def test_create_and_revoke_audits_are_safe_and_service_never_commits():
