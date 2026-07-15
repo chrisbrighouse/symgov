@@ -72,8 +72,9 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
                     return SimpleNamespace(get=lambda key: revision if key == revision_id else None)
                 return SimpleNamespace(filter_by=lambda *a, **k: SimpleNamespace(one_or_none=lambda: None))
 
-            def get(self, model, key):
+            def get(self, model, key, *, with_for_update=False):
                 if model == SymbolRevision and key == revision_id:
+                    self.revision_locked = with_for_update
                     return revision
                 return None
 
@@ -102,6 +103,7 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         # Verify revision was unpublished
         self.assertEqual(revision.lifecycle_state, "review")
+        self.assertTrue(session.revision_locked)
 
         # Verify review case was created with correct initial stage
         review_case = next(obj for obj in session.added if isinstance(obj, ReviewCase))

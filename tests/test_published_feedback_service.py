@@ -67,6 +67,8 @@ class FakeSession:
         self.added = []
         self.flushes = 0
         self.commits = 0
+        self.get_calls = []
+        self.workflow_events = []
 
     def query(self, model):
         if model is User:
@@ -74,11 +76,14 @@ class FakeSession:
         if model is AgentDefinition:
             return Query(SimpleNamespace(id=ED_AGENT_ID) if self.with_agent else None)
         if model is ReviewCase:
+            self.workflow_events.append("case_lookup")
             return Query(self.existing_case)
         raise AssertionError(f"Unexpected query model: {model}")
 
-    def get(self, model, key):
+    def get(self, model, key, *, with_for_update=False):
+        self.get_calls.append((model, key, with_for_update))
         if model is SymbolRevision and key == REVISION_ID:
+            self.workflow_events.append("revision_lock" if with_for_update else "revision_get")
             return self.revision
         return None
 
@@ -126,6 +131,7 @@ def test_comment_creates_open_record_with_one_browser_submitter_without_committi
     assert result.queue_item is None
     assert session.flushes >= 1
     assert session.commits == 0
+    assert session.get_calls == []
 
     audit = added(session, AuditEvent)[0]
     assert audit.action == "published_symbol_comment"
@@ -212,10 +218,21 @@ def test_send_for_review_changes_revision_and_creates_human_readable_workflow(tm
         context_json={},
         catalog_api_key_id=CATALOG_KEY_ID,
         audit_action="published_symbol_send_for_review",
+        catalog_audit_attribution=CatalogAuditAttribution(
+            api_key_id=CATALOG_KEY_ID,
+            key_prefix="symgov_live_acme",
+            customer_name="Acme Engineering",
+            integration_name="AutoCAD pilot",
+        ),
         runtime_queue_dir=tmp_path,
     )
 
     assert session.revision.lifecycle_state == "review"
+    assert session.get_calls == [(SymbolRevision, REVISION_ID, True)]
+    assert session.workflow_events.index("revision_lock") < session.workflow_events.index("case_lookup")
+    assert result.record.catalog_api_key_id == CATALOG_KEY_ID
+    assert result.record.submitted_by is None
+    assert result.record.external_submitter_id is None
     assert result.review_case in added(session, ReviewCase)
     assert result.review_case.current_stage == "ux_feedback_coordination"
     assert result.review_case.owner_id == ED_USER_ID
@@ -227,6 +244,15 @@ def test_send_for_review_changes_revision_and_creates_human_readable_workflow(tm
     assert result.action.action_payload_json["published_display_id"] == "0002-32"
     assert result.action.action_payload_json["symbol_slug"] == "check-valve"
     assert result.action.assigned_to == ED_USER_ID
+    assert result.action.created_by_id == ED_USER_ID
+
+    assert result.audit_event.actor_id is None
+    assert result.audit_event.payload_json["catalog_api_key"] == {
+        "id": str(CATALOG_KEY_ID),
+        "prefix": "symgov_live_acme",
+        "customer": "Acme Engineering",
+        "integration": "AutoCAD pilot",
+    }
 
     assert result.queue_item in added(session, AgentQueueItem)
     assert result.queue_item.payload_json["symbol_display_id"] == "0002-32"

@@ -131,7 +131,7 @@ class FakeSession:
         self.sql.append((str(statement), params or {}))
         return SimpleNamespace(all=lambda: [] if self.row is None else [self.row])
 
-    def get(self, model, key):
+    def get(self, model, key, *, with_for_update=False):
         if model is SymbolRevision and key == REVISION_ID:
             return self.revision
         return None

@@ -192,10 +192,10 @@ def submit_published_feedback(
         if workflow_owner_id is None:
             ed_user = get_or_create_ed_user(session, now=resolved_now)
             workflow_owner_id = ed_user.id
-        if resolved_audit_actor_id is None:
+        if resolved_audit_actor_id is None and catalog_api_key_id is None:
             resolved_audit_actor_id = workflow_owner_id
 
-        current_revision = session.get(SymbolRevision, revision_id)
+        current_revision = session.get(SymbolRevision, revision_id, with_for_update=True)
         if current_revision is not None:
             current_revision.lifecycle_state = "review"
 
