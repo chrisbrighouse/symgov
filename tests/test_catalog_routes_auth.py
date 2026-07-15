@@ -124,6 +124,12 @@ def test_catalog_capabilities_describes_only_public_catalog_integration_surface(
     assert payload["auth"]["preferredHeader"] == "Authorization: Bearer ***"
     assert payload["supports"]["keywordSearch"] is True
     assert payload["supports"]["edQuestions"] is True
+    assert {
+        "method": "POST",
+        "path": "/api/v1/catalog/ed/query",
+        "scope": "catalog.ed.query",
+    } in payload["currentEndpoints"]
+    assert "Ed question and symbol-finding support" not in payload["futureCapabilities"]
     assert payload["links"] == {
         "capabilities": "/api/v1/catalog/capabilities",
         "taxonomy": "/api/v1/catalog/taxonomy",

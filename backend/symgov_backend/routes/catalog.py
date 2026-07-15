@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import json
+import re
 from time import perf_counter
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..catalog_api_auth import IntegrationAuthContext, require_catalog_scope
+from ..catalog_ed import CatalogEdMode, interpret_catalog_ed_prompt
 from ..catalog_search import (
     catalog_symbol_filters as _catalog_symbol_filters,
     catalog_symbol_ref as _catalog_symbol_ref,
@@ -31,6 +38,47 @@ from ..settings import get_settings
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
 CATALOG_READ_SCOPE = "catalog.read"
+CATALOG_ED_QUERY_SCOPE = "catalog.ed.query"
+_CATALOG_ED_MAX_BODY_BYTES = 16384
+_CATALOG_ED_MODES = {"auto", "find_symbols", "question"}
+_CATALOG_ED_USAGE_HEADER_NAMES = (
+    "x-symgov-application",
+    "x-symgov-application-version",
+    "x-request-id",
+    "user-agent",
+)
+_CATALOG_ED_CONTEXT_FIELDS = {
+    "application",
+    "applicationVersion",
+    "drawingType",
+    "selectedLayer",
+    "units",
+    "preferredFormats",
+    "projectRef",
+}
+_CREDENTIAL_LIKE_CONTEXT = re.compile(
+    r"(?i)(authorization\s*:|bearer\s+|api[_ -]?key\s*[=:]|"
+    r"pass(?:word|wd)?\s*[=:]|token\s*[=:]|secret\s*[=:]|"
+    r"client[_ -]?secret\s*[=:]|private[_ -]?key|"
+    r"(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^\s]+)"
+)
+_BARE_CREDENTIAL = re.compile(
+    r"(?ix)(?:"
+    r"\bsymgov_(?:live|test)_[a-z0-9_-]{12,}\b|"
+    r"\beyJ[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{4,}\b|"
+    r"\bsk-(?:proj-)?[a-z0-9_-]{16,}\b|"
+    r"\b(?:xox[baprs]-|gh[pousr]_)[a-z0-9_-]{12,}\b|"
+    r"\bAKIA[A-Z0-9]{16}\b"
+    r")"
+)
+_USAGE_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b(api[_ -]?key|pass(?:word|wd)?|token|secret|client[_ -]?secret)"
+    r"\s*([=:])\s*([^\s&]+)"
+)
+_USAGE_BEARER = re.compile(r"(?i)\bbearer\s+[^\s&]+")
+_USAGE_CONNECTION_URI = re.compile(
+    r"(?i)\b(postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^\s]+"
+)
 PUBLIC_CATALOG_LINKS = {
     "capabilities": "/api/v1/catalog/capabilities",
     "taxonomy": "/api/v1/catalog/taxonomy",
@@ -108,12 +156,16 @@ def get_catalog_capabilities(
                 "path": "/api/v1/catalog/taxonomy",
                 "scope": CATALOG_READ_SCOPE,
             },
+            {
+                "method": "POST",
+                "path": "/api/v1/catalog/ed/query",
+                "scope": CATALOG_ED_QUERY_SCOPE,
+            },
         ],
         "futureCapabilities": [
             "paginated symbol search",
             "symbol detail and preview aliases",
             "contextual Catalog search",
-            "Ed question and symbol-finding support",
             "integration feedback submission",
             "customer usage reporting",
         ],
@@ -292,6 +344,209 @@ def _catalog_symbol_preview_bytes(symbol_ref: str, session: Session) -> Response
     payload = download_object_bytes(object_key=object_key, env_file=str(get_settings().storage_env_file))
     media_type = attachment.content_type if attachment is not None else payload["content_type"]
     return Response(content=payload["payload"], media_type=media_type)
+
+
+async def _read_bounded_catalog_ed_body(request: Request) -> bytes:
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > _CATALOG_ED_MAX_BODY_BYTES:
+                raise HTTPException(status_code=400, detail="Request body is too large.")
+        except ValueError:
+            pass
+
+    body = bytearray()
+    async for chunk in request.stream():
+        if len(body) + len(chunk) > _CATALOG_ED_MAX_BODY_BYTES:
+            raise HTTPException(status_code=400, detail="Request body is too large.")
+        body.extend(chunk)
+    return bytes(body)
+
+
+class _CatalogEdQueryRoute(APIRoute):
+    def get_route_handler(self):
+        route_handler = super().get_route_handler()
+
+        async def handle(request: Request):
+            try:
+                setattr(request, "_body", await _read_bounded_catalog_ed_body(request))
+                return await route_handler(request)
+            except RequestValidationError:
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": "Request body must be valid JSON."},
+                )
+
+        return handle
+
+
+def _validate_catalog_ed_context(value: object) -> dict:
+    if value is None:
+        raise HTTPException(status_code=400, detail="context must be a JSON object.")
+    if not isinstance(value, dict):
+        raise HTTPException(status_code=400, detail="context must be a JSON object.")
+    unknown_fields = set(value) - _CATALOG_ED_CONTEXT_FIELDS
+    if unknown_fields:
+        raise HTTPException(status_code=400, detail="context contains unknown fields.")
+    if len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > 8192:
+        raise HTTPException(status_code=400, detail="context is too large.")
+
+    normalized = {}
+    for key, item in value.items():
+        if key == "preferredFormats":
+            if not isinstance(item, list) or len(item) > 20:
+                raise HTTPException(status_code=400, detail="preferredFormats must be a bounded list.")
+            if any(not isinstance(entry, str) or len(entry) > 64 for entry in item):
+                raise HTTPException(status_code=400, detail="preferredFormats must contain bounded strings.")
+            strings = item
+        else:
+            if item is None:
+                normalized[key] = None
+                continue
+            if not isinstance(item, str) or len(item) > 256:
+                raise HTTPException(status_code=400, detail=f"{key} must be a bounded string.")
+            strings = [item]
+        if any(
+            _CREDENTIAL_LIKE_CONTEXT.search(entry) or _BARE_CREDENTIAL.search(entry)
+            for entry in strings
+        ):
+            raise HTTPException(status_code=400, detail="context must not contain credentials.")
+        normalized[key] = item
+    return normalized
+
+
+def _validate_catalog_ed_usage_headers(request: Request) -> None:
+    for header_name in _CATALOG_ED_USAGE_HEADER_NAMES:
+        value = request.headers.get(header_name, "")
+        if value and (
+            _CREDENTIAL_LIKE_CONTEXT.search(value) or _BARE_CREDENTIAL.search(value)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Usage metadata headers must not contain credentials.",
+            )
+
+
+def _sanitize_catalog_ed_usage_message(message: str) -> str:
+    sanitized = _USAGE_SECRET_ASSIGNMENT.sub(
+        lambda match: f"{match.group(1)}{match.group(2)}[REDACTED]",
+        message,
+    )
+    sanitized = _USAGE_BEARER.sub("Bearer [REDACTED]", sanitized)
+    sanitized = _USAGE_CONNECTION_URI.sub(
+        lambda match: f"{match.group(1)}://[REDACTED]",
+        sanitized,
+    )
+    return _BARE_CREDENTIAL.sub("[REDACTED]", sanitized)
+
+
+def _catalog_ed_citations(symbols: list[dict]) -> list[dict]:
+    return [
+        {
+            "displayId": symbol["displayId"],
+            "href": symbol["links"]["api"],
+        }
+        for symbol in symbols
+    ]
+
+
+def _reject_nonfinite_json_constant(value: str):
+    raise ValueError(f"Non-finite JSON constant is not allowed: {value}")
+
+
+async def catalog_ed_query(
+    request: Request,
+    auth_context: IntegrationAuthContext = Depends(require_catalog_scope(CATALOG_ED_QUERY_SCOPE)),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    started_at = perf_counter()
+    raw_body = await request.body()
+    if len(raw_body) > _CATALOG_ED_MAX_BODY_BYTES:
+        raise HTTPException(status_code=400, detail="Request body is too large.")
+    try:
+        body = json.loads(raw_body, parse_constant=_reject_nonfinite_json_constant)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Request body must be valid JSON.") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    _validate_catalog_ed_usage_headers(request)
+
+    message_value = body.get("message")
+    if not isinstance(message_value, str):
+        raise HTTPException(status_code=400, detail="message must be a string.")
+    message = message_value.strip()
+    if not message or len(message) > 2000:
+        raise HTTPException(status_code=400, detail="message must contain 1 to 2000 characters.")
+
+    mode = body.get("mode", "auto")
+    if not isinstance(mode, str) or mode not in _CATALOG_ED_MODES:
+        raise HTTPException(status_code=400, detail="mode must be one of: auto, find_symbols, question.")
+    context = _validate_catalog_ed_context(body.get("context", {}))
+
+    limit = body.get("limit", 10)
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise HTTPException(status_code=400, detail="limit must be an integer from 1 to 100.")
+
+    conversation_id = body.get("conversationId")
+    if conversation_id is not None and (
+        not isinstance(conversation_id, str) or len(conversation_id) > 256
+    ):
+        raise HTTPException(status_code=400, detail="conversationId must be a bounded opaque string.")
+
+    interpretation = interpret_catalog_ed_prompt(message, mode=cast(CatalogEdMode, mode))
+    symbols: list[dict] = []
+    search_warnings: list[str] = []
+    if interpretation.selected_mode == "find_symbols":
+        search_result = search_catalog_symbols_for_context(
+            session,
+            query=interpretation.search_query,
+            context=context,
+            limit=limit,
+        )
+        symbols = search_result.items
+        search_warnings = search_result.warnings
+
+    answer = interpretation.answer
+    if interpretation.selected_mode == "find_symbols":
+        answer += (
+            f" Ed found {len(symbols)} likely Catalog symbol result(s)."
+            if symbols
+            else " Ed found no matching Catalog symbols."
+        )
+    response = {
+        "conversationId": conversation_id,
+        "mode": interpretation.selected_mode,
+        "answer": answer,
+        "searchQuery": interpretation.search_query,
+        "interpretedFilters": interpretation.interpreted_filters,
+        "symbols": symbols,
+        "citations": _catalog_ed_citations(symbols),
+        "suggestedFollowups": interpretation.suggested_followups,
+        "warnings": interpretation.warnings + search_warnings,
+        "downloadAvailable": False,
+        "mutatesRecords": False,
+    }
+    log_catalog_usage_event_best_effort(
+        session,
+        auth_context,
+        request=request,
+        scope_used=CATALOG_ED_QUERY_SCOPE,
+        route_name="catalog_ed_query",
+        status_code=200,
+        latency_ms=_latency_ms(started_at),
+        query_text=_sanitize_catalog_ed_usage_message(message),
+        result_count=len(symbols),
+        ed_query_type=interpretation.selected_mode,
+    )
+    return response
+
+
+router.add_api_route(
+    "/ed/query",
+    catalog_ed_query,
+    methods=["POST"],
+    route_class_override=_CatalogEdQueryRoute,
+)
 
 
 @router.post("/search")
