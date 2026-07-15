@@ -3,6 +3,7 @@ from __future__ import annotations
 import pathlib
 import sys
 import unittest
+from unittest.mock import patch
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -16,6 +17,7 @@ from symgov_backend.routes.published import (
     published_symbol_comment_item,
     published_symbol_display_id,
     published_symbol_row,
+    run_published_symbol_command,
 )
 from symgov_backend.routes.workspace import build_published_symbol_workspace_item, queue_item_display_parts
 from symgov_backend.models import SymbolRevision
@@ -359,6 +361,96 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         )
 
         self.assertIsNone(item.sourcePreviewUrl)
+
+
+class PublishedSymbolCommandTransactionTests(unittest.IsolatedAsyncioTestCase):
+    class Request:
+        async def json(self):
+            return {"command": "comment", "symbolIds": ["0002-32"], "comment": "Please check this."}
+
+    class Session:
+        def __init__(self):
+            self.commits = 0
+            self.rollbacks = 0
+            self.row = SimpleNamespace(
+                symbol_id=UUID("11111111-1111-1111-1111-111111111111"),
+                symbol_revision_id=UUID("22222222-2222-2222-2222-222222222222"),
+                page_id=UUID("33333333-3333-3333-3333-333333333333"),
+                slug="0002-32",
+                canonical_name="Check valve",
+                pack_code="0002",
+                sort_order=32,
+                payload_json={"package_display_id": "0002", "package_symbol_sequence": 32},
+            )
+
+        def execute(self, *args, **kwargs):
+            return SimpleNamespace(all=lambda: [self.row])
+
+        def commit(self):
+            self.commits += 1
+
+        def rollback(self):
+            self.rollbacks += 1
+
+    async def test_browser_adapter_commits_once_and_preserves_private_response_ids(self) -> None:
+        session = self.Session()
+        feedback = SimpleNamespace(
+            record=SimpleNamespace(id=UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")),
+            review_case=None,
+            queue_item=None,
+        )
+
+        with (
+            patch("symgov_backend.routes.published.get_or_create_ed_user", return_value=SimpleNamespace(id=UUID(int=14))),
+            patch("symgov_backend.routes.published.submit_published_feedback", return_value=feedback) as service,
+        ):
+            response = await run_published_symbol_command(self.Request(), session)
+
+        self.assertEqual(session.commits, 1)
+        self.assertEqual(session.rollbacks, 0)
+        self.assertEqual(response["items"][0]["symbolId"], "11111111-1111-1111-1111-111111111111")
+        self.assertEqual(response["items"][0]["commentId"], "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        self.assertIsNone(response["items"][0]["reviewCaseId"])
+        self.assertIsNone(response["items"][0]["edQueueItemId"])
+        self.assertEqual(service.call_args.kwargs["source"], "published_symbol_command_menu")
+        self.assertEqual(service.call_args.kwargs["kind"], "comment")
+        self.assertEqual(service.call_args.kwargs["context_json"], {})
+
+    async def test_browser_adapter_rolls_back_and_does_not_return_success_on_service_failure(self) -> None:
+        session = self.Session()
+
+        with (
+            patch("symgov_backend.routes.published.get_or_create_ed_user", return_value=SimpleNamespace(id=UUID(int=14))),
+            patch("symgov_backend.routes.published.submit_published_feedback", side_effect=RuntimeError("queue failed")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "queue failed"):
+                await run_published_symbol_command(self.Request(), session)
+
+        self.assertEqual(session.commits, 0)
+        self.assertEqual(session.rollbacks, 1)
+
+    async def test_browser_adapter_rolls_back_when_commit_fails(self) -> None:
+        session = self.Session()
+        feedback = SimpleNamespace(
+            record=SimpleNamespace(id=UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")),
+            review_case=None,
+            queue_item=None,
+        )
+
+        def fail_commit():
+            session.commits += 1
+            raise RuntimeError("commit failed")
+
+        session.commit = fail_commit
+        with (
+            patch("symgov_backend.routes.published.get_or_create_ed_user", return_value=SimpleNamespace(id=UUID(int=14))),
+            patch("symgov_backend.routes.published.submit_published_feedback", return_value=feedback),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "commit failed"):
+                await run_published_symbol_command(self.Request(), session)
+
+        self.assertEqual(session.commits, 1)
+        self.assertEqual(session.rollbacks, 1)
 
 
 if __name__ == "__main__":

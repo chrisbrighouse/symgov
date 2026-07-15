@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-import json
-from pathlib import Path
+from datetime import datetime, timezone
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -10,22 +8,13 @@ from sqlalchemy import Text, bindparam, cast, func, text
 from sqlalchemy.orm import Session
 
 from ..asset_manifest import list_download_assets
-from ..auth import hash_pin
 from ..dependencies import get_db_session
 from ..models import (
-    AgentDefinition,
-    AgentQueueItem,
     Attachment,
-    AuditEvent,
     ClarificationRecord,
     GovernedSymbol,
     HannahPhotoCandidate,
-    PublishedPage,
-    ReviewCase,
-    ReviewCaseAction,
-    SymbolRevision,
     User,
-    UserRole,
 )
 from ..published_catalog import (
     PUBLISHED_SYMBOLS_SQL,
@@ -34,6 +23,11 @@ from ..published_catalog import (
     published_symbol_display_id,
 )
 from ..runtime import download_object_bytes
+from ..services.published_feedback import (
+    DEFAULT_ED_RUNTIME_QUEUE_DIR,
+    get_or_create_ed_user,
+    submit_published_feedback,
+)
 from ..settings import get_settings
 
 
@@ -42,9 +36,7 @@ legacy_router = APIRouter(tags=["published"])
 
 MAX_PUBLISHED_SYMBOL_COMMAND_SELECTION = 5
 PUBLISHED_SYMBOL_COMMANDS = {"comment", "send_for_review"}
-SYSTEM_ED_EMAIL = "ed@symgov.local"
-SYSTEM_ED_NAME = "Ed"
-ED_RUNTIME_QUEUE_DIR = Path("/data/.openclaw/workspaces/ed/runtime/agent_queue_items")
+ED_RUNTIME_QUEUE_DIR = DEFAULT_ED_RUNTIME_QUEUE_DIR
 
 
 def published_download_labels(downloads: list) -> list[str]:
@@ -174,74 +166,6 @@ def normalize_published_symbol_command_request(payload: dict) -> dict:
     if not comment:
         raise ValueError("Add a comment before posting.")
     return {"command": command, "symbol_ids": symbol_ids, "comment": comment}
-
-
-def get_or_create_ed_user(session: Session) -> User:
-    user = session.query(User).filter(func.lower(User.email) == SYSTEM_ED_EMAIL).one_or_none()
-    if user is not None:
-        return user
-    now = datetime.now(timezone.utc).replace(microsecond=0)
-    user = User(
-        id=uuid.uuid4(),
-        email=SYSTEM_ED_EMAIL,
-        display_name=SYSTEM_ED_NAME,
-        pin_hash=hash_pin("4590"),
-        pin_set_at=now,
-        must_change_pin=True,
-        is_active=True,
-        created_at=now,
-        updated_at=now,
-    )
-    session.add(user)
-    session.flush()
-    session.add(UserRole(user_id=user.id, role="admin", created_at=now))
-    session.flush()
-    return user
-
-
-def create_ed_queue_item(session: Session, *, source_type: str, source_id: uuid.UUID, payload: dict, priority: str = "medium") -> AgentQueueItem | None:
-    ed_definition = session.query(AgentDefinition).filter_by(slug="ed").one_or_none()
-    if ed_definition is None:
-        return None
-    now = datetime.now(timezone.utc).replace(microsecond=0)
-    queue_item_id = uuid.uuid4()
-    queue_item = AgentQueueItem(
-        id=queue_item_id,
-        agent_id=ed_definition.id,
-        source_type=source_type,
-        source_id=source_id,
-        status="queued",
-        priority=priority,
-        payload_json=payload,
-        confidence=None,
-        escalation_reason=None,
-        created_at=now,
-        started_at=None,
-        completed_at=None,
-    )
-    session.add(queue_item)
-    session.flush()
-
-    runtime_payload = {
-        "id": str(queue_item_id),
-        "agent_id": "ed",
-        "source_type": source_type,
-        "source_id": str(source_id),
-        "status": "queued",
-        "priority": priority,
-        "payload_json": payload,
-        "confidence": None,
-        "escalation_reason": None,
-        "created_at": now.isoformat().replace("+00:00", "Z"),
-        "started_at": None,
-        "completed_at": None,
-    }
-    ED_RUNTIME_QUEUE_DIR.mkdir(parents=True, exist_ok=True)
-    (ED_RUNTIME_QUEUE_DIR / f"{queue_item_id}.json").write_text(
-        json.dumps(runtime_payload, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    return queue_item
 
 
 def load_supplemental_photos(session: Session, rows) -> dict[str, list[dict]]:
@@ -393,156 +317,62 @@ async def run_published_symbol_command(request: Request, session: Session = Depe
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    symbol_ids = normalized["symbol_ids"]
-    rows = session.execute(
-        text(
-            PUBLISHED_SYMBOLS_SQL
-            + """
-            AND (gs.slug IN :symbol_ids OR gs.id::text IN :symbol_ids)
-            ORDER BY pk.effective_date DESC, pk.pack_code, pe.sort_order, gs.canonical_name
-            """
-        ).bindparams(bindparam("symbol_ids", expanding=True)),
-        {"symbol_ids": symbol_ids},
-    ).all()
-    matched_ids = {str(row.slug) for row in rows} | {str(row.symbol_id) for row in rows}
-    missing = [symbol_id for symbol_id in symbol_ids if symbol_id not in matched_ids]
-    if missing:
-        raise HTTPException(status_code=404, detail=f"Published symbol not found: {', '.join(missing)}")
+    try:
+        symbol_ids = normalized["symbol_ids"]
+        rows = session.execute(
+            text(
+                PUBLISHED_SYMBOLS_SQL
+                + """
+                AND (gs.slug IN :symbol_ids OR gs.id::text IN :symbol_ids)
+                ORDER BY pk.effective_date DESC, pk.pack_code, pe.sort_order, gs.canonical_name
+                """
+            ).bindparams(bindparam("symbol_ids", expanding=True)),
+            {"symbol_ids": symbol_ids},
+        ).all()
+        matched_ids = {str(row.slug) for row in rows} | {str(row.symbol_id) for row in rows}
+        missing = [symbol_id for symbol_id in symbol_ids if symbol_id not in matched_ids]
+        if missing:
+            raise HTTPException(status_code=404, detail=f"Published symbol not found: {', '.join(missing)}")
 
-    now = datetime.now(timezone.utc).replace(microsecond=0)
-    ed_user = get_or_create_ed_user(session)
-    results = []
-    seen_symbols: set[str] = set()
-    for row in rows:
-        symbol_uuid = uuid.UUID(str(row.symbol_id))
-        symbol_display_id = published_symbol_display_id(row)
-        if str(symbol_uuid) in seen_symbols:
-            continue
-        seen_symbols.add(str(symbol_uuid))
-        page_uuid = uuid.UUID(str(row.page_id))
-        comment_record = ClarificationRecord(
-            id=uuid.uuid4(),
-            symbol_id=symbol_uuid,
-            published_page_id=page_uuid,
-            source="published_symbol_command_menu",
-            kind="review_request" if normalized["command"] == "send_for_review" else "comment",
-            status="open",
-            submitted_by=ed_user.id,
-            external_submitter_id=None,
-            detail=normalized["comment"],
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(comment_record)
-
-        review_case = None
-        queue_item = None
-        if normalized["command"] == "send_for_review":
-            # Unpublish the current symbol revision
-            current_revision = session.get(SymbolRevision, row.symbol_revision_id)
-            if current_revision is not None:
-                current_revision.lifecycle_state = "review"
-
-            review_case = (
-                session.query(ReviewCase)
-                .filter_by(source_entity_type="published_symbol", source_entity_id=symbol_uuid)
-                .filter(ReviewCase.closed_at.is_(None))
-                .one_or_none()
-            )
-            if review_case is None:
-                review_case = ReviewCase(
-                    id=uuid.uuid4(),
-                    source_entity_type="published_symbol",
-                    source_entity_id=symbol_uuid,
-                    current_stage="ux_feedback_coordination",
-                    owner_id=ed_user.id,
-                    escalation_level="medium",
-                    opened_at=now,
-                    closed_at=None,
-                )
-                session.add(review_case)
-                session.flush()
-            else:
-                review_case.current_stage = "ux_feedback_coordination"
-
-            action = ReviewCaseAction(
-                id=uuid.uuid4(),
-                review_case_id=review_case.id,
-                decision_id=None,
-                action_code="published_symbol_returned_for_review",
-                action_status="queued",
-                assigned_to=ed_user.id,
-                target_agent_slug="ed",
-                target_stage="ux_feedback_coordination",
-                action_payload_json={
-                    "comment": normalized["comment"],
-                    "symbol_slug": row.slug,
-                    "symbol_display_id": symbol_display_id,
-                    "symbol_name": row.canonical_name,
-                    "published_page_id": str(page_uuid),
-                    "managed_by": "ed",
-                },
-                created_by_type="system",
-                created_by_id=ed_user.id,
-                created_at=now,
-                started_at=None,
-                completed_at=None,
-            )
-            session.add(action)
-            queue_item = create_ed_queue_item(
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        ed_user = get_or_create_ed_user(session, now=now)
+        results = []
+        seen_symbols: set[str] = set()
+        for row in rows:
+            symbol_uuid = uuid.UUID(str(row.symbol_id))
+            if str(symbol_uuid) in seen_symbols:
+                continue
+            seen_symbols.add(str(symbol_uuid))
+            feedback = submit_published_feedback(
                 session,
-                source_type="published_symbol_review_request",
-                source_id=symbol_uuid,
-                payload={
-                    "task_type": "published_symbol_review_request",
-                    "review_case_id": str(review_case.id),
-                    "symbol_id": str(symbol_uuid),
-                    "symbol_slug": row.slug,
-                    "symbol_name": row.canonical_name,
-                    "symbol_display_id": symbol_display_id,
-                    "display_name": symbol_display_id,
-                    "workspace_display_name": symbol_display_id,
-                    "published_display_id": symbol_display_id,
-                    "comment": normalized["comment"],
-                    "managed_by": "ed",
-                    # Ed performs the operator-feedback coordination, then the
-                    # returned published symbol must land in a human-visible
-                    # review stage. The review queue intentionally only lists
-                    # human-actionable stages such as classification_review.
-                    "next_stage": "classification_review",
-                },
-                priority="medium",
+                row=row,
+                source="published_symbol_command_menu",
+                kind="review_request" if normalized["command"] == "send_for_review" else "comment",
+                message=normalized["comment"],
+                context_json={},
+                submitted_by=ed_user.id,
+                audit_action=f"published_symbol_{normalized['command']}",
+                audit_actor_id=ed_user.id,
+                request_review=normalized["command"] == "send_for_review",
+                workflow_owner_id=ed_user.id,
+                runtime_queue_dir=ED_RUNTIME_QUEUE_DIR,
+                now=now,
+            )
+            results.append(
+                {
+                    "symbolId": str(symbol_uuid),
+                    "displayId": published_symbol_display_id(row),
+                    "name": row.canonical_name,
+                    "commentId": str(feedback.record.id),
+                    "reviewCaseId": str(feedback.review_case.id) if feedback.review_case is not None else None,
+                    "edQueueItemId": str(feedback.queue_item.id) if feedback.queue_item is not None else None,
+                }
             )
 
-        session.add(
-            AuditEvent(
-                id=uuid.uuid4(),
-                entity_type="published_symbol",
-                entity_id=symbol_uuid,
-                action=f"published_symbol_{normalized['command']}",
-                actor_id=ed_user.id,
-                payload_json={
-                    "comment_id": str(comment_record.id),
-                    "comment": normalized["comment"],
-                    "review_case_id": str(review_case.id) if review_case is not None else None,
-                    "queue_item_id": str(queue_item.id) if queue_item is not None else None,
-                    "managed_by": "ed",
-                },
-                created_at=now,
-            )
-        )
-        results.append(
-            {
-                "symbolId": str(symbol_uuid),
-                "displayId": symbol_display_id,
-                "name": row.canonical_name,
-                "commentId": str(comment_record.id),
-                "reviewCaseId": str(review_case.id) if review_case is not None else None,
-                "edQueueItemId": str(queue_item.id) if queue_item is not None else None,
-            }
-        )
-
-    session.commit()
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     return {
         "status": "completed",
         "command": normalized["command"],
