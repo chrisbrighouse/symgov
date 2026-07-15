@@ -105,7 +105,7 @@ def test_catalog_feedback_migration_links_to_current_head_and_has_safe_operation
     assert 'op.add_column(\n        "clarification_records",\n        sa.Column("catalog_api_key_id"' in source
     assert 'sa.Column("context_json", JSONB, nullable=False, server_default=sa.text("\'{}\'::jsonb"))' in source
     assert 'op.drop_constraint("ck_clarification_records_one_submitter"' in source
-    assert 'op.create_check_constraint(\n        "ck_clarification_records_exactly_one_submitter"' in source
+    assert 'op.create_check_constraint(\n        op.f("ck_clarification_records_exactly_one_submitter")' in source
     assert _normalized_sql(migration.EXACTLY_ONE_SUBMITTER) == EXACTLY_ONE_SQL
     assert 'op.create_foreign_key(\n        "fk_clarification_records_catalog_api_key_id"' in source
     assert 'ondelete=' not in source
@@ -115,6 +115,9 @@ def test_catalog_feedback_migration_links_to_current_head_and_has_safe_operation
     assert downgrade.index('op.drop_index("ix_clarification_records_catalog_api_key_created_at"') < downgrade.index(
         'op.drop_column("clarification_records", "catalog_api_key_id")'
     )
-    assert 'op.drop_constraint("ck_clarification_records_exactly_one_submitter"' in downgrade
+    assert 'op.drop_constraint(\n        op.f("ck_clarification_records_exactly_one_submitter")' in downgrade
+    # The original migration supplied an already-prefixed logical name under
+    # the naming convention, so downgrade must recreate that same physical
+    # legacy name for a subsequent re-upgrade to drop successfully.
     assert 'op.create_check_constraint(\n        "ck_clarification_records_one_submitter"' in downgrade
     assert 'op.drop_column("clarification_records", "context_json")' in downgrade

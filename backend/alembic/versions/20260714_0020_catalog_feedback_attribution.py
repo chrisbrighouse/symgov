@@ -45,7 +45,7 @@ def upgrade() -> None:
     )
     op.drop_constraint("ck_clarification_records_one_submitter", "clarification_records", type_="check")
     op.create_check_constraint(
-        "ck_clarification_records_exactly_one_submitter",
+        op.f("ck_clarification_records_exactly_one_submitter"),
         "clarification_records",
         EXACTLY_ONE_SUBMITTER,
     )
@@ -70,7 +70,11 @@ def downgrade() -> None:
         "clarification_records",
         type_="foreignkey",
     )
-    op.drop_constraint("ck_clarification_records_exactly_one_submitter", "clarification_records", type_="check")
+    op.drop_constraint(
+        op.f("ck_clarification_records_exactly_one_submitter"),
+        "clarification_records",
+        type_="check",
+    )
     op.create_check_constraint(
         "ck_clarification_records_one_submitter",
         "clarification_records",
