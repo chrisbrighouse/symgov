@@ -129,6 +129,13 @@ def test_catalog_capabilities_describes_only_public_catalog_integration_surface(
         "path": "/api/v1/catalog/ed/query",
         "scope": "catalog.ed.query",
     } in payload["currentEndpoints"]
+    assert {
+        "method": "POST",
+        "path": "/api/v1/catalog/symbols/{symbol_ref}/feedback",
+        "scope": "catalog.feedback.write",
+    } in payload["currentEndpoints"]
+    assert payload["supports"]["feedback"] is True
+    assert "integration feedback submission" not in payload["futureCapabilities"]
     assert "Ed question and symbol-finding support" not in payload["futureCapabilities"]
     assert payload["links"] == {
         "capabilities": "/api/v1/catalog/capabilities",

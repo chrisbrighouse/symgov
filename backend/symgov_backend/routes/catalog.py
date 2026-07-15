@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import re
 from time import perf_counter
 from typing import cast
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -31,16 +33,37 @@ from ..catalog_taxonomy import (
 from ..catalog_usage import log_catalog_usage_event_best_effort
 from ..dependencies import get_db_session
 from ..models import Attachment
-from ..published_catalog import PUBLISHED_SYMBOLS_SQL, choose_published_preview_asset
+from ..published_catalog import (
+    PUBLISHED_SYMBOLS_SQL,
+    choose_published_preview_asset,
+    published_symbol_display_id,
+)
 from ..runtime import download_object_bytes
+from ..services.published_feedback import (
+    CatalogAuditAttribution,
+    DEFAULT_ED_RUNTIME_QUEUE_DIR,
+    submit_published_feedback,
+)
 from ..settings import get_settings
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
 CATALOG_READ_SCOPE = "catalog.read"
 CATALOG_ED_QUERY_SCOPE = "catalog.ed.query"
-_CATALOG_ED_MAX_BODY_BYTES = 16384
+CATALOG_FEEDBACK_WRITE_SCOPE = "catalog.feedback.write"
+_CATALOG_MAX_BODY_BYTES = 16384
+_CATALOG_ED_MAX_BODY_BYTES = _CATALOG_MAX_BODY_BYTES
+CATALOG_FEEDBACK_RUNTIME_QUEUE_DIR: Path = DEFAULT_ED_RUNTIME_QUEUE_DIR
 _CATALOG_ED_MODES = {"auto", "find_symbols", "question"}
+_CATALOG_FEEDBACK_KINDS = {
+    "comment",
+    "usage_question",
+    "issue",
+    "request_alternative",
+    "not_found",
+    "standards_question",
+    "send_for_review",
+}
 _CATALOG_ED_USAGE_HEADER_NAMES = (
     "x-symgov-application",
     "x-symgov-application-version",
@@ -161,12 +184,16 @@ def get_catalog_capabilities(
                 "path": "/api/v1/catalog/ed/query",
                 "scope": CATALOG_ED_QUERY_SCOPE,
             },
+            {
+                "method": "POST",
+                "path": "/api/v1/catalog/symbols/{symbol_ref}/feedback",
+                "scope": CATALOG_FEEDBACK_WRITE_SCOPE,
+            },
         ],
         "futureCapabilities": [
             "paginated symbol search",
             "symbol detail and preview aliases",
             "contextual Catalog search",
-            "integration feedback submission",
             "customer usage reporting",
         ],
         "scopes": [
@@ -323,7 +350,16 @@ def _load_catalog_symbol_row(session: Session, symbol_ref: str):
             PUBLISHED_SYMBOLS_SQL
             + _published_symbol_ref_filter_sql()
             + """
-            ORDER BY pp.effective_date DESC, pk.effective_date DESC
+            ORDER BY CASE
+                WHEN ((sr.payload_json ->> 'package_display_id') || '-' || (sr.payload_json ->> 'package_symbol_sequence')) = :symbol_ref
+                    OR (sr.payload_json ->> 'display_name') = :symbol_ref
+                    OR (sr.payload_json ->> 'workspace_display_name') = :symbol_ref
+                    OR (sr.payload_json ->> 'symbol_display_id') = :symbol_ref THEN 0
+                WHEN gs.slug = :symbol_ref THEN 1
+                WHEN gs.id::text = :symbol_ref THEN 2
+                ELSE 3
+            END,
+            pp.effective_date DESC, pk.effective_date DESC
             LIMIT 1
             """
         ),
@@ -346,30 +382,34 @@ def _catalog_symbol_preview_bytes(symbol_ref: str, session: Session) -> Response
     return Response(content=payload["payload"], media_type=media_type)
 
 
-async def _read_bounded_catalog_ed_body(request: Request) -> bytes:
+async def _read_bounded_catalog_body(request: Request) -> bytes:
     content_length = request.headers.get("content-length")
     if content_length:
         try:
-            if int(content_length) > _CATALOG_ED_MAX_BODY_BYTES:
+            if int(content_length) > _CATALOG_MAX_BODY_BYTES:
                 raise HTTPException(status_code=400, detail="Request body is too large.")
         except ValueError:
             pass
 
     body = bytearray()
     async for chunk in request.stream():
-        if len(body) + len(chunk) > _CATALOG_ED_MAX_BODY_BYTES:
+        if len(body) + len(chunk) > _CATALOG_MAX_BODY_BYTES:
             raise HTTPException(status_code=400, detail="Request body is too large.")
         body.extend(chunk)
     return bytes(body)
 
 
-class _CatalogEdQueryRoute(APIRoute):
+# Compatibility for tests and callers that referenced the original Ed-specific helper.
+_read_bounded_catalog_ed_body = _read_bounded_catalog_body
+
+
+class _CatalogBoundedJsonRoute(APIRoute):
     def get_route_handler(self):
         route_handler = super().get_route_handler()
 
         async def handle(request: Request):
             try:
-                setattr(request, "_body", await _read_bounded_catalog_ed_body(request))
+                setattr(request, "_body", await _read_bounded_catalog_body(request))
                 return await route_handler(request)
             except RequestValidationError:
                 return JSONResponse(
@@ -454,14 +494,9 @@ def _reject_nonfinite_json_constant(value: str):
     raise ValueError(f"Non-finite JSON constant is not allowed: {value}")
 
 
-async def catalog_ed_query(
-    request: Request,
-    auth_context: IntegrationAuthContext = Depends(require_catalog_scope(CATALOG_ED_QUERY_SCOPE)),
-    session: Session = Depends(get_db_session),
-) -> dict:
-    started_at = perf_counter()
+async def _parse_strict_catalog_json_object(request: Request) -> dict:
     raw_body = await request.body()
-    if len(raw_body) > _CATALOG_ED_MAX_BODY_BYTES:
+    if len(raw_body) > _CATALOG_MAX_BODY_BYTES:
         raise HTTPException(status_code=400, detail="Request body is too large.")
     try:
         body = json.loads(raw_body, parse_constant=_reject_nonfinite_json_constant)
@@ -469,6 +504,16 @@ async def catalog_ed_query(
         raise HTTPException(status_code=400, detail="Request body must be valid JSON.") from exc
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+    return body
+
+
+async def catalog_ed_query(
+    request: Request,
+    auth_context: IntegrationAuthContext = Depends(require_catalog_scope(CATALOG_ED_QUERY_SCOPE)),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    started_at = perf_counter()
+    body = await _parse_strict_catalog_json_object(request)
     _validate_catalog_ed_usage_headers(request)
 
     message_value = body.get("message")
@@ -545,7 +590,95 @@ router.add_api_route(
     "/ed/query",
     catalog_ed_query,
     methods=["POST"],
-    route_class_override=_CatalogEdQueryRoute,
+    route_class_override=_CatalogBoundedJsonRoute,
+)
+
+
+async def catalog_symbol_feedback(
+    symbol_ref: str,
+    request: Request,
+    auth_context: IntegrationAuthContext = Depends(require_catalog_scope(CATALOG_FEEDBACK_WRITE_SCOPE)),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    started_at = perf_counter()
+    body = await _parse_strict_catalog_json_object(request)
+    if set(body) - {"kind", "message", "context"}:
+        raise HTTPException(status_code=400, detail="Request body contains unknown fields.")
+    _validate_catalog_ed_usage_headers(request)
+
+    kind_value = body.get("kind")
+    if not isinstance(kind_value, str) or kind_value not in _CATALOG_FEEDBACK_KINDS:
+        raise HTTPException(
+            status_code=400,
+            detail="kind must be one of: comment, usage_question, issue, request_alternative, not_found, standards_question, send_for_review.",
+        )
+    message_value = body.get("message")
+    if not isinstance(message_value, str):
+        raise HTTPException(status_code=400, detail="message must be a string.")
+    message = message_value.strip()
+    if not message or len(message) > 2000:
+        raise HTTPException(status_code=400, detail="message must contain 1 to 2000 characters.")
+    context = _validate_catalog_ed_context(body.get("context", {}))
+
+    row = _load_catalog_symbol_row(session, symbol_ref)
+    api_key_id = uuid.UUID(auth_context.api_key_id)
+    review_requested = kind_value == "send_for_review"
+    try:
+        result = submit_published_feedback(
+            session,
+            row=row,
+            source="catalog_integration_api",
+            kind=kind_value,
+            message=message,
+            context_json=context,
+            catalog_api_key_id=api_key_id,
+            audit_action="catalog_symbol_feedback",
+            catalog_audit_attribution=CatalogAuditAttribution(
+                api_key_id=api_key_id,
+                key_prefix=auth_context.key_prefix,
+                customer_name=auth_context.customer_name,
+                integration_name=auth_context.integration_name,
+            ),
+            request_review=review_requested,
+            runtime_queue_dir=CATALOG_FEEDBACK_RUNTIME_QUEUE_DIR,
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+
+    response = {
+        "status": "recorded",
+        "feedbackId": str(result.record.id),
+        "kind": kind_value,
+        "symbol": {
+            "displayId": published_symbol_display_id(row),
+            "symbolId": str(row.symbol_id),
+        },
+        "reviewRequested": review_requested,
+        "mutatesPublishedState": review_requested,
+    }
+    log_catalog_usage_event_best_effort(
+        session,
+        auth_context,
+        request=request,
+        scope_used=CATALOG_FEEDBACK_WRITE_SCOPE,
+        route_name="catalog_symbol_feedback",
+        status_code=201,
+        latency_ms=_latency_ms(started_at),
+        symbol_ref=symbol_ref,
+        result_count=1,
+        ed_query_type=kind_value,
+    )
+    return response
+
+
+router.add_api_route(
+    "/symbols/{symbol_ref}/feedback",
+    catalog_symbol_feedback,
+    methods=["POST"],
+    status_code=201,
+    route_class_override=_CatalogBoundedJsonRoute,
 )
 
 
