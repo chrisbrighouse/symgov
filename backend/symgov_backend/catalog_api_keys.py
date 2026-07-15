@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import secrets
 import uuid
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .catalog_api_auth import PLANNED_CATALOG_API_SCOPES, hash_api_key
@@ -64,7 +65,7 @@ class CatalogApiKeyCreateDTO:
     """Creation result; ``raw_key`` is returned once and is never persisted."""
 
     key: CatalogApiKeyDTO
-    raw_key: str
+    raw_key: str = field(repr=False)
 
     @property
     def api_key(self) -> str:
@@ -100,14 +101,16 @@ def _aware_utc(value: datetime, *, field_name: str) -> datetime:
 
 
 def _normalized_required_name(value: object, *, field_name: str) -> str:
-    normalized = " ".join(str(value or "").split())
+    if not isinstance(value, str):
+        raise CatalogApiKeyError(f"{field_name} must be a string")
+    normalized = " ".join(value.split())
     if not normalized:
         raise CatalogApiKeyError(f"{field_name} is required")
     return normalized
 
 
 def _normalized_scopes(scopes: object) -> tuple[str, ...]:
-    if scopes is None or isinstance(scopes, (str, bytes)):
+    if scopes is None or isinstance(scopes, str):
         candidates = [] if scopes is None else [scopes]
     else:
         try:
@@ -118,7 +121,9 @@ def _normalized_scopes(scopes: object) -> tuple[str, ...]:
     normalized: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:
-        scope = str(candidate or "").strip()
+        if not isinstance(candidate, str):
+            raise CatalogApiKeyError("Catalog API scopes must be strings")
+        scope = candidate.strip()
         if not scope or scope in seen:
             continue
         if scope not in PLANNED_CATALOG_API_SCOPES:
@@ -211,7 +216,10 @@ def create_catalog_api_key(
             created_at=resolved_now,
         )
     )
-    session.flush()
+    try:
+        session.flush()
+    except SQLAlchemyError:
+        raise CatalogApiKeyError("Unable to create Catalog API key") from None
     return CatalogApiKeyCreateDTO(key=_safe_dto(key_row), raw_key=raw_key)
 
 
@@ -227,7 +235,9 @@ def list_catalog_api_keys(
         customer_filter = _normalized_required_name(customer_name, field_name="customer_name")
     status_filter = None
     if status is not None:
-        status_filter = str(status).strip().lower()
+        if not isinstance(status, str):
+            raise CatalogApiKeyError("status must be a string")
+        status_filter = status.strip().lower()
         if status_filter not in _VALID_STATUSES:
             raise CatalogApiKeyError(f"unsupported Catalog API key status: {status}")
 
@@ -237,14 +247,7 @@ def list_catalog_api_keys(
     if status_filter is not None:
         query = query.filter(CatalogApiKey.status == status_filter)
     rows = query.order_by(CatalogApiKey.created_at.asc(), CatalogApiKey.id.asc()).all()
-    filtered = [
-        row
-        for row in rows
-        if (customer_filter is None or row.customer_name.casefold() == customer_filter.casefold())
-        and (status_filter is None or row.status == status_filter)
-    ]
-    filtered.sort(key=lambda row: (row.created_at, str(row.id)))
-    return [_safe_dto(row) for row in filtered]
+    return [_safe_dto(row) for row in rows]
 
 
 def revoke_catalog_api_key(
@@ -256,11 +259,21 @@ def revoke_catalog_api_key(
 ) -> CatalogApiKeyDTO:
     """Revoke by immutable UUID and exact display-prefix confirmation."""
     try:
-        resolved_id = api_key_id if isinstance(api_key_id, uuid.UUID) else uuid.UUID(str(api_key_id))
-    except (TypeError, ValueError, AttributeError) as exc:
-        raise CatalogApiKeyNotFoundError("Catalog API key not found") from exc
+        if isinstance(api_key_id, uuid.UUID):
+            resolved_id = api_key_id
+        elif isinstance(api_key_id, str):
+            resolved_id = uuid.UUID(api_key_id)
+        else:
+            raise TypeError
+    except (TypeError, ValueError, AttributeError):
+        raise CatalogApiKeyNotFoundError("Catalog API key not found") from None
 
-    row = session.query(CatalogApiKey).filter(CatalogApiKey.id == resolved_id).one_or_none()
+    row = (
+        session.query(CatalogApiKey)
+        .filter(CatalogApiKey.id == resolved_id)
+        .with_for_update()
+        .one_or_none()
+    )
     if row is None:
         raise CatalogApiKeyNotFoundError("Catalog API key not found")
     if not isinstance(key_prefix, str) or not secrets.compare_digest(row.key_prefix, key_prefix):
