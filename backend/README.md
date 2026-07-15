@@ -47,6 +47,16 @@ python manage_symgov.py reconcile-openclaw
 python manage_symgov.py serve-api --host 0.0.0.0 --port 8010
 ```
 
+Catalog API-key operator commands:
+
+```bash
+python manage_symgov.py create-catalog-api-key --customer "Acme Engineering" --integration "CAD connector" --scope catalog.read --scope catalog.preview --expires-at 2027-01-01T00:00:00Z --db-env-file /path/to/database.env
+python manage_symgov.py list-catalog-api-keys --customer "Acme Engineering" --status active --db-env-file /path/to/database.env
+python manage_symgov.py revoke-catalog-api-key --key-id 00000000-0000-0000-0000-000000000000 --confirm-prefix symgov_live_12345678 --db-env-file /path/to/database.env
+```
+
+**Secret warning:** successful create output writes `rawKey` exactly once to stdout. Treat it as one-time secret material; avoid placing secrets in shell history and secure any stdout capture immediately. List and revoke output contain metadata only.
+
 OpenClaw resilience notes:
 
 - The canonical SymGov-to-OpenClaw registration data now lives in:

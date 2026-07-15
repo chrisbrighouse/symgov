@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Sequence
+from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sys
+from typing import Any
 
 from symgov_backend.agent_queue_worker import (
     DEFAULT_AGENT_ORDER,
@@ -18,6 +22,15 @@ from symgov_backend.automation_policy import (
     evaluate_publication_automation_candidates,
     evaluate_review_split_metadata_candidates,
 )
+from symgov_backend.catalog_api_auth import PLANNED_CATALOG_API_SCOPES
+from symgov_backend.catalog_api_keys import (
+    CatalogApiKeyCreateDTO,
+    CatalogApiKeyDTO,
+    create_catalog_api_key,
+    list_catalog_api_keys,
+    revoke_catalog_api_key,
+)
+from symgov_backend.db import create_session_factory
 from symgov_backend.openclaw_sync import audit_openclaw_registration, reconcile_openclaw_registration
 from symgov_backend.runtime import RuntimePersistenceBridge, check_database_health, check_storage_health
 from symgov_backend.tracy_operations import (
@@ -28,7 +41,30 @@ from symgov_backend.tracy_operations import (
 )
 
 
-def parse_args():
+def _parse_aware_datetime(value: str) -> datetime:
+    candidate = f"{value[:-1]}+00:00" if value.endswith(("Z", "z")) else value
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a valid ISO-8601 timestamp") from None
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise argparse.ArgumentTypeError("must include a timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def _parse_scope(value: str) -> str:
+    if value not in PLANNED_CATALOG_API_SCOPES:
+        raise argparse.ArgumentTypeError("must be an allowed Catalog API scope")
+    return value
+
+
+def _parse_catalog_key_status(value: str) -> str:
+    if value not in {"active", "disabled", "revoked"}:
+        raise argparse.ArgumentTypeError("must be active, disabled, or revoked")
+    return value
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Symgov backend bootstrap and health commands.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -173,11 +209,162 @@ def parse_args():
         help="Evaluate split-symbol name/category/discipline metadata instead of classification records.",
     )
 
-    return parser.parse_args()
+    create_key_parser = subparsers.add_parser(
+        "create-catalog-api-key",
+        help="Create a Catalog API key and emit its one-time secret to stdout.",
+        description="Create a Catalog API key. Successful stdout contains one-time secret material.",
+        epilog="WARNING: rawKey is one-time secret material written to stdout. Capture and store it securely.",
+    )
+    create_key_parser.add_argument("--customer", required=True, help="Customer name.")
+    create_key_parser.add_argument("--integration", required=True, help="Integration name.")
+    create_key_parser.add_argument(
+        "--scope",
+        action="append",
+        required=True,
+        type=_parse_scope,
+        metavar="SCOPE",
+        help="Allowed Catalog API scope. Repeat for multiple scopes.",
+    )
+    create_key_parser.add_argument(
+        "--expires-at",
+        type=_parse_aware_datetime,
+        help="Optional future ISO-8601 timestamp with timezone (trailing Z supported).",
+    )
+    create_key_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+
+    list_keys_parser = subparsers.add_parser(
+        "list-catalog-api-keys",
+        help="List secret-safe Catalog API key metadata.",
+    )
+    list_keys_parser.add_argument("--customer", help="Filter by exact customer name.")
+    list_keys_parser.add_argument(
+        "--status",
+        type=_parse_catalog_key_status,
+        metavar="{active,disabled,revoked}",
+        help="Filter by status.",
+    )
+    list_keys_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+
+    revoke_key_parser = subparsers.add_parser(
+        "revoke-catalog-api-key",
+        help="Revoke a Catalog API key by immutable ID and exact displayed prefix.",
+    )
+    revoke_key_parser.add_argument("--key-id", required=True, help="Immutable Catalog API key UUID.")
+    revoke_key_parser.add_argument(
+        "--confirm-prefix",
+        required=True,
+        help="Exact displayed key prefix used as fail-closed confirmation.",
+    )
+    revoke_key_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+
+    return parser
 
 
-def main():
-    args = parse_args()
+def parse_args(argv: Sequence[str] | None = None):
+    return build_parser().parse_args(argv)
+
+
+def _safe_key_payload(key: CatalogApiKeyDTO) -> dict[str, object]:
+    return {
+        "keyId": str(key.id),
+        "keyPrefix": key.key_prefix,
+        "customer": key.customer_name,
+        "integration": key.integration_name,
+        "scopes": list(key.scopes),
+        "status": key.status,
+        "expiresAt": key.expires_at.isoformat() if key.expires_at else None,
+        "lastUsedAt": key.last_used_at.isoformat() if key.last_used_at else None,
+        "createdAt": key.created_at.isoformat(),
+        "updatedAt": key.updated_at.isoformat(),
+        "revokedAt": key.revoked_at.isoformat() if key.revoked_at else None,
+    }
+
+
+def _created_key_payload(created: CatalogApiKeyCreateDTO) -> dict[str, object]:
+    key = created.key
+    return {
+        "keyId": str(key.id),
+        "keyPrefix": key.key_prefix,
+        "customer": key.customer_name,
+        "integration": key.integration_name,
+        "scopes": list(key.scopes),
+        "status": key.status,
+        "expiresAt": key.expires_at.isoformat() if key.expires_at else None,
+        "createdAt": key.created_at.isoformat(),
+        "rawKey": created.raw_key,
+    }
+
+
+def _run_catalog_command(
+    *,
+    env_file: str | None,
+    operation: Callable[[Any], object],
+    serialize: Callable[[Any], object],
+) -> int:
+    """Run one short-lived lifecycle transaction and print only after commit."""
+    session = None
+    try:
+        session_factory = create_session_factory(env_file=env_file, nopool=True)
+        session = session_factory()
+        result = operation(session)
+        payload = serialize(result)
+        session.commit()
+    except Exception:
+        if session is not None:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+        print("Catalog API key operation failed.", file=sys.stderr)
+        return 1
+    finally:
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+    print(json.dumps(payload, indent=2))
+    return 0
+
+
+def main(argv: Sequence[str] | None = None):
+    args = parse_args(argv)
+
+    if args.command == "create-catalog-api-key":
+        return _run_catalog_command(
+            env_file=args.db_env_file,
+            operation=lambda session: create_catalog_api_key(
+                session,
+                customer_name=args.customer,
+                integration_name=args.integration,
+                scopes=args.scope,
+                expires_at=args.expires_at,
+            ),
+            serialize=lambda result: _created_key_payload(result),
+        )
+
+    if args.command == "list-catalog-api-keys":
+        return _run_catalog_command(
+            env_file=args.db_env_file,
+            operation=lambda session: list_catalog_api_keys(
+                session,
+                customer_name=args.customer,
+                status=args.status,
+            ),
+            serialize=lambda result: {"keys": [_safe_key_payload(key) for key in result]},
+        )
+
+    if args.command == "revoke-catalog-api-key":
+        return _run_catalog_command(
+            env_file=args.db_env_file,
+            operation=lambda session: revoke_catalog_api_key(
+                session,
+                args.key_id,
+                key_prefix=args.confirm_prefix,
+            ),
+            serialize=lambda result: _safe_key_payload(result),
+        )
 
     if args.command == "seed-agent-definitions":
         bridge = RuntimePersistenceBridge(env_file=args.db_env_file)
@@ -288,4 +475,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
