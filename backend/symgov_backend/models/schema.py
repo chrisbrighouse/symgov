@@ -369,11 +369,12 @@ class ClarificationRecord(Base):
     __tablename__ = "clarification_records"
     __table_args__ = (
         CheckConstraint(
-            "((submitted_by is not null and external_submitter_id is null) or (submitted_by is null and external_submitter_id is not null))",
-            name="clarification_records_one_submitter",
+            "(submitted_by is not null)::int + (external_submitter_id is not null)::int + (catalog_api_key_id is not null)::int = 1",
+            name="exactly_one_submitter",
         ),
         Index("ix_clarification_records_symbol_page_created_at", "symbol_id", "published_page_id", "created_at"),
         Index("ix_clarification_records_external_submitter_created_at", "external_submitter_id", "created_at"),
+        Index("ix_clarification_records_catalog_api_key_created_at", "catalog_api_key_id", "created_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -384,6 +385,8 @@ class ClarificationRecord(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False)
     submitted_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     external_submitter_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("external_identities.id"), nullable=True)
+    catalog_api_key_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("catalog_api_keys.id"), nullable=True)
+    context_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     detail: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
