@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 
 from symgov_backend.app import create_app
@@ -245,6 +246,88 @@ def test_catalog_contextual_search_caps_requested_limit_at_one_hundred():
     assert response.status_code == 200
     assert len(response.json()["items"]) == 100
     assert session.executed[-1][1]["limit"] == 100
+
+
+def test_catalog_contextual_search_defaults_missing_context_to_empty_object():
+    client, session = build_client(key_rows=[api_key_row("valid-token")], symbol_rows=[])
+    body = contextual_request()
+    body.pop("context")
+
+    response = client.post("/api/v1/catalog/search", headers=auth_headers(), json=body)
+
+    assert response.status_code == 200
+    assert response.json()["interpretedFilters"] == {}
+    assert len(session.executed) == 1
+
+
+@pytest.mark.parametrize("context", [None, [], ["AutoCAD"], "AutoCAD", 3, False])
+def test_catalog_contextual_search_rejects_explicit_non_object_context(context):
+    client, session = build_client(key_rows=[api_key_row("valid-token")])
+    body = contextual_request()
+    body["context"] = context
+
+    response = client.post("/api/v1/catalog/search", headers=auth_headers(), json=body)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "context must be a JSON object."
+    assert session.executed == []
+
+
+@pytest.mark.parametrize("limit", [True, False, "20", 20.0, 20.5, None])
+def test_catalog_contextual_search_rejects_non_integer_limit(limit):
+    client, session = build_client(key_rows=[api_key_row("valid-token")])
+    body = contextual_request()
+    body["limit"] = limit
+
+    response = client.post("/api/v1/catalog/search", headers=auth_headers(), json=body)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "limit must be an integer."
+    assert session.executed == []
+
+
+def test_catalog_contextual_search_body_is_capped_before_endpoint_buffering():
+    client, session = build_client(key_rows=[api_key_row("valid-token")])
+    response = client.post(
+        "/api/v1/catalog/search",
+        content=b'{"query":"' + b"x" * 17000 + b'"}',
+        headers={**auth_headers(), "Content-Type": "application/json"},
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Request body is too large."
+    assert session.executed == []
+
+
+@pytest.mark.parametrize("query", [None, "", "   ", "x" * 2001])
+def test_catalog_contextual_search_requires_a_bounded_query(query):
+    client, session = build_client(key_rows=[api_key_row("valid-token")])
+    body = contextual_request()
+    if query is None:
+        body.pop("query")
+    else:
+        body["query"] = query
+    response = client.post("/api/v1/catalog/search", headers=auth_headers(), json=body)
+    assert response.status_code == 400
+    assert session.executed == []
+    assert not any(isinstance(item, CatalogApiUsageEvent) for item in session.added)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"query": "Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature"},
+        {"query": "ghp_abcdefghijklmnopqrstuvwxyz1234567890"},
+        {"query": "AKIAZZZZZZZZZZZZZZZZ"},
+        {"query": "postgresql://user:password@db/catalog"},
+        {"query": "find symbol", "context": {"apiKey": "actual-secret-value"}},
+    ],
+)
+def test_catalog_contextual_search_rejects_credentials_before_search_or_usage_logging(body):
+    client, session = build_client(key_rows=[api_key_row("valid-token")])
+    response = client.post("/api/v1/catalog/search", headers=auth_headers(), json=body)
+    assert response.status_code == 400
+    assert session.executed == []
+    assert not any(isinstance(item, CatalogApiUsageEvent) for item in session.added)
 
 
 def test_catalog_contextual_search_usage_logging_failure_does_not_fail_response():

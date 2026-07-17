@@ -3,13 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import secrets
+from typing import cast
 import uuid
 
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .catalog_api_auth import PLANNED_CATALOG_API_SCOPES, hash_api_key
-from .models import AuditEvent, CatalogApiKey
+from .models import AuditEvent, CatalogApiKey, User
 
 
 _RAW_KEY_PREFIX = "symgov_live_"
@@ -27,6 +28,10 @@ class CatalogApiKeyNotFoundError(CatalogApiKeyError):
 
 class CatalogApiKeyPrefixMismatchError(CatalogApiKeyError):
     """Raised when revoke confirmation does not exactly match the stored prefix."""
+
+
+class CatalogApiKeyAlreadyActiveError(CatalogApiKeyError):
+    """Raised when a user already owns a current self-service key."""
 
 
 @dataclass(frozen=True)
@@ -151,9 +156,9 @@ def _safe_dto(row: CatalogApiKey) -> CatalogApiKeyDTO:
     )
 
 
-def _audit_payload(row: CatalogApiKey) -> dict[str, object]:
+def _audit_payload(row: CatalogApiKey, *, actor_type: str = "operator_cli") -> dict[str, object]:
     return {
-        "actor_type": "operator_cli",
+        "actor_type": actor_type,
         "api_key_id": str(row.id),
         "key_prefix": row.key_prefix,
         "customer_name": row.customer_name,
@@ -170,6 +175,8 @@ def create_catalog_api_key(
     scopes: object,
     expires_at: datetime | None = None,
     now: datetime | None = None,
+    created_by: uuid.UUID | None = None,
+    actor_type: str = "operator_cli",
 ) -> CatalogApiKeyCreateDTO:
     """Create a key and audit row without taking ownership of the transaction."""
     customer = _normalized_required_name(customer_name, field_name="customer_name")
@@ -198,7 +205,7 @@ def create_catalog_api_key(
         rate_limit_per_minute=None,
         expires_at=resolved_expiry,
         last_used_at=None,
-        created_by=None,
+        created_by=created_by,
         created_at=resolved_now,
         updated_at=resolved_now,
         revoked_at=None,
@@ -211,8 +218,8 @@ def create_catalog_api_key(
             entity_type="catalog_api_key",
             entity_id=key_row.id,
             action="catalog_api_key.created",
-            actor_id=None,
-            payload_json=_audit_payload(key_row),
+            actor_id=created_by,
+            payload_json=_audit_payload(key_row, actor_type=actor_type),
             created_at=resolved_now,
         )
     )
@@ -256,6 +263,8 @@ def revoke_catalog_api_key(
     *,
     key_prefix: str,
     now: datetime | None = None,
+    actor_id: uuid.UUID | None = None,
+    actor_type: str = "operator_cli",
 ) -> CatalogApiKeyDTO:
     """Revoke by immutable UUID and exact display-prefix confirmation."""
     try:
@@ -291,10 +300,124 @@ def revoke_catalog_api_key(
             entity_type="catalog_api_key",
             entity_id=row.id,
             action="catalog_api_key.revoked",
-            actor_id=None,
-            payload_json=_audit_payload(row),
+            actor_id=actor_id,
+            payload_json=_audit_payload(row, actor_type=actor_type),
             created_at=resolved_now,
         )
     )
     session.flush()
     return _safe_dto(row)
+
+
+def _user_uuid(user_id: uuid.UUID | str) -> uuid.UUID:
+    try:
+        return user_id if isinstance(user_id, uuid.UUID) else uuid.UUID(str(user_id))
+    except (TypeError, ValueError, AttributeError):
+        raise CatalogApiKeyNotFoundError("Catalog API key owner was not found") from None
+
+
+def _self_service_key_rows(session: Session, user_id: uuid.UUID) -> list[CatalogApiKey]:
+    return (
+        session.query(CatalogApiKey)
+        .filter(CatalogApiKey.created_by == user_id, CatalogApiKey.status == "active")
+        .all()
+    )
+
+
+def get_active_self_service_catalog_api_key(
+    session: Session,
+    user_id: uuid.UUID | str,
+    *,
+    now: datetime | None = None,
+) -> CatalogApiKeyDTO | None:
+    """Return only a current, non-secret key owned by the requesting user."""
+    owner_id = _user_uuid(user_id)
+    resolved_now = _aware_utc(now, field_name="now") if now is not None else _utc_now()
+    for row in _self_service_key_rows(session, owner_id):
+        if row.revoked_at is not None:
+            continue
+        if row.expires_at is not None and _aware_utc(cast(datetime, row.expires_at), field_name="expires_at") <= resolved_now:
+            continue
+        return _safe_dto(row)
+    return None
+
+
+def create_self_service_catalog_api_key(
+    session: Session,
+    *,
+    user_id: uuid.UUID | str,
+    customer_name: str,
+    integration_name: str,
+    scopes: object,
+    expires_at: datetime | None = None,
+    now: datetime | None = None,
+) -> CatalogApiKeyCreateDTO:
+    """Create at most one current key for a user under a stable user-row lock."""
+    owner_id = _user_uuid(user_id)
+    resolved_now = _aware_utc(now, field_name="now") if now is not None else _utc_now()
+    owner = session.query(User).filter(User.id == owner_id).with_for_update().one_or_none()
+    if owner is None:
+        raise CatalogApiKeyNotFoundError("Catalog API key owner was not found")
+
+    for row in _self_service_key_rows(session, owner_id):
+        is_expired = row.expires_at is not None and _aware_utc(cast(datetime, row.expires_at), field_name="expires_at") <= resolved_now
+        if row.revoked_at is None and not is_expired:
+            raise CatalogApiKeyAlreadyActiveError("An active Catalog API key already exists for this account")
+        if is_expired and row.revoked_at is None:
+            row.status = "revoked"
+            row.revoked_at = resolved_now
+            row.updated_at = resolved_now
+            session.add(
+                AuditEvent(
+                    id=uuid.uuid4(),
+                    entity_type="catalog_api_key",
+                    entity_id=row.id,
+                    action="catalog_api_key.expired",
+                    actor_id=owner_id,
+                    payload_json=_audit_payload(row, actor_type="integrator_self_service"),
+                    created_at=resolved_now,
+                )
+            )
+
+    return create_catalog_api_key(
+        session,
+        customer_name=customer_name,
+        integration_name=integration_name,
+        scopes=scopes,
+        expires_at=expires_at,
+        now=resolved_now,
+        created_by=owner_id,
+        actor_type="integrator_self_service",
+    )
+
+
+def revoke_self_service_catalog_api_key(
+    session: Session,
+    *,
+    user_id: uuid.UUID | str,
+    api_key_id: uuid.UUID | str,
+    key_prefix: str,
+    now: datetime | None = None,
+) -> CatalogApiKeyDTO:
+    """Revoke only the requesting user's own key, with prefix confirmation."""
+    owner_id = _user_uuid(user_id)
+    try:
+        resolved_key_id = api_key_id if isinstance(api_key_id, uuid.UUID) else uuid.UUID(str(api_key_id))
+    except (TypeError, ValueError, AttributeError):
+        raise CatalogApiKeyNotFoundError("Catalog API key not found") from None
+    owned = (
+        session.query(CatalogApiKey)
+        .filter(CatalogApiKey.id == resolved_key_id, CatalogApiKey.created_by == owner_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if owned is None:
+        raise CatalogApiKeyNotFoundError("Catalog API key not found")
+    return revoke_catalog_api_key(
+        session,
+        resolved_key_id,
+        key_prefix=key_prefix,
+        now=now,
+        actor_id=owner_id,
+        actor_type="integrator_self_service",
+    )

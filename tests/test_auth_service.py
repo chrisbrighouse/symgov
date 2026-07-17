@@ -39,6 +39,20 @@ def test_upsert_user_creates_unique_user_with_additive_roles_and_default_pin():
         assert user_roles(session, user.id) == ("admin", "reviewer", "submitter")
 
 
+def test_upsert_user_accepts_integrator_role():
+    Session = session_factory()
+    with Session() as session:
+        user = upsert_user(
+            session,
+            email="integrator@symgov.local",
+            display_name="Integrator",
+            roles=["integrator"],
+        )
+        session.commit()
+
+        assert user_roles(session, user.id) == ("integrator",)
+
+
 def test_authenticate_user_accepts_email_case_insensitively_and_rejects_wrong_pin():
     Session = session_factory()
     with Session() as session:

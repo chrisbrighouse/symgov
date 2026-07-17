@@ -43,6 +43,7 @@ import {
   updateWorkspaceReviewSymbolProperties
 } from './api.js';
 import { appConfig } from './config.js';
+import CatalogDeveloperHub from './CatalogDeveloperHub.jsx';
 import { changeQueue, daisyCoordinationReports, processingActivity, submissionPresets, symbols } from './data.js';
 import {
   DEFAULT_AGENT_RUN_DURATION_SECONDS,
@@ -422,6 +423,8 @@ function AppContent() {
           {/* Route path="/rights" element={<RightsReviewPage />} protected by reviewer/admin auth. */}
           <Route path="/rights" element={<RequireAnyRole roles={['admin', 'reviewer']}><RightsReviewPage /></RequireAnyRole>} />
           <Route path="/standards" element={<RequireAuth><StandardsPage /></RequireAuth>} />
+          <Route path="/integrator/catalog" element={<RequireAnyRole roles={['admin', 'integrator']}><CatalogDeveloperHub /></RequireAnyRole>} />
+          <Route path="/developers/catalog" element={<RequireAnyRole roles={['admin', 'integrator']}><Navigate to="/integrator/catalog" replace /></RequireAnyRole>} />
           <Route path="/standards/submit" element={<RequireAnyRole roles={['admin', 'submitter']}><SubmissionPage /></RequireAnyRole>} />
           <Route path="/support" element={<RequireAuth><SupportPage /></RequireAuth>} />
           <Route path="*" element={<HomeRedirect />} />
@@ -662,12 +665,14 @@ function SideRail() {
   const user = auth.user;
   const canSubmit = hasAnyRole(user, ['admin', 'submitter']);
   const canReview = hasAnyRole(user, ['admin', 'reviewer']);
+  const canIntegrate = hasAnyRole(user, ['admin', 'integrator']);
   const canAdmin = hasAnyRole(user, ['admin']);
 
   return (
     <aside className="side-rail" aria-label="Primary navigation">
       <nav className="rail-nav rail-nav-primary">
         <RailNavLink to="/standards" label="Catalog" end icon="catalog" />
+        {canIntegrate ? <RailNavLink to="/integrator/catalog" label="Integrator" icon="developers" /> : null}
         {canSubmit ? <RailNavLink to="/standards/submit" label="Submissions" icon="submissions" /> : null}
         {canReview ? <RailNavLink to="/rights" label="Rights" icon="rights" /> : null}
         {canReview ? <RailNavLink to="/reviews" label="Reviews" icon="reviews" /> : null}
@@ -706,6 +711,14 @@ function NavIcon({ name }) {
           <path d="M8.5 4.5v11A3.5 3.5 0 0 0 12 19" />
           <path d="M9 8h6" />
           <path d="M9 11h5" />
+        </svg>
+      );
+    case 'developers':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m8 8-4 4 4 4" />
+          <path d="m16 8 4 4-4 4" />
+          <path d="m14 5-4 14" />
         </svg>
       );
     case 'submissions':
@@ -5862,9 +5875,10 @@ function AdminUsersPage() {
         </label>
         <div className="create-user-actions">
           <div className="create-user-role-group" aria-label="User roles">
-            <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('admin')} onChange={(event) => setRole('admin', event.target.checked)} /><span>Admin</span></div>
-            <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('submitter')} onChange={(event) => setRole('submitter', event.target.checked)} /><span>Submitter</span></div>
-            <div className="checkbox-row"><input type="checkbox" checked={form.roles.includes('reviewer')} onChange={(event) => setRole('reviewer', event.target.checked)} /><span>Reviewer</span></div>
+            <label className="checkbox-row"><input type="checkbox" checked={form.roles.includes('admin')} onChange={(event) => setRole('admin', event.target.checked)} /><span>Admin</span></label>
+            <label className="checkbox-row"><input type="checkbox" checked={form.roles.includes('integrator')} onChange={(event) => setRole('integrator', event.target.checked)} /><span>Integrator</span></label>
+            <label className="checkbox-row"><input type="checkbox" checked={form.roles.includes('submitter')} onChange={(event) => setRole('submitter', event.target.checked)} /><span>Submitter</span></label>
+            <label className="checkbox-row"><input type="checkbox" checked={form.roles.includes('reviewer')} onChange={(event) => setRole('reviewer', event.target.checked)} /><span>Reviewer</span></label>
           </div>
           <button type="submit" className="action-button primary create-user-submit" disabled={createBusy}>{createBusy ? 'Saving…' : 'Create user'}</button>
         </div>
@@ -5918,7 +5932,7 @@ function AdminUsersPage() {
                     <td><span>{user.mustChangePin ? 'Change required' : 'Set'}</span></td>
                     <td>
                       <div className="action-stack horizontal role-pill-group">
-                        {['admin', 'submitter', 'reviewer'].map((role) => (
+                        {['admin', 'integrator', 'submitter', 'reviewer'].map((role) => (
                           <label key={`${user.id}-${role}`} className={`role-pill ${user.roles.includes(role) ? 'active' : ''}`}>
                             <input
                               type="checkbox"

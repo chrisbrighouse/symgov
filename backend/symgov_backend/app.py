@@ -15,6 +15,7 @@ from .routes.admin import router as admin_router
 from .routes.auth import legacy_router as legacy_auth_router
 from .routes.auth import router as auth_router
 from .routes.catalog import router as catalog_router
+from .routes.catalog_developer import router as catalog_developer_router
 from .routes.public import legacy_router as legacy_public_router
 from .routes.public import router as public_router
 from .routes.published import legacy_router as legacy_published_router
@@ -35,7 +36,13 @@ def load_app_version() -> str:
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title="Symgov API", version=load_app_version())
+    app = FastAPI(
+        title="Symgov API",
+        version=load_app_version(),
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(_, exc: StarletteHTTPException) -> JSONResponse:
@@ -53,6 +60,11 @@ def create_app() -> FastAPI:
     app.include_router(auth_router, prefix=settings.api_prefix)
     app.include_router(admin_router, prefix=settings.api_prefix)
     app.include_router(catalog_router, prefix=settings.api_prefix)
+    app.include_router(
+        catalog_developer_router,
+        prefix=settings.api_prefix,
+        dependencies=[Depends(require_any_role({"admin", "integrator"}))],
+    )
     app.include_router(
         public_router,
         prefix=settings.api_prefix,

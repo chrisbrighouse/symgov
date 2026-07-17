@@ -37,6 +37,15 @@ def test_admin_user_management_supports_inline_role_editing_and_custom_pin_modal
     assert "Custom 4-digit PIN" in source
 
 
+def test_admin_user_management_offers_integrator_role():
+    source = APP_JSX.read_text(encoding="utf-8")
+
+    assert "setRole('integrator'" in source
+    assert "<span>Integrator</span>" in source
+    assert "['admin', 'integrator', 'submitter', 'reviewer'].map" in source
+    assert '<label className="checkbox-row"><input type="checkbox" checked={form.roles.includes(\'integrator\')}' in source
+
+
 def test_admin_user_management_shows_toast_feedback():
     source = APP_JSX.read_text(encoding="utf-8")
 

@@ -100,6 +100,74 @@ async function postExternalSubmission(payload, wrapped = false) {
   return { response, payload: parsed };
 }
 
+export async function askCatalogIntegrationEd(apiKey, payload, signal) {
+  return requestJson('/catalog/developer/ed', {
+    method: 'POST',
+    signal,
+    headers: { Authorization: `Bearer ${String(apiKey || '').trim()}` },
+    body: JSON.stringify({ message: String(payload?.message || '').trim() })
+  });
+}
+
+export async function runCatalogDeveloperSandbox(apiKey, payload, signal) {
+  const { operation, ...input } = payload || {};
+  const allowedByOperation = {
+    capabilities: [],
+    taxonomy: [],
+    symbol_search: ['query', 'limit'],
+    symbol_detail: ['symbolRef'],
+    contextual_search: ['query', 'context', 'limit'],
+    ed_query: ['message']
+  };
+  const allowed = new Set(allowedByOperation[operation] || []);
+  const boundedInput = Object.fromEntries(
+    Object.entries(input).filter(([key, value]) => allowed.has(key) && value !== undefined)
+  );
+  return requestJson('/catalog/developer/sandbox', {
+    method: 'POST',
+    signal,
+    headers: { Authorization: `Bearer ${String(apiKey || '').trim()}` },
+    body: JSON.stringify({ operation, input: boundedInput })
+  });
+}
+
+export async function fetchCatalogDeveloperOpenApi(signal) {
+  return requestJson('/catalog/developer/openapi.json', {
+    cache: 'no-store',
+    signal
+  });
+}
+
+export async function fetchCatalogDeveloperManifest(signal) {
+  return requestJson('/catalog/developer', {
+    cache: 'no-store',
+    signal
+  });
+}
+
+export async function fetchCatalogSelfServiceApiKey(signal) {
+  return requestJson('/catalog/developer/api-key', {
+    cache: 'no-store',
+    signal
+  });
+}
+
+export async function createCatalogSelfServiceApiKey(payload, signal) {
+  return requestJson('/catalog/developer/api-key', {
+    method: 'POST',
+    signal,
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function revokeCatalogSelfServiceApiKey(payload, signal) {
+  return requestJson('/catalog/developer/api-key', {
+    method: 'DELETE',
+    signal,
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function fetchHealth() {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.' };

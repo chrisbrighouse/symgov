@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import uuid
 
+import pytest
 from starlette.requests import Request
 
 from symgov_backend.catalog_api_auth import IntegrationAuthContext
@@ -137,6 +138,74 @@ def test_sanitize_usage_text_redacts_sensitive_tokens_and_truncates():
     assert "api_key=[REDACTED]" in sanitized
     assert "Authorization: Bearer [REDACTED]" in sanitized
     assert "\n" not in sanitized
+
+
+@pytest.mark.parametrize(
+    ("marker", "submitted_value"),
+    [
+        ("usage_assignment_probe_7f3a", "token=usage_assignment_probe_7f3a"),
+        ("usage_bearer_probe_8c4b", "Bearer usage_bearer_probe_8c4b"),
+        (
+            "usage_uri_probe_9d5c",
+            "redis://catalog:usage_uri_probe_9d5c@cache.example/0",
+        ),
+        (
+            "usage_provider_probe_9a1c",
+            "ghp_usage_provider_probe_9a1c",
+        ),
+    ],
+    ids=("assignment", "bearer", "connection_uri", "provider_token"),
+)
+def test_build_catalog_usage_event_sanitizes_credentials_from_every_persisted_text_field(
+    marker,
+    submitted_value,
+):
+    submitted = {
+        "customer_name_snapshot": submitted_value,
+        "integration_name_snapshot": submitted_value,
+        "scope_used": submitted_value,
+        "method": submitted_value,
+        "path": f"/api/v1/catalog/{submitted_value}",
+        "route_name": submitted_value,
+        "request_id": submitted_value,
+        "query_text": submitted_value,
+        "symbol_ref": submitted_value,
+        "ed_query_type": submitted_value,
+        "user_agent": submitted_value,
+        "application_name": submitted_value,
+        "application_version": submitted_value,
+    }
+    assert all(marker in value for value in submitted.values())
+    request = request_with_headers(
+        {
+            "X-Request-ID": submitted["request_id"],
+            "User-Agent": submitted["user_agent"],
+            "X-Symgov-Application": submitted["application_name"],
+            "X-Symgov-Application-Version": submitted["application_version"],
+        },
+        method=submitted["method"],
+        path=submitted["path"],
+    )
+
+    event = build_catalog_usage_event(
+        auth_context(
+            customer_name=submitted["customer_name_snapshot"],
+            integration_name=submitted["integration_name_snapshot"],
+        ),
+        request=request,
+        scope_used=submitted["scope_used"],
+        route_name=submitted["route_name"],
+        status_code=200,
+        query_text=submitted["query_text"],
+        symbol_ref=submitted["symbol_ref"],
+        ed_query_type=submitted["ed_query_type"],
+    )
+
+    persisted_values = {
+        field_name: getattr(event, field_name)
+        for field_name in submitted
+    }
+    assert all(marker not in str(value) for value in persisted_values.values()), persisted_values
 
 
 def test_build_catalog_usage_event_snapshots_auth_context_and_request_metadata_without_raw_ip():

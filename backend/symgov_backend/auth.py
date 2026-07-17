@@ -17,7 +17,7 @@ from .models import User, UserRole, UserSession
 PIN_HASH_ALGORITHM = "pbkdf2_sha256"
 PIN_HASH_ITERATIONS = 260_000
 DEFAULT_INITIAL_PIN = "4590"
-VALID_ROLES = {"admin", "submitter", "reviewer"}
+VALID_ROLES = {"admin", "integrator", "submitter", "reviewer"}
 SESSION_TOKEN_BYTES = 32
 
 

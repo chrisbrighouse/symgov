@@ -267,6 +267,29 @@ def test_feedback_rejects_invalid_kind_and_message(body):
 
 
 @pytest.mark.parametrize(
+    "message",
+    [
+        "Authorization: Bearer actual-secret-value",
+        "token=actual-secret-value",
+        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.signature",
+        "ghp_abcdefghijklmnopqrstuvwxyz1234567890",
+        "AKIAZZZZZZZZZZZZZZZZ",
+        "postgresql://user:password@db/catalog",
+    ],
+)
+def test_feedback_rejects_credentials_in_principal_message_before_persistence(message):
+    session = FakeSession(key_row=api_key_row(), row=published_row())
+    response = build_client(session).post(
+        "/api/v1/catalog/symbols/0002-32/feedback",
+        json=valid_body(message=message),
+        headers=auth_headers(),
+    )
+    assert response.status_code == 400
+    assert records(session, ClarificationRecord) == []
+    assert records(session, CatalogApiUsageEvent) == []
+
+
+@pytest.mark.parametrize(
     "context",
     [
         None,

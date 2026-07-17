@@ -30,7 +30,7 @@ class User(Base):
 class UserRole(Base):
     __tablename__ = "user_roles"
     __table_args__ = (
-        CheckConstraint("role in ('admin', 'submitter', 'reviewer')", name="ck_user_roles_role"),
+        CheckConstraint("role in ('admin', 'integrator', 'submitter', 'reviewer')", name="ck_user_roles_role"),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)

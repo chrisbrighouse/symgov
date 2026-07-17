@@ -109,6 +109,24 @@ def test_admin_can_list_create_update_and_reset_users():
         assert authenticate_user(session, email="new.submitter@symgov.local", pin="6781") is not None
 
 
+def test_admin_can_assign_integrator_role():
+    client, _ = build_client_with_users()
+    assert client.post("/api/v1/auth/login", json={"email": "admin@symgov.local", "pin": "4590"}).status_code == 200
+
+    created = client.post(
+        "/api/v1/admin/users",
+        json={
+            "email": "integrator@symgov.local",
+            "displayName": "Catalog Integrator",
+            "roles": ["integrator"],
+            "pin": "4590",
+        },
+    )
+
+    assert created.status_code == 201
+    assert created.json()["user"]["roles"] == ["integrator"]
+
+
 def test_admin_create_user_rejects_duplicate_email_or_name():
     client, _ = build_client_with_users()
 

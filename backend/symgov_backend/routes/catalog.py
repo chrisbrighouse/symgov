@@ -15,6 +15,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ..catalog_api_auth import IntegrationAuthContext, require_catalog_scope
+from ..catalog_developer import contains_catalog_credentials
 from ..catalog_ed import CatalogEdMode, interpret_catalog_ed_prompt
 from ..catalog_search import (
     catalog_symbol_filters as _catalog_symbol_filters,
@@ -180,6 +181,31 @@ def get_catalog_capabilities(
                 "scope": CATALOG_READ_SCOPE,
             },
             {
+                "method": "GET",
+                "path": "/api/v1/catalog/symbols",
+                "scope": CATALOG_READ_SCOPE,
+            },
+            {
+                "method": "POST",
+                "path": "/api/v1/catalog/search",
+                "scope": CATALOG_READ_SCOPE,
+            },
+            {
+                "method": "GET",
+                "path": "/api/v1/catalog/symbols/{symbol_ref}",
+                "scope": CATALOG_READ_SCOPE,
+            },
+            {
+                "method": "GET",
+                "path": "/api/v1/catalog/symbols/{symbol_ref}/thumbnail",
+                "scope": CATALOG_READ_SCOPE,
+            },
+            {
+                "method": "GET",
+                "path": "/api/v1/catalog/symbols/{symbol_ref}/preview",
+                "scope": CATALOG_READ_SCOPE,
+            },
+            {
                 "method": "POST",
                 "path": "/api/v1/catalog/ed/query",
                 "scope": CATALOG_ED_QUERY_SCOPE,
@@ -191,9 +217,6 @@ def get_catalog_capabilities(
             },
         ],
         "futureCapabilities": [
-            "paginated symbol search",
-            "symbol detail and preview aliases",
-            "contextual Catalog search",
             "customer usage reporting",
         ],
         "scopes": [
@@ -495,9 +518,7 @@ def _reject_nonfinite_json_constant(value: str):
 
 
 async def _parse_strict_catalog_json_object(request: Request) -> dict:
-    raw_body = await request.body()
-    if len(raw_body) > _CATALOG_MAX_BODY_BYTES:
-        raise HTTPException(status_code=400, detail="Request body is too large.")
+    raw_body = await _read_bounded_catalog_body(request)
     try:
         body = json.loads(raw_body, parse_constant=_reject_nonfinite_json_constant)
     except (UnicodeDecodeError, ValueError) as exc:
@@ -620,6 +641,9 @@ async def catalog_symbol_feedback(
         raise HTTPException(status_code=400, detail="message must contain 1 to 2000 characters.")
     context = _validate_catalog_ed_context(body.get("context", {}))
 
+    if contains_catalog_credentials(message):
+        raise HTTPException(status_code=400, detail="message must not contain credentials.")
+
     row = _load_catalog_symbol_row(session, symbol_ref)
     api_key_id = uuid.UUID(auth_context.api_key_id)
     review_requested = kind_value == "send_for_review"
@@ -682,28 +706,28 @@ router.add_api_route(
 )
 
 
-@router.post("/search")
 async def contextual_catalog_search(
     request: Request,
     auth_context: IntegrationAuthContext = Depends(require_catalog_scope(CATALOG_READ_SCOPE)),
     session: Session = Depends(get_db_session),
 ) -> dict:
     started_at = perf_counter()
-    try:
-        body = await request.json()
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Request body must be valid JSON.") from exc
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
-
-    query = str(body.get("query") or "").strip()
-    context = body.get("context") or {}
+    body = await _parse_strict_catalog_json_object(request)
+    query_value = body.get("query")
+    if not isinstance(query_value, str):
+        raise HTTPException(status_code=400, detail="query must be a string.")
+    query = query_value.strip()
+    if not query or len(query) > 2000:
+        raise HTTPException(status_code=400, detail="query must contain 1 to 2000 characters.")
+    context = body["context"] if "context" in body else {}
     if not isinstance(context, dict):
         raise HTTPException(status_code=400, detail="context must be a JSON object.")
-    try:
-        limit = min(max(int(body.get("limit", 20)), 1), 100)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="limit must be an integer.") from exc
+    if contains_catalog_credentials(query) or contains_catalog_credentials(context):
+        raise HTTPException(status_code=400, detail="query and context must not contain credentials.")
+    requested_limit = body.get("limit", 20)
+    if isinstance(requested_limit, bool) or not isinstance(requested_limit, int):
+        raise HTTPException(status_code=400, detail="limit must be an integer.")
+    limit = min(max(requested_limit, 1), 100)
 
     result = search_catalog_symbols_for_context(session, query=query, context=context, limit=limit)
     items = result.items
@@ -729,6 +753,13 @@ async def contextual_catalog_search(
         result_count=len(items),
     )
     return response
+
+
+router.add_api_route(
+    "/search",
+    contextual_catalog_search,
+    methods=["POST"],
+)
 
 
 @router.get("/symbols")

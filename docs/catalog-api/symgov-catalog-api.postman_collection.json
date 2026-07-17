@@ -1,0 +1,61 @@
+{
+  "info": {
+    "name": "Symgov Catalog Integration API v1",
+    "description": "Current customer Catalog integration endpoints. Downloads are not available.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{catalogApiKey}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "https://YOUR_SYMGOV_HOST" },
+    { "key": "catalogApiKey", "value": "YOUR_CATALOG_API_KEY", "type": "secret" },
+    { "key": "symbolRef", "value": "0003-12" }
+  ],
+  "item": [
+    {
+      "name": "Capabilities",
+      "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/v1/catalog/capabilities", "host": ["{{baseUrl}}"], "path": ["catalog", "capabilities"] } }
+    },
+    {
+      "name": "Taxonomy",
+      "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/v1/catalog/taxonomy", "host": ["{{baseUrl}}"], "path": ["catalog", "taxonomy"] } }
+    },
+    {
+      "name": "Search symbols",
+      "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/v1/catalog/symbols?q=smoke%20detector&limit=5", "host": ["{{baseUrl}}"], "path": ["catalog", "symbols"], "query": [{ "key": "q", "value": "smoke detector" }, { "key": "limit", "value": "5" }] } }
+    },
+    {
+      "name": "Symbol detail",
+      "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/v1/catalog/symbols/{{symbolRef}}", "host": ["{{baseUrl}}"], "path": ["catalog", "symbols", "{{symbolRef}}"] } }
+    },
+    {
+      "name": "Contextual search",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"query\": \"smoke detector near stairwell\",\n  \"context\": {\n    \"application\": \"Customer Portal\",\n    \"drawingType\": \"life_safety_plan\"\n  },\n  \"limit\": 10\n}" },
+        "url": { "raw": "{{baseUrl}}/api/v1/catalog/search", "host": ["{{baseUrl}}"], "path": ["catalog", "search"] }
+      }
+    },
+    {
+      "name": "Ask Catalog Ed",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"message\": \"Find smoke detector symbols\",\n  \"mode\": \"auto\",\n  \"context\": {\n    \"application\": \"Customer Portal\"\n  },\n  \"limit\": 10\n}" },
+        "url": { "raw": "{{baseUrl}}/api/v1/catalog/ed/query", "host": ["{{baseUrl}}"], "path": ["catalog", "ed", "query"] }
+      }
+    },
+    {
+      "name": "Submit symbol feedback",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"kind\": \"usage_question\",\n  \"message\": \"Is this suitable for our drawing review workflow?\",\n  \"context\": {\n    \"application\": \"Apryse Viewer\"\n  }\n}" },
+        "url": { "raw": "{{baseUrl}}/api/v1/catalog/symbols/{{symbolRef}}/feedback", "host": ["{{baseUrl}}"], "path": ["catalog", "symbols", "{{symbolRef}}", "feedback"] }
+      }
+    }
+  ]
+}

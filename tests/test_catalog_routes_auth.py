@@ -124,19 +124,59 @@ def test_catalog_capabilities_describes_only_public_catalog_integration_surface(
     assert payload["auth"]["preferredHeader"] == "Authorization: Bearer ***"
     assert payload["supports"]["keywordSearch"] is True
     assert payload["supports"]["edQuestions"] is True
-    assert {
-        "method": "POST",
-        "path": "/api/v1/catalog/ed/query",
-        "scope": "catalog.ed.query",
-    } in payload["currentEndpoints"]
-    assert {
-        "method": "POST",
-        "path": "/api/v1/catalog/symbols/{symbol_ref}/feedback",
-        "scope": "catalog.feedback.write",
-    } in payload["currentEndpoints"]
+    assert payload["currentEndpoints"] == [
+        {
+            "method": "GET",
+            "path": "/api/v1/catalog/capabilities",
+            "scope": "catalog.read",
+        },
+        {
+            "method": "GET",
+            "path": "/api/v1/catalog/taxonomy",
+            "scope": "catalog.read",
+        },
+        {
+            "method": "GET",
+            "path": "/api/v1/catalog/symbols",
+            "scope": "catalog.read",
+        },
+        {
+            "method": "POST",
+            "path": "/api/v1/catalog/search",
+            "scope": "catalog.read",
+        },
+        {
+            "method": "GET",
+            "path": "/api/v1/catalog/symbols/{symbol_ref}",
+            "scope": "catalog.read",
+        },
+        {
+            "method": "GET",
+            "path": "/api/v1/catalog/symbols/{symbol_ref}/thumbnail",
+            "scope": "catalog.read",
+        },
+        {
+            "method": "GET",
+            "path": "/api/v1/catalog/symbols/{symbol_ref}/preview",
+            "scope": "catalog.read",
+        },
+        {
+            "method": "POST",
+            "path": "/api/v1/catalog/ed/query",
+            "scope": "catalog.ed.query",
+        },
+        {
+            "method": "POST",
+            "path": "/api/v1/catalog/symbols/{symbol_ref}/feedback",
+            "scope": "catalog.feedback.write",
+        },
+    ]
     assert payload["supports"]["feedback"] is True
     assert "integration feedback submission" not in payload["futureCapabilities"]
     assert "Ed question and symbol-finding support" not in payload["futureCapabilities"]
+    assert "paginated symbol search" not in payload["futureCapabilities"]
+    assert "symbol detail and preview aliases" not in payload["futureCapabilities"]
+    assert "contextual Catalog search" not in payload["futureCapabilities"]
     assert payload["links"] == {
         "capabilities": "/api/v1/catalog/capabilities",
         "taxonomy": "/api/v1/catalog/taxonomy",

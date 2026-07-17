@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -18,6 +19,22 @@ class APIHealthResponse(BaseModel):
 class APIErrorResponse(BaseModel):
     error: str
     detail: str
+
+
+class CatalogSelfServiceApiKeyCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    customerName: str = Field(min_length=1, max_length=200)
+    integrationName: str = Field(min_length=1, max_length=200)
+    scopes: list[str] = Field(min_length=1, max_length=10)
+    expiresAt: datetime | None = None
+
+
+class CatalogSelfServiceApiKeyRevokeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    keyId: str = Field(min_length=36, max_length=36)
+    keyPrefix: str = Field(min_length=1, max_length=100)
 
 
 class AuthLoginRequest(BaseModel):
