@@ -5,6 +5,7 @@ import {
   addSymbolsToClipboard,
   applySavedCatalogView,
   buildCatalogCardSummary,
+  buildCatalogPreviewOptions,
   buildCatalogFacetValues,
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
@@ -139,6 +140,21 @@ test('builds compact card summaries for symbol browsing', () => {
     hasPhotos: false,
     commentCount: 0
   });
+});
+
+test('builds format badges that identify the active preview and only enable browser-previewable formats', () => {
+  const options = buildCatalogPreviewOptions({
+    ...fireAlarmSymbol,
+    availableFormats: ['DXF', 'PNG', 'SVG'],
+    previewAsset: { format: 'png' },
+    previewAssets: [{ format: 'png' }, { format: 'svg' }]
+  }, 'SVG');
+
+  assert.deepEqual(options, [
+    { format: 'DXF', active: false, previewable: false },
+    { format: 'SVG', active: true, previewable: true },
+    { format: 'PNG', active: false, previewable: true }
+  ]);
 });
 
 test('Ed guided search maps natural language to non-mutating Catalog filters', () => {

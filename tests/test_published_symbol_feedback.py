@@ -13,6 +13,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 from symgov_backend.routes.published import (
     MAX_PUBLISHED_SYMBOL_COMMAND_SELECTION,
     choose_published_preview_asset,
+    get_published_symbol_preview,
     normalize_published_symbol_command_request,
     published_symbol_comment_item,
     published_symbol_display_id,
@@ -220,6 +221,7 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
 
         self.assertEqual(payload["previewUrl"], "/api/v1/published/symbols/0002-33/preview")
         self.assertEqual(payload["previewAsset"]["object_key"], "symbols/pump.svg")
+        self.assertEqual(payload["previewAssets"], [payload["previewAsset"]])
         self.assertEqual(payload["downloads"], ["pump.dxf"])
         self.assertEqual([asset["object_key"] for asset in payload["downloadAssets"]], ["symbols/pump.dxf"])
         self.assertEqual(choose_published_preview_asset(row.payload_json)["object_key"], "symbols/pump.svg")
@@ -262,6 +264,135 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
 
         self.assertIsNone(payload["previewUrl"])
         self.assertIsNone(payload["previewAsset"])
+        self.assertEqual(payload["previewAssets"], [])
+
+    def test_published_preview_endpoint_serves_the_requested_browser_format(self) -> None:
+        payload_json = {
+            "visual_assets": {
+                "preview": {
+                    "object_key": "symbols/pump.png",
+                    "filename": "pump.png",
+                    "content_type": "image/png",
+                    "format": "png",
+                },
+                "source_assets": [
+                    {
+                        "object_key": "symbols/pump.svg",
+                        "filename": "pump.svg",
+                        "content_type": "image/svg+xml",
+                        "format": "svg",
+                    }
+                ],
+            }
+        }
+
+        class QueryResult:
+            def filter(self, *_args):
+                return self
+
+            def one_or_none(self):
+                return SimpleNamespace(content_type="image/svg+xml")
+
+        class Session:
+            def execute(self, *_args, **_kwargs):
+                return SimpleNamespace(all=lambda: [SimpleNamespace(payload_json=payload_json)])
+
+            def query(self, *_args):
+                return QueryResult()
+
+        with patch(
+            "symgov_backend.routes.published.download_object_bytes",
+            return_value={"payload": b"<svg />", "content_type": "image/svg+xml"},
+        ):
+            response = get_published_symbol_preview("pump", format="SVG", session=Session())
+
+        self.assertEqual(response.body, b"<svg />")
+        self.assertEqual(response.media_type, "image/svg+xml")
+        self.assertEqual(response.headers["content-security-policy"], "sandbox")
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+
+    def test_published_preview_endpoint_sandboxes_svg_media_type_despite_format_metadata(self) -> None:
+        payload_json = {
+            "visual_assets": {
+                "preview": {
+                    "object_key": "symbols/mislabeled.png",
+                    "filename": "mislabeled.png",
+                    "content_type": "image/png",
+                    "format": "png",
+                }
+            }
+        }
+
+        class QueryResult:
+            def filter(self, *_args):
+                return self
+
+            def one_or_none(self):
+                return SimpleNamespace(content_type="image/svg+xml")
+
+        class Session:
+            def execute(self, *_args, **_kwargs):
+                return SimpleNamespace(all=lambda: [SimpleNamespace(payload_json=payload_json)])
+
+            def query(self, *_args):
+                return QueryResult()
+
+        with patch(
+            "symgov_backend.routes.published.download_object_bytes",
+            return_value={"payload": b"<svg><script /></svg>", "content_type": "image/svg+xml"},
+        ):
+            response = get_published_symbol_preview("mislabeled", format="PNG", session=Session())
+
+        self.assertEqual(response.media_type, "image/svg+xml")
+        self.assertEqual(response.headers["content-security-policy"], "sandbox")
+        self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+
+    def test_published_preview_endpoint_sandboxes_all_responses_despite_active_content_mismatches(self) -> None:
+        payload_json = {
+            "visual_assets": {
+                "preview": {
+                    "object_key": "symbols/mislabeled.png",
+                    "filename": "mislabeled.png",
+                    "content_type": "image/png",
+                    "format": "png",
+                }
+            }
+        }
+
+        class QueryResult:
+            def __init__(self, content_type: str):
+                self.content_type = content_type
+
+            def filter(self, *_args):
+                return self
+
+            def one_or_none(self):
+                return SimpleNamespace(content_type=self.content_type)
+
+        class Session:
+            def __init__(self, content_type: str):
+                self.content_type = content_type
+
+            def execute(self, *_args, **_kwargs):
+                return SimpleNamespace(all=lambda: [SimpleNamespace(payload_json=payload_json)])
+
+            def query(self, *_args):
+                return QueryResult(self.content_type)
+
+        cases = (
+            ("text/html", b"<script>window.top.location='https://example.test'</script>"),
+            ("image/png", b"<svg xmlns='http://www.w3.org/2000/svg'><script /></svg>"),
+        )
+        for media_type, body in cases:
+            with self.subTest(media_type=media_type), patch(
+                "symgov_backend.routes.published.download_object_bytes",
+                return_value={"payload": body, "content_type": media_type},
+            ):
+                response = get_published_symbol_preview("mislabeled", format="PNG", session=Session(media_type))
+
+            self.assertEqual(response.media_type, media_type)
+            self.assertEqual(response.headers["content-security-policy"], "sandbox")
+            self.assertEqual(response.headers["x-content-type-options"], "nosniff")
 
     def test_published_symbol_comment_item_serializes_history_entry(self) -> None:
         comment = SimpleNamespace(

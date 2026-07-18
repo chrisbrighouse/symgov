@@ -12,6 +12,8 @@ from symgov_backend.asset_manifest import (  # noqa: E402
     is_browser_previewable,
     list_available_assets,
     list_download_assets,
+    list_preview_assets,
+    select_preview_asset,
 )
 
 
@@ -429,3 +431,42 @@ def test_list_available_assets_includes_source_preview_downloads_and_derivatives
         "assets/license.txt",
         "assets/generated.svg",
     ]
+
+
+def test_lists_one_browser_preview_asset_per_available_format_and_selects_requested_format():
+    payload = {
+        "visual_assets": {
+            "preview": {
+                "object_key": "assets/pump.png",
+                "filename": "pump.png",
+                "content_type": "image/png",
+                "format": "png",
+            },
+            "source_assets": [
+                {
+                    "object_key": "assets/pump.dxf",
+                    "filename": "pump.dxf",
+                    "content_type": "application/dxf",
+                    "format": "dxf",
+                },
+                {
+                    "object_key": "assets/pump.svg",
+                    "filename": "pump.svg",
+                    "content_type": "image/svg+xml",
+                    "format": "svg",
+                },
+            ],
+            "derivatives": [
+                {
+                    "object_key": "assets/pump-thumbnail.png",
+                    "filename": "pump-thumbnail.png",
+                    "content_type": "image/png",
+                    "format": "png",
+                }
+            ],
+        }
+    }
+
+    assert [asset["format"] for asset in list_preview_assets(payload)] == ["png", "svg"]
+    assert select_preview_asset(payload, "SVG")["object_key"] == "assets/pump.svg"
+    assert select_preview_asset(payload, "dxf") is None

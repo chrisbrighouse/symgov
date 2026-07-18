@@ -204,8 +204,12 @@ export function availableFormatsForSymbol(symbol = {}) {
 
   pushFormat(symbol.format);
   pushFormat(symbol.contentType);
+  (symbol.availableFormats || []).forEach(pushFormat);
   (symbol.downloads || []).forEach(pushFormat);
   (symbol.downloadAssets || []).forEach((asset) => {
+    pushFormat(asset?.format || asset?.filename || asset?.content_type || asset?.contentType || asset?.object_key);
+  });
+  [...(symbol.previewAssets || []), symbol.previewAsset].filter(Boolean).forEach((asset) => {
     pushFormat(asset?.format || asset?.filename || asset?.content_type || asset?.contentType || asset?.object_key);
   });
   const payload = symbol.payload || {};
@@ -382,6 +386,27 @@ export function buildCatalogCardSummary(symbol = {}) {
     hasPhotos: Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length > 0,
     commentCount: Number(symbol.commentCount || 0) || (symbol.hasComments ? 1 : 0)
   };
+}
+
+export function buildCatalogPreviewOptions(symbol = {}, selectedFormat = '') {
+  const taxonomy = catalogTaxonomyForSymbol(symbol);
+  const normalizeFormat = (value) => String(value || '').trim().replace(/^\./, '').toUpperCase();
+  const activeFormat = normalizeFormat(selectedFormat || symbol.previewAsset?.format);
+  const previewableFormats = new Set(
+    [...(symbol.previewAssets || []), symbol.previewAsset]
+      .filter(Boolean)
+      .map((asset) => normalizeFormat(asset.format))
+      .filter(Boolean)
+  );
+
+  return taxonomy.availableFormats.map((format) => {
+    const normalized = normalizeFormat(format);
+    return {
+      format: normalized,
+      active: normalized === activeFormat,
+      previewable: previewableFormats.has(normalized)
+    };
+  });
 }
 
 export function interpretEdCatalogPrompt(prompt = '') {

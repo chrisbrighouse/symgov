@@ -36,6 +36,7 @@ import {
   resetAdminUserPin,
   testAdminLlmPrompt,
   submitPublishedSymbolCommand,
+  updateCatalogFavourite,
   updateScottSourceSiteIncludeNextRun,
   updateScottSourceSitePrompt,
   updateScottSourceSiteStatus,
@@ -44,6 +45,8 @@ import {
 } from './api.js';
 import { appConfig } from './config.js';
 import CatalogDeveloperHub from './CatalogDeveloperHub.jsx';
+import FavouriteButton from './FavouriteButton.js';
+import FavouriteFilter from './FavouriteFilter.js';
 import { changeQueue, daisyCoordinationReports, processingActivity, submissionPresets, symbols } from './data.js';
 import {
   DEFAULT_AGENT_RUN_DURATION_SECONDS,
@@ -55,6 +58,7 @@ import {
   addSymbolsToClipboard,
   applySavedCatalogView,
   buildCatalogCardSummary,
+  buildCatalogPreviewOptions,
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
   catalogTaxonomyForSymbol,
@@ -63,6 +67,14 @@ import {
   serializeCatalogPreferences,
   sortSymbolsByPreferredFormats
 } from './catalogWorkbench.js';
+import {
+  applyFavouriteState,
+  applySequencedCatalogLoadState,
+  applySequencedFavouriteState,
+  buildFavouriteToggle,
+  catalogItemsForDisplay,
+  filterCatalogSymbols
+} from './catalogFavourites.js';
 
 const REVIEW_ITEM_ACTION_OPTIONS = [
   ['approve', 'Approve'],
@@ -883,6 +895,9 @@ function StandardsPage() {
   const [workbenchExpanded, setWorkbenchExpanded] = useState(false);
   const [catalogResultView, setCatalogResultView] = useState('cards');
   const [workbenchStatus, setWorkbenchStatus] = useState({ mode: '', message: '' });
+  const [favouriteStatus, setFavouriteStatus] = useState({ mode: '', message: '' });
+  const [pendingFavouriteIds, setPendingFavouriteIds] = useState([]);
+  const [showFavourites, setShowFavourites] = useState(false);
   const [edCatalogPrompt, setEdCatalogPrompt] = useState('');
   const [edCatalogInterpretation, setEdCatalogInterpretation] = useState(null);
   const [standardsState, setStandardsState] = useState({
@@ -892,7 +907,11 @@ function StandardsPage() {
     items: appConfig.apiRoot ? [] : symbols
   });
   const standardsGridRef = useRef(null);
-  const standardsSymbols = standardsState.items.length ? standardsState.items : symbols;
+  const catalogLoadSequenceRef = useRef(0);
+  const catalogMutationSequenceRef = useRef(0);
+  const favouriteOperationSequencesRef = useRef(new Map());
+  const standardsSymbols = catalogItemsForDisplay(standardsState, symbols);
+  const favouriteMutationsEnabled = !standardsState.loading && standardsState.mode === 'live';
   const requestedSymbolId = searchParams.get('symbol') || '';
   const standardsColumns = [
     ['id', 'ID'],
@@ -931,35 +950,11 @@ function StandardsPage() {
   }, [standardsSymbols]);
 
   const filteredSymbols = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-
-    const filtered = standardsSymbols.filter((symbol) => {
-      const matchesSearch = !normalizedQuery || buildCatalogSearchText(symbol).toLowerCase().includes(normalizedQuery);
-
-      if (!matchesSearch) {
-        return false;
-      }
-
-      const matchesColumns = Object.entries(columnFilters).every(([key, value]) => {
-        const normalizedValue = String(value || '').trim().toLowerCase();
-        if (!normalizedValue) {
-          return true;
-        }
-        return getSymbolField(symbol, key).toLowerCase().includes(normalizedValue);
-      });
-
-      if (!matchesColumns) {
-        return false;
-      }
-
-      return Object.entries(facetFilters).every(([key, selected]) => {
-        if (!selected?.length) {
-          return true;
-        }
-        const values = getSymbolFacetValues(symbol, key).map((value) => String(value || '').trim());
-        return selected.some((value) => values.includes(value));
-      });
-    });
+    const filtered = filterCatalogSymbols(
+      standardsSymbols,
+      { query, columnFilters, facetFilters, showFavourites },
+      { buildSearchText: buildCatalogSearchText, getField: getSymbolField, getFacetValues: getSymbolFacetValues }
+    );
 
     const sorted = filtered.sort((left, right) => {
       const leftValue = getSymbolField(left, sortState.key);
@@ -968,7 +963,7 @@ function StandardsPage() {
       return sortState.direction === 'asc' ? result : -result;
     });
     return sortSymbolsByPreferredFormats(sorted, catalogPreferences.formats);
-  }, [standardsSymbols, query, columnFilters, facetFilters, sortState, catalogPreferences.formats]);
+  }, [standardsSymbols, query, columnFilters, facetFilters, showFavourites, sortState, catalogPreferences.formats]);
 
   const visibleSymbols = filteredSymbols.slice(0, displayCount);
   const selectedSymbols = selectedSymbolIds
@@ -978,6 +973,19 @@ function StandardsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const loadSequence = catalogLoadSequenceRef.current + 1;
+    catalogLoadSequenceRef.current = loadSequence;
+    const mutationSequenceAtStart = catalogMutationSequenceRef.current;
+    const applyLoadedState = (loadedState) => {
+      setStandardsState((current) => applySequencedCatalogLoadState(
+        current,
+        loadedState,
+        loadSequence,
+        catalogLoadSequenceRef.current,
+        mutationSequenceAtStart,
+        catalogMutationSequenceRef.current
+      ));
+    };
 
     fetchPublishedSymbols().then((result) => {
       if (cancelled) {
@@ -985,7 +993,7 @@ function StandardsPage() {
       }
 
       if (result.ok) {
-        setStandardsState({
+        applyLoadedState({
           loading: false,
           mode: 'live',
           message: result.items.length ? result.message : 'No live published records are currently available.',
@@ -994,7 +1002,7 @@ function StandardsPage() {
         return;
       }
 
-      setStandardsState({
+      applyLoadedState({
         loading: false,
         mode: result.mode,
         message: result.message,
@@ -1044,13 +1052,14 @@ function StandardsPage() {
       setActiveId(requestedSymbol.id);
       setColumnFilters({});
       setFacetFilters({});
+      setShowFavourites(false);
       setQuery('');
     }
   }, [requestedSymbolId, standardsSymbols]);
 
   useEffect(() => {
     setDisplayCount(60);
-  }, [query, columnFilters, facetFilters, sortState]);
+  }, [query, columnFilters, facetFilters, showFavourites, sortState]);
 
   const activeSymbol = filteredSymbols.find((symbol) => symbol.id === activeId) || null;
 
@@ -1113,6 +1122,64 @@ function StandardsPage() {
       }
       return [...current, symbolId];
     });
+  }
+
+  async function toggleCatalogFavourite(symbolId) {
+    if (!favouriteMutationsEnabled || pendingFavouriteIds.includes(symbolId)) {
+      return;
+    }
+
+    const toggle = buildFavouriteToggle(standardsSymbols, symbolId);
+    const operationSequence = (favouriteOperationSequencesRef.current.get(symbolId) || 0) + 1;
+    favouriteOperationSequencesRef.current.set(symbolId, operationSequence);
+    catalogMutationSequenceRef.current += 1;
+    setPendingFavouriteIds((current) => [...current, symbolId]);
+    setFavouriteStatus({ mode: '', message: '' });
+    setStandardsState((current) => ({
+      ...current,
+      items: applyFavouriteState(current.items, symbolId, toggle.isFavourite)
+    }));
+
+    try {
+      const result = await updateCatalogFavourite(symbolId, toggle.isFavourite);
+      setStandardsState((current) => ({
+        ...current,
+        items: applySequencedFavouriteState(
+          current.items,
+          symbolId,
+          Boolean(result?.isFavourite),
+          operationSequence,
+          favouriteOperationSequencesRef.current.get(symbolId)
+        )
+      }));
+      if (operationSequence === favouriteOperationSequencesRef.current.get(symbolId)) {
+        setFavouriteStatus({
+          mode: 'success',
+          message: toggle.isFavourite ? 'Added to Favourites.' : 'Removed from Favourites.'
+        });
+      }
+    } catch (error) {
+      setStandardsState((current) => ({
+        ...current,
+        items: applySequencedFavouriteState(
+          current.items,
+          symbolId,
+          !toggle.isFavourite,
+          operationSequence,
+          favouriteOperationSequencesRef.current.get(symbolId)
+        )
+      }));
+      if (operationSequence === favouriteOperationSequencesRef.current.get(symbolId)) {
+        setFavouriteStatus({
+          mode: 'error',
+          message: error instanceof Error ? error.message : 'Favourite update failed.'
+        });
+      }
+    } finally {
+      if (operationSequence === favouriteOperationSequencesRef.current.get(symbolId)) {
+        setPendingFavouriteIds((current) => current.filter((value) => value !== symbolId));
+      }
+    }
   }
 
   function openPublishedCommandDialog(command) {
@@ -1536,6 +1603,10 @@ function StandardsPage() {
       <div className={`standards-browser-grid ${activeId && activeSymbol ? 'has-detail' : ''}`}>
         <section className="glass-panel pane facets-panel">
           <SectionHeading title="Filter symbols" subtitle="Narrow by properties" />
+          <div className="facet-group">
+            <h4>Favourites</h4>
+            <FavouriteFilter checked={showFavourites} onChange={setShowFavourites} />
+          </div>
           {facetOptions.map((facet) => (
             <div key={facet.key} className="facet-group">
               <h4>{facet.label}</h4>
@@ -1607,6 +1678,14 @@ function StandardsPage() {
           {commandStatus.message ? (
             <p className={`inline-status ${commandStatus.mode || 'info'}`}>{commandStatus.message}</p>
           ) : null}
+          {favouriteStatus.message ? (
+            <p
+              className={`inline-status ${favouriteStatus.mode || 'info'}`}
+              role={favouriteStatus.mode === 'error' ? 'alert' : 'status'}
+            >
+              {favouriteStatus.message}
+            </p>
+          ) : null}
           <div
             className="approved-symbol-grid"
             ref={standardsGridRef}
@@ -1630,6 +1709,9 @@ function StandardsPage() {
                       aria-pressed={symbol.id === activeId}
                       onClick={() => selectSymbol(symbol.id)}
                       onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) {
+                          return;
+                        }
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault();
                           selectSymbol(symbol.id);
@@ -1652,15 +1734,21 @@ function StandardsPage() {
                         <div className="catalog-card-title-row">
                           <strong>{card.displayId}</strong>
                           <span className="catalog-card-icons">
+                            <FavouriteButton
+                              symbol={symbol}
+                              pressed={Boolean(symbol.isFavourite)}
+                              disabled={!favouriteMutationsEnabled}
+                              pending={pendingFavouriteIds.includes(symbol.id)}
+                              onToggle={() => toggleCatalogFavourite(symbol.id)}
+                            />
                             <span title={card.hasPhotos ? `${symbol.supplementalPhotos.length} photo(s)` : 'No photos yet'}>{card.hasPhotos ? '📷' : '—'}</span>
                             <span title={card.commentCount ? `${card.commentCount} comment(s)` : 'No comments yet'}>{card.commentCount ? '💬' : '—'}</span>
                           </span>
                         </div>
                         <h4>{card.name || 'Unnamed symbol'}</h4>
                         <p>{card.categories.slice(0, 2).join(' · ') || 'Category pending'}</p>
-                        <div className="catalog-card-chip-row" aria-label="Disciplines and formats">
+                        <div className="catalog-card-chip-row" aria-label="Disciplines">
                           {card.disciplines.slice(0, 2).map((value) => <span key={`${symbol.id}-discipline-${value}`}>{value}</span>)}
-                          {card.formats.slice(0, 3).map((value) => <span key={`${symbol.id}-format-${value}`} className="format-chip">{value}</span>)}
                         </div>
                       </div>
                     </article>
@@ -1672,6 +1760,7 @@ function StandardsPage() {
                 <thead>
                   <tr>
                     <th aria-label="Select symbols" className="select-column">Select</th>
+                    <th aria-label="Favourites">Favourite</th>
                     <th>Preview</th>
                     {standardsColumns.map(([key, label]) => (
                       <th key={key}>
@@ -1701,6 +1790,9 @@ function StandardsPage() {
                         selectSymbol(symbol.id);
                       }}
                       onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) {
+                          return;
+                        }
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault();
                           selectSymbol(symbol.id);
@@ -1714,6 +1806,15 @@ function StandardsPage() {
                           checked={selectedSymbolIds.includes(symbol.id)}
                           disabled={!selectedSymbolIds.includes(symbol.id) && selectionLimitReached}
                           onChange={() => toggleSymbolSelection(symbol.id)}
+                        />
+                      </td>
+                      <td onClick={(event) => event.stopPropagation()}>
+                        <FavouriteButton
+                          symbol={symbol}
+                          pressed={Boolean(symbol.isFavourite)}
+                          disabled={!favouriteMutationsEnabled}
+                          pending={pendingFavouriteIds.includes(symbol.id)}
+                          onToggle={() => toggleCatalogFavourite(symbol.id)}
                         />
                       </td>
                       <td className="preview-cell">
@@ -3281,51 +3382,124 @@ function isTerminalReviewStage(stage) {
   );
 }
 
-function buildPublishedPreviewCandidates(symbol) {
+function buildPublishedPreviewCandidates(symbol, selectedFormat = '') {
   const candidates = [];
   const symbolReference = symbol?.slug || symbol?.id || symbol?.symbolId;
+  const format = String(selectedFormat || '').trim().toUpperCase();
+  const withFormat = (assetUrl) => {
+    const resolved = resolveWorkspaceAssetUrl(assetUrl);
+    if (!resolved || !format) {
+      return resolved;
+    }
+    const url = new URL(resolved);
+    url.searchParams.set('format', format);
+    return url.toString();
+  };
 
   if (symbol?.previewUrl) {
-    candidates.push(resolveWorkspaceAssetUrl(symbol.previewUrl));
+    candidates.push(withFormat(symbol.previewUrl));
   }
   if (symbolReference) {
-    candidates.push(resolveWorkspaceAssetUrl(`/api/v1/published/symbols/${encodeURIComponent(symbolReference)}/preview`));
+    candidates.push(withFormat(`/api/v1/published/symbols/${encodeURIComponent(symbolReference)}/preview`));
   }
 
-  const reviewCaseId = symbol?.payload?.review_case_id || symbol?.payload?.lineage?.parent_sheet_review_case_id;
-  const objectKey = symbol?.payload?.source_object_key;
-  if (reviewCaseId && objectKey) {
-    candidates.push(
-      resolveWorkspaceAssetUrl(
-        `/api/v1/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/children/preview?object_key=${encodeURIComponent(objectKey)}`
-      )
-    );
+  if (!format) {
+    const reviewCaseId = symbol?.payload?.review_case_id || symbol?.payload?.lineage?.parent_sheet_review_case_id;
+    const objectKey = symbol?.payload?.source_object_key;
+    if (reviewCaseId && objectKey) {
+      candidates.push(
+        resolveWorkspaceAssetUrl(
+          `/api/v1/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/children/preview?object_key=${encodeURIComponent(objectKey)}`
+        )
+      );
+    }
   }
 
   return Array.from(new Set(candidates.filter(Boolean)));
 }
 
 function PublishedSymbolPreview({ symbol, large = false }) {
-  const previewCandidates = useMemo(() => buildPublishedPreviewCandidates(symbol), [symbol]);
+  const defaultFormat = String(symbol?.previewAsset?.format || '').trim().replace(/^\./, '').toUpperCase();
+  const [selectedFormat, setSelectedFormat] = useState(defaultFormat);
+  const previewOptions = useMemo(
+    () => buildCatalogPreviewOptions(symbol, selectedFormat),
+    [symbol, selectedFormat]
+  );
+  const previewCandidates = useMemo(
+    () => buildPublishedPreviewCandidates(symbol, selectedFormat),
+    [symbol, selectedFormat]
+  );
   const [previewIndex, setPreviewIndex] = useState(0);
   const previewUrl = previewCandidates[previewIndex];
+  const symbolReference = symbol?.slug || symbol?.id || symbol?.symbolId;
+
+  useEffect(() => {
+    setSelectedFormat(defaultFormat);
+  }, [symbolReference, defaultFormat]);
 
   useEffect(() => {
     setPreviewIndex(0);
   }, [previewCandidates.join('|')]);
 
-  if (previewUrl) {
-    return (
-      <img
-        className={`published-symbol-preview ${large ? 'large' : ''}`.trim()}
-        src={previewUrl}
-        alt={`Published preview of ${symbol?.name || symbol?.id || 'symbol'}`}
-        onError={() => setPreviewIndex((current) => current + 1)}
-      />
-    );
-  }
-
-  return <SymbolGlyph symbolId={symbol?.id || symbol?.symbolId || 'SYMBOL'} large={large} />;
+  return (
+    <div className={`published-symbol-preview-control ${large ? 'large' : ''}`.trim()}>
+      {previewUrl ? (
+        <img
+          className={`published-symbol-preview ${large ? 'large' : ''}`.trim()}
+          src={previewUrl}
+          alt={`Published preview of ${symbol?.name || symbol?.id || 'symbol'}${selectedFormat ? ` in ${selectedFormat} format` : ''}`}
+          onError={() => setPreviewIndex((current) => current + 1)}
+        />
+      ) : (
+        <SymbolGlyph symbolId={symbol?.id || symbol?.symbolId || 'SYMBOL'} large={large} />
+      )}
+      {previewOptions.length ? (
+        <div className="catalog-preview-format-badges" role="group" aria-label="Symbol preview format">
+          {previewOptions.map((option) => {
+            if (option.active) {
+              return (
+                <span
+                  key={option.format}
+                  className="catalog-preview-format-badge active"
+                  aria-current="true"
+                  title={`${option.format} is shown in the preview`}
+                >
+                  {option.format}
+                </span>
+              );
+            }
+            if (option.previewable) {
+              return (
+                <button
+                  key={option.format}
+                  type="button"
+                  className="catalog-preview-format-badge"
+                  aria-label={`Show ${option.format} preview`}
+                  title={`Show ${option.format} preview`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSelectedFormat(option.format);
+                  }}
+                  onKeyDown={(event) => event.stopPropagation()}
+                >
+                  {option.format}
+                </button>
+              );
+            }
+            return (
+              <span
+                key={option.format}
+                className="catalog-preview-format-badge unavailable"
+                title={`${option.format} is available to download but cannot be previewed here`}
+              >
+                {option.format}
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function SupplementalPhotoStrip({ photos }) {

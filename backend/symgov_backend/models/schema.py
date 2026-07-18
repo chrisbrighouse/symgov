@@ -51,6 +51,22 @@ class UserSession(Base):
     last_seen_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class CatalogFavourite(Base):
+    __tablename__ = "catalog_favourites"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    symbol_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("governed_symbols.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class CatalogApiKey(Base):
     __tablename__ = "catalog_api_keys"
     __table_args__ = (

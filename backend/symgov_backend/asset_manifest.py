@@ -292,3 +292,43 @@ def list_available_assets(
     _add_asset(seen, assets, fallback_source_asset)
 
     return assets
+
+
+def list_preview_assets(
+    payload: dict[str, Any] | None,
+    fallback_source_asset: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """List the preferred browser-previewable asset for each available format."""
+    preferred = choose_preview_asset(payload, fallback_source_asset=fallback_source_asset)
+    candidates = [preferred, *list_available_assets(payload, fallback_source_asset=fallback_source_asset)]
+    formats: set[str] = set()
+    previews: list[dict[str, Any]] = []
+    for candidate in candidates:
+        asset = _asset_from_mapping(candidate)
+        if asset is None or not _is_previewable_asset(asset):
+            continue
+        asset_format = canonical_asset_format(asset.get("format"))
+        if not asset_format or asset_format in formats:
+            continue
+        formats.add(asset_format)
+        previews.append(asset)
+    return previews
+
+
+def select_preview_asset(
+    payload: dict[str, Any] | None,
+    requested_format: Any = None,
+    fallback_source_asset: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Choose the default preview or the preview matching a requested browser format."""
+    normalized_format = canonical_asset_format(requested_format)
+    if not normalized_format:
+        return choose_preview_asset(payload, fallback_source_asset=fallback_source_asset)
+    return next(
+        (
+            asset
+            for asset in list_preview_assets(payload, fallback_source_asset=fallback_source_asset)
+            if canonical_asset_format(asset.get("format")) == normalized_format
+        ),
+        None,
+    )

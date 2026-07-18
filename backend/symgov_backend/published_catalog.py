@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .asset_manifest import choose_preview_asset
+from .asset_manifest import list_preview_assets, select_preview_asset
 
 
 PUBLISHED_SYMBOLS_SQL = """
@@ -73,6 +73,15 @@ def published_fallback_source_asset(payload: dict | None) -> dict:
     }
 
 
-def choose_published_preview_asset(payload: dict | None) -> dict | None:
+def choose_published_preview_asset(payload: dict | None, requested_format: str | None = None) -> dict | None:
     payload = payload or {}
-    return choose_preview_asset(payload, fallback_source_asset=published_fallback_source_asset(payload))
+    return select_preview_asset(
+        payload,
+        requested_format=requested_format,
+        fallback_source_asset=published_fallback_source_asset(payload),
+    )
+
+
+def list_published_preview_assets(payload: dict | None) -> list[dict]:
+    payload = payload or {}
+    return list_preview_assets(payload, fallback_source_asset=published_fallback_source_asset(payload))

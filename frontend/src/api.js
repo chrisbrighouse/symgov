@@ -1102,37 +1102,34 @@ export async function fetchWorkspaceReviewSymbolPropertyOptions() {
 }
 
 export async function fetchPublishedSymbols() {
-  if (!appConfig.apiRoot) {
-    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
-  }
-
-  try {
-    const response = await fetch(`${appConfig.apiRoot}/published/symbols`);
-    const payload = await parseJson(response);
-
-    if (!response.ok) {
-      return {
-        ok: false,
-        mode: 'error',
-        message: payload?.detail || 'Published symbols load failed.',
-        items: []
-      };
-    }
-
-    return {
-      ok: true,
-      mode: 'live',
-      message: 'Live published symbols loaded.',
-      items: Array.isArray(payload?.items) ? payload.items : []
-    };
-  } catch (error) {
+  const result = await requestJson('/published/symbols', { cache: 'no-store' });
+  if (!result.ok) {
     return {
       ok: false,
-      mode: 'offline',
-      message: error instanceof Error ? error.message : 'Published symbols load failed.',
+      mode: result.mode,
+      message: result.message || 'Published symbols load failed.',
       items: []
     };
   }
+
+  return {
+    ok: true,
+    mode: 'live',
+    message: 'Live published symbols loaded.',
+    items: Array.isArray(result.payload?.items) ? result.payload.items : []
+  };
+}
+
+export async function updateCatalogFavourite(symbolId, isFavourite) {
+  const result = await requestJson(`/published/favourites/${encodeURIComponent(symbolId)}`, {
+    method: isFavourite ? 'PUT' : 'DELETE'
+  });
+
+  if (!result.ok) {
+    throw new Error(result.message || 'Favourite update failed.');
+  }
+
+  return result.payload;
 }
 
 export async function fetchPublishedSymbolComments(symbolId) {

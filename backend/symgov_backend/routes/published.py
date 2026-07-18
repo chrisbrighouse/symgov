@@ -8,7 +8,13 @@ from sqlalchemy import Text, bindparam, cast, func, text
 from sqlalchemy.orm import Session
 
 from ..asset_manifest import list_download_assets
-from ..dependencies import get_db_session
+from ..auth import AuthenticatedUser
+from ..catalog_favourites import (
+    add_catalog_favourite,
+    load_favourite_symbol_ids,
+    remove_catalog_favourite,
+)
+from ..dependencies import get_db_session, require_user
 from ..models import (
     Attachment,
     ClarificationRecord,
@@ -19,6 +25,7 @@ from ..models import (
 from ..published_catalog import (
     PUBLISHED_SYMBOLS_SQL,
     choose_published_preview_asset,
+    list_published_preview_assets,
     published_fallback_source_asset,
     published_symbol_display_id,
 )
@@ -55,6 +62,7 @@ def published_symbol_row(
     row,
     supplemental_photos_by_symbol: dict[str, list[dict]] | None = None,
     comment_counts_by_symbol: dict[str, int] | None = None,
+    favourite_symbol_ids: set[uuid.UUID] | None = None,
 ) -> dict:
     payload = row.payload_json or {}
     keywords = payload.get("keywords") or payload.get("search_terms") or []
@@ -69,6 +77,11 @@ def published_symbol_row(
 
     symbol_display_id = published_symbol_display_id(row)
     preview_asset = choose_published_preview_asset(payload)
+    preview_assets = list_published_preview_assets(payload)
+    try:
+        symbol_uuid = uuid.UUID(str(row.symbol_id))
+    except (TypeError, ValueError, AttributeError):
+        symbol_uuid = None
 
     return {
         "id": row.slug,
@@ -100,9 +113,11 @@ def published_symbol_row(
         "sortOrder": row.sort_order,
         "previewUrl": f"/api/v1/published/symbols/{row.slug}/preview" if preview_asset else None,
         "previewAsset": preview_asset,
+        "previewAssets": preview_assets,
         "supplementalPhotos": supplemental_photos,
         "hasComments": comment_count > 0,
         "commentCount": comment_count,
+        "isFavourite": symbol_uuid is not None and symbol_uuid in (favourite_symbol_ids or set()),
         "payload": payload,
     }
 
@@ -213,11 +228,73 @@ def pack_row(row) -> dict:
     }
 
 
+def _load_published_symbol_row(session: Session, symbol_ref: str):
+    rows = session.execute(
+        text(
+            PUBLISHED_SYMBOLS_SQL
+            + """
+            AND (gs.slug = :symbol_ref OR gs.id::text = :symbol_ref)
+            ORDER BY pp.effective_date DESC, pk.effective_date DESC
+            LIMIT 1
+            """
+        ),
+        {"symbol_ref": symbol_ref},
+    ).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Published symbol was not found.")
+    return rows[0]
+
+
+@router.get("/favourites")
+def list_catalog_favourites(
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    symbol_ids = load_favourite_symbol_ids(session, current_user.id)
+    return {"items": [{"symbolId": str(symbol_id)} for symbol_id in sorted(symbol_ids, key=str)]}
+
+
+@router.put("/favourites/{symbol_ref}")
+def add_current_user_catalog_favourite(
+    symbol_ref: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    row = _load_published_symbol_row(session, symbol_ref)
+    symbol_id = uuid.UUID(str(row.symbol_id))
+    add_catalog_favourite(session, current_user.id, symbol_id)
+    return {"symbolId": str(symbol_id), "isFavourite": True}
+
+
+@router.delete("/favourites/{symbol_ref}")
+def remove_current_user_catalog_favourite(
+    symbol_ref: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    try:
+        requested_symbol_id = uuid.UUID(symbol_ref)
+    except ValueError:
+        requested_symbol_id = None
+    if requested_symbol_id is not None and requested_symbol_id in load_favourite_symbol_ids(
+        session,
+        current_user.id,
+        [requested_symbol_id],
+    ):
+        symbol_id = requested_symbol_id
+    else:
+        row = _load_published_symbol_row(session, symbol_ref)
+        symbol_id = uuid.UUID(str(row.symbol_id))
+    remove_catalog_favourite(session, current_user.id, symbol_id)
+    return {"symbolId": str(symbol_id), "isFavourite": False}
+
+
 @router.get("/symbols")
 @legacy_router.get("/published/symbols", include_in_schema=False)
 def list_published_symbols(
     q: str | None = Query(default=None),
     pack: str | None = Query(default=None),
+    current_user: AuthenticatedUser = Depends(require_user),
     session: Session = Depends(get_db_session),
 ) -> dict:
     filters = []
@@ -252,28 +329,36 @@ def list_published_symbols(
     ).all()
     supplemental = load_supplemental_photos(session, rows)
     comment_counts = load_comment_counts(session, rows)
-    return {"items": [published_symbol_row(row, supplemental, comment_counts) for row in rows]}
+    favourite_ids = load_favourite_symbol_ids(
+        session,
+        current_user.id,
+        [uuid.UUID(str(row.symbol_id)) for row in rows],
+    )
+    return {
+        "items": [
+            published_symbol_row(row, supplemental, comment_counts, favourite_ids)
+            for row in rows
+        ]
+    }
 
 
 @router.get("/symbols/{symbol_id}")
 @legacy_router.get("/published/symbols/{symbol_id}", include_in_schema=False)
-def get_published_symbol(symbol_id: str, session: Session = Depends(get_db_session)) -> dict:
-    rows = session.execute(
-        text(
-            PUBLISHED_SYMBOLS_SQL
-            + """
-            AND (gs.slug = :symbol_id OR gs.id::text = :symbol_id)
-            ORDER BY pp.effective_date DESC, pk.effective_date DESC
-            LIMIT 1
-            """
-        ),
-        {"symbol_id": symbol_id},
-    ).all()
-    if not rows:
-        raise HTTPException(status_code=404, detail="Published symbol was not found.")
+def get_published_symbol(
+    symbol_id: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    row = _load_published_symbol_row(session, symbol_id)
+    rows = [row]
     supplemental = load_supplemental_photos(session, rows)
     comment_counts = load_comment_counts(session, rows)
-    return {"item": published_symbol_row(rows[0], supplemental, comment_counts)}
+    favourite_ids = load_favourite_symbol_ids(
+        session,
+        current_user.id,
+        [uuid.UUID(str(row.symbol_id))],
+    )
+    return {"item": published_symbol_row(row, supplemental, comment_counts, favourite_ids)}
 
 
 @router.get("/symbols/{symbol_id}/comments")
@@ -388,7 +473,11 @@ async def run_published_symbol_command(request: Request, session: Session = Depe
 
 @router.get("/symbols/{symbol_id}/preview")
 @legacy_router.get("/published/symbols/{symbol_id}/preview", include_in_schema=False)
-def get_published_symbol_preview(symbol_id: str, session: Session = Depends(get_db_session)) -> Response:
+def get_published_symbol_preview(
+    symbol_id: str,
+    format: str | None = Query(default=None),
+    session: Session = Depends(get_db_session),
+) -> Response:
     rows = session.execute(
         text(
             PUBLISHED_SYMBOLS_SQL
@@ -404,7 +493,7 @@ def get_published_symbol_preview(symbol_id: str, session: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Published symbol was not found.")
 
     payload_json = rows[0].payload_json or {}
-    preview_asset = choose_published_preview_asset(payload_json)
+    preview_asset = choose_published_preview_asset(payload_json, requested_format=format)
     object_key = preview_asset.get("object_key") if preview_asset else None
     if not object_key:
         raise HTTPException(status_code=404, detail="Published symbol preview was not found.")
@@ -412,7 +501,11 @@ def get_published_symbol_preview(symbol_id: str, session: Session = Depends(get_
     attachment = session.query(Attachment).filter(Attachment.object_key == object_key).one_or_none()
     payload = download_object_bytes(object_key=object_key, env_file=str(get_settings().storage_env_file))
     media_type = attachment.content_type if attachment is not None else payload["content_type"]
-    return Response(content=payload["payload"], media_type=media_type)
+    headers = {
+        "Content-Security-Policy": "sandbox",
+        "X-Content-Type-Options": "nosniff",
+    }
+    return Response(content=payload["payload"], media_type=media_type, headers=headers)
 
 
 @router.get("/symbols/{symbol_id}/supplemental-photos/{photo_id}/preview")
@@ -438,7 +531,11 @@ def get_published_symbol_supplemental_photo_preview(symbol_id: str, photo_id: st
 
 @router.get("/pages/{page_code}")
 @legacy_router.get("/published/pages/{page_code}", include_in_schema=False)
-def get_published_page(page_code: str, session: Session = Depends(get_db_session)) -> dict:
+def get_published_page(
+    page_code: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+) -> dict:
     rows = session.execute(
         text(PUBLISHED_SYMBOLS_SQL + " AND pp.page_code = :page_code LIMIT 1"),
         {"page_code": page_code},
@@ -447,7 +544,12 @@ def get_published_page(page_code: str, session: Session = Depends(get_db_session
         raise HTTPException(status_code=404, detail="Published page was not found.")
     supplemental = load_supplemental_photos(session, rows)
     comment_counts = load_comment_counts(session, rows)
-    return {"item": published_symbol_row(rows[0], supplemental, comment_counts)}
+    favourite_ids = load_favourite_symbol_ids(
+        session,
+        current_user.id,
+        [uuid.UUID(str(rows[0].symbol_id))],
+    )
+    return {"item": published_symbol_row(rows[0], supplemental, comment_counts, favourite_ids)}
 
 
 @router.get("/packs")

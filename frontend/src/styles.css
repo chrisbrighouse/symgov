@@ -2311,6 +2311,38 @@ a {
   accent-color: var(--blue);
 }
 
+.catalog-favourite-button {
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  border: 1px solid rgba(29, 43, 54, 0.18);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #60717d;
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.catalog-favourite-button:hover,
+.catalog-favourite-button.selected {
+  border-color: #a66d00;
+  background: #fff7d6;
+  color: #9a6500;
+}
+
+.catalog-favourite-button:focus-visible {
+  outline: 3px solid rgba(47, 111, 167, 0.55);
+  outline-offset: 2px;
+}
+
+.catalog-favourite-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .catalog-card-preview {
   display: grid;
   place-items: center;
@@ -2839,6 +2871,74 @@ a {
   border-radius: 0.35rem;
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(12, 24, 38, 0.12);
+}
+
+.published-symbol-preview-control {
+  display: grid;
+  justify-items: center;
+  gap: 0.28rem;
+  min-width: 0;
+}
+
+.published-symbol-preview-control.large {
+  width: 100%;
+}
+
+.catalog-preview-format-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.18rem;
+  max-width: 8rem;
+}
+
+.published-symbol-preview-control.large .catalog-preview-format-badges {
+  max-width: 24rem;
+}
+
+.catalog-preview-format-badge {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.25rem;
+  margin: 0;
+  padding: 0.14rem 0.34rem;
+  border: 1px solid rgba(23, 104, 93, 0.35);
+  border-radius: 999px;
+  background: #fff;
+  color: #17685d;
+  font: inherit;
+  font-size: 0.6rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+button.catalog-preview-format-badge {
+  cursor: pointer;
+}
+
+button.catalog-preview-format-badge:hover {
+  background: rgba(23, 104, 93, 0.12);
+}
+
+button.catalog-preview-format-badge:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.catalog-preview-format-badge.active {
+  border-color: #17685d;
+  background: #17685d;
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(23, 104, 93, 0.14);
+}
+
+.catalog-preview-format-badge.unavailable {
+  border-color: rgba(29, 43, 54, 0.12);
+  background: rgba(29, 43, 54, 0.05);
+  color: var(--text-soft);
+  opacity: 0.72;
 }
 
 .published-symbol-preview.large {
