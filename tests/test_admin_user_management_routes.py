@@ -109,6 +109,26 @@ def test_admin_can_list_create_update_and_reset_users():
         assert authenticate_user(session, email="new.submitter@symgov.local", pin="6781") is not None
 
 
+def test_admin_can_create_catalog_only_user_without_roles():
+    client, _ = build_client_with_users()
+
+    login = client.post("/api/v1/auth/login", json={"email": "admin@symgov.local", "pin": "4590"})
+    assert login.status_code == 200
+
+    created = client.post(
+        "/api/v1/admin/users",
+        json={
+            "email": "catalog.reader@symgov.local",
+            "displayName": "Catalog Reader",
+            "roles": [],
+            "pin": "4590",
+        },
+    )
+
+    assert created.status_code == 201
+    assert created.json()["user"]["roles"] == []
+
+
 def test_admin_can_assign_integrator_role():
     client, _ = build_client_with_users()
     assert client.post("/api/v1/auth/login", json={"email": "admin@symgov.local", "pin": "4590"}).status_code == 200
@@ -125,6 +145,21 @@ def test_admin_can_assign_integrator_role():
 
     assert created.status_code == 201
     assert created.json()["user"]["roles"] == ["integrator"]
+
+
+def test_admin_can_remove_last_role_from_existing_user():
+    client, _ = build_client_with_users()
+
+    login = client.post("/api/v1/auth/login", json={"email": "admin@symgov.local", "pin": "4590"})
+    assert login.status_code == 200
+
+    listed = client.get("/api/v1/admin/users")
+    reviewer = next(user for user in listed.json()["items"] if user["email"] == "reviewer@symgov.local")
+
+    updated = client.patch(f"/api/v1/admin/users/{reviewer['id']}", json={"roles": []})
+
+    assert updated.status_code == 200
+    assert updated.json()["user"]["roles"] == []
 
 
 def test_admin_create_user_rejects_duplicate_email_or_name():

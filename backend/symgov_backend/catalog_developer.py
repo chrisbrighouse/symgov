@@ -25,6 +25,7 @@ _CREDENTIAL_TEXT = re.compile(
     r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b|"
     r"\bsymgov_(?:live|test)_[a-z0-9_-]{12,}\b|"
     r"\bsk-(?:proj-)?[a-z0-9_-]{16,}\b|"
+    r"(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])|"
     r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^\s/:@]+:[^\s/@]+@[^\s]+"
     r")"
 )
@@ -53,6 +54,11 @@ def contains_catalog_credentials(value: object) -> bool:
     scrubbed = _PLACEHOLDER.sub("DOCUMENTATION_PLACEHOLDER", value)
     scrubbed = scrubbed.replace("AKIAIOSFODNN7EXAMPLE", "AWS_DOCUMENTATION_PLACEHOLDER")
     return bool(_CREDENTIAL_TEXT.search(scrubbed))
+
+
+def redact_catalog_credential_label(value: str) -> str:
+    """Defensively hide credential material from legacy label surfaces."""
+    return "[REDACTED]" if contains_catalog_credentials(value) else value
 
 CATALOG_INTEGRATION_ENDPOINTS = (
     {"method": "GET", "path": "/api/v1/catalog/capabilities", "scope": "catalog.read", "summary": "Discover current Catalog capabilities."},

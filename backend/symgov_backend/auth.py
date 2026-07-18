@@ -88,8 +88,6 @@ def normalize_roles(roles: Iterable[str]) -> tuple[str, ...]:
     invalid = [role for role in normalized if role not in VALID_ROLES]
     if invalid:
         raise ValueError(f"Unsupported user role(s): {', '.join(invalid)}")
-    if not normalized:
-        raise ValueError("At least one role is required.")
     return normalized
 
 

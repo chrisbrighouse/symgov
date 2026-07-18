@@ -37,6 +37,18 @@ class CatalogSelfServiceApiKeyRevokeRequest(BaseModel):
     keyPrefix: str = Field(min_length=1, max_length=100)
 
 
+class CatalogSelfServiceApiKeyCreateEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request: CatalogSelfServiceApiKeyCreateRequest
+
+
+class CatalogSelfServiceApiKeyRevokeEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request: CatalogSelfServiceApiKeyRevokeRequest
+
+
 class AuthLoginRequest(BaseModel):
     email: str = Field(min_length=3)
     pin: str = Field(min_length=4, max_length=4)
@@ -85,14 +97,14 @@ class AdminUserListResponse(BaseModel):
 class AdminUserCreateRequest(BaseModel):
     email: str = Field(min_length=3)
     displayName: str = Field(min_length=1)
-    roles: list[str] = Field(min_length=1)
+    roles: list[str]
     pin: str = Field(default="4590", min_length=4, max_length=4)
     isActive: bool = True
 
 
 class AdminUserUpdateRequest(BaseModel):
     displayName: str | None = Field(default=None, min_length=1)
-    roles: list[str] | None = Field(default=None, min_length=1)
+    roles: list[str] | None = None
     isActive: bool | None = None
 
 

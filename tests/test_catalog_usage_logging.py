@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
@@ -41,6 +42,7 @@ EXPECTED_USAGE_COLUMNS = {
     "application_version",
     "created_at",
 }
+HASH_CREDENTIAL_MARKER = hashlib.sha256(b"symgov_live_usage-hash-probe").hexdigest()
 
 
 def request_with_headers(headers: dict[str, str], *, method: str = "POST", path: str = "/api/v1/catalog/ed/query") -> Request:
@@ -146,15 +148,24 @@ def test_sanitize_usage_text_redacts_sensitive_tokens_and_truncates():
         ("usage_assignment_probe_7f3a", "token=usage_assignment_probe_7f3a"),
         ("usage_bearer_probe_8c4b", "Bearer usage_bearer_probe_8c4b"),
         (
-            "usage_uri_probe_9d5c",
-            "redis://catalog:usage_uri_probe_9d5c@cache.example/0",
+            "usage_mixed_uri_password_probe_4e6f",
+            "redis://catalog:"
+            + "usage_mixed_uri_password_probe_4e6f"
+            + "@cache.example/<YOUR_API_KEY>",
         ),
         (
             "usage_provider_probe_9a1c",
             "ghp_usage_provider_probe_9a1c",
         ),
+        (HASH_CREDENTIAL_MARKER, HASH_CREDENTIAL_MARKER),
     ],
-    ids=("assignment", "bearer", "connection_uri", "provider_token"),
+    ids=(
+        "assignment",
+        "bearer",
+        "connection_uri",
+        "provider_token",
+        "sha256_hash",
+    ),
 )
 def test_build_catalog_usage_event_sanitizes_credentials_from_every_persisted_text_field(
     marker,
@@ -255,6 +266,38 @@ def test_build_catalog_usage_event_snapshots_auth_context_and_request_metadata_w
     assert event.application_version == "0.1.0"
     assert isinstance(event.created_at, datetime)
     assert event.created_at.tzinfo is not None
+
+
+def test_build_catalog_usage_event_redacts_hash_bearing_legacy_labels():
+    raw_key = "symgov_live_legacy-usage-label"
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+
+    event = build_catalog_usage_event(
+        auth_context(customer_name=key_hash, integration_name=key_hash),
+        request=request_with_headers({}),
+        scope_used="catalog.read",
+        route_name="catalog_symbols",
+        status_code=200,
+    )
+
+    assert event.customer_name_snapshot == "[REDACTED]"
+    assert event.integration_name_snapshot == "[REDACTED]"
+    assert key_hash not in repr(event.customer_name_snapshot)
+    assert key_hash not in repr(event.integration_name_snapshot)
+
+
+@pytest.mark.parametrize("scope_used", ["catalog.download", "symgov_live_legacy-scope-secret"])
+def test_build_catalog_usage_event_filters_scope_used_through_canonical_allowlist(scope_used):
+    event = build_catalog_usage_event(
+        auth_context(),
+        request=request_with_headers({}),
+        scope_used=scope_used,
+        route_name="catalog_symbols",
+        status_code=200,
+    )
+
+    assert event.scope_used is None
+    assert scope_used not in repr(event)
 
 
 def test_log_catalog_usage_event_best_effort_commits_successful_event():

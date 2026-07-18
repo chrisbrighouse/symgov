@@ -649,7 +649,7 @@ function Header() {
       </div>
       <div className="header-actions">
         {user ? <div className="build-chip">{user.displayName || user.email}</div> : null}
-        <div className="build-chip">v{appConfig.version} · {appConfig.build || 'local'}</div>
+        <div className="build-chip">{appConfig.build || 'local'}</div>
         {user ? (
           <button type="button" className="ghost-button" onClick={handleLogout}>Sign out</button>
         ) : (
@@ -5693,7 +5693,7 @@ function useScottSourceDiscoveryControls({
 
 function AdminUsersPage() {
   const [state, setState] = useState({ loading: true, items: [], message: 'Loading users…' });
-  const [form, setForm] = useState({ email: '', displayName: '', roles: ['submitter'], pin: '4590', isActive: true });
+  const [form, setForm] = useState({ email: '', displayName: '', roles: [], pin: '4590', isActive: true });
   const [createBusy, setCreateBusy] = useState(false);
   const [rowBusyByUser, setRowBusyByUser] = useState({});
   const [toast, setToast] = useState({ kind: 'info', message: '' });
@@ -5741,7 +5741,7 @@ function AdminUsersPage() {
       showToast('error', message);
       return;
     }
-    setForm({ email: '', displayName: '', roles: ['submitter'], pin: '4590', isActive: true });
+    setForm({ email: '', displayName: '', roles: [], pin: '4590', isActive: true });
     await loadUsers();
     showToast('success', `User ${result.user?.displayName || 'created'} added.`);
   };
@@ -5766,10 +5766,6 @@ function AdminUsersPage() {
       roles.delete(role);
     }
     const nextRoles = Array.from(roles);
-    if (!nextRoles.length) {
-      showToast('error', 'Each user needs at least one role.');
-      return;
-    }
     markRowBusy(user.id, true);
     const result = await updateAdminUser(user.id, { roles: nextRoles });
     markRowBusy(user.id, false);
@@ -5814,8 +5810,7 @@ function AdminUsersPage() {
       } else {
         roles.delete(role);
       }
-      const next = Array.from(roles);
-      return { ...current, roles: next.length ? next : ['submitter'] };
+      return { ...current, roles: Array.from(roles) };
     });
   };
 

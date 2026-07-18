@@ -10,12 +10,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .catalog_api_auth import PLANNED_CATALOG_API_SCOPES, hash_api_key
+from .catalog_developer import contains_catalog_credentials, redact_catalog_credential_label
 from .models import AuditEvent, CatalogApiKey, User
 
 
 _RAW_KEY_PREFIX = "symgov_live_"
 _DISPLAY_SECRET_CHARS = 8
 _VALID_STATUSES = frozenset({"active", "disabled", "revoked"})
+
 
 
 class CatalogApiKeyError(ValueError):
@@ -111,7 +113,17 @@ def _normalized_required_name(value: object, *, field_name: str) -> str:
     normalized = " ".join(value.split())
     if not normalized:
         raise CatalogApiKeyError(f"{field_name} is required")
+    if _contains_catalog_key_material(normalized):
+        raise CatalogApiKeyError("Catalog API key labels must not contain credentials")
     return normalized
+
+
+def _contains_catalog_key_material(value: str) -> bool:
+    return contains_catalog_credentials(value)
+
+
+def _safe_label(value: str) -> str:
+    return redact_catalog_credential_label(value)
 
 
 def _normalized_scopes(scopes: object) -> tuple[str, ...]:
@@ -120,8 +132,8 @@ def _normalized_scopes(scopes: object) -> tuple[str, ...]:
     else:
         try:
             candidates = list(scopes)  # type: ignore[arg-type]
-        except TypeError as exc:
-            raise CatalogApiKeyError("scopes must be an iterable") from exc
+        except TypeError:
+            raise CatalogApiKeyError("scopes must be an iterable") from None
 
     normalized: list[str] = []
     seen: set[str] = set()
@@ -143,10 +155,10 @@ def _normalized_scopes(scopes: object) -> tuple[str, ...]:
 def _safe_dto(row: CatalogApiKey) -> CatalogApiKeyDTO:
     return CatalogApiKeyDTO(
         id=row.id,
-        customer_name=row.customer_name,
-        integration_name=row.integration_name,
-        key_prefix=row.key_prefix,
-        scopes=tuple(str(scope) for scope in (row.scopes_json or [])),
+        customer_name=_safe_label(row.customer_name),
+        integration_name=_safe_label(row.integration_name),
+        key_prefix=_safe_label(row.key_prefix),
+        scopes=_safe_stored_scopes(row.scopes_json),
         status=row.status,
         expires_at=row.expires_at,
         last_used_at=row.last_used_at,
@@ -160,11 +172,23 @@ def _audit_payload(row: CatalogApiKey, *, actor_type: str = "operator_cli") -> d
     return {
         "actor_type": actor_type,
         "api_key_id": str(row.id),
-        "key_prefix": row.key_prefix,
-        "customer_name": row.customer_name,
-        "integration_name": row.integration_name,
-        "scopes": list(row.scopes_json or []),
+        "key_prefix": _safe_label(row.key_prefix),
+        "customer_name": _safe_label(row.customer_name),
+        "integration_name": _safe_label(row.integration_name),
+        "scopes": list(_safe_stored_scopes(row.scopes_json)),
     }
+
+
+def _safe_stored_scopes(scopes: object) -> tuple[str, ...]:
+    try:
+        candidates = list(scopes or [])  # type: ignore[arg-type]
+    except TypeError:
+        return ()
+    return tuple(
+        normalized
+        for scope in candidates
+        if (normalized := str(scope).strip()) in PLANNED_CATALOG_API_SCOPES
+    )
 
 
 def create_catalog_api_key(

@@ -6,8 +6,10 @@ from datetime import datetime, timezone
 import hashlib
 
 from fastapi import Depends, HTTPException, Request
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from .catalog_developer import redact_catalog_credential_label
 from .dependencies import get_db_session
 from .models import CatalogApiKey
 
@@ -29,6 +31,17 @@ class IntegrationAuthContext:
     key_prefix: str
 
 
+class CatalogApiAuthenticationError(RuntimeError):
+    """Fixed, secret-safe authentication infrastructure failure."""
+
+
+def _rollback_without_diagnostics(session: Session) -> None:
+    try:
+        session.rollback()
+    except Exception:
+        pass
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -44,7 +57,11 @@ def _as_aware_utc(value: datetime) -> datetime:
 
 
 def _normalize_scopes(scopes: Iterable[object] | None) -> tuple[str, ...]:
-    return tuple(str(scope).strip() for scope in scopes or [] if str(scope).strip())
+    return tuple(
+        normalized
+        for scope in scopes or []
+        if (normalized := str(scope).strip()) in PLANNED_CATALOG_API_SCOPES
+    )
 
 
 def _bearer_token(request: Request) -> str:
@@ -64,7 +81,10 @@ def authenticate_catalog_api_key(
     if not token:
         return None
     resolved_now = now or utc_now()
-    key_row = session.query(CatalogApiKey).filter(CatalogApiKey.key_hash == hash_api_key(token)).one_or_none()
+    try:
+        key_row = session.query(CatalogApiKey).filter(CatalogApiKey.key_hash == hash_api_key(token)).one_or_none()
+    except SQLAlchemyError:
+        raise CatalogApiAuthenticationError("Catalog API key authentication failed") from None
     if key_row is None:
         return None
     if key_row.status != "active" or key_row.revoked_at is not None:
@@ -77,10 +97,10 @@ def authenticate_catalog_api_key(
     key_row.last_used_at = _as_aware_utc(resolved_now)
     return IntegrationAuthContext(
         api_key_id=str(key_row.id),
-        customer_name=key_row.customer_name,
-        integration_name=key_row.integration_name,
+        customer_name=redact_catalog_credential_label(key_row.customer_name),
+        integration_name=redact_catalog_credential_label(key_row.integration_name),
         scopes=scopes,
-        key_prefix=key_row.key_prefix,
+        key_prefix=redact_catalog_credential_label(key_row.key_prefix),
     )
 
 
@@ -88,10 +108,24 @@ def get_catalog_api_key_context(
     request: Request,
     session: Session = Depends(get_db_session),
 ) -> IntegrationAuthContext:
-    context = authenticate_catalog_api_key(session, _bearer_token(request))
+    try:
+        context = authenticate_catalog_api_key(session, _bearer_token(request))
+    except CatalogApiAuthenticationError:
+        _rollback_without_diagnostics(session)
+        raise HTTPException(
+            status_code=503,
+            detail="Catalog API key authentication is temporarily unavailable.",
+        ) from None
     if context is None:
         raise HTTPException(status_code=401, detail="Authentication required.")
-    session.commit()
+    try:
+        session.commit()
+    except SQLAlchemyError:
+        _rollback_without_diagnostics(session)
+        raise HTTPException(
+            status_code=503,
+            detail="Catalog API key authentication is temporarily unavailable.",
+        ) from None
     return context
 
 

@@ -46,6 +46,14 @@ def test_admin_user_management_offers_integrator_role():
     assert '<label className="checkbox-row"><input type="checkbox" checked={form.roles.includes(\'integrator\')}' in source
 
 
+def test_admin_user_management_allows_catalog_only_users_without_roles():
+    source = APP_JSX.read_text(encoding="utf-8")
+
+    assert "roles: []" in source
+    assert "return { ...current, roles: Array.from(roles) };" in source
+    assert "Each user needs at least one role." not in source
+
+
 def test_admin_user_management_shows_toast_feedback():
     source = APP_JSX.read_text(encoding="utf-8")
 

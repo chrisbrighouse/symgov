@@ -20,9 +20,21 @@ from ..catalog_developer import catalog_openapi_document, developer_manifest
 from ..catalog_integration_ed import answer_integration_question, read_integration_ed_body
 from ..catalog_sandbox import read_sandbox_body, run_sandbox
 from ..dependencies import get_db_session, require_user
-from ..schemas import CatalogSelfServiceApiKeyCreateRequest, CatalogSelfServiceApiKeyRevokeRequest
+from ..schemas import (
+    CatalogSelfServiceApiKeyCreateEnvelope,
+    CatalogSelfServiceApiKeyCreateRequest,
+    CatalogSelfServiceApiKeyRevokeEnvelope,
+    CatalogSelfServiceApiKeyRevokeRequest,
+)
 
 router = APIRouter(prefix="/catalog/developer", tags=["catalog-developer"])
+
+
+def _rollback_without_diagnostics(session: Session) -> None:
+    try:
+        session.rollback()
+    except Exception:
+        pass
 
 
 def _key_payload(key: CatalogApiKeyDTO) -> dict[str, object]:
@@ -61,7 +73,11 @@ async def create_self_service_api_key(
 ) -> dict:
     try:
         body = await http_request.json()
-        payload = CatalogSelfServiceApiKeyCreateRequest.model_validate(body.get("request") or body)
+        payload = (
+            CatalogSelfServiceApiKeyCreateEnvelope.model_validate(body).request
+            if isinstance(body, dict) and "request" in body
+            else CatalogSelfServiceApiKeyCreateRequest.model_validate(body)
+        )
     except (ValueError, ValidationError, AttributeError):
         raise HTTPException(status_code=422, detail="Catalog API key request was invalid.") from None
     try:
@@ -75,13 +91,13 @@ async def create_self_service_api_key(
         )
         session.commit()
     except CatalogApiKeyAlreadyActiveError:
-        session.rollback()
+        _rollback_without_diagnostics(session)
         raise HTTPException(status_code=409, detail="An active Catalog API key already exists for this account.") from None
     except CatalogApiKeyError:
-        session.rollback()
+        _rollback_without_diagnostics(session)
         raise HTTPException(status_code=400, detail="Catalog API key request was invalid.") from None
     except Exception:
-        session.rollback()
+        _rollback_without_diagnostics(session)
         raise HTTPException(status_code=500, detail="Catalog API key could not be created.") from None
     return {
         "activeKey": _key_payload(created.key),
@@ -98,7 +114,11 @@ async def revoke_self_service_api_key(
 ) -> dict:
     try:
         body = await http_request.json()
-        payload = CatalogSelfServiceApiKeyRevokeRequest.model_validate(body.get("request") or body)
+        payload = (
+            CatalogSelfServiceApiKeyRevokeEnvelope.model_validate(body).request
+            if isinstance(body, dict) and "request" in body
+            else CatalogSelfServiceApiKeyRevokeRequest.model_validate(body)
+        )
     except (ValueError, ValidationError, AttributeError):
         raise HTTPException(status_code=422, detail="Catalog API key request was invalid.") from None
     try:
@@ -110,16 +130,16 @@ async def revoke_self_service_api_key(
         )
         session.commit()
     except CatalogApiKeyNotFoundError:
-        session.rollback()
+        _rollback_without_diagnostics(session)
         raise HTTPException(status_code=404, detail="Catalog API key was not found.") from None
     except CatalogApiKeyPrefixMismatchError:
-        session.rollback()
+        _rollback_without_diagnostics(session)
         raise HTTPException(status_code=400, detail="Catalog API key confirmation did not match.") from None
     except CatalogApiKeyError:
-        session.rollback()
+        _rollback_without_diagnostics(session)
         raise HTTPException(status_code=400, detail="Catalog API key request was invalid.") from None
     except Exception:
-        session.rollback()
+        _rollback_without_diagnostics(session)
         raise HTTPException(status_code=500, detail="Catalog API key could not be revoked.") from None
     return {"activeKey": None, "revokedKey": _key_payload(revoked)}
 

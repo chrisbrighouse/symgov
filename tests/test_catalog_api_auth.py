@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+import traceback
 import uuid
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.requests import Request
 
 from symgov_backend.catalog_api_auth import (
@@ -35,6 +37,7 @@ class CapturingSession:
     def __init__(self, row=None):
         self.query_obj = CapturingQuery(row)
         self.committed = False
+        self.rolled_back = False
 
     def query(self, model):
         self.model = model
@@ -42,6 +45,9 @@ class CapturingSession:
 
     def commit(self):
         self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
 
 
 def request_with_headers(headers: dict[str, str]) -> Request:
@@ -88,6 +94,130 @@ def test_authenticate_catalog_api_key_hashes_presented_token_before_lookup():
     compiled_criteria = "\n".join(str(criterion.compile(compile_kwargs={"literal_binds": True})) for criterion in session.query_obj.criteria)
     assert hash_api_key("secret-token") in compiled_criteria
     assert "secret-token" not in compiled_criteria
+
+
+def test_authenticate_catalog_api_key_redacts_credential_bearing_legacy_labels():
+    raw_key = "symgov_live_legacy-auth-label"
+    key_hash = hash_api_key(raw_key)
+    session = CapturingSession(
+        api_key_row(customer_name=raw_key, integration_name=key_hash)
+    )
+
+    context = authenticate_catalog_api_key(
+        session,
+        "secret-token",
+        now=datetime.now(timezone.utc),
+    )
+
+    assert context is not None
+    assert context.customer_name == "[REDACTED]"
+    assert context.integration_name == "[REDACTED]"
+    assert raw_key not in repr(context)
+    assert key_hash not in repr(context)
+
+
+def test_catalog_auth_lookup_failure_rolls_back_without_hash_disclosure():
+    raw_key = "symgov_live_lookup-failure-secret"
+    key_hash = hash_api_key(raw_key)
+    session = CapturingSession()
+
+    def fail_lookup():
+        raise SQLAlchemyError(f"database rejected key_hash={key_hash}")
+
+    session.query_obj.one_or_none = fail_lookup
+
+    with pytest.raises(HTTPException) as caught:
+        get_catalog_api_key_context(
+            request_with_headers({"Authorization": f"Bearer {raw_key}"}),
+            session,
+        )
+
+    rendered = "".join(traceback.format_exception(caught.value))
+    assert caught.value.status_code == 503
+    assert session.rolled_back is True
+    assert raw_key not in rendered
+    assert key_hash not in rendered
+
+
+@pytest.mark.parametrize("failure_phase", ["lookup", "commit"])
+def test_catalog_auth_rollback_failure_preserves_fixed_secret_safe_503(failure_phase):
+    raw_key = "symgov_live_auth-rollback-failure-secret"
+    key_hash = hash_api_key(raw_key)
+    database_error = SQLAlchemyError(
+        f"database failure containing raw_key={raw_key} key_hash={key_hash}"
+    )
+    rollback_error = RuntimeError(
+        f"rollback failure containing raw_key={raw_key} key_hash={key_hash}"
+    )
+    session = CapturingSession(api_key_row())
+
+    if failure_phase == "lookup":
+        session.query_obj.one_or_none = lambda: (_ for _ in ()).throw(database_error)
+    else:
+        session.commit = lambda: (_ for _ in ()).throw(database_error)
+
+    def fail_rollback():
+        session.rolled_back = True
+        raise rollback_error
+
+    session.rollback = fail_rollback
+
+    assert raw_key in repr(database_error)
+    assert key_hash in repr(database_error)
+    assert raw_key in repr(rollback_error)
+    assert key_hash in repr(rollback_error)
+    with pytest.raises(HTTPException) as caught:
+        get_catalog_api_key_context(
+            request_with_headers({"Authorization": f"Bearer {raw_key}"}),
+            session,
+        )
+
+    rendered = "".join(traceback.format_exception(caught.value))
+    assert caught.value.status_code == 503
+    assert caught.value.detail == "Catalog API key authentication is temporarily unavailable."
+    assert session.rolled_back is True
+    assert raw_key not in rendered
+    assert key_hash not in rendered
+
+
+def test_auth_context_filters_credential_contaminated_legacy_scopes():
+    raw_key = "symgov_live_legacy-scope-secret"
+    key_hash = hash_api_key(raw_key)
+    session = CapturingSession(
+        api_key_row(scopes_json=[raw_key, key_hash, "catalog.read"])
+    )
+
+    context = authenticate_catalog_api_key(
+        session,
+        "secret-token",
+        now=datetime.now(timezone.utc),
+    )
+
+    assert context is not None
+    assert context.scopes == ("catalog.read",)
+    assert raw_key not in repr(context)
+    assert key_hash not in repr(context)
+
+
+@pytest.mark.parametrize(
+    "contaminated_prefix",
+    [
+        "symgov_live_legacy-prefix-secret",
+        hash_api_key("symgov_live_legacy-prefix-secret"),
+    ],
+)
+def test_auth_context_redacts_credential_contaminated_legacy_prefix(contaminated_prefix):
+    session = CapturingSession(api_key_row(key_prefix=contaminated_prefix))
+
+    context = authenticate_catalog_api_key(
+        session,
+        "secret-token",
+        now=datetime.now(timezone.utc),
+    )
+
+    assert context is not None
+    assert context.key_prefix == "[REDACTED]"
+    assert contaminated_prefix not in repr(context)
 
 
 @pytest.mark.parametrize(

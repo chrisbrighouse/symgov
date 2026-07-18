@@ -8,7 +8,8 @@ import uuid
 from fastapi import Request
 from sqlalchemy.orm import Session
 
-from .catalog_api_auth import IntegrationAuthContext
+from .catalog_api_auth import PLANNED_CATALOG_API_SCOPES, IntegrationAuthContext
+from .catalog_developer import redact_catalog_credential_label
 from .models import CatalogApiUsageEvent
 
 MAX_USAGE_TEXT_LENGTH = 500
@@ -31,6 +32,7 @@ _SECRET_PROVIDER_TOKEN = re.compile(
     r"\bAKIA[A-Z0-9]{16}\b"
     r")"
 )
+_SECRET_SHA256 = re.compile(r"(?i)(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])")
 _OBVIOUS_PLACEHOLDER = re.compile(
     r"(?ix)^(?:"
     r"\*{3,}|\.\.\.|…|"
@@ -69,12 +71,16 @@ def sanitize_usage_text(value: object, *, max_length: int = MAX_USAGE_TEXT_LENGT
     text = _SECRET_CONNECTION_URI.sub(
         lambda match: (
             match.group(0)
-            if re.search(r"(?i)(?:\*{3,}|\[redacted\]|<[^>]+>)", match.group(0))
+            if re.search(
+                r"(?i)://[^/\s:@]+:(?:\*{3,}|\[redacted\]|<[^>]+>)@",
+                match.group(0),
+            )
             else f"{match.group(1)}://[REDACTED]"
         ),
         text,
     )
     text = _SECRET_PROVIDER_TOKEN.sub("[REDACTED]", text)
+    text = _SECRET_SHA256.sub("[REDACTED]", text)
     return text[:max_length]
 
 
@@ -108,9 +114,18 @@ def build_catalog_usage_event(
 ) -> CatalogApiUsageEvent:
     return CatalogApiUsageEvent(
         api_key_id=uuid.UUID(str(auth_context.api_key_id)),
-        customer_name_snapshot=sanitize_usage_text(auth_context.customer_name) or "[REDACTED]",
-        integration_name_snapshot=sanitize_usage_text(auth_context.integration_name) or "[REDACTED]",
-        scope_used=sanitize_usage_text(scope_used, max_length=100),
+        customer_name_snapshot=redact_catalog_credential_label(
+            sanitize_usage_text(auth_context.customer_name) or "[REDACTED]"
+        ),
+        integration_name_snapshot=redact_catalog_credential_label(
+            sanitize_usage_text(auth_context.integration_name) or "[REDACTED]"
+        ),
+        scope_used=(
+            normalized_scope
+            if (normalized_scope := sanitize_usage_text(scope_used, max_length=100))
+            in PLANNED_CATALOG_API_SCOPES
+            else None
+        ),
         method=sanitize_usage_text(request.method, max_length=100) or "[REDACTED]",
         path=sanitize_usage_text(request.url.path, max_length=500) or "[REDACTED]",
         route_name=sanitize_usage_text(route_name, max_length=200),

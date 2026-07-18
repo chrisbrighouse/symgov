@@ -6,6 +6,7 @@ import uuid
 
 import pytest
 
+from symgov_backend.catalog_api_auth import hash_api_key
 from symgov_backend.catalog_api_keys import (
     CatalogApiKeyAlreadyActiveError,
     CatalogApiKeyNotFoundError,
@@ -186,6 +187,38 @@ def test_status_returns_only_current_nonexpired_key_for_requesting_owner():
     assert result is not None
     assert result.id == own.id
     assert "key_hash" not in result.to_dict()
+
+
+def test_status_and_revoke_redact_credential_bearing_legacy_labels():
+    raw_key = "symgov_live_legacy-label-secret"
+    key_hash = hash_api_key(raw_key)
+    own = key_row(expires_at=NOW + timedelta(days=1))
+    own.customer_name = raw_key
+    own.integration_name = key_hash
+    own.key_prefix = raw_key
+    own.scopes_json = [raw_key, key_hash, "catalog.read"]
+    session = FakeSession([own])
+
+    status = get_active_self_service_catalog_api_key(session, USER_ID, now=NOW)
+    assert status is not None
+    assert raw_key not in repr(status)
+    assert key_hash not in repr(status)
+    assert raw_key not in repr(status.to_dict())
+    assert key_hash not in repr(status.to_dict())
+    assert status.key_prefix == "[REDACTED]"
+    assert status.scopes == ("catalog.read",)
+
+    revoked = revoke_self_service_catalog_api_key(
+        session,
+        user_id=USER_ID,
+        api_key_id=own.id,
+        key_prefix=own.key_prefix,
+        now=NOW + timedelta(minutes=1),
+    )
+    audit = [value for value in session.added if isinstance(value, AuditEvent)][-1]
+    for surface in (repr(revoked), repr(revoked.to_dict()), repr(audit.payload_json)):
+        assert raw_key not in surface
+        assert key_hash not in surface
 
 
 def test_self_service_revoke_is_owner_scoped_and_requires_exact_prefix():

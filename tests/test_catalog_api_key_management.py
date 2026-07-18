@@ -242,6 +242,57 @@ def test_create_rejected_scope_error_does_not_render_the_rejected_value():
     assert session.flushes == session.commits == session.rollbacks == 0
 
 
+def test_create_iterable_type_error_does_not_chain_attacker_value():
+    raw_key = "symgov_live_iterable-error-secret"
+
+    class LeakingIterable:
+        def __iter__(self):
+            raise TypeError(f"cannot iterate {raw_key}")
+
+    session = FakeSession()
+    with pytest.raises(CatalogApiKeyError) as caught:
+        create_catalog_api_key(
+            session,
+            customer_name="Acme",
+            integration_name="CAD",
+            scopes=LeakingIterable(),
+            now=NOW,
+        )
+
+    rendered = "".join(traceback.format_exception(caught.value))
+    assert str(caught.value) == "scopes must be an iterable"
+    assert raw_key not in rendered
+    assert session.rows == session.added == session.queries == []
+
+
+@pytest.mark.parametrize("field_name", ["customer_name", "integration_name"])
+@pytest.mark.parametrize(
+    "credential",
+    [
+        "symgov_live_label-secret-marker",
+        hash_api_key("symgov_live_label-secret-marker"),
+    ],
+)
+def test_create_rejects_credential_bearing_labels_before_persistence(field_name, credential):
+    session = FakeSession()
+    values = {
+        "customer_name": "Acme",
+        "integration_name": "CAD",
+        "scopes": ["catalog.read"],
+    }
+    values[field_name] = credential
+
+    with pytest.raises(CatalogApiKeyError) as caught:
+        create_catalog_api_key(session, now=NOW, **values)
+
+    rendered = "".join(traceback.format_exception(caught.value))
+    assert credential not in str(caught.value)
+    assert credential not in repr(caught.value)
+    assert credential not in rendered
+    assert session.rows == session.added == session.queries == []
+    assert session.flushes == session.commits == session.rollbacks == 0
+
+
 def test_list_filters_safely_and_has_stable_order_and_serialization():
     older_id = uuid.UUID("00000000-0000-0000-0000-000000000002")
     newer_id = uuid.UUID("00000000-0000-0000-0000-000000000001")
@@ -276,6 +327,33 @@ def test_list_filters_safely_and_has_stable_order_and_serialization():
         assert "key_hash" not in serialized
         assert "raw_key" not in serialized
         assert hash_api_key("not-returned") not in repr(serialized)
+
+
+@pytest.mark.parametrize(
+    "contaminated_prefix",
+    [
+        "symgov_live_legacy-prefix-secret",
+        hash_api_key("symgov_live_legacy-prefix-secret"),
+    ],
+)
+def test_list_and_revoke_redact_credential_contaminated_legacy_prefix(contaminated_prefix):
+    key = row(key_prefix=contaminated_prefix)
+    session = FakeSession([key])
+
+    listed = list_catalog_api_keys(session)
+    revoked = revoke_catalog_api_key(
+        session,
+        key.id,
+        key_prefix=contaminated_prefix,
+        now=NOW + timedelta(minutes=1),
+    )
+    audit = next(item for item in session.added if isinstance(item, AuditEvent))
+
+    assert listed[0].key_prefix == "[REDACTED]"
+    assert revoked.key_prefix == "[REDACTED]"
+    assert audit.payload_json["key_prefix"] == "[REDACTED]"
+    for surface in (repr(listed), repr(revoked), repr(revoked.to_dict()), repr(audit.payload_json)):
+        assert contaminated_prefix not in surface
 
 
 @pytest.mark.parametrize(
