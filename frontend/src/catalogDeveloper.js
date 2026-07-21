@@ -2,6 +2,7 @@ const ALLOWED_ENDPOINTS = new Set([
   '/catalog/capabilities',
   '/catalog/taxonomy',
   '/catalog/symbols',
+  '/catalog/symbols/download',
   '/catalog/search',
   '/catalog/ed/query'
 ]);
@@ -21,6 +22,7 @@ const DEVELOPER_CITATIONS = new Map([
   ['developer://guides/search', ['#reference', 'Search guide']],
   ['developer://guides/pagination', ['#reference', 'Pagination guide']],
   ['developer://guides/previews', ['#reference', 'Preview guide']],
+  ['developer://guides/downloads', ['#reference', 'Download guide']],
   ['developer://guides/errors', ['#reference', 'Errors guide']],
   ['developer://guides/sandbox', ['#sandbox', 'Sandbox guide']],
   ['developer://guides/feedback', ['#changelog', 'Feedback guide']],
@@ -94,6 +96,9 @@ export function catalogExampleBodyForEndpoint(method, path) {
       limit: 10
     };
   }
+  if (normalized === '/catalog/symbols/download') {
+    return { symbolIds: ['0003-12', '00023-3'], format: 'PNG' };
+  }
   if (/^\/catalog\/symbols\/[^/]+\/feedback$/.test(normalized)) {
     return {
       kind: 'comment',
@@ -149,9 +154,9 @@ export function buildCatalogCodeExample({
   const verb = String(method || 'GET').toUpperCase();
   const url = requestUrl(baseUrl, path);
   const json = quotedJson(body);
-  const isBinaryResponse = /^\/catalog\/symbols\/[^/]+\/(thumbnail|preview)$/.test(
-    normalizeCatalogEndpoint(path)
-  );
+  const normalizedPath = normalizeCatalogEndpoint(path);
+  const isBinaryResponse = normalizedPath === '/catalog/symbols/download'
+    || /^\/catalog\/symbols\/[^/]+\/(thumbnail|preview)$/.test(normalizedPath);
 
   if (language === 'curl') {
     const lines = [

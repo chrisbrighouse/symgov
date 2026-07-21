@@ -17,7 +17,7 @@ from ..auth import (
 )
 from ..dependencies import get_db_session
 from ..models import User
-from ..schemas import AuthChangePinRequest, AuthChangePinResponse, AuthLoginRequest, AuthLoginResponse, AuthMeResponse, AuthUserResponse
+from ..schemas import AuthChangePinRequest, AuthChangePinResponse, AuthLoginRequest, AuthLoginResponse, AuthMeResponse, AuthUserResponse, SubscriptionResponse
 
 
 SESSION_COOKIE_NAME = "symgov_session"
@@ -33,6 +33,13 @@ def auth_user_response(user: AuthenticatedUser) -> AuthUserResponse:
         displayName=user.display_name,
         roles=list(user.roles),
         mustChangePin=user.must_change_pin,
+        subscription=SubscriptionResponse(
+            tier=user.subscription_tier,
+            startedOn=user.subscription_started_on.isoformat(),
+            expiresOn=user.subscription_expires_on.isoformat() if user.subscription_expires_on else None,
+            isActive=user.subscription_tier == "plus",
+            isProtected=user.subscription_is_protected,
+        ),
     )
 
 
@@ -58,6 +65,7 @@ async def login(
     current = current_user_from_token(session, token)
     if current is None:
         raise HTTPException(status_code=500, detail="Login session could not be created.")
+    session.commit()
     response.set_cookie(
         SESSION_COOKIE_NAME,
         token,

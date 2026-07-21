@@ -228,11 +228,19 @@ export async function changeCurrentUserPin({ currentPin, newPin }) {
   });
 }
 
-export async function fetchAdminUsers() {
-  const result = await requestJson('/admin/users', { cache: 'no-store' });
+export async function fetchAdminUsers(params = {}) {
+  const query = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') query.set(key, String(value));
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  const result = await requestJson(`/admin/users${suffix}`, { cache: 'no-store' });
   return {
     ...result,
-    items: result.ok ? result.payload?.items || [] : []
+    items: result.ok ? result.payload?.items || [] : [],
+    page: result.ok ? result.payload?.page || 1 : 1,
+    pageSize: result.ok ? result.payload?.pageSize || 50 : 50,
+    total: result.ok ? result.payload?.total || 0 : 0
   };
 }
 
@@ -256,6 +264,31 @@ export async function updateAdminUser(userId, payload) {
     ...result,
     user: result.ok ? result.payload?.user || null : null
   };
+}
+
+async function mutateAdminUser(path, options = {}) {
+  const result = await requestJson(path, options);
+  return { ...result, user: result.ok ? result.payload?.user || null : null };
+}
+
+export async function upgradeAdminUserSubscription(userId, months) {
+  return mutateAdminUser(`/admin/users/${encodeURIComponent(userId)}/subscription/upgrade`, {
+    method: 'POST', body: JSON.stringify({ months })
+  });
+}
+
+export async function adjustAdminUserSubscription(userId, months) {
+  return mutateAdminUser(`/admin/users/${encodeURIComponent(userId)}/subscription/adjust`, {
+    method: 'POST', body: JSON.stringify({ months })
+  });
+}
+
+export async function cancelAdminUserSubscription(userId) {
+  return mutateAdminUser(`/admin/users/${encodeURIComponent(userId)}/subscription/cancel`, { method: 'POST' });
+}
+
+export async function deleteAdminUser(userId) {
+  return mutateAdminUser(`/admin/users/${encodeURIComponent(userId)}`, { method: 'DELETE' });
 }
 
 export async function resetAdminUserPin(userId, pin) {

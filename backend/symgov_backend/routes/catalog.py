@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from io import BytesIO
 import json
 from pathlib import Path
 import re
 from time import perf_counter
 from typing import cast
 import uuid
+from urllib.parse import quote
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
@@ -14,7 +18,14 @@ from fastapi.routing import APIRoute
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from ..catalog_api_auth import IntegrationAuthContext, require_catalog_scope
+from ..asset_manifest import canonical_asset_format, content_type_for_format, list_download_assets
+from ..auth import AuthenticatedUser, current_user_from_token
+from ..catalog_api_auth import (
+    CatalogApiAuthenticationError,
+    IntegrationAuthContext,
+    authenticate_catalog_api_key,
+    require_catalog_scope,
+)
 from ..catalog_developer import contains_catalog_credentials
 from ..catalog_ed import CatalogEdMode, interpret_catalog_ed_prompt
 from ..catalog_search import (
@@ -32,11 +43,12 @@ from ..catalog_taxonomy import (
     catalog_taxonomy_for_symbol,
 )
 from ..catalog_usage import log_catalog_usage_event_best_effort
-from ..dependencies import get_db_session
+from ..dependencies import SESSION_COOKIE_NAME, get_db_session
 from ..models import Attachment
 from ..published_catalog import (
     PUBLISHED_SYMBOLS_SQL,
     choose_published_preview_asset,
+    published_fallback_source_asset,
     published_symbol_display_id,
 )
 from ..runtime import download_object_bytes
@@ -108,9 +120,72 @@ PUBLIC_CATALOG_LINKS = {
     "taxonomy": "/api/v1/catalog/taxonomy",
     "symbols": "/api/v1/catalog/symbols",
     "symbolSearch": "/api/v1/catalog/search",
+    "symbolDownload": "/api/v1/catalog/symbols/download",
     "edQuery": "/api/v1/catalog/ed/query",
     "feedback": "/api/v1/catalog/symbols/{symbolRef}/feedback",
 }
+CATALOG_DOWNLOAD_FORMATS = frozenset(
+    format_name
+    for value in FORMAT_ORDER
+    if (format_name := canonical_asset_format(value)) is not None
+)
+
+
+def catalog_download_now() -> datetime:
+    return datetime.now(timezone.utc).replace(microsecond=0)
+
+
+def catalog_symbol_download_filename(symbol_name: object, display_id: object, format: object) -> str:
+    name = re.sub(r"[\x00-\x1f\x7f]", "", str(symbol_name or "Symbol"))
+    name = re.sub(r"[\\/]", " - ", name)
+    name = re.sub(r"[:*?<>|]", "-", name).replace('"', "")
+    name = re.sub(r"\s+", " ", name).strip(" .") or "Symbol"
+    safe_display_id = re.sub(r"[^A-Za-z0-9._-]", "-", str(display_id or "unknown")).strip(".-") or "unknown"
+    extension = canonical_asset_format(format)
+    if extension not in CATALOG_DOWNLOAD_FORMATS:
+        extension = "bin"
+    return f"{name} ({safe_display_id}).{extension}"
+
+
+def catalog_download_header_token(value: object) -> str:
+    return re.sub(r"[^A-Za-z0-9._-]", "-", str(value or "unknown")).strip(".-") or "unknown"
+
+
+def catalog_download_content_disposition(filename: str) -> str:
+    ascii_filename = "".join(character if 32 <= ord(character) < 127 else "_" for character in filename)
+    basic = f'attachment; filename="{ascii_filename}"'
+    if ascii_filename == filename:
+        return basic
+    return f"{basic}; filename*=UTF-8''{quote(filename, safe='.-_')}"
+
+
+def require_catalog_download_access(
+    request: Request,
+    session: Session = Depends(get_db_session),
+) -> AuthenticatedUser | IntegrationAuthContext:
+    session_token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    current_user = current_user_from_token(session, session_token)
+    if current_user is not None:
+        session.commit()
+        return current_user
+
+    authorization = request.headers.get("authorization", "")
+    scheme, _, value = authorization.partition(" ")
+    api_token = value.strip() if scheme.lower() == "bearer" else request.headers.get("x-symgov-api-key", "").strip()
+    try:
+        context = authenticate_catalog_api_key(session, api_token)
+    except CatalogApiAuthenticationError:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Catalog API key authentication is temporarily unavailable.",
+        ) from None
+    if context is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    if CATALOG_READ_SCOPE not in context.scopes:
+        raise HTTPException(status_code=403, detail="Insufficient scope for this operation.")
+    session.commit()
+    return context
 
 
 def _latency_ms(started_at: float) -> int:
@@ -152,7 +227,7 @@ def get_catalog_capabilities(
     response = {
         "apiVersion": "v1",
         "catalogName": "Symgov Catalog",
-        "downloadAvailable": False,
+        "downloadAvailable": True,
         "auth": {
             "methods": ["api_key"],
             "preferredHeader": "Authorization: Bearer ***",
@@ -167,7 +242,7 @@ def get_catalog_capabilities(
             "previews": True,
             "feedback": True,
             "usageReporting": True,
-            "download": False,
+            "download": True,
         },
         "currentEndpoints": [
             {
@@ -207,6 +282,11 @@ def get_catalog_capabilities(
             },
             {
                 "method": "POST",
+                "path": "/api/v1/catalog/symbols/download",
+                "scope": CATALOG_READ_SCOPE,
+            },
+            {
+                "method": "POST",
                 "path": "/api/v1/catalog/ed/query",
                 "scope": CATALOG_ED_QUERY_SCOPE,
             },
@@ -242,7 +322,7 @@ def get_catalog_taxonomy(
     response = {
         "apiVersion": "v1",
         "catalogName": "Symgov Catalog",
-        "downloadAvailable": False,
+        "downloadAvailable": True,
         "facets": {
             "disciplines": CATALOG_DISCIPLINE_ORDER,
             "categories": CATALOG_CATEGORY_ORDER,
@@ -256,6 +336,7 @@ def get_catalog_taxonomy(
         "links": {
             "capabilities": "/api/v1/catalog/capabilities",
             "symbols": "/api/v1/catalog/symbols",
+            "symbolDownload": PUBLIC_CATALOG_LINKS["symbolDownload"],
         },
     }
     _log_successful_catalog_read(session, auth_context, request=request, route_name="catalog_taxonomy", started_at=started_at)
@@ -296,11 +377,13 @@ def _preview_response(display_id: str, preview_asset: dict | None) -> dict | Non
     return preview
 
 
-def _catalog_links(display_id: str, preview_asset: dict | None) -> dict:
+def _catalog_links(display_id: str, preview_asset: dict | None, *, download_available: bool = False) -> dict:
     links = {"api": f"/api/v1/catalog/symbols/{display_id}"}
     if preview_asset:
         links["thumbnail"] = f"/api/v1/catalog/symbols/{display_id}/thumbnail"
         links["preview"] = f"/api/v1/catalog/symbols/{display_id}/preview"
+    if download_available:
+        links["download"] = PUBLIC_CATALOG_LINKS["symbolDownload"]
     return links
 
 
@@ -309,6 +392,9 @@ def _catalog_symbol_detail(row) -> dict:
     display_id = _catalog_symbol_ref(row)
     taxonomy = catalog_taxonomy_for_symbol(_row_taxonomy_input(row))
     preview_asset = choose_published_preview_asset(payload)
+    download_available = bool(
+        list_download_assets(payload, fallback_source_asset=published_fallback_source_asset(payload))
+    )
     provenance = {
         "sourceRef": payload.get("source_ref"),
         "submittedBy": payload.get("submitted_by"),
@@ -346,11 +432,11 @@ def _catalog_symbol_detail(row) -> dict:
             "pageTitle": row.page_title,
         },
         "availableFormats": taxonomy["available_formats"],
-        "downloadAvailable": False,
+        "downloadAvailable": download_available,
         "preview": _preview_response(display_id, preview_asset),
         "curated": bool(payload.get("curated", True)),
         "provenance": provenance,
-        "links": _catalog_links(display_id, preview_asset),
+        "links": _catalog_links(display_id, preview_asset, download_available=download_available),
     }
 
 
@@ -732,15 +818,18 @@ async def contextual_catalog_search(
     result = search_catalog_symbols_for_context(session, query=query, context=context, limit=limit)
     items = result.items
 
+    download_available = any(item.get("downloadAvailable") for item in items)
     response = {
         "query": query,
         "items": items,
         "interpretedFilters": result.interpreted_filters,
         "rankingExplanation": result.ranking_explanation,
         "warnings": result.warnings,
-        "downloadAvailable": False,
-        "noDownloadNotice": "Symbol downloads are not available through the Catalog integration API.",
+        "downloadAvailable": download_available,
+        "downloadEndpoint": PUBLIC_CATALOG_LINKS["symbolDownload"],
     }
+    if not download_available:
+        response["noDownloadNotice"] = "The requested format is not available for these symbols."
     log_catalog_usage_event_best_effort(
         session,
         auth_context,
@@ -832,6 +921,126 @@ def search_catalog_symbols(
         result_count=len(page_rows),
     )
     return response
+
+
+@router.post("/symbols/download")
+async def download_catalog_symbols(
+    request: Request,
+    auth_context: AuthenticatedUser | IntegrationAuthContext = Depends(require_catalog_download_access),
+    session: Session = Depends(get_db_session),
+) -> Response:
+    started_at = perf_counter()
+    body = await _parse_strict_catalog_json_object(request)
+    if set(body) != {"symbolIds", "format"}:
+        raise HTTPException(status_code=400, detail="Request must contain symbolIds and format only.")
+    symbol_ids = body.get("symbolIds")
+    raw_format = body.get("format")
+    requested_format = canonical_asset_format(raw_format)
+    if (
+        not isinstance(symbol_ids, list)
+        or not 1 <= len(symbol_ids) <= 10
+        or not isinstance(raw_format, str)
+        or not 1 <= len(raw_format.strip()) <= 64
+        or requested_format not in CATALOG_DOWNLOAD_FORMATS
+    ):
+        raise HTTPException(status_code=400, detail="Select 1 to 10 symbols and one format.")
+    if any(not isinstance(symbol_id, str) or not symbol_id.strip() or len(symbol_id.strip()) > 256 for symbol_id in symbol_ids):
+        raise HTTPException(status_code=400, detail="Each symbol ID must be a non-empty string.")
+    symbol_ids = [symbol_id.strip() for symbol_id in symbol_ids]
+    if len(set(symbol_ids)) != len(symbol_ids):
+        raise HTTPException(status_code=400, detail="Each selected symbol must be unique.")
+
+    resolved_rows = []
+    resolved_symbol_ids: set[str] = set()
+    for symbol_id in symbol_ids:
+        row = _load_catalog_symbol_row(session, symbol_id)
+        resolved_symbol_id = str(row.symbol_id)
+        if resolved_symbol_id in resolved_symbol_ids:
+            raise HTTPException(status_code=400, detail="Each selected symbol must be unique.")
+        resolved_symbol_ids.add(resolved_symbol_id)
+        resolved_rows.append(row)
+
+    selected: list[tuple[str, bytes, str | None]] = []
+    skipped: list[str] = []
+    for row in resolved_rows:
+        display_id = published_symbol_display_id(row)
+        asset = next(
+            (
+                candidate
+                for candidate in list_download_assets(
+                    row.payload_json or {},
+                    fallback_source_asset=published_fallback_source_asset(row.payload_json or {}),
+                )
+                if canonical_asset_format(candidate.get("format")) == requested_format
+            ),
+            None,
+        )
+        if asset is None:
+            skipped.append(catalog_download_header_token(display_id))
+            continue
+        stored = download_object_bytes(
+            object_key=asset["object_key"],
+            env_file=str(get_settings().storage_env_file),
+        )
+        symbol_name = str((row.payload_json or {}).get("name") or row.canonical_name).strip()
+        filename = catalog_symbol_download_filename(symbol_name, display_id, requested_format)
+        selected.append(
+            (
+                filename,
+                stored["payload"],
+                content_type_for_format(
+                    requested_format,
+                    filename=filename,
+                    content_type=asset.get("content_type") or stored.get("content_type"),
+                ),
+            )
+        )
+
+    if not selected:
+        raise HTTPException(status_code=422, detail="The selected format is not available for any selected symbol.")
+
+    headers = {
+        "X-Symgov-Selected-Count": str(len(symbol_ids)),
+        "X-Symgov-Downloaded-Count": str(len(selected)),
+        "X-Symgov-Skipped-Symbols": ",".join(skipped),
+    }
+    if len(symbol_ids) == 1:
+        filename, content, media_type = selected[0]
+        headers["Content-Disposition"] = catalog_download_content_disposition(filename)
+        if isinstance(auth_context, IntegrationAuthContext):
+            _log_successful_catalog_read(
+                session,
+                auth_context,
+                request=request,
+                route_name="catalog_symbol_download",
+                started_at=started_at,
+                query_text=requested_format,
+                result_count=len(selected),
+            )
+        return Response(content=content, media_type=media_type, headers=headers)
+
+    archive = BytesIO()
+    with ZipFile(archive, "w", compression=ZIP_DEFLATED) as output:
+        for filename, content, _ in selected:
+            output.writestr(filename, content)
+    timestamp = catalog_download_now().astimezone(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    filename = f"symgov-{requested_format}-{timestamp}.zip"
+    headers["Content-Disposition"] = catalog_download_content_disposition(filename)
+    if isinstance(auth_context, IntegrationAuthContext):
+        _log_successful_catalog_read(
+            session,
+            auth_context,
+            request=request,
+            route_name="catalog_symbol_download",
+            started_at=started_at,
+            query_text=requested_format,
+            result_count=len(selected),
+        )
+    return Response(
+        content=archive.getvalue(),
+        media_type="application/zip",
+        headers=headers,
+    )
 
 
 @router.get("/symbols/{symbol_ref}")

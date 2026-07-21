@@ -30,6 +30,7 @@ def client():
         ("Should I use keyword or contextual search?", "search"),
         ("How does cursor pagination work?", "pagination"),
         ("How can I show thumbnails and previews?", "previews"),
+        ("How do I download several symbols as PNG?", "downloads"),
         ("What do 401, 403 and validation errors mean?", "errors"),
         ("How does the safe sandbox work?", "sandbox"),
         ("How do I submit feedback?", "feedback"),

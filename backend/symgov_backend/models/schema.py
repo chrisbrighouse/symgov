@@ -14,6 +14,7 @@ class User(Base):
     __table_args__ = (
         Index("uq_users_email_lower", text("lower(email)"), unique=True),
         Index("uq_users_display_name_lower", text("lower(display_name)"), unique=True),
+        Index("ix_users_deleted_display_name", "deleted_at", "display_name"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -25,6 +26,7 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    deleted_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class UserRole(Base):
@@ -49,6 +51,52 @@ class UserSession(Base):
     expires_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UserSubscription(Base):
+    __tablename__ = "user_subscriptions"
+    __table_args__ = (
+        CheckConstraint("tier in ('free', 'plus')", name="ck_user_subscriptions_tier"),
+        CheckConstraint(
+            "(tier = 'free' and expires_on is null and is_protected = false) or "
+            "(tier = 'plus' and ((is_protected = true and expires_on is null) or expires_on is not null))",
+            name="ck_user_subscriptions_tier_expiry",
+        ),
+        CheckConstraint("expires_on is null or expires_on > started_on", name="ck_user_subscriptions_dates"),
+        CheckConstraint("anchor_day between 1 and 31", name="ck_user_subscriptions_anchor_day"),
+        Index("ix_user_subscriptions_tier_expiry", "tier", "expires_on"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    tier: Mapped[str] = mapped_column(Text, nullable=False)
+    started_on: Mapped[object] = mapped_column(Date, nullable=False)
+    expires_on: Mapped[object | None] = mapped_column(Date, nullable=True)
+    anchor_day: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_protected: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SubscriptionEvent(Base):
+    __tablename__ = "subscription_events"
+    __table_args__ = (
+        CheckConstraint(
+            "action in ('created', 'upgraded', 'adjusted', 'cancelled', 'expired', 'user_removed', 'owner_repaired')",
+            name="ck_subscription_events_action",
+        ),
+        Index("ix_subscription_events_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_tier: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_tier: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_expires_on: Mapped[object | None] = mapped_column(Date, nullable=True)
+    new_expires_on: Mapped[object | None] = mapped_column(Date, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class CatalogFavourite(Base):

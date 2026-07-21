@@ -25,6 +25,10 @@ def test_admin_user_management_ui_uses_admin_user_api_calls():
     assert "createAdminUser" in source
     assert "updateAdminUser" in source
     assert "resetAdminUserPin" in source
+    assert "upgradeAdminUserSubscription" in source
+    assert "adjustAdminUserSubscription" in source
+    assert "cancelAdminUserSubscription" in source
+    assert "deleteAdminUser" in source
 
 
 def test_admin_user_management_supports_inline_role_editing_and_custom_pin_modal():
@@ -37,21 +41,43 @@ def test_admin_user_management_supports_inline_role_editing_and_custom_pin_modal
     assert "Custom 4-digit PIN" in source
 
 
-def test_admin_user_management_offers_integrator_role():
+def test_admin_user_management_offers_roles_only_for_plus_users():
     source = APP_JSX.read_text(encoding="utf-8")
 
-    assert "setRole('integrator'" in source
-    assert "<span>Integrator</span>" in source
     assert "['admin', 'integrator', 'submitter', 'reviewer'].map" in source
-    assert '<label className="checkbox-row"><input type="checkbox" checked={form.roles.includes(\'integrator\')}' in source
+    assert "user.subscription?.tier !== 'plus'" in source
 
 
 def test_admin_user_management_allows_catalog_only_users_without_roles():
     source = APP_JSX.read_text(encoding="utf-8")
 
     assert "roles: []" in source
-    assert "return { ...current, roles: Array.from(roles) };" in source
     assert "Each user needs at least one role." not in source
+
+
+def test_admin_user_management_shows_subscription_dates_controls_and_pagination():
+    source = APP_JSX.read_text(encoding="utf-8")
+
+    assert "Subscription start" in source
+    assert "Plus expiry" in source
+    assert "Upgrade to Plus" in source
+    assert "Adjust months" in source
+    assert "Cancel Plus" in source
+    assert "Remove user" in source
+    assert "searchDraft" in source
+    assert "appliedSearch" in source
+    assert "userPage" in source
+    assert "sortDirection" in source
+    assert "requestId !== userRequestSequence.current" in source
+    assert r"/^-?\d+$/" in source
+    assert "Number.isSafeInteger" in source
+    assert "Protected owner" in source
+
+
+def test_header_shows_active_plus_badge():
+    source = APP_JSX.read_text(encoding="utf-8")
+    assert "plus-subscription-badge" in source
+    assert "user.subscription?.isActive" in source
 
 
 def test_admin_user_management_shows_toast_feedback():
@@ -74,11 +100,14 @@ def test_admin_user_management_uses_per_user_loading_state_not_global_busy_for_r
 def test_admin_user_management_api_client_methods_exist():
     source = API_JS.read_text(encoding="utf-8")
 
-    assert "export async function fetchAdminUsers()" in source
+    assert "export async function fetchAdminUsers(" in source
     assert "export async function createAdminUser(" in source
     assert "export async function updateAdminUser(" in source
     assert "export async function resetAdminUserPin(" in source
     assert "requestJson('/admin/users'" in source
+    assert "subscription/upgrade" in source
+    assert "subscription/adjust" in source
+    assert "subscription/cancel" in source
 
 
 def test_admin_llm_management_api_client_methods_exist():

@@ -47,6 +47,7 @@ const FALLBACK_ENDPOINTS = [
   { method: 'GET', path: '/api/v1/catalog/symbols/{symbolRef}', scope: 'catalog.read', summary: 'Read one published symbol.' },
   { method: 'GET', path: '/api/v1/catalog/symbols/{symbolRef}/thumbnail', scope: 'catalog.read', summary: 'Retrieve a symbol thumbnail.' },
   { method: 'GET', path: '/api/v1/catalog/symbols/{symbolRef}/preview', scope: 'catalog.read', summary: 'Retrieve a symbol preview.' },
+  { method: 'POST', path: '/api/v1/catalog/symbols/download', scope: 'catalog.read', summary: 'Download one to ten symbols in one format.' },
   { method: 'POST', path: '/api/v1/catalog/search', scope: 'catalog.read', summary: 'Search using application and drawing context.' },
   { method: 'POST', path: '/api/v1/catalog/ed/query', scope: 'catalog.ed.query', summary: 'Ask Catalog Ed for symbol guidance.' },
   { method: 'POST', path: '/api/v1/catalog/symbols/{symbolRef}/feedback', scope: 'catalog.feedback.write', summary: 'Submit feedback or an explicit review request.' }

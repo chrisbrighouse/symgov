@@ -25,8 +25,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from .db import create_session_factory, read_env_file
-from .auth import hash_pin
 from .property_options import remember_property_option
+from .service_users import enforce_noninteractive_service_account, new_service_pin_hash
 from .models import (
     AgentDefinition,
     AgentOutputArtifact,
@@ -54,7 +54,6 @@ from .models import (
     HannahPhotoCandidate,
     HannahSymbolCurationState,
     User,
-    UserRole,
     ValidationReport,
     WhitneyDemandSignal,
     WhitneyMarketIntelligenceReport,
@@ -1882,18 +1881,16 @@ class RuntimePersistenceBridge:
                 id=coerce_uuid("user:symgov-publication-service"),
                 email=service_email,
                 display_name="SymGov Publication Service",
-                pin_hash=hash_pin("4590"),
+                pin_hash=new_service_pin_hash(),
                 pin_set_at=now,
-                must_change_pin=True,
-                is_active=True,
+                must_change_pin=False,
+                is_active=False,
                 created_at=now,
                 updated_at=now,
             )
             session.add(row)
             session.flush()
-            session.add(UserRole(user_id=row.id, role="admin", created_at=now))
-            session.flush()
-        return row
+        return enforce_noninteractive_service_account(session, row, now=now)
 
     def generate_published_page_code(
         self,

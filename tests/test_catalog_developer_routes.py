@@ -155,6 +155,7 @@ def test_developer_manifest_is_current_and_credentials_are_not_disclosed():
     assert payload["sandbox"]["available"] is True
     assert payload["sandbox"]["deterministic"] is True
     assert payload["support"]["route"] == "/support"
+    assert payload["downloadAvailable"] is True
     assert payload["security"]["requiresLoginSession"] is True
     assert payload["security"]["requiresCatalogApiKey"] is True
     assert "no user/customer association" in payload["security"]["authorizationBoundary"].lower()
@@ -166,6 +167,7 @@ def test_developer_manifest_is_current_and_credentials_are_not_disclosed():
         "catalog.read", "catalog.ed.query", "catalog.feedback.write"
     }
     assert all(item["path"].startswith("/api/v1/catalog/") for item in payload["endpoints"])
+    assert any(item["path"] == "/api/v1/catalog/symbols/download" for item in payload["endpoints"])
     serialized = str(payload)
     assert "valid-token" not in serialized
     assert "symgov_live_acme" not in serialized

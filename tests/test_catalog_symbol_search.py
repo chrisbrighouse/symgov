@@ -93,9 +93,9 @@ def symbol_row(**overrides):
         "summary": "Approved fire alarm smoke detector symbol.",
         "keywords": ["smoke", "detector", "fire alarm"],
         "downloads": [
-            {"format": "DXF", "filename": "smoke-detector.dxf"},
-            {"format": "SVG", "filename": "smoke-detector.svg"},
-            {"format": "PNG", "filename": "smoke-detector.png"},
+            {"format": "DXF", "filename": "smoke-detector.dxf", "object_key": "symbols/smoke-detector.dxf"},
+            {"format": "SVG", "filename": "smoke-detector.svg", "object_key": "symbols/smoke-detector.svg"},
+            {"format": "PNG", "filename": "smoke-detector.png", "object_key": "symbols/smoke-detector.png"},
         ],
         "preview_object_key": "previews/smoke-detector.svg",
         "preview_format": "SVG",
@@ -198,7 +198,7 @@ def test_catalog_symbol_search_returns_paginated_integration_friendly_summaries_
     assert item["catalogCategories"] == ["Fire Alarm Devices", "Sensors / Detectors", "Drawing Symbols"]
     assert item["useCases"] == ["Insert into CAD drawing", "Mark up / annotate drawing", "Use in PDF/report"]
     assert item["availableFormats"] == ["DXF", "SVG", "PNG"]
-    assert item["downloadAvailable"] is False
+    assert item["downloadAvailable"] is True
     assert item["preview"] == {
         "thumbnailUrl": "/api/v1/catalog/symbols/0003-12/thumbnail",
         "previewUrl": "/api/v1/catalog/symbols/0003-12/preview",
@@ -207,6 +207,7 @@ def test_catalog_symbol_search_returns_paginated_integration_friendly_summaries_
         "api": "/api/v1/catalog/symbols/0003-12",
         "thumbnail": "/api/v1/catalog/symbols/0003-12/thumbnail",
         "preview": "/api/v1/catalog/symbols/0003-12/preview",
+        "download": "/api/v1/catalog/symbols/download",
     }
     serialized = str(payload).lower()
     assert "/api/v1/published" not in serialized
@@ -270,5 +271,5 @@ def test_catalog_symbol_search_usage_logging_failure_does_not_fail_response():
     response = client.get("/api/v1/catalog/symbols", headers=auth_headers())
 
     assert response.status_code == 200
-    assert response.json()["items"][0]["downloadAvailable"] is False
+    assert response.json()["items"][0]["downloadAvailable"] is True
     assert session.rollbacks == 1

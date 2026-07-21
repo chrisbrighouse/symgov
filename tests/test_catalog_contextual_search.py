@@ -94,9 +94,9 @@ def symbol_row(**overrides):
         "summary": "Approved fire alarm smoke detector symbol.",
         "keywords": ["smoke", "detector", "fire alarm"],
         "downloads": [
-            {"format": "DXF", "filename": "smoke-detector.dxf"},
-            {"format": "SVG", "filename": "smoke-detector.svg"},
-            {"format": "PNG", "filename": "smoke-detector.png"},
+            {"format": "DXF", "filename": "smoke-detector.dxf", "object_key": "symbols/smoke-detector.dxf"},
+            {"format": "SVG", "filename": "smoke-detector.svg", "object_key": "symbols/smoke-detector.svg"},
+            {"format": "PNG", "filename": "smoke-detector.png", "object_key": "symbols/smoke-detector.png"},
         ],
         "preview_object_key": "previews/smoke-detector.svg",
         "preview_format": "SVG",
@@ -196,8 +196,8 @@ def test_catalog_contextual_search_merges_context_into_ranked_results_and_public
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["downloadAvailable"] is False
-    assert payload["noDownloadNotice"]
+    assert payload["downloadAvailable"] is True
+    assert payload["downloadEndpoint"] == "/api/v1/catalog/symbols/download"
     assert payload["query"] == "smoke detector near stairwell"
     assert payload["interpretedFilters"] == {
         "application": "AutoCAD",
@@ -211,11 +211,12 @@ def test_catalog_contextual_search_merges_context_into_ranked_results_and_public
     item = payload["items"][0]
     assert item["displayId"] == "0003-12"
     assert item["availableFormats"] == ["DXF", "SVG", "PNG"]
-    assert item["downloadAvailable"] is False
+    assert item["downloadAvailable"] is True
     assert item["links"] == {
         "api": "/api/v1/catalog/symbols/0003-12",
         "thumbnail": "/api/v1/catalog/symbols/0003-12/thumbnail",
         "preview": "/api/v1/catalog/symbols/0003-12/preview",
+        "download": "/api/v1/catalog/symbols/download",
     }
     assert any("query" in explanation.lower() for explanation in payload["rankingExplanation"])
     assert any("discipline" in explanation.lower() for explanation in payload["rankingExplanation"])
@@ -340,5 +341,5 @@ def test_catalog_contextual_search_usage_logging_failure_does_not_fail_response(
     response = client.post("/api/v1/catalog/search", headers=auth_headers(), json=contextual_request())
 
     assert response.status_code == 200
-    assert response.json()["items"][0]["downloadAvailable"] is False
+    assert response.json()["items"][0]["downloadAvailable"] is True
     assert session.rollbacks == 1

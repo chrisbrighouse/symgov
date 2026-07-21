@@ -442,6 +442,10 @@ def test_unknown_symbol_returns_404_without_feedback_side_effect():
 
 def test_send_for_review_uses_shared_workflow_reuses_case_and_queues_before_success(tmp_path, monkeypatch):
     monkeypatch.setattr(catalog_routes, "CATALOG_FEEDBACK_RUNTIME_QUEUE_DIR", tmp_path)
+    monkeypatch.setattr(
+        "symgov_backend.services.published_feedback.get_or_create_ed_user",
+        lambda session, now=None: SimpleNamespace(id=ED_USER_ID),
+    )
     existing_case = SimpleNamespace(
         id=UUID("55555555-5555-5555-5555-555555555555"),
         current_stage="classification_review",

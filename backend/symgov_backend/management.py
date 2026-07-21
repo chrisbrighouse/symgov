@@ -10,10 +10,11 @@ from sqlalchemy.orm import Session
 from .auth import upsert_user, user_roles
 from .db import create_session_factory
 from .models import User
+from .subscriptions import PROTECTED_OWNER_EMAIL, ensure_subscription
 from .settings import get_settings
 
-INITIAL_ROLES = ("admin", "submitter", "reviewer")
-DEFAULT_BOOTSTRAP_DISPLAY_NAME = "Alfi"
+INITIAL_ROLES = ("admin",)
+DEFAULT_BOOTSTRAP_DISPLAY_NAME = "Chris Brighouse"
 
 
 def bootstrap_first_user(
@@ -24,7 +25,9 @@ def bootstrap_first_user(
     display_name: str = DEFAULT_BOOTSTRAP_DISPLAY_NAME,
     roles: Sequence[str] = INITIAL_ROLES,
 ) -> User:
-    return upsert_user(
+    if email.strip().lower() != PROTECTED_OWNER_EMAIL:
+        raise ValueError(f"The bootstrap account must be the protected owner {PROTECTED_OWNER_EMAIL}.")
+    user = upsert_user(
         session,
         email=email,
         display_name=display_name,
@@ -32,14 +35,16 @@ def bootstrap_first_user(
         roles=roles,
         must_change_pin=True,
     )
+    ensure_subscription(session, user)
+    return user
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Manage Symgov application users.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    bootstrap = subparsers.add_parser("bootstrap-first-user", help="Create or update the initial Alfi account.")
-    bootstrap.add_argument("--email", default=os.environ.get("SYMGOV_BOOTSTRAP_EMAIL"))
+    bootstrap = subparsers.add_parser("bootstrap-first-user", help="Create or repair the protected owner account.")
+    bootstrap.add_argument("--email", default=os.environ.get("SYMGOV_BOOTSTRAP_EMAIL", PROTECTED_OWNER_EMAIL))
     bootstrap.add_argument("--pin", default=os.environ.get("SYMGOV_BOOTSTRAP_PIN"))
     bootstrap.add_argument("--display-name", default=os.environ.get("SYMGOV_BOOTSTRAP_DISPLAY_NAME", DEFAULT_BOOTSTRAP_DISPLAY_NAME))
     bootstrap.add_argument("--role", action="append", dest="roles", default=None)

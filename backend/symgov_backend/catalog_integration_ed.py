@@ -33,7 +33,8 @@ _TOPICS = (
     ("examples", ("example", "curl", "python", "javascript", "typescript", "c#", "csharp"), "Use a placeholder key in the Authorization bearer header and replace it only at runtime. Never persist the key."),
     ("authentication", ("auth", "scope", "api key", "bearer", "login"), "Developer Hub content requires both an existing Symgov login session and an active Catalog API key. Production operations require the exact documented scope; these credentials are independent and are not a user/customer association."),
     ("pagination", ("pagin", "cursor", "nextcursor"), "GET /api/v1/catalog/symbols uses cursor pagination. Request at most 100 items, then pass a non-null nextCursor as the next cursor value."),
-    ("previews", ("preview", "thumbnail", "image"), "Symbol summaries and detail can expose thumbnail and preview routes when an asset exists. These are render-only; Catalog downloads are not available."),
+    ("downloads", ("download", "symbol file", "zip"), "POST /api/v1/catalog/symbols/download with catalog.read accepts 1 to 10 unique symbolIds and one format. One matching file is returned directly; a multi-symbol selection returns a ZIP. Symbols without the format are skipped and named in response headers; if none match, the API returns 422."),
+    ("previews", ("preview", "thumbnail", "image"), "Symbol summaries and detail can expose render-only thumbnail and preview routes when an asset exists. Use POST /api/v1/catalog/symbols/download when the original symbol file is required."),
     ("errors", ("error", "401", "403", "validation", "not found", "404"), "A 401 means a login or API-key credential is missing or invalid; 403 means the key lacks scope; 400/422 means bounded input or validation failed; 404 means the symbol was not found."),
     ("sandbox", ("sandbox", "simulate", "try it"), "The sandbox is an in-process deterministic simulator with synthetic IDs. It is read-only, allowlisted, makes no production mutation, and does not call external services."),
     ("feedback", ("feedback", "support", "issue", "review"), "Submit integration feedback with POST /api/v1/catalog/symbols/{symbol_ref}/feedback and catalog.feedback.write. For unresolved integration help, use /support."),
@@ -90,7 +91,7 @@ def answer_integration_question(body: dict) -> dict:
         return {
             "answer": "I cannot resolve that from the current Catalog developer documentation. Use /support for integration help.",
             "citations": ["developer://support"],
-            "suggestedFollowups": ["Open /support", "Ask about authentication, search, pagination, previews, errors, sandbox, or feedback"],
+            "suggestedFollowups": ["Open /support", "Ask about authentication, search, pagination, previews, downloads, errors, sandbox, or feedback"],
             "code": None,
             "resolved": False,
             "supportRoute": "/support",

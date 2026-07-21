@@ -6,6 +6,8 @@ import {
   applySavedCatalogView,
   buildCatalogCardSummary,
   buildCatalogPreviewOptions,
+  buildReviewPreviewOptions,
+  buildReviewPreviewUrl,
   buildCatalogFacetValues,
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
@@ -154,6 +156,43 @@ test('builds format badges that identify the active preview and only enable brow
     { format: 'DXF', active: false, previewable: false },
     { format: 'SVG', active: true, previewable: true },
     { format: 'PNG', active: false, previewable: true }
+  ]);
+});
+
+test('builds review format badges from workspace source assets', () => {
+  const review = {
+    id: 'review-123',
+    availableFormats: ['dxf', 'jpg', 'svg'],
+    sourcePreviewUrl: '/api/v1/workspace/review-cases/review-123/source/preview',
+    sourceAssets: [
+      { objectKey: 'symbols/alarm.dxf', format: 'dxf', previewable: false, selectedPreview: false },
+      { objectKey: 'symbols/alarm.jpg', format: 'jpg', previewable: true, selectedPreview: true },
+      { objectKey: 'validation/alarm.svg', format: 'svg', previewable: true, selectedPreview: false }
+    ]
+  };
+
+  assert.deepEqual(buildReviewPreviewOptions(review, 'SVG'), [
+    { format: 'DXF', active: false, previewable: false, objectKey: 'symbols/alarm.dxf' },
+    { format: 'SVG', active: true, previewable: true, objectKey: 'validation/alarm.svg' },
+    { format: 'JPG', active: false, previewable: true, objectKey: 'symbols/alarm.jpg' }
+  ]);
+  assert.equal(
+    buildReviewPreviewUrl(review, 'validation/alarm.svg', 'SVG'),
+    '/api/v1/workspace/review-cases/review-123/source/preview?object_key=validation%2Falarm.svg&format=SVG'
+  );
+});
+
+test('review format badges prefer the selected preview when a format has duplicate assets', () => {
+  const review = {
+    availableFormats: ['svg'],
+    sourceAssets: [
+      { objectKey: 'symbols/alarm.svg', format: 'svg', previewable: true, selectedPreview: false },
+      { objectKey: 'validation/alarm-preview.svg', format: 'svg', previewable: true, selectedPreview: true }
+    ]
+  };
+
+  assert.deepEqual(buildReviewPreviewOptions(review), [
+    { format: 'SVG', active: true, previewable: true, objectKey: 'validation/alarm-preview.svg' }
   ]);
 });
 

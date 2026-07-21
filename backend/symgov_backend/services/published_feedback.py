@@ -9,7 +9,6 @@ import uuid
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ..auth import hash_pin
 from ..models import (
     AgentDefinition,
     AgentQueueItem,
@@ -19,9 +18,9 @@ from ..models import (
     ReviewCaseAction,
     SymbolRevision,
     User,
-    UserRole,
 )
 from ..published_catalog import published_symbol_display_id
+from ..service_users import enforce_noninteractive_service_account, new_service_pin_hash
 
 
 SYSTEM_ED_EMAIL = "ed@symgov.local"
@@ -60,25 +59,22 @@ def _utc_now() -> datetime:
 
 def get_or_create_ed_user(session: Session, *, now: datetime | None = None) -> User:
     user = session.query(User).filter(func.lower(User.email) == SYSTEM_ED_EMAIL).one_or_none()
-    if user is not None:
-        return user
     resolved_now = now or _utc_now()
-    user = User(
-        id=uuid.uuid4(),
-        email=SYSTEM_ED_EMAIL,
-        display_name=SYSTEM_ED_NAME,
-        pin_hash=hash_pin("4590"),
-        pin_set_at=resolved_now,
-        must_change_pin=True,
-        is_active=True,
-        created_at=resolved_now,
-        updated_at=resolved_now,
-    )
-    session.add(user)
-    session.flush()
-    session.add(UserRole(user_id=user.id, role="admin", created_at=resolved_now))
-    session.flush()
-    return user
+    if user is None:
+        user = User(
+            id=uuid.uuid4(),
+            email=SYSTEM_ED_EMAIL,
+            display_name=SYSTEM_ED_NAME,
+            pin_hash=new_service_pin_hash(),
+            pin_set_at=resolved_now,
+            must_change_pin=False,
+            is_active=False,
+            created_at=resolved_now,
+            updated_at=resolved_now,
+        )
+        session.add(user)
+        session.flush()
+    return enforce_noninteractive_service_account(session, user, now=resolved_now)
 
 
 def create_ed_queue_item(

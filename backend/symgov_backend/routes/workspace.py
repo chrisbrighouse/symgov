@@ -4665,6 +4665,7 @@ def get_workspace_review_child_preview(
 @router.get("/review-cases/{review_case_id}/source/preview")
 def get_workspace_review_source_preview(
     review_case_id: str,
+    object_key: str | None = None,
     session: Session = Depends(get_db_session),
 ) -> Response:
     parsed_case_id = parse_review_case_id(review_case_id)
@@ -4672,8 +4673,9 @@ def get_workspace_review_source_preview(
     if review_case is None:
         raise HTTPException(status_code=404, detail="Review case not found.")
 
-    object_key = None
+    selected_object_key = None
     preview_asset = None
+    source_assets: list[WorkspaceReviewAssetResponse] = []
     if review_case.source_entity_type == "validation_report":
         validation_report = session.get(ValidationReport, review_case.source_entity_id)
         if validation_report is not None:
@@ -4688,29 +4690,58 @@ def get_workspace_review_source_preview(
                 source_file_name=source_file_name,
                 source_object_key=source_object_key,
             )
-            object_key = preview_asset.get("object_key") if preview_asset else None
+            source_assets, _ = build_workspace_source_assets(
+                validation_report=validation_report,
+                intake_record=intake_record,
+                source_file_name=source_file_name,
+                source_object_key=source_object_key,
+            )
+            selected_object_key = preview_asset.get("object_key") if preview_asset else None
     elif review_case.source_entity_type == "provenance_assessment":
         provenance_assessment = session.get(ProvenanceAssessment, review_case.source_entity_id)
         intake_record = session.get(IntakeRecord, provenance_assessment.intake_record_id) if provenance_assessment is not None else None
         if intake_record is not None:
             source_file_name = resolve_source_file_name_from_intake(intake_record)
             source_object_key = resolve_source_object_key_from_intake(intake_record)
+            validation_report = latest_validation_report_for_intake(session, intake_record.id)
             preview_asset = choose_workspace_source_preview_asset(
-                validation_report=latest_validation_report_for_intake(session, intake_record.id),
+                validation_report=validation_report,
                 intake_record=intake_record,
                 source_file_name=source_file_name,
                 source_object_key=source_object_key,
             )
-            object_key = preview_asset.get("object_key") if preview_asset else None
+            source_assets, _ = build_workspace_source_assets(
+                validation_report=validation_report,
+                intake_record=intake_record,
+                source_file_name=source_file_name,
+                source_object_key=source_object_key,
+            )
+            selected_object_key = preview_asset.get("object_key") if preview_asset else None
 
-    if not object_key:
+    if object_key:
+        requested_asset = next((asset for asset in source_assets if asset.objectKey == object_key), None)
+        if requested_asset is None or not requested_asset.previewable:
+            raise HTTPException(status_code=404, detail="Review source preview asset not found.")
+        selected_object_key = requested_asset.objectKey
+        preview_asset = {
+            "object_key": requested_asset.objectKey,
+            "filename": requested_asset.filename,
+            "content_type": requested_asset.contentType,
+            "format": requested_asset.format,
+        }
+
+    if not selected_object_key:
         raise HTTPException(status_code=404, detail="Review source preview not found.")
 
-    attachment = session.execute(select(Attachment).where(Attachment.object_key == object_key)).scalar_one_or_none()
-    payload = download_object_bytes(object_key=object_key, env_file=str(get_settings().storage_env_file))
+    attachment = session.execute(select(Attachment).where(Attachment.object_key == selected_object_key)).scalar_one_or_none()
+    payload = download_object_bytes(object_key=selected_object_key, env_file=str(get_settings().storage_env_file))
     media_type = content_type_for_format(
         preview_asset.get("format") if preview_asset else None,
-        filename=(preview_asset or {}).get("filename") or object_key,
+        filename=(preview_asset or {}).get("filename") or selected_object_key,
         content_type=(preview_asset or {}).get("content_type") or (attachment.content_type if attachment is not None else payload["content_type"]),
     )
-    return Response(content=payload["payload"], media_type=media_type)
+    return Response(
+        content=payload["payload"],
+        media_type=media_type,
+        headers={"Cache-Control": "no-store"},
+    )

@@ -119,7 +119,7 @@ def test_catalog_capabilities_describes_only_public_catalog_integration_surface(
     payload = response.json()
     assert payload["apiVersion"] == "v1"
     assert payload["catalogName"] == "Symgov Catalog"
-    assert payload["downloadAvailable"] is False
+    assert payload["downloadAvailable"] is True
     assert payload["auth"]["methods"] == ["api_key"]
     assert payload["auth"]["preferredHeader"] == "Authorization: Bearer ***"
     assert payload["supports"]["keywordSearch"] is True
@@ -162,6 +162,11 @@ def test_catalog_capabilities_describes_only_public_catalog_integration_surface(
         },
         {
             "method": "POST",
+            "path": "/api/v1/catalog/symbols/download",
+            "scope": "catalog.read",
+        },
+        {
+            "method": "POST",
             "path": "/api/v1/catalog/ed/query",
             "scope": "catalog.ed.query",
         },
@@ -182,6 +187,7 @@ def test_catalog_capabilities_describes_only_public_catalog_integration_surface(
         "taxonomy": "/api/v1/catalog/taxonomy",
         "symbols": "/api/v1/catalog/symbols",
         "symbolSearch": "/api/v1/catalog/search",
+        "symbolDownload": "/api/v1/catalog/symbols/download",
         "edQuery": "/api/v1/catalog/ed/query",
         "feedback": "/api/v1/catalog/symbols/{symbolRef}/feedback",
     }
@@ -201,7 +207,7 @@ def test_catalog_taxonomy_requires_catalog_read_and_returns_backend_owned_facets
     assert response.status_code == 200
     payload = response.json()
     assert payload["apiVersion"] == "v1"
-    assert payload["downloadAvailable"] is False
+    assert payload["downloadAvailable"] is True
     assert "Fire & Life Safety" in payload["facets"]["disciplines"]
     assert "Fire Alarm Devices" in payload["facets"]["categories"]
     assert "DXF" in payload["facets"]["formats"]
@@ -209,6 +215,7 @@ def test_catalog_taxonomy_requires_catalog_read_and_returns_backend_owned_facets
     assert payload["links"] == {
         "capabilities": "/api/v1/catalog/capabilities",
         "symbols": "/api/v1/catalog/symbols",
+        "symbolDownload": "/api/v1/catalog/symbols/download",
     }
     assert any(isinstance(row, CatalogApiUsageEvent) and row.route_name == "catalog_taxonomy" for row in session.added)
 
@@ -227,5 +234,5 @@ def test_catalog_usage_logging_failure_does_not_fail_successful_route_response()
     response = client.get("/api/v1/catalog/capabilities", headers=auth_headers())
 
     assert response.status_code == 200
-    assert response.json()["downloadAvailable"] is False
+    assert response.json()["downloadAvailable"] is True
     assert session.rollbacks == 1

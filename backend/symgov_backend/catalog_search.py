@@ -6,8 +6,14 @@ import re
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from .asset_manifest import list_download_assets
 from .catalog_taxonomy import catalog_taxonomy_for_symbol
-from .published_catalog import PUBLISHED_SYMBOLS_SQL, choose_published_preview_asset, published_symbol_display_id
+from .published_catalog import (
+    PUBLISHED_SYMBOLS_SQL,
+    choose_published_preview_asset,
+    published_fallback_source_asset,
+    published_symbol_display_id,
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +47,9 @@ def catalog_symbol_summary(row) -> dict:
     display_id = catalog_symbol_ref(row)
     taxonomy = catalog_taxonomy_for_symbol(row_taxonomy_input(row))
     preview_asset = choose_published_preview_asset(payload)
+    download_available = bool(
+        list_download_assets(payload, fallback_source_asset=published_fallback_source_asset(payload))
+    )
     preview = None
     links = {"api": f"/api/v1/catalog/symbols/{display_id}"}
     if preview_asset:
@@ -50,6 +59,8 @@ def catalog_symbol_summary(row) -> dict:
         }
         links["thumbnail"] = preview["thumbnailUrl"]
         links["preview"] = preview["previewUrl"]
+    if download_available:
+        links["download"] = "/api/v1/catalog/symbols/download"
 
     return {
         "displayId": display_id,
@@ -61,7 +72,7 @@ def catalog_symbol_summary(row) -> dict:
         "catalogCategories": taxonomy["categories"],
         "useCases": taxonomy["use_cases"],
         "availableFormats": taxonomy["available_formats"],
-        "downloadAvailable": False,
+        "downloadAvailable": download_available,
         "preview": preview,
         "links": links,
     }
@@ -233,7 +244,7 @@ def search_catalog_symbols_for_context(
     if interpreted_filters.get("catalogDisciplines"):
         ranking_explanation.append("Requested discipline is applied as a Catalog filter and ranking preference.")
     if requested_formats:
-        ranking_explanation.append("Preferred formats boost matching symbols but do not enable downloads.")
+        ranking_explanation.append("Preferred formats boost matching symbols and can be used with the symbol download endpoint.")
     if interpreted_filters.get("selectedLayer"):
         ranking_explanation.append("Selected layer terms provide an additional ranking signal.")
 

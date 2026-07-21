@@ -48,7 +48,7 @@ def test_developer_openapi_is_catalog_only_and_describes_security_errors_and_no_
     document = response.json()
     assert document["openapi"].startswith("3.")
     assert document["info"]["title"] == "Symgov Catalog Integration API"
-    assert document["x-download-available"] is False
+    assert document["x-download-available"] is True
     assert document["components"]["securitySchemes"]["CatalogApiKey"] == {
         "type": "http", "scheme": "bearer", "bearerFormat": "Catalog API key"
     }
@@ -67,8 +67,7 @@ def test_developer_openapi_is_catalog_only_and_describes_security_errors_and_no_
             assert operation["responses"]
             assert operation["description"]
 
-    serialized = str(document).lower()
-    assert "downloads are not available" in serialized
+    assert "/api/v1/catalog/symbols/download" in document["paths"]
     documented_paths = " ".join(document["paths"]).lower()
     for forbidden in ("/admin", "/auth", "/workspace", "/published", "/llm"):
         assert forbidden not in documented_paths
@@ -76,19 +75,25 @@ def test_developer_openapi_is_catalog_only_and_describes_security_errors_and_no_
 
 def test_developer_openapi_paths_match_registered_catalog_integration_routes():
     app, client = build_client()
+    effective_routes = []
+    for route in app.routes:
+        if hasattr(route, "path"):
+            effective_routes.append(route)
+        else:
+            effective_routes.extend(route.effective_route_contexts())
+    registered = {
+        (method, route.path)
+        for route in effective_routes
+        if route.path.startswith("/api/v1/catalog/")
+        and not route.path.startswith("/api/v1/catalog/developer")
+        for method in (route.methods or set())
+        if method not in {"HEAD", "OPTIONS"}
+    }
     document = client.get("/api/v1/catalog/developer/openapi.json").json()
     documented = {
         (method.upper(), path)
         for path, operations in document["paths"].items()
         for method in operations
-    }
-    registered = {
-        (method, route.path)
-        for route in app.routes
-        if route.path.startswith("/api/v1/catalog/")
-        and not route.path.startswith("/api/v1/catalog/developer")
-        for method in (route.methods or set())
-        if method not in {"HEAD", "OPTIONS"}
     }
 
     assert documented == registered
@@ -108,6 +113,15 @@ def test_developer_openapi_documents_bounds_examples_schemas_and_exact_scopes():
     assert feedback["x-required-scope"] == "catalog.feedback.write"
     assert feedback["requestBody"]["content"]["application/json"]["schema"]
     assert feedback["requestBody"]["content"]["application/json"]["example"]
+    download = document["paths"]["/api/v1/catalog/symbols/download"]["post"]
+    assert download["x-required-scope"] == "catalog.read"
+    assert download["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/DownloadRequest"
+    }
+    assert set(download["responses"]["200"]["content"]) == {
+        "application/octet-stream",
+        "application/zip",
+    }
 
 
 def test_developer_openapi_matches_filter_preview_and_feedback_wire_contracts():

@@ -54,12 +54,21 @@ class AuthLoginRequest(BaseModel):
     pin: str = Field(min_length=4, max_length=4)
 
 
+class SubscriptionResponse(BaseModel):
+    tier: str
+    startedOn: str
+    expiresOn: str | None
+    isActive: bool
+    isProtected: bool
+
+
 class AuthUserResponse(BaseModel):
     id: str
     email: str
     displayName: str
     roles: list[str]
     mustChangePin: bool
+    subscription: SubscriptionResponse
 
 
 class AuthLoginResponse(BaseModel):
@@ -85,13 +94,18 @@ class AdminUserResponse(BaseModel):
     displayName: str
     roles: list[str]
     isActive: bool
+    isDeleted: bool
     mustChangePin: bool
     createdAt: str
     updatedAt: str
+    subscription: SubscriptionResponse
 
 
 class AdminUserListResponse(BaseModel):
     items: list[AdminUserResponse]
+    page: int
+    pageSize: int
+    total: int
 
 
 class AdminUserCreateRequest(BaseModel):
@@ -106,6 +120,17 @@ class AdminUserUpdateRequest(BaseModel):
     displayName: str | None = Field(default=None, min_length=1)
     roles: list[str] | None = None
     isActive: bool | None = None
+
+
+class AdminSubscriptionMonthsRequest(BaseModel):
+    months: int = Field(ge=-120, le=120)
+
+    @field_validator("months")
+    @classmethod
+    def months_must_not_be_zero(cls, value: int) -> int:
+        if value == 0:
+            raise ValueError("Months must not be zero.")
+        return value
 
 
 class AdminUserResetPinRequest(BaseModel):

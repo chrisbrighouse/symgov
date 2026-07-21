@@ -45,7 +45,14 @@ def symbol_row(*, name: str, discipline: str, formats: list[str], keywords: list
             "package_symbol_sequence": 12,
             "summary": f"Approved {name} symbol.",
             "keywords": keywords,
-            "downloads": [{"format": value, "filename": f"{slug}.{value.lower()}"} for value in formats],
+            "downloads": [
+                {
+                    "format": value,
+                    "filename": f"{slug}.{value.lower()}",
+                    "object_key": f"symbols/{slug}.{value.lower()}",
+                }
+                for value in formats
+            ],
         },
         rationale="Approved for catalog publication.",
         page_id=str(uuid.uuid4()),
@@ -151,5 +158,5 @@ def test_search_catalog_symbols_caps_limit_and_returns_public_symbol_summaries()
         "preview",
         "links",
     }
-    assert result.items[0]["downloadAvailable"] is False
+    assert result.items[0]["downloadAvailable"] is True
     assert all("downloadUrl" not in item and "downloadAssets" not in item for item in result.items)

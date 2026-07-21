@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import hashlib
 import hmac
 import secrets
@@ -13,6 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .models import User, UserRole, UserSession
+from .subscriptions import PROTECTED_OWNER_EMAIL, ensure_subscription
 
 PIN_HASH_ALGORITHM = "pbkdf2_sha256"
 PIN_HASH_ITERATIONS = 260_000
@@ -28,6 +29,10 @@ class AuthenticatedUser:
     display_name: str
     roles: tuple[str, ...]
     must_change_pin: bool
+    subscription_tier: str = "plus"
+    subscription_started_on: date = date(1970, 1, 1)
+    subscription_expires_on: date | None = None
+    subscription_is_protected: bool = False
 
 
 def utc_now() -> datetime:
@@ -147,8 +152,12 @@ def upsert_user(
         user.display_name = normalized_display_name
         user.updated_at = now
 
+    subscription = ensure_subscription(session, user)
+    allowed_roles = normalized_roles if subscription.tier == "plus" else ()
+    if normalized_email == PROTECTED_OWNER_EMAIL:
+        allowed_roles = tuple(sorted(set(allowed_roles) | {"admin"}))
     session.query(UserRole).filter(UserRole.user_id == user.id).delete(synchronize_session=False)
-    for role in normalized_roles:
+    for role in allowed_roles:
         session.add(UserRole(user_id=user.id, role=role, created_at=now))
     session.flush()
     return user
@@ -160,7 +169,7 @@ def authenticate_user(session: Session, *, email: str, pin: str) -> User | None:
     except ValueError:
         return None
     user = session.query(User).filter(func.lower(User.email) == normalized_email).one_or_none()
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.deleted_at is not None:
         return None
     if not verify_pin(pin, user.pin_hash):
         return None
@@ -201,15 +210,20 @@ def current_user_from_token(session: Session, token: str, *, now: datetime | Non
     if _as_aware_utc(session_row.expires_at) <= _as_aware_utc(resolved_now):
         return None
     user = session.get(User, session_row.auth_user_id)
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or user.deleted_at is not None:
         return None
+    subscription = ensure_subscription(session, user, as_of=_as_aware_utc(resolved_now).date())
     session_row.last_seen_at = _as_aware_utc(resolved_now)
     return AuthenticatedUser(
         id=str(user.id),
         email=user.email,
         display_name=user.display_name,
-        roles=user_roles(session, user.id),
+        roles=user_roles(session, user.id) if subscription.tier == "plus" else (),
         must_change_pin=bool(user.must_change_pin),
+        subscription_tier=subscription.tier,
+        subscription_started_on=subscription.started_on,
+        subscription_expires_on=subscription.expires_on,
+        subscription_is_protected=bool(subscription.is_protected),
     )
 
 

@@ -68,6 +68,7 @@ CATALOG_INTEGRATION_ENDPOINTS = (
     {"method": "GET", "path": "/api/v1/catalog/symbols/{symbol_ref}", "scope": "catalog.read", "summary": "Read one published symbol."},
     {"method": "GET", "path": "/api/v1/catalog/symbols/{symbol_ref}/thumbnail", "scope": "catalog.read", "summary": "Render the available thumbnail."},
     {"method": "GET", "path": "/api/v1/catalog/symbols/{symbol_ref}/preview", "scope": "catalog.read", "summary": "Render the available preview."},
+    {"method": "POST", "path": "/api/v1/catalog/symbols/download", "scope": "catalog.read", "summary": "Download one symbol or a ZIP of selected symbols in one format."},
     {"method": "POST", "path": "/api/v1/catalog/ed/query", "scope": "catalog.ed.query", "summary": "Ask production Catalog Ed a symbol question."},
     {"method": "POST", "path": "/api/v1/catalog/symbols/{symbol_ref}/feedback", "scope": "catalog.feedback.write", "summary": "Submit integration feedback."},
 )
@@ -78,6 +79,7 @@ GUIDES = (
     {"id": "search", "title": "Choose keyword or contextual search"},
     {"id": "pagination", "title": "Cursor pagination"},
     {"id": "previews", "title": "Thumbnails and previews"},
+    {"id": "downloads", "title": "Download symbol files"},
     {"id": "errors", "title": "Errors and troubleshooting"},
     {"id": "sandbox", "title": "Safe deterministic sandbox"},
     {"id": "feedback", "title": "Feedback and support"},
@@ -116,8 +118,8 @@ def developer_manifest() -> dict:
         "endpoints": list(CATALOG_INTEGRATION_ENDPOINTS),
         "sandbox": {"available": True, "deterministic": True, "readOnly": True, "syntheticData": True},
         "support": {"route": "/support", "submission": "local experience"},
-        "downloadAvailable": False,
-        "noDownloadNotice": "Production Catalog downloads are not available in this milestone.",
+        "downloadAvailable": True,
+        "downloadEndpoint": "/api/v1/catalog/symbols/download",
     }
 
 
@@ -126,7 +128,7 @@ def _operation(endpoint: dict) -> dict:
     response_schema = _RESPONSE_SCHEMA_BY_ENDPOINT.get((endpoint["method"], endpoint["path"]))
     operation = {
         "summary": endpoint["summary"],
-        "description": endpoint["summary"] + " Production Catalog downloads are not available.",
+        "description": endpoint["summary"],
         "security": [{"CatalogApiKey": [scope]}],
         "x-required-scope": scope,
         "responses": {
@@ -182,6 +184,22 @@ def _operation(endpoint: dict) -> dict:
                 )
             },
         }
+    if path == "/api/v1/catalog/symbols/download":
+        binary_schema = {"schema": {"type": "string", "format": "binary"}}
+        operation["responses"]["200"] = {
+            "description": "A single stored symbol asset or a ZIP archive for multiple selected symbols.",
+            "headers": {
+                "Content-Disposition": {"schema": {"type": "string"}},
+                "X-Symgov-Selected-Count": {"schema": {"type": "integer"}},
+                "X-Symgov-Downloaded-Count": {"schema": {"type": "integer"}},
+                "X-Symgov-Skipped-Symbols": {"schema": {"type": "string"}},
+            },
+            "content": {
+                "application/octet-stream": dict(binary_schema),
+                "application/zip": dict(binary_schema),
+            },
+        }
+        operation["responses"]["422"] = {"$ref": "#/components/responses/ValidationError"}
     if path.endswith("/feedback") and endpoint["method"] == "POST":
         operation["responses"]["201"] = operation["responses"].pop("200")
         operation["responses"]["201"]["description"] = "Feedback recorded."
@@ -191,6 +209,7 @@ def _operation(endpoint: dict) -> dict:
         schema_name = (
             "ContextualSearchRequest" if path == "/api/v1/catalog/search"
             else "EdQueryRequest" if path == "/api/v1/catalog/ed/query"
+            else "DownloadRequest" if path == "/api/v1/catalog/symbols/download"
             else "FeedbackRequest"
         )
         example_name = schema_name.removesuffix("Request")
@@ -207,6 +226,7 @@ def _operation(endpoint: dict) -> dict:
 EXAMPLES = {
     "ContextualSearch": {"summary": "Contextual search", "value": {"query": "smoke detector", "context": {"application": "AutoCAD"}, "limit": 20}},
     "EdQuery": {"summary": "Catalog question", "value": {"message": "Find smoke detector symbols", "mode": "auto", "context": {}, "limit": 10}},
+    "Download": {"summary": "Symbol download", "value": {"symbolIds": ["0003-12"], "format": "SVG"}},
     "Feedback": {"summary": "Integration feedback", "value": {"kind": "comment", "message": "Preview is clear.", "context": {}}},
 }
 
@@ -239,7 +259,7 @@ def catalog_openapi_document() -> dict:
             "type": "object", "required": ["apiVersion", "catalogName", "downloadAvailable", "auth", "supports", "currentEndpoints", "futureCapabilities", "scopes", "links"],
             "properties": {
                 "apiVersion": {"type": "string"}, "catalogName": {"type": "string"},
-                "downloadAvailable": {"type": "boolean", "const": False}, "auth": object_schema,
+                "downloadAvailable": {"type": "boolean", "const": True}, "auth": object_schema,
                 "supports": object_schema, "currentEndpoints": {"type": "array", "items": object_schema},
                 "futureCapabilities": {"type": "array", "items": {"type": "string"}},
                 "scopes": {"type": "array", "items": {"type": "string"}}, "links": object_schema,
@@ -247,19 +267,19 @@ def catalog_openapi_document() -> dict:
         },
         "TaxonomyResponse": {
             "type": "object", "required": ["apiVersion", "catalogName", "downloadAvailable", "facets", "metadata", "links"],
-            "properties": {"apiVersion": {"type": "string"}, "catalogName": {"type": "string"}, "downloadAvailable": {"type": "boolean", "const": False}, "facets": object_schema, "metadata": object_schema, "links": object_schema},
+            "properties": {"apiVersion": {"type": "string"}, "catalogName": {"type": "string"}, "downloadAvailable": {"type": "boolean", "const": True}, "facets": object_schema, "metadata": object_schema, "links": object_schema},
         },
         "SymbolSearchResponse": {
             "type": "object", "required": ["items", "nextCursor", "totalEstimate", "query"],
             "properties": {"items": {"type": "array", "items": object_schema}, "nextCursor": {"type": ["string", "null"]}, "totalEstimate": {"type": "integer"}, "query": object_schema},
         },
         "ContextualSearchResponse": {
-            "type": "object", "required": ["query", "items", "interpretedFilters", "rankingExplanation", "warnings", "downloadAvailable", "noDownloadNotice"],
-            "properties": {"query": {"type": "string"}, "items": {"type": "array", "items": object_schema}, "interpretedFilters": object_schema, "rankingExplanation": {"type": "array", "items": {"type": "string"}}, "warnings": {"type": "array", "items": {"type": "string"}}, "downloadAvailable": {"type": "boolean", "const": False}, "noDownloadNotice": {"type": "string"}},
+            "type": "object", "required": ["query", "items", "interpretedFilters", "rankingExplanation", "warnings", "downloadAvailable", "downloadEndpoint"],
+            "properties": {"query": {"type": "string"}, "items": {"type": "array", "items": object_schema}, "interpretedFilters": object_schema, "rankingExplanation": {"type": "array", "items": {"type": "string"}}, "warnings": {"type": "array", "items": {"type": "string"}}, "downloadAvailable": {"type": "boolean"}, "downloadEndpoint": {"type": "string"}, "noDownloadNotice": {"type": "string"}},
         },
         "SymbolDetailResponse": {
             "type": "object", "required": ["displayId", "symbolId", "slug", "name", "summary", "taxonomy", "rawAudit", "governance", "availableFormats", "downloadAvailable", "preview", "curated", "provenance", "links"],
-            "properties": {"displayId": {"type": "string"}, "symbolId": {"type": "string", "format": "uuid"}, "slug": {"type": "string"}, "name": {"type": "string"}, "summary": {"type": "string"}, "taxonomy": object_schema, "rawAudit": object_schema, "governance": object_schema, "availableFormats": {"type": "array", "items": {"type": "string"}}, "downloadAvailable": {"type": "boolean", "const": False}, "preview": {"anyOf": [object_schema, {"type": "null"}]}, "curated": {"type": "boolean"}, "provenance": object_schema, "links": object_schema},
+            "properties": {"displayId": {"type": "string"}, "symbolId": {"type": "string", "format": "uuid"}, "slug": {"type": "string"}, "name": {"type": "string"}, "summary": {"type": "string"}, "taxonomy": object_schema, "rawAudit": object_schema, "governance": object_schema, "availableFormats": {"type": "array", "items": {"type": "string"}}, "downloadAvailable": {"type": "boolean"}, "preview": {"anyOf": [object_schema, {"type": "null"}]}, "curated": {"type": "boolean"}, "provenance": object_schema, "links": object_schema},
         },
         "EdQueryResponse": {
             "type": "object", "required": ["conversationId", "mode", "answer", "searchQuery", "interpretedFilters", "symbols", "citations", "suggestedFollowups", "warnings", "downloadAvailable", "mutatesRecords"],
@@ -274,9 +294,9 @@ def catalog_openapi_document() -> dict:
         "openapi": "3.1.0",
         "info": {
             "title": "Symgov Catalog Integration API", "version": "v1",
-            "description": "Current Catalog integration surface. Production Catalog downloads are not available.",
+            "description": "Current Catalog integration surface, including authenticated symbol downloads.",
         },
-        "x-download-available": False,
+        "x-download-available": True,
         "security": [{"CatalogApiKey": ["catalog.read"]}],
         "paths": paths,
         "components": {
@@ -295,6 +315,19 @@ def catalog_openapi_document() -> dict:
                             "type": "integer", "default": 20,
                             "description": "Values are clamped to the inclusive range 1 through 100.",
                         },
+                    },
+                },
+                "DownloadRequest": {
+                    "type": "object",
+                    "required": ["symbolIds", "format"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "symbolIds": {
+                            "type": "array", "minItems": 1, "maxItems": 10,
+                            "uniqueItems": True,
+                            "items": {"type": "string", "minLength": 1, "maxLength": 256},
+                        },
+                        "format": {"type": "string", "minLength": 1, "maxLength": 64},
                     },
                 },
                 "EdQueryRequest": {

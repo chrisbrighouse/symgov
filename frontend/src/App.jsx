@@ -2,6 +2,9 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, useTra
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   createAdminUser,
+  adjustAdminUserSubscription,
+  cancelAdminUserSubscription,
+  deleteAdminUser,
   fetchAdminUsers,
   fetchAdminLlmSettings,
   fetchOpenRouterModels,
@@ -32,6 +35,7 @@ import {
   submitWorkspaceRightsReviewDecision,
   submitExternalSubmission,
   updateAdminUser,
+  upgradeAdminUserSubscription,
   updateAdminLlmSettings,
   resetAdminUserPin,
   testAdminLlmPrompt,
@@ -59,6 +63,8 @@ import {
   applySavedCatalogView,
   buildCatalogCardSummary,
   buildCatalogPreviewOptions,
+  buildReviewPreviewOptions,
+  buildReviewPreviewUrl,
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
   catalogTaxonomyForSymbol,
@@ -75,6 +81,12 @@ import {
   catalogItemsForDisplay,
   filterCatalogSymbols
 } from './catalogFavourites.js';
+import {
+  buildCatalogDownloadOptions,
+  catalogDownloadAvailability,
+  catalogDownloadResultMessage,
+  requestCatalogDownload
+} from './catalogDownload.js';
 
 const REVIEW_ITEM_ACTION_OPTIONS = [
   ['approve', 'Approve'],
@@ -220,7 +232,8 @@ const WORKSPACE_QUEUE_COLUMNS = [
 ];
 
 const WORKSPACE_REFRESH_INTERVAL_MS = 5000;
-const PUBLISHED_SYMBOL_SELECTION_LIMIT = 5;
+const PUBLISHED_SYMBOL_COMMAND_LIMIT = 5;
+const PUBLISHED_SYMBOL_SELECTION_LIMIT = 10;
 const DEFAULT_HIDDEN_WORKSPACE_STATUSES = new Set(['completed']);
 const SCOTT_SOURCE_SITE_PAGE_SIZE = 50;
 const SCOTT_SOURCE_SEARCH_DURATION_SECONDS = DEFAULT_AGENT_RUN_DURATION_SECONDS;
@@ -660,7 +673,7 @@ function Header() {
         </div>
       </div>
       <div className="header-actions">
-        {user ? <div className="build-chip">{user.displayName || user.email}</div> : null}
+        {user ? <div className="build-chip user-identity-chip">{user.displayName || user.email}{user.subscription?.isActive ? <span className="plus-subscription-badge">Plus</span> : null}</div> : null}
         <div className="build-chip">{appConfig.build || 'local'}</div>
         {user ? (
           <button type="button" className="ghost-button" onClick={handleLogout}>Sign out</button>
@@ -878,6 +891,9 @@ function StandardsPage() {
   const [commandComment, setCommandComment] = useState('');
   const [commandStatus, setCommandStatus] = useState({ mode: '', message: '' });
   const [submittingCommand, setSubmittingCommand] = useState(false);
+  const [downloadFormat, setDownloadFormat] = useState('');
+  const [downloadStatus, setDownloadStatus] = useState({ mode: '', message: '' });
+  const [preparingDownload, setPreparingDownload] = useState(false);
   const [activeDetailTab, setActiveDetailTab] = useState('details');
   const [commentHistoryState, setCommentHistoryState] = useState({ symbolId: '', loading: false, mode: '', message: '', items: [] });
   const [displayCount, setDisplayCount] = useState(60);
@@ -970,6 +986,18 @@ function StandardsPage() {
     .map((symbolId) => standardsSymbols.find((symbol) => symbol.id === symbolId || symbol.symbolId === symbolId))
     .filter(Boolean);
   const selectionLimitReached = selectedSymbolIds.length >= PUBLISHED_SYMBOL_SELECTION_LIMIT;
+  const downloadOptions = buildCatalogDownloadOptions(selectedSymbols);
+  const downloadAvailability = catalogDownloadAvailability(
+    selectedSymbols.length,
+    downloadFormat,
+    preparingDownload
+  );
+
+  useEffect(() => {
+    if (downloadFormat && !downloadOptions.includes(downloadFormat)) {
+      setDownloadFormat('');
+    }
+  }, [downloadFormat, downloadOptions.join('|')]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1112,6 +1140,7 @@ function StandardsPage() {
 
   function toggleSymbolSelection(symbolId) {
     setCommandStatus({ mode: '', message: '' });
+    setDownloadStatus({ mode: '', message: '' });
     setSelectedSymbolIds((current) => {
       if (current.includes(symbolId)) {
         return current.filter((value) => value !== symbolId);
@@ -1122,6 +1151,41 @@ function StandardsPage() {
       }
       return [...current, symbolId];
     });
+  }
+
+  async function downloadSelectedSymbols() {
+    if (!downloadAvailability.enabled) {
+      setDownloadStatus({ mode: 'error', message: downloadAvailability.reason });
+      return;
+    }
+    setPreparingDownload(true);
+    setDownloadStatus({ mode: 'info', message: 'Preparing symbol download…' });
+    try {
+      const result = await requestCatalogDownload({
+        apiRoot: appConfig.apiRoot,
+        symbolIds: selectedSymbols.map((symbol) => symbol.id),
+        format: downloadFormat
+      });
+      const objectUrl = window.URL.createObjectURL(result.blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = result.filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(objectUrl);
+      setDownloadStatus({
+        mode: result.skippedSymbols.length ? 'info' : 'success',
+        message: catalogDownloadResultMessage({ ...result, format: downloadFormat })
+      });
+    } catch (error) {
+      setDownloadStatus({
+        mode: 'error',
+        message: error instanceof Error ? error.message : 'Symbol download failed.'
+      });
+    } finally {
+      setPreparingDownload(false);
+    }
   }
 
   async function toggleCatalogFavourite(symbolId) {
@@ -1654,13 +1718,38 @@ function StandardsPage() {
           <div className="published-command-bar">
             <div>
               <strong>{selectedSymbols.length} selected</strong>
-              <span>Select up to {PUBLISHED_SYMBOL_SELECTION_LIMIT} published symbols.</span>
+              <span>Select up to {PUBLISHED_SYMBOL_SELECTION_LIMIT} published symbols for download.</span>
             </div>
             <div className="command-button-row">
+              <label className="catalog-download-format">
+                <span>Format</span>
+                <select
+                  aria-label="Download format"
+                  value={downloadFormat}
+                  disabled={!selectedSymbols.length || preparingDownload}
+                  onChange={(event) => {
+                    setDownloadFormat(event.target.value);
+                    setDownloadStatus({ mode: '', message: '' });
+                  }}
+                >
+                  <option value="">Choose format</option>
+                  {downloadOptions.map((format) => <option key={format} value={format}>{format}</option>)}
+                </select>
+              </label>
               <button
                 type="button"
                 className="action-button secondary compact"
-                disabled={!selectedSymbols.length}
+                disabled={!downloadAvailability.enabled}
+                title={downloadAvailability.reason || `Download ${selectedSymbols.length} selected symbols`}
+                onClick={downloadSelectedSymbols}
+              >
+                {preparingDownload ? 'Preparing…' : downloadAvailability.label}
+              </button>
+              <button
+                type="button"
+                className="action-button secondary compact"
+                disabled={!selectedSymbols.length || selectedSymbols.length > PUBLISHED_SYMBOL_COMMAND_LIMIT}
+                title={selectedSymbols.length > PUBLISHED_SYMBOL_COMMAND_LIMIT ? `Comments support up to ${PUBLISHED_SYMBOL_COMMAND_LIMIT} symbols.` : ''}
                 onClick={() => openPublishedCommandDialog('comment')}
               >
                 Comment
@@ -1668,7 +1757,8 @@ function StandardsPage() {
               <button
                 type="button"
                 className="action-button compact"
-                disabled={!selectedSymbols.length}
+                disabled={!selectedSymbols.length || selectedSymbols.length > PUBLISHED_SYMBOL_COMMAND_LIMIT}
+                title={selectedSymbols.length > PUBLISHED_SYMBOL_COMMAND_LIMIT ? `Review requests support up to ${PUBLISHED_SYMBOL_COMMAND_LIMIT} symbols.` : ''}
                 onClick={() => openPublishedCommandDialog('send_for_review')}
               >
                 Send for Review
@@ -1677,6 +1767,14 @@ function StandardsPage() {
           </div>
           {commandStatus.message ? (
             <p className={`inline-status ${commandStatus.mode || 'info'}`}>{commandStatus.message}</p>
+          ) : null}
+          {downloadStatus.message ? (
+            <p
+              className={`inline-status ${downloadStatus.mode || 'info'}`}
+              role={downloadStatus.mode === 'error' ? 'alert' : 'status'}
+            >
+              {downloadStatus.message}
+            </p>
           ) : null}
           {favouriteStatus.message ? (
             <p
@@ -3418,6 +3516,59 @@ function buildPublishedPreviewCandidates(symbol, selectedFormat = '') {
   return Array.from(new Set(candidates.filter(Boolean)));
 }
 
+function FormatPreviewBadges({ options, onSelect, ariaLabel = 'Symbol preview format' }) {
+  if (!options.length) {
+    return null;
+  }
+
+  return (
+    <div className="catalog-preview-format-badges" role="group" aria-label={ariaLabel}>
+      {options.map((option) => {
+        if (option.active) {
+          return (
+            <span
+              key={option.format}
+              className="catalog-preview-format-badge active"
+              aria-current="true"
+              title={`${option.format} is shown in the preview`}
+            >
+              {option.format}
+            </span>
+          );
+        }
+        if (option.previewable) {
+          return (
+            <button
+              key={option.format}
+              type="button"
+              className="catalog-preview-format-badge"
+              aria-label={`Show ${option.format} preview`}
+              title={`Show ${option.format} preview`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelect(option);
+              }}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              {option.format}
+            </button>
+          );
+        }
+        return (
+          <span
+            key={option.format}
+            className="catalog-preview-format-badge unavailable"
+            aria-disabled="true"
+            title={`${option.format} is available to download but cannot be previewed here`}
+          >
+            {option.format}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function PublishedSymbolPreview({ symbol, large = false }) {
   const defaultFormat = String(symbol?.previewAsset?.format || '').trim().replace(/^\./, '').toUpperCase();
   const [selectedFormat, setSelectedFormat] = useState(defaultFormat);
@@ -3453,51 +3604,7 @@ function PublishedSymbolPreview({ symbol, large = false }) {
       ) : (
         <SymbolGlyph symbolId={symbol?.id || symbol?.symbolId || 'SYMBOL'} large={large} />
       )}
-      {previewOptions.length ? (
-        <div className="catalog-preview-format-badges" role="group" aria-label="Symbol preview format">
-          {previewOptions.map((option) => {
-            if (option.active) {
-              return (
-                <span
-                  key={option.format}
-                  className="catalog-preview-format-badge active"
-                  aria-current="true"
-                  title={`${option.format} is shown in the preview`}
-                >
-                  {option.format}
-                </span>
-              );
-            }
-            if (option.previewable) {
-              return (
-                <button
-                  key={option.format}
-                  type="button"
-                  className="catalog-preview-format-badge"
-                  aria-label={`Show ${option.format} preview`}
-                  title={`Show ${option.format} preview`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedFormat(option.format);
-                  }}
-                  onKeyDown={(event) => event.stopPropagation()}
-                >
-                  {option.format}
-                </button>
-              );
-            }
-            return (
-              <span
-                key={option.format}
-                className="catalog-preview-format-badge unavailable"
-                title={`${option.format} is available to download but cannot be previewed here`}
-              >
-                {option.format}
-              </span>
-            );
-          })}
-        </div>
-      ) : null}
+      <FormatPreviewBadges options={previewOptions} onSelect={(option) => setSelectedFormat(option.format)} />
     </div>
   );
 }
@@ -3582,7 +3689,17 @@ function formatReviewAssetChip(asset) {
 function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, onSaveProperties, propertyOptions, workspaceMode }) {
   const primaryChild = activeChildren[0];
   const isLibraryProvenance = activeChange?.reviewKind === 'library_provenance';
-  const resolvedPreviewUrl = resolveWorkspaceAssetUrl(activeChange?.sourcePreviewUrl || (!isLibraryProvenance ? primaryChild?.previewUrl : null));
+  const reviewSourceAssets = Array.isArray(activeChange?.sourceAssets) ? activeChange.sourceAssets : [];
+  const defaultPreviewAsset = reviewSourceAssets.find((asset) => asset.selectedPreview);
+  const defaultPreviewFormat = String(defaultPreviewAsset?.format || activeChange?.format || '').trim().replace(/^\./, '').toUpperCase();
+  const [selectedPreviewFormat, setSelectedPreviewFormat] = useState(defaultPreviewFormat);
+  const previewOptions = useMemo(
+    () => buildReviewPreviewOptions(activeChange, selectedPreviewFormat),
+    [activeChange, selectedPreviewFormat]
+  );
+  const selectedPreviewAsset = previewOptions.find((option) => option.active && option.previewable);
+  const selectedPreviewUrl = buildReviewPreviewUrl(activeChange, selectedPreviewAsset?.objectKey, selectedPreviewAsset?.format);
+  const resolvedPreviewUrl = resolveWorkspaceAssetUrl(selectedPreviewUrl || (!isLibraryProvenance ? primaryChild?.previewUrl : null));
   const [imageUnavailable, setImageUnavailable] = useState(!resolvedPreviewUrl);
   const [propertyDraft, setPropertyDraft] = useState({
     name: '',
@@ -3604,7 +3721,6 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
     submissionContext.submittedBy ||
     submissionContext.submissionBatchId
   );
-  const reviewSourceAssets = Array.isArray(activeChange?.sourceAssets) ? activeChange.sourceAssets : [];
   const availableFormats = Array.isArray(activeChange?.availableFormats)
     ? activeChange.availableFormats.map((format) => formatReviewAssetFormat(format)).filter(Boolean)
     : [];
@@ -3615,6 +3731,10 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
   useEffect(() => {
     setImageUnavailable(!resolvedPreviewUrl);
   }, [resolvedPreviewUrl]);
+
+  useEffect(() => {
+    setSelectedPreviewFormat(defaultPreviewFormat);
+  }, [activeChange?.id, defaultPreviewFormat]);
 
   useEffect(() => {
     const suggestedName = primaryChild?.proposedSymbolName || activeChange?.proposedSymbolName || activeChange?.displayName || itemName;
@@ -3699,20 +3819,28 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
         <span className="status-pill">{activeChildren.length ? `${activeChildren.length} proposed children` : activeChange?.status}</span>
       </div>
       <div className="review-visual-primary-row">
-        <div className="review-visual-frame">
-          {!imageUnavailable && resolvedPreviewUrl ? (
-            <img
-              className="review-source-image"
-              src={resolvedPreviewUrl}
-              alt={`Visual preview for ${originalFilename || itemName}`}
-              onError={() => setImageUnavailable(true)}
-            />
-          ) : (
-            <div className="review-source-fallback">
-              {isLibraryProvenance ? null : <SymbolGlyph symbolId={activeChange?.symbolId || 'SYMBOL'} large />}
-              <small>{isLibraryProvenance ? 'No symbol preview is available for this library provenance case.' : 'Preview unavailable'}</small>
-            </div>
-          )}
+        <div className="review-preview-control">
+          <div className="review-visual-frame">
+            {!imageUnavailable && resolvedPreviewUrl ? (
+              <img
+                key={resolvedPreviewUrl}
+                className="review-source-image"
+                src={resolvedPreviewUrl}
+                alt={`Visual preview for ${originalFilename || itemName}${selectedPreviewFormat ? ` in ${selectedPreviewFormat} format` : ''}`}
+                onError={() => setImageUnavailable(true)}
+              />
+            ) : (
+              <div className="review-source-fallback">
+                {isLibraryProvenance ? null : <SymbolGlyph symbolId={activeChange?.symbolId || 'SYMBOL'} large />}
+                <small>{isLibraryProvenance ? 'No symbol preview is available for this library provenance case.' : 'Preview unavailable'}</small>
+              </div>
+            )}
+          </div>
+          <FormatPreviewBadges
+            options={previewOptions}
+            ariaLabel="Review symbol preview format"
+            onSelect={(option) => setSelectedPreviewFormat(option.format)}
+          />
         </div>
         <div className="review-primary-properties">
           <Fact label="ID" value={itemName} />
@@ -5866,13 +5994,18 @@ function useScottSourceDiscoveryControls({
 }
 
 function AdminUsersPage() {
-  const [state, setState] = useState({ loading: true, items: [], message: 'Loading users…' });
+  const [state, setState] = useState({ loading: true, items: [], total: 0, message: 'Loading users…' });
   const [form, setForm] = useState({ email: '', displayName: '', roles: [], pin: '4590', isActive: true });
   const [createBusy, setCreateBusy] = useState(false);
   const [rowBusyByUser, setRowBusyByUser] = useState({});
   const [toast, setToast] = useState({ kind: 'info', message: '' });
   const [pinResetDialog, setPinResetDialog] = useState({ open: false, user: null, pin: '4590' });
-  const [userSort, setUserSort] = useState({ key: 'displayName', direction: 'asc' });
+  const [userSort, setUserSort] = useState({ key: 'name', direction: 'asc' });
+  const [searchDraft, setSearchDraft] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [userPage, setUserPage] = useState(1);
+  const userRequestSequence = useRef(0);
+  const pageSize = 50;
 
   const showToast = (kind, message) => {
     setToast({ kind, message });
@@ -5895,14 +6028,45 @@ function AdminUsersPage() {
 
   const isRowBusy = (userId) => Boolean(rowBusyByUser[userId]);
 
-  const loadUsers = async () => {
-    const result = await fetchAdminUsers();
-    setState({ loading: false, items: result.items || [], message: result.ok ? 'User list loaded.' : result.message });
+  const loadUsers = async (page = userPage, q = appliedSearch, sort = userSort) => {
+    const requestId = ++userRequestSequence.current;
+    setState((current) => ({ ...current, loading: true }));
+    const result = await fetchAdminUsers({
+      page,
+      pageSize,
+      q,
+      sort: sort.key,
+      sortDirection: sort.direction
+    });
+    if (requestId !== userRequestSequence.current) return;
+    const total = result.total || 0;
+    const lastPage = Math.max(1, Math.ceil(total / pageSize));
+    if (result.ok && page > lastPage) {
+      setUserPage(lastPage);
+      return;
+    }
+    setState({
+      loading: false,
+      items: result.items || [],
+      total,
+      message: result.ok ? `${total} user(s) found.` : result.message
+    });
   };
 
   useEffect(() => {
-    loadUsers();
-  }, []);
+    loadUsers(userPage, appliedSearch, userSort);
+  }, [userPage, appliedSearch, userSort.key, userSort.direction]);
+
+  const submitUserSearch = (event) => {
+    event.preventDefault();
+    const nextSearch = searchDraft.trim();
+    if (nextSearch === appliedSearch && userPage === 1) {
+      loadUsers(1, nextSearch, userSort);
+      return;
+    }
+    setAppliedSearch(nextSearch);
+    if (userPage !== 1) setUserPage(1);
+  };
 
   const handleCreate = async (event) => {
     event.preventDefault();
@@ -5951,6 +6115,68 @@ function AdminUsersPage() {
     showToast('success', `${user.displayName} roles updated.`);
   };
 
+  const requestSubscriptionMonths = (message, defaultValue) => {
+    const value = window.prompt(message, String(defaultValue));
+    if (value === null) return null;
+    const normalized = value.trim();
+    if (!/^-?\d+$/.test(normalized)) {
+      showToast('error', 'Enter a whole number of months.');
+      return null;
+    }
+    const months = Number(normalized);
+    if (!Number.isSafeInteger(months) || months === 0) {
+      showToast('error', 'Enter a non-zero whole number of months.');
+      return null;
+    }
+    return months;
+  };
+
+  const upgradeSubscription = async (user) => {
+    const months = requestSubscriptionMonths('Plus duration in months', 12);
+    if (months === null) return;
+    if (months < 1) {
+      showToast('error', 'Plus duration must be at least one month.');
+      return;
+    }
+    markRowBusy(user.id, true);
+    const result = await upgradeAdminUserSubscription(user.id, months);
+    markRowBusy(user.id, false);
+    if (!result.ok) return showToast('error', result.message || 'Could not upgrade subscription.');
+    await loadUsers();
+    showToast('success', `${user.displayName} upgraded to Plus.`);
+  };
+
+  const adjustSubscription = async (user) => {
+    const months = requestSubscriptionMonths('Months to add (negative to shorten)', 1);
+    if (!months) return;
+    markRowBusy(user.id, true);
+    const result = await adjustAdminUserSubscription(user.id, months);
+    markRowBusy(user.id, false);
+    if (!result.ok) return showToast('error', result.message || 'Could not adjust subscription.');
+    await loadUsers();
+    showToast('success', `${user.displayName} subscription adjusted.`);
+  };
+
+  const cancelSubscription = async (user) => {
+    if (!window.confirm(`Cancel Plus for ${user.displayName}? Their roles will be removed permanently.`)) return;
+    markRowBusy(user.id, true);
+    const result = await cancelAdminUserSubscription(user.id);
+    markRowBusy(user.id, false);
+    if (!result.ok) return showToast('error', result.message || 'Could not cancel subscription.');
+    await loadUsers();
+    showToast('success', `${user.displayName} returned to Free.`);
+  };
+
+  const removeUser = async (user) => {
+    if (!window.confirm(`Remove ${user.displayName}? This soft-deletes the account and cancels its subscription.`)) return;
+    markRowBusy(user.id, true);
+    const result = await deleteAdminUser(user.id);
+    markRowBusy(user.id, false);
+    if (!result.ok) return showToast('error', result.message || 'Could not remove user.');
+    await loadUsers();
+    showToast('success', `${user.displayName} removed.`);
+  };
+
   const openPinResetDialog = (user) => {
     setPinResetDialog({ open: true, user, pin: '4590' });
   };
@@ -5976,44 +6202,15 @@ function AdminUsersPage() {
     showToast('success', `PIN reset for ${pinResetDialog.user.displayName}.`);
   };
 
-  const setRole = (role, checked) => {
-    setForm((current) => {
-      const roles = new Set(current.roles);
-      if (checked) {
-        roles.add(role);
-      } else {
-        roles.delete(role);
-      }
-      return { ...current, roles: Array.from(roles) };
-    });
-  };
-
   const sortAdminUsers = (key) => {
+    setUserPage(1);
     setUserSort((current) => ({
       key,
       direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
     }));
   };
 
-  const sortedUsers = useMemo(() => {
-    const valueForSort = (user) => {
-      switch (userSort.key) {
-        case 'email':
-          return user.email || '';
-        case 'status':
-          return user.isActive ? 'active' : 'inactive';
-        case 'pin':
-          return user.mustChangePin ? 'change required' : 'set';
-        case 'roles':
-          return (user.roles || []).slice().sort().join(', ');
-        case 'displayName':
-        default:
-          return user.displayName || user.email || '';
-      }
-    };
-    const direction = userSort.direction === 'asc' ? 1 : -1;
-    return [...state.items].sort((left, right) => String(valueForSort(left)).localeCompare(String(valueForSort(right)), undefined, { sensitivity: 'base' }) * direction);
-  }, [state.items, userSort.direction, userSort.key]);
+  const sortedUsers = state.items;
 
   const sortIndicator = (key) => (userSort.key === key ? (userSort.direction === 'asc' ? 'Up' : 'Down') : '');
 
@@ -6023,13 +6220,13 @@ function AdminUsersPage() {
         <div>
           <p className="eyebrow">Workspace administration</p>
           <h2>Manage users</h2>
-          <p className="title-support">Create accounts, set role combinations, deactivate users, and reset default PINs.</p>
+          <p className="title-support">Create Free accounts, manage Plus periods and roles, and safely remove users.</p>
         </div>
       </div>
       <p className="page-status-text">{state.message}</p>
       {toast.message ? <p className={`admin-toast ${toast.kind}`}>{toast.message}</p> : null}
       <form className="glass-panel pane form-panel" onSubmit={handleCreate}>
-        <SectionHeading title="Create user" subtitle="New users are forced to change PIN on first login" />
+        <SectionHeading title="Create user" subtitle="New users start on Free and must change PIN on first login" />
         <label className="field">
           <span>Email</span>
           <input required type="email" value={form.email} onChange={(event) => setForm((c) => ({ ...c, email: event.target.value }))} />
@@ -6043,26 +6240,25 @@ function AdminUsersPage() {
           <input required inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={form.pin} onChange={(event) => setForm((c) => ({ ...c, pin: event.target.value }))} />
         </label>
         <div className="create-user-actions">
-          <div className="create-user-role-group" aria-label="User roles">
-            <label className="checkbox-row"><input type="checkbox" checked={form.roles.includes('admin')} onChange={(event) => setRole('admin', event.target.checked)} /><span>Admin</span></label>
-            <label className="checkbox-row"><input type="checkbox" checked={form.roles.includes('integrator')} onChange={(event) => setRole('integrator', event.target.checked)} /><span>Integrator</span></label>
-            <label className="checkbox-row"><input type="checkbox" checked={form.roles.includes('submitter')} onChange={(event) => setRole('submitter', event.target.checked)} /><span>Submitter</span></label>
-            <label className="checkbox-row"><input type="checkbox" checked={form.roles.includes('reviewer')} onChange={(event) => setRole('reviewer', event.target.checked)} /><span>Reviewer</span></label>
-          </div>
+          <p className="page-status-text">Upgrade the user to Plus after creation before assigning privileged roles.</p>
           <button type="submit" className="action-button primary create-user-submit" disabled={createBusy}>{createBusy ? 'Saving…' : 'Create user'}</button>
         </div>
       </form>
       <section className="glass-panel pane">
-        <SectionHeading title="Existing users" subtitle="Account status and role management" />
+        <SectionHeading title="Existing users" subtitle="Subscription, account status and role management" />
+        <form className="admin-user-search" onSubmit={submitUserSearch}>
+          <label className="field"><span>Search users</span><input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Name or email" /></label>
+          <button type="submit" className="action-button compact">Search</button>
+        </form>
         {state.loading ? <p>Loading…</p> : (
           <div className="admin-users-table-shell">
             <table className="admin-users-grid">
               <thead>
                 <tr>
                   <th scope="col">
-                    <button type="button" className="source-column-sort" onClick={() => sortAdminUsers('displayName')}>
+                    <button type="button" className="source-column-sort" onClick={() => sortAdminUsers('name')}>
                       <span>Name</span>
-                      <span className="source-sort-indicator">{sortIndicator('displayName')}</span>
+                      <span className="source-sort-indicator">{sortIndicator('name')}</span>
                     </button>
                   </th>
                   <th scope="col">
@@ -6071,24 +6267,17 @@ function AdminUsersPage() {
                       <span className="source-sort-indicator">{sortIndicator('email')}</span>
                     </button>
                   </th>
+                  <th scope="col"><button type="button" className="source-column-sort" onClick={() => sortAdminUsers('tier')}><span>Tier</span><span className="source-sort-indicator">{sortIndicator('tier')}</span></button></th>
+                  <th scope="col"><button type="button" className="source-column-sort" onClick={() => sortAdminUsers('start')}><span>Subscription start</span><span className="source-sort-indicator">{sortIndicator('start')}</span></button></th>
+                  <th scope="col"><button type="button" className="source-column-sort" onClick={() => sortAdminUsers('expiry')}><span>Plus expiry</span><span className="source-sort-indicator">{sortIndicator('expiry')}</span></button></th>
                   <th scope="col">
                     <button type="button" className="source-column-sort" onClick={() => sortAdminUsers('status')}>
                       <span>Status</span>
                       <span className="source-sort-indicator">{sortIndicator('status')}</span>
                     </button>
                   </th>
-                  <th scope="col">
-                    <button type="button" className="source-column-sort" onClick={() => sortAdminUsers('pin')}>
-                      <span>PIN</span>
-                      <span className="source-sort-indicator">{sortIndicator('pin')}</span>
-                    </button>
-                  </th>
-                  <th scope="col">
-                    <button type="button" className="source-column-sort" onClick={() => sortAdminUsers('roles')}>
-                      <span>Roles</span>
-                      <span className="source-sort-indicator">{sortIndicator('roles')}</span>
-                    </button>
-                  </th>
+                  <th scope="col">PIN</th>
+                  <th scope="col">Roles</th>
                   <th scope="col">Actions</th>
                 </tr>
               </thead>
@@ -6097,6 +6286,9 @@ function AdminUsersPage() {
                   <tr key={user.id} className="admin-user-row">
                     <td><strong>{user.displayName}</strong></td>
                     <td><span>{user.email}</span></td>
+                    <td><span className={`subscription-tier-pill ${user.subscription?.tier || 'free'}`}>{user.subscription?.tier === 'plus' ? 'Plus' : 'Free'}{user.subscription?.isProtected ? ' · protected' : ''}</span></td>
+                    <td><span>{user.subscription?.startedOn || '—'}</span></td>
+                    <td><span>{user.subscription?.expiresOn || (user.subscription?.isProtected ? 'Perpetual' : 'Never')}</span></td>
                     <td><span className={`admin-status-pill ${user.isActive ? 'active' : 'inactive'}`}>{user.isActive ? 'Active' : 'Inactive'}</span></td>
                     <td><span>{user.mustChangePin ? 'Change required' : 'Set'}</span></td>
                     <td>
@@ -6106,7 +6298,7 @@ function AdminUsersPage() {
                             <input
                               type="checkbox"
                               checked={user.roles.includes(role)}
-                              disabled={isRowBusy(user.id)}
+                              disabled={isRowBusy(user.id) || user.subscription?.tier !== 'plus' || (user.subscription?.isProtected && role === 'admin')}
                               onChange={(event) => toggleUserRole(user, role, event.target.checked)}
                             />
                             <span>{role}</span>
@@ -6116,19 +6308,33 @@ function AdminUsersPage() {
                     </td>
                     <td>
                       <div className="action-stack horizontal admin-user-row-actions">
-                        <button type="button" className="action-button compact" disabled={isRowBusy(user.id)} onClick={() => toggleActive(user)}>{isRowBusy(user.id) ? 'Saving…' : (user.isActive ? 'Deactivate' : 'Activate')}</button>
+                        {user.subscription?.tier === 'plus' ? (
+                          <>
+                            {!user.subscription?.isProtected ? <button type="button" className="action-button compact" disabled={isRowBusy(user.id)} onClick={() => adjustSubscription(user)}>Adjust months</button> : null}
+                            {!user.subscription?.isProtected ? <button type="button" className="action-button compact danger" disabled={isRowBusy(user.id)} onClick={() => cancelSubscription(user)}>Cancel Plus</button> : null}
+                          </>
+                        ) : <button type="button" className="action-button compact primary" disabled={isRowBusy(user.id)} onClick={() => upgradeSubscription(user)}>Upgrade to Plus</button>}
+                        {user.subscription?.isProtected
+                          ? <span className="protected-owner-label">Protected owner</span>
+                          : <button type="button" className="action-button compact" disabled={isRowBusy(user.id)} onClick={() => toggleActive(user)}>{isRowBusy(user.id) ? 'Saving…' : (user.isActive ? 'Deactivate' : 'Activate')}</button>}
                         <button type="button" className="action-button compact" disabled={isRowBusy(user.id)} onClick={() => openPinResetDialog(user)}>{isRowBusy(user.id) ? 'Saving…' : 'Reset PIN'}</button>
+                        {!user.subscription?.isProtected ? <button type="button" className="action-button compact danger" disabled={isRowBusy(user.id)} onClick={() => removeUser(user)}>Remove user</button> : null}
                       </div>
                     </td>
                   </tr>
                 ))}
                 {!sortedUsers.length ? (
                   <tr>
-                    <td colSpan="6" className="admin-users-empty">No users found.</td>
+                    <td colSpan="9" className="admin-users-empty">No users found.</td>
                   </tr>
                 ) : null}
               </tbody>
             </table>
+            <div className="admin-user-pagination">
+              <button type="button" className="action-button compact" disabled={userPage <= 1} onClick={() => setUserPage((page) => Math.max(1, page - 1))}>Previous</button>
+              <span>Page {userPage} of {Math.max(1, Math.ceil(state.total / pageSize))}</span>
+              <button type="button" className="action-button compact" disabled={userPage * pageSize >= state.total} onClick={() => setUserPage((page) => page + 1)}>Next</button>
+            </div>
           </div>
         )}
       </section>

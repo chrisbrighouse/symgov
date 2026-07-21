@@ -8,7 +8,8 @@ from fastapi.testclient import TestClient
 from symgov_backend.app import create_app
 from symgov_backend.auth import upsert_user
 from symgov_backend.dependencies import get_db_session
-from symgov_backend.models import User, UserRole, UserSession
+from symgov_backend.models import SubscriptionEvent, User, UserRole, UserSession, UserSubscription
+from symgov_backend.subscriptions import upgrade_to_plus
 
 
 def build_client_with_users():
@@ -17,25 +18,30 @@ def build_client_with_users():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    for table in (User.__table__, UserRole.__table__, UserSession.__table__):
+    for table in (User.__table__, UserRole.__table__, UserSession.__table__, UserSubscription.__table__, SubscriptionEvent.__table__):
         table.create(engine)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
     with Session() as session:
-        upsert_user(
+        admin = upsert_user(
             session,
             email="admin@symgov.local",
             display_name="Alfi",
-            roles=["admin", "submitter", "reviewer"],
+            roles=[],
             pin="4590",
         )
-        upsert_user(
+        reviewer = upsert_user(
             session,
             email="reviewer@symgov.local",
             display_name="Rupert",
-            roles=["reviewer"],
+            roles=[],
             pin="4590",
         )
+        upgrade_to_plus(session, admin, months=12)
+        upgrade_to_plus(session, reviewer, months=12)
+        for role in ("admin", "submitter", "reviewer"):
+            session.add(UserRole(user_id=admin.id, role=role, created_at=admin.created_at))
+        session.add(UserRole(user_id=reviewer.id, role="reviewer", created_at=reviewer.created_at))
         session.commit()
 
     app = create_app()

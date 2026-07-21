@@ -87,6 +87,14 @@ test('preserves JSON decoding for non-binary examples', () => {
   assert.match(buildCatalogCodeExample({ ...request, language: 'csharp' }), /ReadFromJsonAsync/);
 });
 
+test('builds binary-aware batch download examples', () => {
+  const body = { symbolIds: ['0003-12', '00023-3'], format: 'PNG' };
+  const options = { ...request, method: 'POST', path: '/catalog/symbols/download', body };
+  assert.match(buildCatalogCodeExample({ ...options, language: 'typescript' }), /response\.arrayBuffer\(\)/);
+  assert.match(buildCatalogCodeExample({ ...options, language: 'python' }), /response\.content/);
+  assert.match(buildCatalogCodeExample({ ...options, language: 'csharp' }), /ReadAsByteArrayAsync/);
+});
+
 test('keeps curl binary endpoints as raw-output requests', () => {
   const output = buildCatalogCodeExample({
     ...request,
@@ -102,6 +110,7 @@ test('keeps curl binary endpoints as raw-output requests', () => {
 test('normalizes only allowlisted Catalog endpoints', () => {
   assert.equal(normalizeCatalogEndpoint('/api/v1/catalog/symbols'), '/catalog/symbols');
   assert.equal(normalizeCatalogEndpoint('/catalog/search'), '/catalog/search');
+  assert.equal(normalizeCatalogEndpoint('/catalog/symbols/download'), '/catalog/symbols/download');
   assert.throws(() => normalizeCatalogEndpoint('/admin/users'), /Catalog endpoint/);
   assert.throws(() => normalizeCatalogEndpoint('https://evil.invalid/'), /Catalog endpoint/);
 });
@@ -110,6 +119,7 @@ test('maps supported reference endpoints to read-only sandbox operations', () =>
   assert.equal(sandboxOperationForEndpoint('GET', '/catalog/capabilities'), 'capabilities');
   assert.equal(sandboxOperationForEndpoint('POST', '/catalog/search'), 'contextual_search');
   assert.equal(sandboxOperationForEndpoint('POST', '/catalog/symbols/0003-12/feedback'), null);
+  assert.equal(sandboxOperationForEndpoint('POST', '/catalog/symbols/download'), null);
 });
 
 test('developer headers keep the key in the request header only', () => {
@@ -135,6 +145,10 @@ test('builds endpoint-specific POST examples', () => {
     context: { application: 'Customer Portal', drawingType: 'life_safety_plan' },
     limit: 10
   });
+  assert.deepEqual(catalogExampleBodyForEndpoint('POST', '/api/v1/catalog/symbols/download'), {
+    symbolIds: ['0003-12', '00023-3'],
+    format: 'PNG'
+  });
   assert.deepEqual(catalogExampleBodyForEndpoint('POST', '/api/v1/catalog/symbols/{symbol_ref}/feedback'), {
     kind: 'comment',
     message: 'This preview is clear in our drawing review workflow.',
@@ -150,6 +164,7 @@ test('materializes either backend or frontend symbol placeholders', () => {
 
 test('maps only allowlisted developer citations to page sections or support', () => {
   assert.deepEqual(resolveDeveloperCitation('developer://guides/search'), { href: '#reference', label: 'Search guide' });
+  assert.deepEqual(resolveDeveloperCitation('developer://guides/downloads'), { href: '#reference', label: 'Download guide' });
   assert.deepEqual(resolveDeveloperCitation({ href: 'developer://guides/sandbox', title: 'Sandbox details' }), { href: '#sandbox', label: 'Sandbox details' });
   assert.deepEqual(resolveDeveloperCitation('developer://support'), { href: '/support', label: 'Support' });
   for (const unsafe of ['javascript:alert(1)', 'https://evil.invalid', '/admin', 'developer://guides/not-real']) {

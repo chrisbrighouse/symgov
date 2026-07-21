@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from symgov_backend.app import create_app
 from symgov_backend.auth import authenticate_user, upsert_user
 from symgov_backend.dependencies import get_db_session
-from symgov_backend.models import User, UserRole, UserSession
+from symgov_backend.models import SubscriptionEvent, User, UserRole, UserSession, UserSubscription
 
 
 def build_client_with_user():
@@ -15,7 +15,7 @@ def build_client_with_user():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    for table in (User.__table__, UserRole.__table__, UserSession.__table__):
+    for table in (User.__table__, UserRole.__table__, UserSession.__table__, UserSubscription.__table__, SubscriptionEvent.__table__):
         table.create(engine)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     with Session() as session:
@@ -49,6 +49,9 @@ def test_login_sets_http_only_session_cookie_and_returns_user_roles():
     assert payload["user"]["displayName"] == "Alfi"
     assert payload["user"]["roles"] == ["admin", "reviewer", "submitter"]
     assert payload["user"]["mustChangePin"] is True
+    assert payload["user"]["subscription"]["tier"] == "plus"
+    assert payload["user"]["subscription"]["expiresOn"] is None
+    assert payload["user"]["subscription"]["isProtected"] is True
     assert "symgov_session=" in response.headers["set-cookie"]
     assert "HttpOnly" in response.headers["set-cookie"]
 

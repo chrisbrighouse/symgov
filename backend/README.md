@@ -47,6 +47,22 @@ python manage_symgov.py reconcile-openclaw
 python manage_symgov.py serve-api --host 0.0.0.0 --port 8010
 ```
 
+## User subscriptions and privileged roles
+
+Alembic revision `20260720_0023_user_subscriptions.py` adds the one-to-one `user_subscriptions` current-state table, immutable `subscription_events`, and `users.deleted_at` for soft deletion.
+
+- Every newly created user starts on Free with no expiry and no privileged roles.
+- Plus uses date-only calendar-month periods. `expires_on` is exclusive, and month-end dates clamp to the last valid day of the destination month.
+- Authentication resolves subscription expiry synchronously before returning effective roles, so access control never depends on a scheduled expiry job.
+- Expiry, cancellation, and soft deletion permanently delete the user's `user_roles` rows. Free users cannot be assigned Admin, Integrator, Submitter, or Reviewer.
+- The migration intentionally removes existing privileged roles from every account except `chris.brighouse@hotmail.co.uk`; other users must be upgraded and assigned roles manually.
+- Because that approved role removal is permanent, revision `20260720_0023` deliberately rejects downgrade rather than pretending deleted role assignments can be reconstructed.
+- The protected Chris account is repaired to active, perpetual Plus with Admin and cannot be cancelled, deactivated, soft-deleted, or stripped of Admin through the API.
+- `bootstrap-first-user` accepts only the protected Chris email, defaults its display name to `Chris Brighouse`, and creates only the Admin role; it no longer creates the old generic Alfi bootstrap account.
+- Subscription and role mutations lock the target user/subscription rows in a consistent order so concurrent admin requests cannot leave privileged roles on Free accounts or lose month adjustments.
+- `GET /api/v1/admin/users` reconciles expiry before filtering and supports `page`, `pageSize`, `q`, `tier`, `role`, `includeDeleted`, `sort`, and `sortDirection`. Roles are bulk-loaded per page rather than queried once per user.
+- Dedicated mutations are `POST .../subscription/upgrade`, `POST .../subscription/adjust`, `POST .../subscription/cancel`, and `DELETE /admin/users/{id}` for soft deletion.
+
 Catalog API-key operator commands:
 
 ```bash

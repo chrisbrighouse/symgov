@@ -1295,6 +1295,22 @@ a {
   align-items: stretch;
 }
 
+.review-preview-control {
+  display: grid;
+  align-content: start;
+  justify-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.review-preview-control .review-visual-frame {
+  width: 100%;
+}
+
+.review-preview-control .catalog-preview-format-badges {
+  max-width: 100%;
+}
+
 .review-visual-frame {
   display: grid;
   place-items: center;
@@ -2242,6 +2258,23 @@ a {
   flex-wrap: wrap;
 }
 
+.catalog-download-format {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.catalog-download-format span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.catalog-download-format select {
+  min-width: 8.5rem;
+}
+
 .inline-status {
   margin: 0;
   padding: 0.65rem 0.8rem;
@@ -2679,7 +2712,7 @@ a {
 
 .admin-users-grid {
   width: 100%;
-  min-width: 58rem;
+  min-width: 92rem;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 0.86rem;
@@ -2710,8 +2743,8 @@ a {
   min-width: 15rem;
 }
 
-.admin-users-grid th:nth-child(5),
-.admin-users-grid td:nth-child(5) {
+.admin-users-grid th:nth-child(8),
+.admin-users-grid td:nth-child(8) {
   min-width: 17rem;
 }
 
@@ -2753,6 +2786,62 @@ a {
 
 .admin-user-row-actions {
   gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+.user-identity-chip,
+.admin-user-search,
+.admin-user-pagination {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.plus-subscription-badge,
+.subscription-tier-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  background: rgba(193, 139, 28, 0.16);
+  color: #79530a;
+  font-size: 0.72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.subscription-tier-pill.free {
+  background: rgba(29, 43, 54, 0.08);
+  color: var(--text-soft);
+}
+
+.subscription-tier-pill.plus {
+  border-color: rgba(80, 200, 160, 0.45);
+  background: rgba(80, 200, 160, 0.14);
+  color: #17685d;
+}
+
+.protected-owner-label {
+  align-self: center;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-user-search {
+  margin-bottom: 1rem;
+}
+
+.admin-user-search .field {
+  flex: 1;
+  margin: 0;
+}
+
+.admin-user-pagination {
+  justify-content: flex-end;
+  padding: 0.85rem;
 }
 
 .admin-users-empty {

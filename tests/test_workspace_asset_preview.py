@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 BACKEND_ROOT = Path(__file__).resolve().parents[1] / "backend"
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
@@ -379,6 +381,114 @@ def test_workspace_review_source_preview_endpoint_uses_intake_companion_for_vali
     assert captured["object_key"] == "symbols/valve.jpg"
     assert response.media_type == "image/jpeg"
     assert response.body == b"jpeg-bytes"
+
+
+def test_workspace_review_source_preview_endpoint_serves_requested_previewable_asset(monkeypatch):
+    review_case_id = uuid.uuid4()
+    validation_report_id = uuid.uuid4()
+    review_case = SimpleNamespace(
+        id=review_case_id,
+        source_entity_type="validation_report",
+        source_entity_id=validation_report_id,
+    )
+    validation_report = SimpleNamespace(
+        id=validation_report_id,
+        source_type="upload",
+        source_id=None,
+        normalized_payload_json={
+            "raw_object_key": "symbols/valve.dxf",
+            "source_file_name": "valve.dxf",
+            "visual_assets": {
+                "source_assets": [
+                    {"object_key": "symbols/valve.dxf", "filename": "valve.dxf", "format": "dxf"},
+                    {"object_key": "symbols/valve.jpg", "filename": "valve.jpg", "format": "jpg", "content_type": "image/jpeg"},
+                ],
+                "derivatives": [
+                    {"object_key": "validation/valve.svg", "filename": "valve.svg", "format": "svg", "content_type": "image/svg+xml"}
+                ],
+            },
+        },
+        report_json={},
+    )
+    captured = {}
+
+    class PreviewSession:
+        def get(self, model, item_id):
+            if model is ReviewCase and item_id == review_case_id:
+                return review_case
+            if model is ValidationReport and item_id == validation_report_id:
+                return validation_report
+            return None
+
+        def execute(self, statement):
+            return SimpleNamespace(scalar_one_or_none=lambda: None)
+
+    def fake_download_object_bytes(*, object_key, env_file):
+        captured["object_key"] = object_key
+        return {"payload": b"svg-bytes", "content_type": "image/svg+xml"}
+
+    monkeypatch.setattr(workspace_routes, "download_object_bytes", fake_download_object_bytes)
+    monkeypatch.setattr(workspace_routes, "get_settings", lambda: SimpleNamespace(storage_env_file="storage.env"))
+
+    response = workspace_routes.get_workspace_review_source_preview(
+        str(review_case_id), object_key="validation/valve.svg", session=PreviewSession()
+    )
+
+    assert captured["object_key"] == "validation/valve.svg"
+    assert response.media_type == "image/svg+xml"
+    assert response.body == b"svg-bytes"
+    assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize("object_key", ["symbols/valve.dxf", "other/private.svg"])
+def test_workspace_review_source_preview_endpoint_rejects_unpreviewable_or_unrelated_assets(monkeypatch, object_key):
+    review_case_id = uuid.uuid4()
+    validation_report_id = uuid.uuid4()
+    review_case = SimpleNamespace(
+        id=review_case_id,
+        source_entity_type="validation_report",
+        source_entity_id=validation_report_id,
+    )
+    validation_report = SimpleNamespace(
+        id=validation_report_id,
+        source_type="upload",
+        source_id=None,
+        normalized_payload_json={
+            "raw_object_key": "symbols/valve.dxf",
+            "source_file_name": "valve.dxf",
+            "visual_assets": {
+                "source_assets": [
+                    {"object_key": "symbols/valve.dxf", "filename": "valve.dxf", "format": "dxf"},
+                ],
+                "derivatives": [
+                    {"object_key": "validation/valve.svg", "filename": "valve.svg", "format": "svg", "content_type": "image/svg+xml"}
+                ],
+            },
+        },
+        report_json={},
+    )
+
+    class PreviewSession:
+        def get(self, model, item_id):
+            if model is ReviewCase and item_id == review_case_id:
+                return review_case
+            if model is ValidationReport and item_id == validation_report_id:
+                return validation_report
+            return None
+
+    monkeypatch.setattr(
+        workspace_routes,
+        "download_object_bytes",
+        lambda **kwargs: pytest.fail("Rejected object keys must not reach storage."),
+    )
+
+    with pytest.raises(workspace_routes.HTTPException) as error:
+        workspace_routes.get_workspace_review_source_preview(
+            str(review_case_id), object_key=object_key, session=PreviewSession()
+        )
+
+    assert error.value.status_code == 404
+    assert error.value.detail == "Review source preview asset not found."
 
 
 class FakeQuery:

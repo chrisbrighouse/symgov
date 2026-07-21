@@ -109,9 +109,9 @@ def symbol_row(**overrides):
         "description": "Smoke detector for approved fire alarm layouts.",
         "keywords": ["smoke", "detector", "fire alarm"],
         "downloads": [
-            {"format": "DXF", "filename": "smoke-detector.dxf"},
-            {"format": "SVG", "filename": "smoke-detector.svg"},
-            {"format": "PNG", "filename": "smoke-detector.png"},
+            {"format": "DXF", "filename": "smoke-detector.dxf", "object_key": "symbols/smoke-detector.dxf"},
+            {"format": "SVG", "filename": "smoke-detector.svg", "object_key": "symbols/smoke-detector.svg"},
+            {"format": "PNG", "filename": "smoke-detector.png", "object_key": "symbols/smoke-detector.png"},
         ],
         "preview_object_key": "previews/smoke-detector.svg",
         "preview_format": "SVG",
@@ -239,7 +239,7 @@ def test_catalog_symbol_detail_resolves_display_id_slug_and_uuid_with_public_lin
             "pageTitle": "Smoke Detector",
         }
         assert payload["availableFormats"] == ["DXF", "SVG", "PNG"]
-        assert payload["downloadAvailable"] is False
+        assert payload["downloadAvailable"] is True
         assert payload["preview"] == {
             "thumbnailUrl": "/api/v1/catalog/symbols/0003-12/thumbnail",
             "previewUrl": "/api/v1/catalog/symbols/0003-12/preview",
@@ -255,6 +255,7 @@ def test_catalog_symbol_detail_resolves_display_id_slug_and_uuid_with_public_lin
             "api": "/api/v1/catalog/symbols/0003-12",
             "thumbnail": "/api/v1/catalog/symbols/0003-12/thumbnail",
             "preview": "/api/v1/catalog/symbols/0003-12/preview",
+            "download": "/api/v1/catalog/symbols/download",
         }
         serialized = str(payload).lower()
         assert "/api/v1/published" not in serialized
@@ -323,5 +324,5 @@ def test_catalog_symbol_detail_usage_logging_failure_does_not_fail_response():
     response = client.get("/api/v1/catalog/symbols/0003-12", headers=auth_headers())
 
     assert response.status_code == 200
-    assert response.json()["downloadAvailable"] is False
+    assert response.json()["downloadAvailable"] is True
     assert session.rollbacks == 1

@@ -17,7 +17,6 @@ except ModuleNotFoundError:  # pragma: no cover - production image-processing de
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from .auth import hash_pin
 from .models import (
     AgentDefinition,
     AgentQueueItem,
@@ -33,9 +32,9 @@ from .models import (
     ReviewSymbolProperty,
     SymbolRevision,
     User,
-    UserRole,
     ValidationReport,
 )
+from .service_users import enforce_noninteractive_service_account, new_service_pin_hash
 from .settings import get_settings
 from .runtime import coerce_uuid, download_object_bytes, slugify_public_code
 
@@ -62,18 +61,16 @@ def ensure_publication_service_user(session: Session) -> User:
             id=coerce_uuid("user:symgov-publication-service"),
             email=service_email,
             display_name="SymGov Publication Service",
-            pin_hash=hash_pin("4590"),
+            pin_hash=new_service_pin_hash(),
             pin_set_at=now,
-            must_change_pin=True,
-            is_active=True,
+            must_change_pin=False,
+            is_active=False,
             created_at=now,
             updated_at=now,
         )
         session.add(row)
         session.flush()
-        session.add(UserRole(user_id=row.id, role="admin", created_at=now))
-        session.flush()
-    return row
+    return enforce_noninteractive_service_account(session, row, now=utc_now())
 
 
 def text_value(*values: Any, fallback: str = "") -> str:

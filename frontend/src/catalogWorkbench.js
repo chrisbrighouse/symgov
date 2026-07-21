@@ -409,6 +409,47 @@ export function buildCatalogPreviewOptions(symbol = {}, selectedFormat = '') {
   });
 }
 
+export function buildReviewPreviewOptions(review = {}, selectedFormat = '') {
+  const normalizeFormat = (value) => String(value || '').trim().replace(/^\./, '').toUpperCase();
+  const assetsByFormat = new Map();
+  (review.sourceAssets || []).forEach((asset) => {
+    const format = normalizeFormat(asset?.format);
+    const currentAsset = assetsByFormat.get(format);
+    const assetPriority = asset?.selectedPreview ? 2 : asset?.previewable ? 1 : 0;
+    const currentPriority = currentAsset?.selectedPreview ? 2 : currentAsset?.previewable ? 1 : 0;
+    if (format && (!currentAsset || assetPriority > currentPriority)) {
+      assetsByFormat.set(format, asset);
+    }
+  });
+  const defaultAsset = (review.sourceAssets || []).find((asset) => asset?.selectedPreview);
+  const activeFormat = normalizeFormat(selectedFormat || defaultAsset?.format || review.format);
+  const formats = sortByPreferredOrder(
+    [...(review.availableFormats || []), ...assetsByFormat.keys()].map(normalizeFormat),
+    FORMAT_ORDER
+  );
+
+  return formats.map((format) => {
+    const asset = assetsByFormat.get(format);
+    return {
+      format,
+      active: format === activeFormat,
+      previewable: Boolean(asset?.previewable),
+      objectKey: asset?.objectKey || ''
+    };
+  });
+}
+
+export function buildReviewPreviewUrl(review = {}, objectKey = '', format = '') {
+  const sourcePreviewUrl = String(review.sourcePreviewUrl || '').trim();
+  if (!sourcePreviewUrl || !objectKey) {
+    return sourcePreviewUrl || null;
+  }
+  const separator = sourcePreviewUrl.includes('?') ? '&' : '?';
+  const normalizedFormat = String(format || '').trim().replace(/^\./, '').toUpperCase();
+  const formatQuery = normalizedFormat ? `&format=${encodeURIComponent(normalizedFormat)}` : '';
+  return `${sourcePreviewUrl}${separator}object_key=${encodeURIComponent(objectKey)}${formatQuery}`;
+}
+
 export function interpretEdCatalogPrompt(prompt = '') {
   const rawPrompt = String(prompt || '').trim();
   const normalizedPrompt = rawPrompt.toLowerCase();
