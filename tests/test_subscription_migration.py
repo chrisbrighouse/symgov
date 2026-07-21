@@ -3,6 +3,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "backend" / "alembic" / "versions" / "20260720_0023_user_subscriptions.py"
 MODEL = ROOT / "backend" / "symgov_backend" / "models" / "schema.py"
+PROFILE_MIGRATION = ROOT / "backend" / "alembic" / "versions" / "20260721_0024_profile_subscription_outbox.py"
 
 
 def test_subscription_migration_chains_from_head_and_backfills_confirmed_policy():
@@ -33,3 +34,16 @@ def test_subscription_migration_disables_legacy_interactive_service_accounts():
     assert "symgov-publication-service@symgov.local" in migration
     assert "disabled-service-account" in migration
     assert "is_active = false" in migration
+
+
+def test_profile_subscription_migration_adds_audit_origin_and_transactional_outbox():
+    migration = PROFILE_MIGRATION.read_text(encoding="utf-8")
+    model = MODEL.read_text(encoding="utf-8")
+
+    assert 'revision: str = "20260721_0024"' in migration
+    assert 'down_revision: Union[str, None] = "20260720_0023"' in migration
+    assert '"subscription_events"' in migration
+    assert '"origin"' in migration
+    assert '"email_outbox"' in migration
+    assert '"uq_email_outbox_event_recipient"' in migration
+    assert "class EmailOutbox(Base):" in model

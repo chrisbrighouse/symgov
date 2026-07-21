@@ -81,6 +81,7 @@ def test_upgrade_adjust_cancel_and_expiry_remove_roles_permanently():
             "adjusted",
             "expired",
         ]
+        assert session.query(SubscriptionEvent).filter_by(action="expired").one().origin == "expiry"
 
         upgrade_to_plus(session, user, months=1, as_of=date(2026, 5, 10))
         session.add(UserRole(user_id=user.id, role="submitter", created_at=user.created_at))
@@ -103,3 +104,5 @@ def test_protected_owner_is_perpetual_plus_admin_and_cannot_be_cancelled():
 
         with pytest.raises(ValueError, match="protected owner"):
             cancel_plus(session, owner, as_of=date(2026, 7, 20))
+        with pytest.raises(ValueError, match="perpetual Plus"):
+            upgrade_to_plus(session, owner, months=12, as_of=date(2026, 7, 20))

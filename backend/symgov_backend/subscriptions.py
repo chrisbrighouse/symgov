@@ -60,16 +60,18 @@ def _record_event(
     previous_expires_on: date | None,
     new_expires_on: date | None,
     actor_id: uuid.UUID | None = None,
-) -> None:
-    session.add(
-        SubscriptionEvent(
+    origin: str = "system",
+) -> SubscriptionEvent:
+    event = SubscriptionEvent(
             id=uuid.uuid4(), user_id=user.id, actor_id=actor_id, action=action,
+            origin=origin,
             previous_tier=previous_tier, new_tier=new_tier,
             previous_expires_on=previous_expires_on, new_expires_on=new_expires_on,
             created_at=_timestamp(),
         )
-    )
+    session.add(event)
     session.flush()
+    return event
 
 
 def ensure_subscription(session: Session, user: User, *, as_of: date | None = None) -> UserSubscription:
@@ -131,13 +133,14 @@ def reconcile_subscription(
         remove_roles(session, user)
         _record_event(
             session, user=user, action="expired", previous_tier="plus", new_tier="free",
-            previous_expires_on=previous_expiry, new_expires_on=None,
+            previous_expires_on=previous_expiry, new_expires_on=None, origin="expiry",
         )
     return current
 
 
 def upgrade_to_plus(
     session: Session, user: User, *, months: int, as_of: date | None = None, actor_id: uuid.UUID | None = None,
+    origin: str = "admin",
 ) -> UserSubscription:
     if months < 1:
         raise ValueError("Plus duration must be at least one month.")
@@ -145,7 +148,7 @@ def upgrade_to_plus(
     _lock_user_and_subscription(session, user)
     current = ensure_subscription(session, user, as_of=resolved_date)
     if current.is_protected:
-        return current
+        raise ValueError("The protected owner already has a perpetual Plus subscription.")
     if current.tier == "plus":
         raise ValueError("The user already has an active Plus subscription; adjust its duration instead.")
     previous_tier, previous_expiry = current.tier, current.expires_on
@@ -157,13 +160,14 @@ def upgrade_to_plus(
     current.updated_at = _timestamp()
     _record_event(
         session, user=user, action="upgraded", previous_tier=previous_tier, new_tier="plus",
-        previous_expires_on=previous_expiry, new_expires_on=current.expires_on, actor_id=actor_id,
+        previous_expires_on=previous_expiry, new_expires_on=current.expires_on, actor_id=actor_id, origin=origin,
     )
     return current
 
 
 def adjust_plus_months(
     session: Session, user: User, *, months: int, as_of: date | None = None, actor_id: uuid.UUID | None = None,
+    origin: str = "admin",
 ) -> UserSubscription:
     if months == 0:
         raise ValueError("Subscription adjustment must not be zero months.")
@@ -183,20 +187,22 @@ def adjust_plus_months(
     current.updated_at = _timestamp()
     _record_event(
         session, user=user, action="adjusted", previous_tier="plus", new_tier="plus",
-        previous_expires_on=previous_expiry, new_expires_on=candidate, actor_id=actor_id,
+        previous_expires_on=previous_expiry, new_expires_on=candidate, actor_id=actor_id, origin=origin,
     )
     return reconcile_subscription(session, user, subscription=current, as_of=resolved_date)
 
 
 def cancel_plus(
     session: Session, user: User, *, as_of: date | None = None, actor_id: uuid.UUID | None = None,
-    action: str = "cancelled",
+    action: str = "cancelled", origin: str = "admin", require_active: bool = False,
 ) -> UserSubscription:
     resolved_date = as_of or today_utc()
     _lock_user_and_subscription(session, user)
     current = ensure_subscription(session, user, as_of=resolved_date)
     if current.is_protected:
         raise ValueError("The protected owner subscription cannot be cancelled.")
+    if require_active and current.tier != "plus":
+        raise ValueError("Only an active Plus subscription can be downgraded.")
     previous_tier, previous_expiry = current.tier, current.expires_on
     current.tier = "free"
     current.started_on = resolved_date
@@ -207,6 +213,6 @@ def cancel_plus(
     remove_roles(session, user)
     _record_event(
         session, user=user, action=action, previous_tier=previous_tier, new_tier="free",
-        previous_expires_on=previous_expiry, new_expires_on=None, actor_id=actor_id,
+        previous_expires_on=previous_expiry, new_expires_on=None, actor_id=actor_id, origin=origin,
     )
     return current

@@ -85,6 +85,7 @@ class SubscriptionEvent(Base):
             "action in ('created', 'upgraded', 'adjusted', 'cancelled', 'expired', 'user_removed', 'owner_repaired')",
             name="ck_subscription_events_action",
         ),
+        CheckConstraint("origin in ('admin', 'self_service', 'system', 'expiry')", name="ck_subscription_events_origin"),
         Index("ix_subscription_events_user_created", "user_id", "created_at"),
     )
 
@@ -92,11 +93,37 @@ class SubscriptionEvent(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     action: Mapped[str] = mapped_column(Text, nullable=False)
+    origin: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'system'"))
     previous_tier: Mapped[str | None] = mapped_column(Text, nullable=True)
     new_tier: Mapped[str] = mapped_column(Text, nullable=False)
     previous_expires_on: Mapped[object | None] = mapped_column(Date, nullable=True)
     new_expires_on: Mapped[object | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class EmailOutbox(Base):
+    __tablename__ = "email_outbox"
+    __table_args__ = (
+        CheckConstraint("status in ('pending', 'sent')", name="ck_email_outbox_status"),
+        CheckConstraint("recipient_kind in ('customer', 'admin')", name="ck_email_outbox_recipient_kind"),
+        Index("uq_email_outbox_event_recipient", "subscription_event_id", "recipient_kind", unique=True),
+        Index("ix_email_outbox_pending", "status", "next_attempt_at", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    subscription_event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("subscription_events.id", ondelete="CASCADE"), nullable=False
+    )
+    recipient_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    to_email: Mapped[str] = mapped_column(Text, nullable=False)
+    subject: Mapped[str] = mapped_column(Text, nullable=False)
+    body_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    next_attempt_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    sent_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class CatalogFavourite(Base):

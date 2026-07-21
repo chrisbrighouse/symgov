@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .db import DEFAULT_ENV_FILE
@@ -38,6 +38,17 @@ class SymgovAPISettings:
     hermes_container_openclaw_root: Path = Path(
         os.environ.get("SYMGOV_HERMES_CONTAINER_OPENCLAW_ROOT", "/data/.openclaw")
     )
+    subscription_admin_email: str = os.environ.get(
+        "SYMGOV_SUBSCRIPTION_ADMIN_EMAIL", "chris.brighouse@hotmail.co.uk"
+    ).strip().lower()
+    smtp_host: str = os.environ.get("SYMGOV_SMTP_HOST", "").strip()
+    smtp_port: int = int(os.environ.get("SYMGOV_SMTP_PORT", "587"))
+    smtp_username: str = os.environ.get("SYMGOV_SMTP_USERNAME", "").strip()
+    smtp_password: str = field(default=os.environ.get("SYMGOV_SMTP_PASSWORD", ""), repr=False)
+    smtp_from_email: str = os.environ.get("SYMGOV_SMTP_FROM_EMAIL", "").strip().lower()
+    smtp_starttls: bool = os.environ.get("SYMGOV_SMTP_STARTTLS", "1").strip().lower() in {"1", "true", "yes", "on"}
+    smtp_ssl: bool = os.environ.get("SYMGOV_SMTP_SSL", "0").strip().lower() in {"1", "true", "yes", "on"}
+    email_worker_interval_seconds: float = float(os.environ.get("SYMGOV_EMAIL_WORKER_INTERVAL_SECONDS", "30"))
 
 
 def get_settings() -> SymgovAPISettings:

@@ -12,8 +12,8 @@ from .runtime import RuntimePersistenceBridge
 from .settings import SymgovAPISettings, get_settings
 
 
-def get_db_session(settings: SymgovAPISettings | None = None) -> Generator[Session, None, None]:
-    resolved_settings = settings or get_settings()
+def get_db_session(settings: SymgovAPISettings = Depends(get_settings)) -> Generator[Session, None, None]:
+    resolved_settings = settings
     # Per-request engine: NullPool so we don't leak connections via discarded
     # session factories. The TCP cost is small compared to pool exhaustion risk.
     session_factory = create_session_factory(env_file=resolved_settings.db_env_file, nopool=True)

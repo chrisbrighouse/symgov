@@ -26,7 +26,7 @@ def enforce_noninteractive_service_account(session: Session, user: User, *, now:
 
     subscription = ensure_subscription(session, user, as_of=now.date())
     if subscription.tier == "plus":
-        cancel_plus(session, user, as_of=now.date())
+        cancel_plus(session, user, as_of=now.date(), origin="system")
     else:
         remove_roles(session, user)
     session.flush()

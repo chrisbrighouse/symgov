@@ -63,6 +63,18 @@ Alembic revision `20260720_0023_user_subscriptions.py` adds the one-to-one `user
 - `GET /api/v1/admin/users` reconciles expiry before filtering and supports `page`, `pageSize`, `q`, `tier`, `role`, `includeDeleted`, `sort`, and `sortDirection`. Roles are bulk-loaded per page rather than queried once per user.
 - Dedicated mutations are `POST .../subscription/upgrade`, `POST .../subscription/adjust`, `POST .../subscription/cancel`, and `DELETE /admin/users/{id}` for soft deletion.
 
+### Customer profile and self-service subscription changes
+
+Alembic revision `20260721_0024_profile_subscription_outbox.py` adds an origin to subscription audit events and a transactional `email_outbox` table.
+
+- `GET /api/v1/profile` returns only the current session user's identity, effective subscription, server-authoritative GBP annual price, and one-to-five-year expiry options.
+- `POST /api/v1/profile/subscription/upgrade` accepts an exact integer `years` from 1 through 5 plus `confirmed: true`. It activates Plus immediately at £50/year without taking payment in the initial release.
+- `POST /api/v1/profile/subscription/downgrade` requires `confirmed: true` and returns ordinary Plus to Free immediately. Protected owner Plus cannot be downgraded.
+- Neither endpoint accepts a target user ID, and self-service upgrade never assigns roles. Existing row locking and entitlement resolution remain authoritative.
+- Each successful self-service change writes `origin=self_service` and queues one customer and one administrator email in the same transaction.
+- Email transport is optional and configured only through runtime environment variables: `SYMGOV_SUBSCRIPTION_ADMIN_EMAIL`, `SYMGOV_SMTP_HOST`, `SYMGOV_SMTP_PORT`, `SYMGOV_SMTP_USERNAME`, `SYMGOV_SMTP_PASSWORD`, `SYMGOV_SMTP_FROM_EMAIL`, `SYMGOV_SMTP_STARTTLS`, `SYMGOV_SMTP_SSL`, and `SYMGOV_EMAIL_WORKER_INTERVAL_SECONDS`.
+- When SMTP is configured, the API worker sends pending rows and marks them sent. Transport failures retain a sanitized error category and exponential retry time; they do not undo a committed entitlement change.
+
 Catalog API-key operator commands:
 
 ```bash

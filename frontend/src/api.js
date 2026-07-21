@@ -217,6 +217,24 @@ export async function fetchCurrentUser() {
   };
 }
 
+export async function fetchProfile() {
+  return requestJson('/profile', { cache: 'no-store' });
+}
+
+export async function upgradeCurrentSubscription(payload) {
+  return requestJson('/profile/subscription/upgrade', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function downgradeCurrentSubscription(payload) {
+  return requestJson('/profile/subscription/downgrade', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function logoutUser() {
   return requestJson('/auth/logout', { method: 'POST' });
 }

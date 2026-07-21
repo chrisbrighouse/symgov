@@ -51,6 +51,139 @@ a {
   text-decoration: none;
 }
 
+.user-identity-link {
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.user-identity-link:hover,
+.user-identity-link:focus-visible {
+  border-color: rgba(47, 140, 123, 0.55);
+  box-shadow: 0 0 0 3px rgba(94, 189, 147, 0.16);
+  transform: translateY(-1px);
+}
+
+.profile-page {
+  width: min(1080px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 1.25rem;
+}
+
+.profile-heading,
+.profile-card {
+  padding: clamp(1.1rem, 3vw, 2rem);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius-xl);
+  background: var(--glass-light);
+  box-shadow: var(--shadow);
+}
+
+.profile-heading h2,
+.profile-card h3,
+.profile-card h4 {
+  margin: 0.2rem 0 0.5rem;
+}
+
+.profile-subscription-card {
+  min-width: 0;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 0.72fr) minmax(360px, 1.28fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.profile-card-title,
+.profile-price-summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.profile-details {
+  margin: 1rem 0 0;
+  display: grid;
+  gap: 0.8rem;
+}
+
+.profile-details div {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.profile-details dt {
+  color: var(--text-soft);
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.profile-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.profile-subscription-action {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--stroke);
+  display: grid;
+  gap: 0.9rem;
+}
+
+.profile-subscription-action label {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 700;
+}
+
+.profile-subscription-action select {
+  width: min(15rem, 100%);
+  padding: 0.7rem;
+  border: 1px solid var(--stroke-strong);
+  border-radius: var(--radius-md);
+  background: white;
+}
+
+.profile-price-summary {
+  flex-wrap: wrap;
+  padding: 0.9rem;
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+}
+
+.profile-payment-notice,
+.profile-protected-note {
+  color: var(--text-soft);
+}
+
+.profile-confirmation {
+  padding: 1rem;
+  border: 1px solid rgba(47, 140, 123, 0.34);
+  border-radius: var(--radius-lg);
+  background: rgba(94, 189, 147, 0.08);
+}
+
+.danger-zone {
+  border-top-color: rgba(212, 107, 125, 0.4);
+}
+
+@media (max-width: 760px) {
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-card-title,
+  .profile-price-summary {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
 .app-shell {
   position: relative;
   min-height: 100vh;

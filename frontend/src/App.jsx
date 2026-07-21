@@ -49,6 +49,7 @@ import {
 } from './api.js';
 import { appConfig } from './config.js';
 import CatalogDeveloperHub from './CatalogDeveloperHub.jsx';
+import ProfilePage from './ProfilePage.jsx';
 import FavouriteButton from './FavouriteButton.js';
 import FavouriteFilter from './FavouriteFilter.js';
 import { changeQueue, daisyCoordinationReports, processingActivity, submissionPresets, symbols } from './data.js';
@@ -441,6 +442,7 @@ function AppContent() {
           <Route path="/" element={<HomeRedirect />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/change-pin" element={<RequireAuth><ChangePinPage /></RequireAuth>} />
+          <Route path="/profile" element={<RequireAuth><ProfilePage auth={auth} /></RequireAuth>} />
           <Route path="/workspace" element={<RequireAnyRole roles={['admin']}><WorkspacePage /></RequireAnyRole>} />
           <Route path="/workspace/users" element={<RequireAnyRole roles={['admin']}><AdminUsersPage /></RequireAnyRole>} />
           <Route path="/workspace/llm" element={<RequireAnyRole roles={['admin']}><AdminLlmPage /></RequireAnyRole>} />
@@ -673,7 +675,7 @@ function Header() {
         </div>
       </div>
       <div className="header-actions">
-        {user ? <div className="build-chip user-identity-chip">{user.displayName || user.email}{user.subscription?.isActive ? <span className="plus-subscription-badge">Plus</span> : null}</div> : null}
+        {user ? <NavLink to="/profile" className="build-chip user-identity-chip user-identity-link" aria-label="Open your profile">{user.displayName || user.email}{user.subscription?.isActive ? <span className="plus-subscription-badge">Plus</span> : null}</NavLink> : null}
         <div className="build-chip">{appConfig.build || 'local'}</div>
         {user ? (
           <button type="button" className="ghost-button" onClick={handleLogout}>Sign out</button>

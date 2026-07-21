@@ -79,6 +79,41 @@ class AuthMeResponse(BaseModel):
     user: AuthUserResponse | None
 
 
+class ProfileUpgradeOptionResponse(BaseModel):
+    years: int
+    totalPricePence: int
+    expiresOn: str
+
+
+class ProfilePlanResponse(BaseModel):
+    currency: str = "GBP"
+    annualPricePence: int = 5000
+    minimumYears: int = 1
+    maximumYears: int = 5
+    paymentRequired: bool = False
+    upgradeOptions: list[ProfileUpgradeOptionResponse]
+
+
+class ProfileResponse(BaseModel):
+    user: AuthUserResponse
+    plan: ProfilePlanResponse
+
+
+class SelfServiceUpgradeRequest(BaseModel):
+    years: int = Field(strict=True, ge=1, le=5)
+    confirmed: bool
+
+
+class SelfServiceDowngradeRequest(BaseModel):
+    confirmed: bool
+
+
+class ProfileSubscriptionMutationResponse(BaseModel):
+    user: AuthUserResponse
+    plan: ProfilePlanResponse
+    notificationStatus: str = "queued"
+
+
 class AuthChangePinRequest(BaseModel):
     currentPin: str = Field(min_length=4, max_length=4)
     newPin: str = Field(min_length=4, max_length=4)

@@ -20,12 +20,14 @@ from .routes.public import legacy_router as legacy_public_router
 from .routes.public import router as public_router
 from .routes.published import legacy_router as legacy_published_router
 from .routes.published import router as published_router
+from .routes.profile import router as profile_router
 from .routes.llm import legacy_router as legacy_llm_router
 from .routes.llm import router as llm_router
 from .routes.workspace import legacy_router as legacy_workspace_router
 from .routes.workspace import router as workspace_router
 from .agent_queue_worker import AgentQueueWorkerConfig, AgentQueueWorkerState, run_agent_queue_worker
 from .dependencies import require_any_role, require_user
+from .email_worker import run_email_outbox_worker
 from .settings import get_settings
 
 
@@ -71,6 +73,7 @@ def create_app() -> FastAPI:
         dependencies=[Depends(require_any_role({"admin", "submitter"}))],
     )
     app.include_router(published_router, prefix=settings.api_prefix, dependencies=[Depends(require_user)])
+    app.include_router(profile_router, prefix=settings.api_prefix)
     app.include_router(
         workspace_router,
         prefix=settings.api_prefix,
@@ -94,6 +97,10 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def start_background_workers() -> None:
+        if settings.smtp_host and settings.smtp_from_email:
+            email_stop_event = asyncio.Event()
+            app.state.email_worker_stop_event = email_stop_event
+            app.state.email_worker_task = asyncio.create_task(run_email_outbox_worker(settings, email_stop_event))
         agents = settings.agent_workers if settings.enable_agent_workers else (("libby",) if settings.enable_libby_worker else ())
         app.state.agent_worker_state = AgentQueueWorkerState(configured_agents=agents)
         if not agents:
@@ -121,6 +128,14 @@ def create_app() -> FastAPI:
 
     @app.on_event("shutdown")
     async def stop_background_workers() -> None:
+        email_task = getattr(app.state, "email_worker_task", None)
+        email_stop_event = getattr(app.state, "email_worker_stop_event", None)
+        if email_stop_event is not None:
+            email_stop_event.set()
+        if email_task is not None:
+            email_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await email_task
         task = getattr(app.state, "agent_worker_task", None)
         stop_event = getattr(app.state, "agent_worker_stop_event", None)
         if stop_event is not None:
