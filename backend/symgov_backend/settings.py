@@ -8,6 +8,30 @@ from .db import DEFAULT_ENV_FILE
 from .runtime import DEFAULT_STORAGE_ENV_FILE
 
 
+def _read_env_value(path: Path, key: str) -> str:
+    if not path.exists():
+        return ""
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        candidate, value = line.split("=", 1)
+        if candidate.strip() == key:
+            return value.strip().strip("'\"")
+    return ""
+
+
+def _agentmail_api_key() -> str:
+    direct = os.environ.get("AGENTMAIL_API_KEY", "").strip()
+    if direct:
+        return direct
+    profile = os.environ.get("SYMGOV_HERMES_PROFILE", "symgov").strip() or "symgov"
+    env_file = Path(
+        os.environ.get("SYMGOV_HERMES_ENV_FILE", f"/root/.hermes/profiles/{profile}/.env")
+    )
+    return _read_env_value(env_file, "AGENTMAIL_API_KEY")
+
+
 @dataclass(frozen=True)
 class SymgovAPISettings:
     service_name: str = "symgov-api"
@@ -41,6 +65,11 @@ class SymgovAPISettings:
     subscription_admin_email: str = os.environ.get(
         "SYMGOV_SUBSCRIPTION_ADMIN_EMAIL", "chris.brighouse@hotmail.co.uk"
     ).strip().lower()
+    email_transport: str = os.environ.get("SYMGOV_EMAIL_TRANSPORT", "smtp").strip().lower()
+    agentmail_api_key: str = field(default_factory=_agentmail_api_key, repr=False)
+    agentmail_inbox: str = os.environ.get("SYMGOV_AGENTMAIL_INBOX", "").strip().lower()
+    agentmail_base_url: str = "https://api.agentmail.to/v0"
+    agentmail_timeout_seconds: float = float(os.environ.get("SYMGOV_AGENTMAIL_TIMEOUT_SECONDS", "20"))
     smtp_host: str = os.environ.get("SYMGOV_SMTP_HOST", "").strip()
     smtp_port: int = int(os.environ.get("SYMGOV_SMTP_PORT", "587"))
     smtp_username: str = os.environ.get("SYMGOV_SMTP_USERNAME", "").strip()

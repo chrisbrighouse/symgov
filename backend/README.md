@@ -72,8 +72,11 @@ Alembic revision `20260721_0024_profile_subscription_outbox.py` adds an origin t
 - `POST /api/v1/profile/subscription/downgrade` requires `confirmed: true` and returns ordinary Plus to Free immediately. Protected owner Plus cannot be downgraded.
 - Neither endpoint accepts a target user ID, and self-service upgrade never assigns roles. Existing row locking and entitlement resolution remain authoritative.
 - Each successful self-service change writes `origin=self_service` and queues one customer and one administrator email in the same transaction.
-- Email transport is optional and configured only through runtime environment variables: `SYMGOV_SUBSCRIPTION_ADMIN_EMAIL`, `SYMGOV_SMTP_HOST`, `SYMGOV_SMTP_PORT`, `SYMGOV_SMTP_USERNAME`, `SYMGOV_SMTP_PASSWORD`, `SYMGOV_SMTP_FROM_EMAIL`, `SYMGOV_SMTP_STARTTLS`, `SYMGOV_SMTP_SSL`, and `SYMGOV_EMAIL_WORKER_INTERVAL_SECONDS`.
-- When SMTP is configured, the API worker sends pending rows and marks them sent. Transport failures retain a sanitized error category and exponential retry time; they do not undo a committed entitlement change.
+- Email transport is optional and selected with `SYMGOV_EMAIL_TRANSPORT` (`smtp` by default, or `agentmail`).
+- Pat/AgentMail delivery uses `SYMGOV_AGENTMAIL_INBOX` (normally `alfi-bot@agentmail.to`), optional `SYMGOV_AGENTMAIL_TIMEOUT_SECONDS`, and `AGENTMAIL_API_KEY`. The key is read from the process environment first, then only by name from the protected Hermes profile `.env`; it is excluded from settings representations. Delivery is pinned to AgentMail's official HTTPS API and refuses redirects so runtime configuration cannot redirect the bearer token.
+- SMTP remains available through `SYMGOV_SMTP_HOST`, `SYMGOV_SMTP_PORT`, `SYMGOV_SMTP_USERNAME`, `SYMGOV_SMTP_PASSWORD`, `SYMGOV_SMTP_FROM_EMAIL`, `SYMGOV_SMTP_STARTTLS`, and `SYMGOV_SMTP_SSL`.
+- Both transports use `SYMGOV_SUBSCRIPTION_ADMIN_EMAIL` and `SYMGOV_EMAIL_WORKER_INTERVAL_SECONDS`.
+- When the selected transport is configured, the API worker sends pending rows and marks them sent. AgentMail requests use the outbox UUID as the stable `Idempotency-Key`, so retries within AgentMail's 24-hour idempotency window return the original send instead of creating a duplicate. Transport failures retain a sanitized error category and HTTP status (when available) plus exponential retry time; they do not undo a committed entitlement change.
 
 Catalog API-key operator commands:
 

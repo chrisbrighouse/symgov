@@ -27,7 +27,7 @@ from .routes.workspace import legacy_router as legacy_workspace_router
 from .routes.workspace import router as workspace_router
 from .agent_queue_worker import AgentQueueWorkerConfig, AgentQueueWorkerState, run_agent_queue_worker
 from .dependencies import require_any_role, require_user
-from .email_worker import run_email_outbox_worker
+from .email_worker import configured_email_sender, run_email_outbox_worker
 from .settings import get_settings
 
 
@@ -97,7 +97,7 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def start_background_workers() -> None:
-        if settings.smtp_host and settings.smtp_from_email:
+        if configured_email_sender(settings) is not None:
             email_stop_event = asyncio.Event()
             app.state.email_worker_stop_event = email_stop_event
             app.state.email_worker_task = asyncio.create_task(run_email_outbox_worker(settings, email_stop_event))
