@@ -517,7 +517,7 @@ The controlling goal spec is:
 
 `docs/plans/2026-07-26-f0-1-test-baseline-spec.md`
 
-It contains the copy-ready implementation prompt, exact scope, candidate files and verification gates. Before dispatch, record the planning-doc commit in a restart note and choose the execution lane. Default lane: durable Symgov Kanban with serialized Cody implementation, fresh Stage 1 review, fresh Stage 2 security/code-quality review and final verification. The current baseline code commit is `f5b1381`; `main` is one commit ahead of `origin/main`, and no push is authorized.
+The committed concrete restart note is `docs/plans/2026-07-26-f0-1-restart-note.md`; always use its latest committed version. It contains the copy-ready implementation prompt, exact repository position, verification evidence and execution lane. Default lane: durable Symgov Kanban with serialized Cody implementation, fresh Stage 1 review, fresh Stage 2 security/code-quality review and final verification. The baseline product commit is `f5b1381`, the controlling plan/spec commit is `312aafe`, and no push is authorized.
 
 ### Template for future goal-spec creation
 
@@ -536,4 +536,4 @@ have changed. Do not implement code in the planning session.
 
 ## 6. Immediate next action
 
-The implementation-ready spec for **F0.1 Repair and codify the test baseline** is now `docs/plans/2026-07-26-f0-1-test-baseline-spec.md`. Commit these planning documents, create the concrete restart note with its commit ID and chosen Kanban/Cody lane, then execute F0.1. After F0.1, close F0.2–F0.4 before any new reviewer, capability or submission feature work.
+The implementation-ready spec and committed concrete restart note for **F0.1 Repair and codify the test baseline** are ready. Execute F0.1 through the recorded Kanban/Cody lane. After F0.1, close F0.2–F0.4 before any new reviewer, capability or submission feature work.
