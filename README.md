@@ -300,6 +300,84 @@ Current intent:
 - the current managed SymGov binding set is intentionally empty so `telegram:7643191699` falls through to Alfi/main rather than routing directly to a Symgov worker agent
 - OpenClaw bindings are deterministic channel/account/peer matches; they are not free-form keyword routing rules
 
+## Repeatable quality gates
+
+The default backend gate is the portable repository suite. It installs the runtime
+requirements plus the bounded test-only dependencies in a clean, isolated `uv`
+environment and excludes tests that import separately managed agent workspaces.
+From the repository root, run:
+
+```bash
+./scripts/test-backend.sh
+```
+
+The portable gate has a five-minute outer timeout by default. Override it for a
+diagnostic run with `SYMGOV_BACKEND_TIMEOUT_SECONDS`; do not raise it merely to hide
+a hang. The separately bounded external-workspace partition and the complete
+portable-plus-external sequence are:
+
+```bash
+./scripts/test-backend.sh --external
+./scripts/test-backend.sh --full
+```
+
+External files are run in separate pytest processes, with a two-minute timeout per
+process, because some load code from `/data/symgov` or `/data/.openclaw/workspaces`.
+This isolation also prevents their import-time `sys.modules` rewrites from corrupting
+the portable suite. These tests require the Libby, Scott, Daisy, Ed and downstream
+agent workspaces to exist. They also verify the retired Vlad code copy remains absent
+at `/data/.openclaw/workspaces/vlad/run_vlad_validation.py`; failures are not skipped
+by the full command.
+
+Other partitions are explicit. These examples are also from the repository root:
+
+```bash
+./scripts/test-langfuse-poc.sh
+./scripts/test-frontend.sh
+./scripts/build-frontend-isolated.sh
+./scripts/test-verification-scripts.sh
+```
+
+From another current directory, invoke the same wrappers through an absolute repository
+path instead of a cwd-relative `./scripts` path, for example:
+
+```bash
+REPO_ROOT=/path/to/symgov
+"$REPO_ROOT/scripts/test-backend.sh" --full
+"$REPO_ROOT/scripts/test-langfuse-poc.sh"
+"$REPO_ROOT/scripts/test-frontend.sh"
+"$REPO_ROOT/scripts/build-frontend-isolated.sh"
+"$REPO_ROOT/scripts/test-verification-scripts.sh"
+```
+
+The Langfuse POC, frontend Node tests and isolated build each have a finite outer
+timeout of two minutes by default. Diagnostic overrides are
+`SYMGOV_LANGFUSE_TEST_TIMEOUT_SECONDS`,
+`SYMGOV_FRONTEND_TEST_TIMEOUT_SECONDS` and
+`SYMGOV_FRONTEND_BUILD_TIMEOUT_SECONDS`; each must be a positive integer.
+
+The shell-level contract probes cover invalid timeout values, timeout exit-status
+propagation, relative and in-repository build outputs, `..` and symlink resolution,
+and valid external output paths without running a real frontend build.
+
+The isolated build writes to `/tmp/symgov-build` by default and refuses an output
+directory inside the repository after canonical path and symlink resolution. A
+custom `SYMGOV_BUILD_OUT_DIR` must be absolute. The isolated build accepts no CLI
+arguments; output customization is available only through `SYMGOV_BUILD_OUT_DIR`.
+`npm run test:frontend` and `npm run build:isolated` are thin conveniences for the
+frontend commands.
+
+Use the quality gates according to the changed surface:
+
+| Change | Required checks |
+|---|---|
+| Backend domain/service | Focused pytest target, then portable backend |
+| Backend route/auth | Focused route matrix, then portable backend |
+| Frontend | Relevant Node target, all frontend Node tests, isolated build |
+| Agent/external workspace | Focused portable test plus external partition |
+| Langfuse POC | Langfuse POC partition |
+| Migration | Focused tests, portable backend, Alembic single-head and disposable upgrade checks |
+
 ## Run
 
 Install dependencies and run the frontend locally:

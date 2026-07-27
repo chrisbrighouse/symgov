@@ -47,6 +47,38 @@ python manage_symgov.py reconcile-openclaw
 python manage_symgov.py serve-api --host 0.0.0.0 --port 8010
 ```
 
+## Tests from a clean environment
+
+`requirements.txt` remains production-only. Test additions are bounded separately in
+`requirements-test.txt` and layered with the runtime requirements by `uv`:
+
+```bash
+cd /path/to/symgov
+PYTHONPATH=backend uv run --isolated \
+  --with-requirements backend/requirements.txt \
+  --with-requirements backend/requirements-test.txt \
+  python -m pytest tests/test_auth_routes.py -q
+```
+
+Normally run `./scripts/test-backend.sh` from the repository root. From another current
+directory, use an absolute repository path:
+
+```bash
+REPO_ROOT=/path/to/symgov
+"$REPO_ROOT/scripts/test-backend.sh"
+"$REPO_ROOT/scripts/test-backend.sh" --external
+"$REPO_ROOT/scripts/test-backend.sh" --full
+```
+
+The default portable partition is bounded to five minutes. `--external` runs the
+separately managed Libby, Scott, Daisy and Ed workspace tests in isolated pytest
+processes with a two-minute timeout per process; it also checks that the retired Vlad
+runner remains absent at `/data/.openclaw/workspaces/vlad/run_vlad_validation.py`.
+`--full` runs both partitions without skipping failures. This process isolation is
+intentional: the DXF external-workspace tests replace imported `symgov_backend`
+modules during collection, which caused the old monolithic suite to stall in the
+agent-worker test until its ten-minute outer timeout.
+
 ## User subscriptions and privileged roles
 
 Alembic revision `20260720_0023_user_subscriptions.py` adds the one-to-one `user_subscriptions` current-state table, immutable `subscription_events`, and `users.deleted_at` for soft deletion.

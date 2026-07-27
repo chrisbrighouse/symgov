@@ -49,22 +49,26 @@ Tests may be written before, during or immediately after the implementation, but
 Do not use one guessed `pytest` command as the only quality gate. The repository currently needs explicit partitions:
 
 ```bash
-# Main backend tests (httpx2 is required by the installed Starlette TestClient)
-PYTHONPATH=backend uv run \
-  --with-requirements backend/requirements.txt \
-  --with pytest --with httpx2 \
-  python -m pytest tests -q
+# Portable backend (clean uv, bounded outer timeout)
+./scripts/test-backend.sh
 
-# Langfuse proof of concept has a separate import root
-PYTHONPATH=langfuse-poc/scripts pytest \
-  langfuse-poc/tests/test_synthetic_contract.py -q
+# Separately managed agent workspaces, or both backend partitions
+./scripts/test-backend.sh --external
+./scripts/test-backend.sh --full
 
-# Frontend production build; use an isolated output directory while planning/reviewing
-npm run build -- --outDir /tmp/symgov-build
-
-# Node tests are currently invoked directly because package.json has no npm test script
-node --test <relevant-test-files>
+# Langfuse synthetic POC, frontend Node tests and an isolated production build
+./scripts/test-langfuse-poc.sh
+./scripts/test-frontend.sh
+./scripts/build-frontend-isolated.sh
 ```
+
+All partitions have finite outer timeouts. The portable backend defaults to five
+minutes; each external backend process, the Langfuse POC, frontend Node tests and
+the isolated build default to two minutes. Timeout overrides must be positive
+integer seconds, and the isolated build canonicalizes its absolute output path and
+refuses any path that resolves inside the repository. The isolated build rejects
+all CLI arguments; its output can be customized only through the validated
+`SYMGOV_BUILD_OUT_DIR` environment contract.
 
 Current known stale fixtures must be repaired in Goal F0.1 rather than accepted as product failures.
 

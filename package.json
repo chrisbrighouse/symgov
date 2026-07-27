@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:isolated": "./scripts/build-frontend-isolated.sh",
     "preview": "vite preview",
+    "test:frontend": "./scripts/test-frontend.sh",
     "publish:static": "./scripts/publish-static.sh",
     "build:publish": "npm run build && ./scripts/publish-static.sh"
   },

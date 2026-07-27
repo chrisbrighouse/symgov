@@ -174,3 +174,151 @@ Finish by recording exact commands, outputs, exit codes and durations; changed f
 review findings and resolutions; commits; migration/runtime state; residual risks;
 branch/status; and the concrete next handoff for F0.2.
 ```
+
+---
+
+## F0.1 completion report — 2026-07-27
+
+### Outcome
+
+F0.1 is complete and green on branch `main`. The implementation adds a bounded,
+clean-environment test dependency layer; repairs stale test fixtures; separates the
+portable, external-workspace, Langfuse, frontend-test and frontend-build partitions;
+and documents the quality-gate matrix. Product behaviour changed: **no**. In
+particular, the current published-to-review transition remains deliberately unchanged
+and belongs to F0.4.
+
+The pre-commit identity for the final gate was
+`14e29cea00c05eaa43534aaa9b047f3705fa4625`. The F0.1 completion commit is local on
+`main`; its immutable SHA is recorded in the Kanban completion handoff and can be read
+with `git log -1 --oneline`. It has not been pushed.
+
+### Exact committed scope
+
+- `README.md`
+- `backend/README.md`
+- `backend/requirements-test.txt`
+- `docs/plans/2026-07-26-f0-1-restart-note.md`
+- `docs/plans/2026-07-26-f0-1-test-baseline-spec.md`
+- `docs/plans/2026-07-26-symgov-trial-readiness-implementation-backlog.md`
+- `package.json`
+- `pytest.ini`
+- `scripts/build-frontend-isolated.sh`
+- `scripts/test-backend.sh`
+- `scripts/test-frontend.sh`
+- `scripts/test-langfuse-poc.sh`
+- `scripts/test-verification-scripts.sh`
+- `tests/test_daisy_rights_review_coordination.py`
+- `tests/test_dxf_phase1.py`
+- `tests/test_libby_duplicate_triage.py`
+- `tests/test_libby_symbol_vision.py`
+- `tests/test_published_feedback_service.py`
+- `tests/test_published_symbol_review_workflow.py`
+- `tests/test_vlad_hardening.py`
+- `tests/test_zip_phase2.py`
+
+No product-source or migration file changed.
+
+### Final fresh verification evidence
+
+All commands below were bounded and exited 0 unless an expected rejection exit is
+stated. Durations are measured wall times from the final completion run.
+
+| Command / gate | Working directory | Result | Wall duration |
+|---|---|---|---:|
+| `git diff --check` | repository root | no output; pass | 0.011 s |
+| `python3 -m py_compile` on all eight changed Python test files | repository root | no output; pass | 0.050 s |
+| `./scripts/test-backend.sh` | repository root | 756 passed, 3 deselected; existing FastAPI warnings only | 20.308 s |
+| `./scripts/test-backend.sh --full` | repository root | portable 756 passed/3 deselected; external 2+7+3+4+9+2+1 passed; 784 backend nodes executed | 28.635 s |
+| `./scripts/test-frontend.sh` | repository root | 65 passed, 0 failed/skipped | 0.311 s |
+| `./scripts/test-langfuse-poc.sh` | repository root | 12 passed | 0.285 s |
+| `SYMGOV_BUILD_OUT_DIR=<fresh /tmp path> ./scripts/build-frontend-isolated.sh` | repository root | Vite 7.3.6; 54 modules; external index/assets only | 1.815 s |
+| `SYMGOV_BUILD_OUT_DIR=<fresh /tmp path> npm run build:isolated` | repository root | Vite 7.3.6; 54 modules; external index/assets only | 1.991 s |
+| `./scripts/test-verification-scripts.sh` | repository root | partition, marker, timeout, exit, containment and argument contracts passed | 2.330 s |
+| clean layered `uv` run of `tests/test_email_outbox.py -q` | repository root | 9 passed | 0.959 s |
+| absolute `scripts/test-backend.sh` | `/tmp` | 756 passed, 3 deselected | 21.160 s |
+| absolute `scripts/test-frontend.sh` | `/tmp` | 65 passed | 0.251 s |
+| absolute `scripts/test-langfuse-poc.sh` | `/tmp` | 12 passed | 0.288 s |
+| absolute zero-argument isolated build wrapper | `/tmp` | Vite 7.3.6; 54 modules; external index/assets only | 1.893 s |
+| absolute `scripts/test-verification-scripts.sh` | `/tmp` | all contracts passed | 2.348 s |
+
+The explicit negative matrix also passed. Both backend timeout variables and the
+frontend, Langfuse and build timeout variables rejected representative empty, zero,
+negative, fractional or nonnumeric values with exit 2 before execution (individual
+probes: 0.006–0.008 s). Relative, root, repository-resolving and empty-relative build
+output environments rejected with exit 2 (0.006–0.011 s). Standalone `--`, config,
+positional-root, `--root`, `--outDir`, mode and arbitrary build arguments all rejected
+with the same value-independent diagnostic and exit 2 before npm/Vite (0.006 s each).
+No `dist-argument-probe` or repository build output appeared.
+
+### External partitions and prerequisites
+
+The full backend gate runs portable tests once, then seven isolated external
+processes. Those processes require the managed Daisy, DXF/Scott, Libby and Ed workspace
+files used by their named tests. Vlad's single external node requires the retired host
+runner state: `/data/.openclaw/workspaces/vlad/run_vlad_validation.py` must remain
+absent. The other four Vlad tests are repository-portable. These prerequisites were
+present in the final environment and every external process passed.
+
+### Review findings and fixes
+
+Every actionable review finding was closed before the final immutable reviews:
+
+1. **Lexical build-output containment could be bypassed by relative, `..`, `TMPDIR=.`
+   or symlink paths.** The wrapper now requires an absolute destination, canonicalizes
+   root/output paths and rejects root or any repository-resolving destination; shell
+   contracts cover valid and invalid paths.
+2. **Frontend, Langfuse and isolated-build wrappers lacked finite outer timeouts.**
+   Each now has a configurable positive-integer timeout, fail-closed validation and
+   preserved underlying/timeout exit behaviour.
+3. **One Vlad host-state assertion was incorrectly portable.** Only
+   `test_legacy_vlad_runner_code_is_retired` is marked external; `--full` runs it in a
+   dedicated process and keeps the other four Vlad nodes portable.
+4. **Any-cwd documentation showed relative commands.** Both READMEs now distinguish
+   repository-root `./scripts/...` use from absolute `REPO_ROOT/scripts/...` invocation
+   from another directory; final wrappers passed from `/tmp`.
+5. **Backend timeout overrides accepted zero and other invalid durations.** Both
+   backend timeout variables now validate positive decimal integers before pytest/uv;
+   invalid input exits 2 without invoking the wrapped command.
+6. **A forwarded standalone `--` could terminate Vite option parsing and defeat the
+   appended canonical outDir.** The first correction rejected that terminator and
+   added RED-to-GREEN containment probes.
+7. **Forwarded `--config`/`-c` or positional root could load caller configuration whose
+   Rollup output overrides Vite outDir.** The final fail-closed design rejects every
+   build CLI argument before timeout/npm. Output selection is environment-only through
+   validated `SYMGOV_BUILD_OUT_DIR`; representative argument classes have regression
+   coverage.
+
+The final fresh Stage 1 review (`t_9375d91d`) returned **PASS** with no actionable
+specification gaps on the unchanged 20-path implementation snapshot. The final fresh
+Stage 2 review (`t_2b887013`) returned **APPROVED** with no Critical, Important or drift
+findings on that same snapshot. This completion-report edit occurred only after those
+implementation reviews; all canonical gates were therefore rerun after this edit
+before commit.
+
+### Runtime, migration and side effects
+
+- No migration was created or executed.
+- No service, worker, gateway or public runtime was started, stopped, restarted,
+  deployed or reconfigured.
+- No symbol was published, withdrawn or otherwise mutated.
+- No external email, post or message was sent.
+- No push, clean, reset, stash or F0.2 work was performed.
+- Verification wrote only fresh build/probe artifacts under `/tmp`, including
+  `/tmp/symgov-f01-final-direct.lxRx0j`,
+  `/tmp/symgov-f01-final-npm.s4OJNP` and
+  `/tmp/symgov-f01-from-tmp.M1JF9l`; repository build destinations remained absent.
+
+### Residual risks and next handoff
+
+- F0.4 still owns the governance correction that prevents a review request from moving
+  a published revision back to `review`.
+- External partitions remain dependent on the managed host workspaces/files and Vlad
+  retirement state described above.
+- The portable suite emits existing FastAPI `on_event` deprecation warnings.
+- The build wrapper intentionally accepts no CLI arguments; callers must use
+  `SYMGOV_BUILD_OUT_DIR` and the documented timeout environment variable.
+
+Next goal: **F0.2 — Split workspace authorization by operation**. Start only in a new,
+explicitly authorized task after reading the parent backlog and this completion report;
+do not infer any deployment, migration, restart or push authorization from F0.1.

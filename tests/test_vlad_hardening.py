@@ -25,6 +25,7 @@ def load_module(name: str, path: Path):
     return module
 
 
+@pytest.mark.external_workspace
 def test_legacy_vlad_runner_code_is_retired():
     assert not LEGACY_VLAD_RUNNER_PATH.exists()
 

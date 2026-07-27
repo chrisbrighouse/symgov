@@ -4,6 +4,11 @@ import os
 from pathlib import Path
 import unittest
 
+import pytest
+
+
+pytestmark = pytest.mark.external_workspace
+
 
 RUNNER_PATH = Path("/data/symgov/scripts/run_libby_classification.py")
 spec = importlib.util.spec_from_file_location("run_libby_classification", RUNNER_PATH)

@@ -3,6 +3,11 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 
+import pytest
+
+
+pytestmark = pytest.mark.external_workspace
+
 
 DAISY_RUNNER = pathlib.Path("/data/.openclaw/workspaces/daisy/run_daisy_coordination.py")
 

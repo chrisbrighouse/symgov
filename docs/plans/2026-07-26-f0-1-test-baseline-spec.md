@@ -190,7 +190,10 @@ The existing assertion that a review request changes `published` to `review` rem
 - Create: `scripts/build-frontend-isolated.sh`
 - Modify: `package.json` only for thin frontend conveniences
 
-**Steps:** implement root resolution, argument forwarding and isolated output; execute every script from repository root and from one different working directory.
+**Steps:** implement root resolution and isolated output; make the build wrapper
+reject all CLI arguments so output customization is available only through the
+validated `SYMGOV_BUILD_OUT_DIR` environment contract; execute every script from
+repository root and from one different working directory.
 
 ### Task 7: Document the quality-gate matrix
 

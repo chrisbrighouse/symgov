@@ -16,6 +16,8 @@ from symgov_backend.models import (
     ReviewCaseAction,
     SymbolRevision,
     User,
+    UserRole,
+    UserSubscription,
 )
 from symgov_backend.services.published_feedback import (
     CatalogAuditAttribution,
@@ -57,11 +59,21 @@ class Query:
     def one_or_none(self):
         return self.result
 
+    def delete(self, *args, **kwargs):
+        return 0
+
 
 class FakeSession:
     def __init__(self, *, existing_case=None, with_agent=True):
         self.revision = SimpleNamespace(id=REVISION_ID, lifecycle_state="published")
-        self.ed_user = SimpleNamespace(id=ED_USER_ID)
+        self.ed_user = SimpleNamespace(
+            id=ED_USER_ID,
+            email="ed@symgov.local",
+            display_name="Ed",
+            is_active=True,
+            deleted_at=None,
+        )
+        self.ed_subscription = SimpleNamespace(tier="free", is_protected=False)
         self.existing_case = existing_case
         self.with_agent = with_agent
         self.added = []
@@ -78,6 +90,8 @@ class FakeSession:
         if model is ReviewCase:
             self.workflow_events.append("case_lookup")
             return Query(self.existing_case)
+        if model is UserRole:
+            return Query(None)
         raise AssertionError(f"Unexpected query model: {model}")
 
     def get(self, model, key, *, with_for_update=False):
@@ -85,6 +99,8 @@ class FakeSession:
         if model is SymbolRevision and key == REVISION_ID:
             self.workflow_events.append("revision_lock" if with_for_update else "revision_get")
             return self.revision
+        if model is UserSubscription and key == ED_USER_ID:
+            return self.ed_subscription
         return None
 
     def add(self, value):
@@ -228,7 +244,11 @@ def test_send_for_review_changes_revision_and_creates_human_readable_workflow(tm
     )
 
     assert session.revision.lifecycle_state == "review"
-    assert session.get_calls == [(SymbolRevision, REVISION_ID, True)]
+    # F0.4 will separate a review request from withdrawal; F0.1 preserves the current baseline.
+    assert session.get_calls == [
+        (UserSubscription, ED_USER_ID, False),
+        (SymbolRevision, REVISION_ID, True),
+    ]
     assert session.workflow_events.index("revision_lock") < session.workflow_events.index("case_lookup")
     assert result.record.catalog_api_key_id == CATALOG_KEY_ID
     assert result.record.submitted_by is None

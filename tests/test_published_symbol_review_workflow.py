@@ -5,6 +5,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import pytest
 from types import SimpleNamespace
 from uuid import UUID
 from datetime import datetime, timezone
@@ -14,7 +15,16 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 import symgov_backend.routes.published as published_routes
 from symgov_backend.routes.published import run_published_symbol_command
-from symgov_backend.models import SymbolRevision, ReviewCase, AgentQueueItem, GovernedSymbol, User, AgentDefinition
+from symgov_backend.models import (
+    AgentDefinition,
+    AgentQueueItem,
+    GovernedSymbol,
+    ReviewCase,
+    SymbolRevision,
+    User,
+    UserRole,
+    UserSubscription,
+)
 
 class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_send_for_review_unpublishes_symbol_and_sets_coordination_stage(self) -> None:
@@ -56,13 +66,25 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 self.added = []
                 self.flushed = False
                 self.committed = False
+                self.rolled_back = False
+                self.ed_subscription = SimpleNamespace(tier="free", is_protected=False)
 
             def execute(self, *args, **kwargs):
                 return SimpleNamespace(all=lambda: [FakeRow()])
 
             def query(self, model):
                 if model == User:
-                    return SimpleNamespace(filter=lambda *a, **k: SimpleNamespace(one_or_none=lambda: SimpleNamespace(id=ed_user_id)))
+                    return SimpleNamespace(
+                        filter=lambda *a, **k: SimpleNamespace(
+                            one_or_none=lambda: SimpleNamespace(
+                                id=ed_user_id,
+                                email="ed@symgov.local",
+                                display_name="Ed",
+                                is_active=True,
+                                deleted_at=None,
+                            )
+                        )
+                    )
                 if model == AgentDefinition:
                     return SimpleNamespace(filter_by=lambda *a, **k: SimpleNamespace(one_or_none=lambda: SimpleNamespace(id=ed_agent_id)))
                 if model == ReviewCase:
@@ -70,12 +92,16 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
                     return SimpleNamespace(filter_by=lambda *a, **k: SimpleNamespace(filter=lambda *a, **k: SimpleNamespace(one_or_none=lambda: None)))
                 if model == SymbolRevision:
                     return SimpleNamespace(get=lambda key: revision if key == revision_id else None)
+                if model == UserRole:
+                    return SimpleNamespace(filter=lambda *a, **k: SimpleNamespace(delete=lambda **k: 0))
                 return SimpleNamespace(filter_by=lambda *a, **k: SimpleNamespace(one_or_none=lambda: None))
 
             def get(self, model, key, *, with_for_update=False):
                 if model == SymbolRevision and key == revision_id:
                     self.revision_locked = with_for_update
                     return revision
+                if model == UserSubscription and key == ed_user_id:
+                    return self.ed_subscription
                 return None
 
             def add(self, obj):
@@ -86,6 +112,9 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
             def commit(self):
                 self.committed = True
+
+            def rollback(self):
+                self.rolled_back = True
 
         session = FakeSession()
         original_queue_dir = published_routes.ED_RUNTIME_QUEUE_DIR
@@ -102,6 +131,7 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
         await run_published_symbol_command(request, session)
 
         # Verify revision was unpublished
+        # F0.4 will separate review requests from withdrawal; preserve current behaviour here.
         self.assertEqual(revision.lifecycle_state, "review")
         self.assertTrue(session.revision_locked)
 
@@ -122,6 +152,7 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime_payload["status"], "queued")
         self.assertEqual(runtime_payload["payload_json"]["next_stage"], "classification_review")
 
+    @pytest.mark.external_workspace
     async def test_ed_completes_review_request_handoff(self) -> None:
         # This tests the logic in run_ed_feedback.py
         # We need to add the ed workspace to the path to import the module
@@ -150,6 +181,7 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(artifact["next_stage"], "classification_review")
         self.assertIn("coordinated review handoff", artifact["feedback_summary"])
 
+    @pytest.mark.external_workspace
     async def test_ed_legacy_daisy_coordination_stage_resolves_to_review_queue(self) -> None:
         ed_workspace = pathlib.Path("/data/.openclaw/workspaces/ed")
         if str(ed_workspace) not in sys.path:
