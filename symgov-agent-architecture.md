@@ -467,9 +467,9 @@ Current implementation status:
   - `python /data/.openclaw/workspaces/scott/run_scott_intake.py --queue-item ... --runtime-root ... --persist-db`
   - `python /data/symgov/scripts/run_vlad_validation.py --queue-item ... --runtime-root /data/.openclaw/workspaces/vlad/runtime --persist-db`
   - `python /data/.openclaw/workspaces/tracy/run_tracy_provenance.py --queue-item ... --runtime-root ... --persist-db`
-- Run local scaffold-only agents with:
+- Run the remaining local agent runners with:
   - `python /data/.openclaw/workspaces/daisy/run_daisy_coordination.py --queue-item ... --runtime-root ...`
-  - `python /data/.openclaw/workspaces/rupert/run_rupert_publication.py --queue-item ... --runtime-root ...`
+  - `python /data/symgov/scripts/run_rupert_publication.py --queue-item ... --runtime-root /data/.openclaw/workspaces/rupert/runtime --persist-db`
   - `python /data/symgov/scripts/run_hannah_curation.py --queue-item ... --runtime-root /data/.openclaw/workspaces/hannah/runtime --persist-db`
 
 ## Current verified live state

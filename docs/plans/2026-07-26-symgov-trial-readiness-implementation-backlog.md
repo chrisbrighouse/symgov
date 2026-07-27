@@ -106,11 +106,11 @@ Current known stale fixtures must be repaired in Goal F0.1 rather than accepted 
 
 ## 3. Phased backlog
 
-Statuses at plan creation: `READY` means sufficiently understood to write the goal spec; `DECISION` needs product confirmation inside the spec; `DEFERRED` is intentionally outside the initial trial.
+Status vocabulary: `SPECIFIED` means a controlling implementation-ready goal specification exists; `COMPLETE` means implemented and verified at an immutable commit; `DEPLOYED` additionally means the reviewed commit is active in production; `READY` means sufficiently understood to write or execute the goal spec; `DECISION` needs product confirmation inside the spec; `DEFERRED` is intentionally outside the initial trial. `SECURITY BLOCKER`, `GOVERNANCE BLOCKER`, `LIVE GOVERNANCE BLOCKER`, and `TRIAL BLOCKER` identify the risk boundary that prevents dependent work or release until the item is complete. The completion records below, rather than the original plan-creation wording, are authoritative.
 
 ## Phase F0 — Establish a trustworthy baseline
 
-### F0.1 Repair and codify the test baseline — READY
+### F0.1 Repair and codify the test baseline — COMPLETE
 
 **Purpose:** Make future red/green evidence trustworthy and fast enough to run per goal.
 
@@ -124,7 +124,9 @@ Statuses at plan creation: `READY` means sufficiently understood to write the go
 
 **Acceptance:** all previously stale focused tests pass; each partition can be run independently; no production dependency is added solely for tests unless Starlette requires it at runtime.
 
-### F0.2 Split workspace authorization by operation — READY, SECURITY BLOCKER
+**Completion:** Commit `972f2b89ff6a534b6daa0572df644b041a770779`. Final evidence in `docs/plans/2026-07-26-f0-1-restart-note.md`: 784 backend nodes across full partitions, 65 frontend tests, 12 Langfuse tests, 9 focused email-outbox tests, two isolated Vite builds, and verification-wrapper timeout/path/partition/argument contracts passed. Fresh Stage 1 passed and Stage 2 approved. Product behavior changed: no; no migration or dedicated runtime activation was required.
+
+### F0.2 Split workspace authorization by operation — COMPLETE, DEPLOYED
 
 **Purpose:** Prevent a generic reviewer from accessing agent controls, scans, source configuration, worker health and operational queues.
 
@@ -134,7 +136,9 @@ Statuses at plan creation: `READY` means sufficiently understood to write the go
 
 **Acceptance:** an automated route-policy matrix enumerates every current workspace route and method on both prefixes; reviewer access is allowlisted, all other routes return 403, new/unclassified routes fail closed to admin, legacy and v1 policies match, and admin behaviour remains intact.
 
-### F0.3 Make review and publication attribution session-authoritative — READY, GOVERNANCE BLOCKER
+**Completion:** Commit `63edef801e45768ac3a402a44f6941f490226c58`. Goal-local evidence in `docs/plans/2026-07-27-f0-2-workspace-authorization-spec.md`: 28 normalized operations/49 concrete routes; 186 focused authorization tests; 20 workspace regressions; portable backend 933 passed/3 deselected; Stage 1 `t_8c833387` PASS; Stage 2 `t_b02100b2` APPROVED. Broader pre-production gates passed: 961 backend, 65 frontend and 12 Langfuse tests plus isolated build and wrapper contracts. The commit was pushed and deployed on 2026-07-27; live health returned 200, reviewer/admin v1 and legacy boundaries returned the expected 200/403 outcomes, anonymous probes returned 401, temporary records were removed, and no migration was required.
+
+### F0.3 Make review and publication attribution session-authoritative — COMPLETE, NOT DEPLOYED
 
 **Purpose:** Ensure decisions cannot impersonate another reviewer and publication records point to the actual human approver.
 
@@ -143,6 +147,12 @@ Statuses at plan creation: `READY` means sufficiently understood to write the go
 **Likely files:** `backend/symgov_backend/schemas.py`, `routes/workspace.py`, `publication_handoff.py`, `runtime.py`, `frontend/src/App.jsx`, review/publication tests.
 
 **Acceptance:** spoofed identity input is rejected or ignored; persisted actor matches the session; historical response snapshots remain human-readable.
+
+**Controlling spec and handoff:** `docs/plans/2026-07-27-f0-3-session-authoritative-attribution-spec.md` and `docs/plans/2026-07-27-f0-3-restart-handoff.md`. Execution used serialized Cody implementation, fresh immutable Stage 1, fresh immutable Stage 2 and final verification/local commit. No push or deployment was authorized by the implementation handoff.
+
+**Release boundary:** a later authorized F0.3 release must pause all review/publication mutations and Rupert claims, activate the backend, frontend, and repository-owned Rupert runner as one atomic release, pass the exact smoke gates in the controlling spec, and only then resume mutations. A mixed-version backend-first or frontend-first rollout is prohibited because strict 422 spoof rejection is intentionally retained.
+
+**Completion:** Final local checkpoint task `t_ae5e0550` closed F0.3 on 2026-07-27 from baseline `63edef801e45768ac3a402a44f6941f490226c58`. The final immutable implementation snapshot passed Stage 1 `t_bcd01d5d` and was approved by Stage 2 `t_af9698b2`; both reviews recorded the same 21 per-path SHA-256 values and unchanged staged/unstaged/HEAD-to-worktree patch identities. Fresh final gates passed: exact 12-file `py_compile`; 279 focused tests including both repository-runner import boundaries; portable backend 1,002 passed/3 deselected; frontend 67 passed; isolated and canonical Vite builds each transformed 54 modules; verification-wrapper contracts; tracked and all four untracked whitespace checks. No migration or historical backfill was added, and no push, deployment, runtime/service restart, database mutation, publication, withdrawal or external message occurred. F0.3 changes backend, frontend and the repository-owned Rupert runner, so the atomic paused rollout above remains mandatory before this goal can become `DEPLOYED`.
 
 ### F0.4 Separate review requests from publication withdrawal — READY, LIVE GOVERNANCE BLOCKER
 
@@ -515,13 +525,15 @@ Next backlog goal and exact next-spec path
 
 The corresponding fresh-session prompt must repeat those concrete values, not `<ID>` placeholders. Each CP0–CP6 note is an immutable phase record; if later work changes the facts, create a newer note rather than rewriting historical evidence.
 
-### Current concrete implementation handoff: F0.1
+### Current completed checkpoint: F0.3
 
-The controlling goal spec is:
+F0.1, F0.2 and F0.3 are complete. F0.2 commit `63edef801e45768ac3a402a44f6941f490226c58` is pushed and deployed; F0.3 has one local checkpoint commit recorded by final task `t_ae5e0550` and is not pushed or deployed.
 
-`docs/plans/2026-07-26-f0-1-test-baseline-spec.md`
+The controlling F0.3 goal spec is:
 
-The committed concrete restart note is `docs/plans/2026-07-26-f0-1-restart-note.md`; always use its latest committed version. It contains the copy-ready implementation prompt, exact repository position, verification evidence and execution lane. Default lane: durable Symgov Kanban with serialized Cody implementation, fresh Stage 1 review, fresh Stage 2 security/code-quality review and final verification. The baseline product commit is `f5b1381`, the controlling plan/spec commit is `312aafe`, and no push is authorized.
+`docs/plans/2026-07-27-f0-3-session-authoritative-attribution-spec.md`
+
+The concrete restart handoff is `docs/plans/2026-07-27-f0-3-restart-handoff.md`. It records the baseline/deployment state, completed evidence, exact scope, review replacement history, fresh final gates, preserved safety boundaries and the separately authorized atomic release requirement. The implementation baseline was clean `main`/`origin/main` at `63edef801e45768ac3a402a44f6941f490226c58`; the exact resulting local commit is recorded by task `t_ae5e0550`. No push, deployment, migration or runtime change was authorized or performed.
 
 ### Template for future goal-spec creation
 
@@ -540,4 +552,4 @@ have changed. Do not implement code in the planning session.
 
 ## 6. Immediate next action
 
-The implementation-ready spec and committed concrete restart note for **F0.1 Repair and codify the test baseline** are ready. Execute F0.1 through the recorded Kanban/Cody lane. After F0.1, close F0.2–F0.4 before any new reviewer, capability or submission feature work.
+The next backlog goal is **F0.4 — Separate review requests from publication withdrawal**. Write and independently review its implementation-ready specification before any F0.4 code change; no F0.4 spec path exists yet. Keep F0.3 undeployed until a separately authorized atomic paused release executes every smoke, synthetic-attribution and rollback gate in its controlling specification.

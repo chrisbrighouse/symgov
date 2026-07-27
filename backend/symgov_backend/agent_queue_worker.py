@@ -15,6 +15,9 @@ from typing import Any
 from .runtime import RuntimePersistenceBridge
 
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+
+
 AGENT_SPECS: dict[str, dict[str, Any]] = {
     "scott": {
         "runtime_root": Path("/data/.openclaw/workspaces/scott/runtime"),
@@ -52,7 +55,7 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
     },
     "rupert": {
         "runtime_root": Path("/data/.openclaw/workspaces/rupert/runtime"),
-        "runner_path": Path("/data/.openclaw/workspaces/rupert/run_rupert_publication.py"),
+        "runner_path": REPOSITORY_ROOT / "scripts" / "run_rupert_publication.py",
         "module": "symgov_rupert_runner_worker",
         "persist_db": True,
     },

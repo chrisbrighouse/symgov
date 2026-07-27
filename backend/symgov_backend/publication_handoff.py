@@ -39,7 +39,8 @@ from .settings import get_settings
 from .runtime import coerce_uuid, download_object_bytes, slugify_public_code
 
 
-RUPERT_RUNNER = Path("/data/.openclaw/workspaces/rupert/run_rupert_publication.py")
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+RUPERT_RUNNER = REPOSITORY_ROOT / "scripts" / "run_rupert_publication.py"
 RUPERT_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/rupert/runtime")
 SYMGOV_DB_ENV_FILE = Path("/data/.openclaw/workspace/symgov/.env.backend.database")
 
@@ -85,6 +86,22 @@ def text_value(*values: Any, fallback: str = "") -> str:
 
 def list_value(value: Any) -> list:
     return value if isinstance(value, list) else []
+
+
+def approval_actor_snapshot(decision: HumanReviewDecision) -> dict[str, str]:
+    if decision.decision_code != "approve":
+        raise RuntimeError("Publication requires an approve review decision.")
+    if decision.decided_by is None:
+        raise RuntimeError("Publication requires an approve decision with an authenticated actor.")
+    display_name = text_value(decision.decider_name)
+    effective_role = text_value(decision.decider_role)
+    if not display_name or not effective_role:
+        raise RuntimeError("Publication approval actor snapshot is incomplete.")
+    return {
+        "id": str(decision.decided_by),
+        "display_name": display_name,
+        "effective_role": effective_role,
+    }
 
 
 def source_package_display_id(intake_record: IntakeRecord | None) -> str | None:
@@ -951,9 +968,10 @@ def queue_libby_duplicate_followup(
             entity_type="review_case",
             entity_id=review_case.id,
             action="publication_duplicate_detected",
-            actor_id=None,
+            actor_id=decision.decided_by,
             payload_json={
                 "decision_id": str(decision.id),
+                "approval_actor": approval_actor_snapshot(decision),
                 "review_case_action_id": str(action.id),
                 "libby_queue_item_id": queue_id,
                 "duplicate_split_item_id": duplicate_split_item_id,
@@ -1013,6 +1031,7 @@ def execute_publication_handoff(
     session.commit()
 
     try:
+        approval_actor = approval_actor_snapshot(decision)
         context = load_review_context(session, review_case)
         revisions = approved_revisions_for_decision(
             session,
@@ -1046,6 +1065,7 @@ def execute_publication_handoff(
                 "review_decision_id": str(decision.id),
                 "human_decision": "approve",
                 "human_approved": True,
+                "approval_actor": approval_actor,
                 "symbol_revision_ids": revision_ids,
                 "symbol_display_ids": display_ids,
                 "display_name": display_ids[0] if len(display_ids) == 1 else None,
@@ -1070,6 +1090,7 @@ def execute_publication_handoff(
             "rupert_queue_item_id": queue_id,
             "publication_pack_code": pack_code,
             "duplicate_gate_override": duplicate_override,
+            "approval_actor": approval_actor,
         }
         session.commit()
 
@@ -1099,9 +1120,10 @@ def execute_publication_handoff(
                 entity_type="review_case",
                 entity_id=review_case.id,
                 action="publication_handoff_completed",
-                actor_id=None,
+                actor_id=decision.decided_by,
                 payload_json={
                     "decision_id": str(decision.id),
+                    "approval_actor": approval_actor,
                     "review_case_action_id": str(action.id),
                     "symbol_revision_ids": revision_ids,
                     "rupert_queue_item_id": queue_id,

@@ -992,11 +992,16 @@ export async function fetchWorkspaceDaisyReports(reviewCaseId) {
   }
 }
 
+function pickPayloadFields(payload, fields) {
+  return Object.fromEntries(fields.filter((field) => payload?.[field] !== undefined).map((field) => [field, payload[field]]));
+}
+
 export async function submitWorkspaceReviewDecision(reviewCaseId, decisionPayload) {
   if (!appConfig.apiRoot) {
     throw new Error('API root is not configured.');
   }
 
+  decisionPayload = pickPayloadFields(decisionPayload, ['decisionCode', 'decisionNote', 'childDecisions', 'caseComment']);
   const endpoint = `${appConfig.apiRoot}/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/decisions`;
   const postDecision = async (payload, wrapped = false) => {
     const requestBody = wrapped ? { request: payload } : payload;
@@ -1028,6 +1033,15 @@ export async function submitWorkspaceRightsReviewDecision(reviewCaseId, decision
     throw new Error('API root is not configured.');
   }
 
+  decisionPayload = pickPayloadFields(decisionPayload, [
+    'decisionCode',
+    'correctedRightsStatus',
+    'correctedRightsDisposition',
+    'correctedProcessingOutcome',
+    'licenseLabel',
+    'sourceUrl',
+    'evidenceNote'
+  ]);
   const endpoint = `${appConfig.apiRoot}/workspace/rights-review-cases/${encodeURIComponent(reviewCaseId)}/decisions`;
   const postDecision = async (payload, wrapped = false) => {
     const requestBody = wrapped ? { request: payload } : payload;
@@ -1059,6 +1073,7 @@ export async function processWorkspaceSplitReviewDecisions(reviewCaseId, decisio
     throw new Error('API root is not configured.');
   }
 
+  decisionPayload = pickPayloadFields(decisionPayload, ['childDecisions', 'caseComment']);
   const endpoint = `${appConfig.apiRoot}/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/split-items/process-decisions`;
   const postDecision = async (payload, wrapped = false) => {
     const requestBody = wrapped ? { request: payload } : payload;
@@ -1090,6 +1105,14 @@ export async function updateWorkspaceReviewSymbolProperties(reviewCaseId, proper
     throw new Error('API root is not configured.');
   }
 
+  propertiesPayload = pickPayloadFields(propertiesPayload, [
+    'splitItemId',
+    'name',
+    'description',
+    'category',
+    'discipline',
+    'format'
+  ]);
   const endpoint = `${appConfig.apiRoot}/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/symbol-properties`;
   const patchProperties = async (payload, wrapped = false) => {
     const requestBody = wrapped ? { request: payload } : payload;

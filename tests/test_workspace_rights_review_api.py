@@ -4,8 +4,19 @@ from uuid import uuid4
 
 import pytest
 
-from symgov_backend.models import ProvenanceAssessment, ReviewCase
+from symgov_backend.auth import AuthenticatedUser
+from symgov_backend.models import AuditEvent, HumanReviewDecision, ProvenanceAssessment, ReviewCase, ReviewCaseAction
 from symgov_backend.routes import workspace as workspace_routes
+
+
+def reviewer_user() -> AuthenticatedUser:
+    return AuthenticatedUser(
+        id="11111111-1111-1111-1111-111111111111",
+        email="reviewer@example.test",
+        display_name="Daisy Reviewer",
+        roles=("reviewer",),
+        must_change_pin=False,
+    )
 
 
 def test_rights_evidence_payload_extracts_tracy_report_problem_fields():
@@ -74,18 +85,24 @@ def test_rights_review_decision_rejects_non_rights_cases_before_mutation():
     request = workspace_routes.WorkspaceRightsReviewDecisionRequest(
         decisionCode="clear_rights",
         evidenceNote="Rights cleared by reviewer.",
-        deciderName="Daisy",
-        deciderRole="rights_reviewer",
     )
 
     with pytest.raises(workspace_routes.HTTPException) as exc_info:
-        workspace_routes.create_workspace_rights_review_decision(str(review_case_id), request, session=FakeSession())
+        workspace_routes.create_workspace_rights_review_decision(
+            str(review_case_id), request, current_user=reviewer_user(), session=FakeSession()
+        )
 
     assert exc_info.value.status_code == 422
     assert "not a rights review" in exc_info.value.detail
 
 
-def test_rights_review_decision_updates_corrected_problem_fields_on_provenance_assessment():
+@pytest.mark.parametrize(
+    ("role", "display_name"),
+    [("reviewer", "Daisy Reviewer"), ("admin", "Alex Admin")],
+)
+def test_rights_review_decision_updates_corrected_problem_fields_on_provenance_assessment(
+    role, display_name
+):
     review_case_id = uuid4()
     assessment_id = uuid4()
     review_case = ReviewCase(
@@ -155,11 +172,18 @@ def test_rights_review_decision_updates_corrected_problem_fields_on_provenance_a
         licenseLabel="Permission confirmed",
         sourceUrl="https://new.example/permission",
         evidenceNote="Reviewer checked the source and corrected Tracy's restricted status.",
-        deciderName="Daisy",
-        deciderRole="rights_reviewer",
     )
 
-    response = workspace_routes.create_workspace_rights_review_decision(str(review_case_id), request, session=session)
+    actor = AuthenticatedUser(
+        id="11111111-1111-1111-1111-111111111111",
+        email="actor@example.test",
+        display_name=display_name,
+        roles=(role,),
+        must_change_pin=False,
+    )
+    response = workspace_routes.create_workspace_rights_review_decision(
+        str(review_case_id), request, current_user=actor, session=session
+    )
 
     assert response.updatedRights["corrected_rights_status"] == "cleared"
     assert assessment.rights_status == "cleared"
@@ -168,6 +192,18 @@ def test_rights_review_decision_updates_corrected_problem_fields_on_provenance_a
     assert assessment.evidence_json["license_label"] == "Permission confirmed"
     assert assessment.evidence_json["source_url"] == "https://new.example/permission"
     assert assessment.evidence_json["reviewer_rights_correction"]["decision_code"] == "clear_rights"
+    assert assessment.evidence_json["reviewer_rights_correction"]["decider_name"] == display_name
+    assert assessment.evidence_json["reviewer_rights_correction"]["decider_role"] == role
+    decision = next(item for item in session.added if isinstance(item, HumanReviewDecision))
+    action = next(item for item in session.added if isinstance(item, ReviewCaseAction))
+    audit = next(item for item in session.added if isinstance(item, AuditEvent))
+    assert str(decision.decided_by) == actor.id
+    assert decision.decider_name == display_name
+    assert decision.decider_role == role
+    assert decision.decision_summary.startswith(f"{display_name} recorded")
+    assert action.created_by_id == decision.decided_by
+    assert audit.actor_id == decision.decided_by
+    assert audit.payload_json["actor"]["effective_role"] == role
     assert session.committed is True
 
 
@@ -238,11 +274,11 @@ def test_rights_review_decision_closes_review_case_so_it_leaves_rights_queue():
         correctedRightsDisposition="cleared",
         correctedProcessingOutcome="pass",
         evidenceNote="Rights cleared by reviewer.",
-        deciderName="Daisy",
-        deciderRole="rights_reviewer",
     )
 
-    response = workspace_routes.create_workspace_rights_review_decision(str(review_case_id), request, session=FakeSession())
+    response = workspace_routes.create_workspace_rights_review_decision(
+        str(review_case_id), request, current_user=reviewer_user(), session=FakeSession()
+    )
 
     assert response.currentStage == "rights_cleared"
     assert response.closedAt is not None
@@ -315,7 +351,9 @@ def test_rights_review_decision_normalizes_legacy_ui_values_to_database_safe_val
         evidenceNote="Rights cleared by reviewer.",
     )
 
-    response = workspace_routes.create_workspace_rights_review_decision(str(review_case_id), request, session=FakeSession())
+    response = workspace_routes.create_workspace_rights_review_decision(
+        str(review_case_id), request, current_user=reviewer_user(), session=FakeSession()
+    )
 
     assert assessment.rights_disposition == "cleared"
     assert assessment.processing_outcome == "pass"

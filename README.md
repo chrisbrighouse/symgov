@@ -66,6 +66,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 - The Standards submission route now calls the live Symgov backend instead of using demo-only local submission behavior
 - Guided lookup is intentionally constrained to published approved records
 - Review decisions now have source-level backend support through durable `human_review_decisions` and `review_case_actions` records plus `POST /api/v1/workspace/review-cases/{id}/decisions`. Review-case source previews are exposed through `sourcePreviewUrl` and `GET /api/v1/workspace/review-cases/{review_case_id}/source/preview`, and these routes are available through the live public API.
+- Review, rights, split-child, and symbol-property mutations derive the human actor from the authenticated session and reject legacy client identity fields. Human-approved publication resolves the approver from the durable review decision; publication records and governance audits retain that human snapshot while identifying Rupert's service account separately as the executor.
 - Review-decision routing now preserves the Daisy-managed review loop:
   - `approve` is the only path to Rupert publication staging
   - every non-approval outcome routes to Libby with the full SME response, case comment, decision note, and child-symbol decisions

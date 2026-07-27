@@ -37,6 +37,7 @@ from .models import (
     ClassificationRecord,
     ExternalIdentity,
     GovernedSymbol,
+    HumanReviewDecision,
     IntakeRecord,
     PackEntry,
     ProvenanceAssessment,
@@ -535,8 +536,126 @@ def coerce_uuid(value: str | uuid.UUID | None) -> uuid.UUID | None:
         return value
     try:
         return uuid.UUID(str(value))
-    except ValueError:
+    except (TypeError, ValueError, AttributeError):
         return uuid.uuid5(LEGACY_ID_NAMESPACE, str(value))
+
+
+def resolve_durable_publication_approval(
+    session,
+    queue_item: dict[str, Any],
+) -> tuple[HumanReviewDecision, dict[str, str]]:
+    payload = dict(queue_item.get("payload_json") or {})
+    if queue_item.get("source_type") != "review_decision":
+        raise RuntimeError("Human-approved publication must originate from a review decision.")
+    payload_decision_id = coerce_uuid(payload.get("review_decision_id"))
+    source_decision_id = coerce_uuid(queue_item.get("source_id"))
+    if payload_decision_id is None or source_decision_id is None or payload_decision_id != source_decision_id:
+        raise RuntimeError("Queued publication decision identity is missing or inconsistent.")
+    decision_id = payload_decision_id
+    decision = session.get(HumanReviewDecision, decision_id) if decision_id is not None else None
+    if decision is None:
+        raise RuntimeError("Publication review decision does not exist.")
+    if decision.decision_code != "approve":
+        raise RuntimeError("Publication review decision is not an approval.")
+    payload_review_case_id = coerce_uuid(payload.get("review_case_id"))
+    if payload_review_case_id is None or payload_review_case_id != decision.review_case_id:
+        raise RuntimeError("Queued publication review case does not match durable review decision.")
+    if decision.decided_by is None:
+        raise RuntimeError("Publication approval has no authenticated actor.")
+    approval_actor = {
+        "id": str(decision.decided_by),
+        "display_name": str(decision.decider_name or "").strip(),
+        "effective_role": str(decision.decider_role or "").strip(),
+    }
+    if not approval_actor["display_name"] or not approval_actor["effective_role"]:
+        raise RuntimeError("Publication approval actor snapshot is incomplete.")
+    queued_actor = payload.get("approval_actor")
+    if not isinstance(queued_actor, dict) or any(
+        str(queued_actor.get(key) or "").strip() != value for key, value in approval_actor.items()
+    ):
+        raise RuntimeError("Queued approval actor does not match durable review decision.")
+    return decision, approval_actor
+
+
+def validate_existing_durable_publication_queue_item(
+    durable_queue_item: AgentQueueItem,
+    queue_item: dict[str, Any],
+    *,
+    expected_agent_id: uuid.UUID,
+) -> None:
+    runtime_payload = dict(queue_item.get("payload_json") or {})
+    durable_payload = (
+        dict(durable_queue_item.payload_json)
+        if isinstance(durable_queue_item.payload_json, dict)
+        else {}
+    )
+    mismatch = (
+        durable_queue_item.agent_id != expected_agent_id
+        or durable_queue_item.source_type != queue_item.get("source_type")
+        or durable_queue_item.source_id != coerce_uuid(queue_item.get("source_id"))
+        or any(
+            durable_payload.get(field) != runtime_payload.get(field)
+            for field in (
+                "review_decision_id",
+                "review_case_id",
+                "symbol_revision_ids",
+                "human_decision",
+                "human_approved",
+                "approval_actor",
+            )
+        )
+    )
+    if mismatch:
+        raise RuntimeError("Existing durable queue item does not match runtime queue authority.")
+
+
+def resolve_durable_publication_revisions(
+    session,
+    queue_item: dict[str, Any],
+    artifact: dict[str, Any],
+    review_decision: HumanReviewDecision,
+) -> list[SymbolRevision]:
+    def parse_revision_ids(value: Any, *, source: str) -> list[uuid.UUID]:
+        if not isinstance(value, list) or not value:
+            raise RuntimeError(f"{source} requires at least one revision ID.")
+        try:
+            revision_ids = [uuid.UUID(str(item)) for item in value]
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise RuntimeError(f"{source} contains an invalid revision ID.") from exc
+        if len(set(revision_ids)) != len(revision_ids):
+            raise RuntimeError(f"{source} contains duplicate revision IDs.")
+        return revision_ids
+
+    payload = dict(queue_item.get("payload_json") or {})
+    trusted_revision_ids = parse_revision_ids(
+        payload.get("symbol_revision_ids"),
+        source="Trusted publication handoff",
+    )
+    staged_revision_ids = parse_revision_ids(
+        artifact.get("staged_symbol_revisions"),
+        source="Rupert publication artifact",
+    )
+    if staged_revision_ids != trusted_revision_ids:
+        raise RuntimeError(
+            "Rupert publication artifact revision scope does not exactly match trusted publication handoff."
+        )
+
+    revisions: list[SymbolRevision] = []
+    for revision_id in trusted_revision_ids:
+        revision = session.get(SymbolRevision, revision_id)
+        if revision is None:
+            raise RuntimeError(f"Missing symbol_revisions row for id {revision_id}.")
+        revision_payload = revision.payload_json if isinstance(revision.payload_json, dict) else {}
+        try:
+            revision_decision_id = uuid.UUID(str(revision_payload.get("review_decision_id")))
+        except (TypeError, ValueError, AttributeError):
+            revision_decision_id = None
+        if revision_decision_id != review_decision.id:
+            raise RuntimeError(
+                f"Symbol revision {revision_id} does not belong to durable review decision {review_decision.id}."
+            )
+        revisions.append(revision)
+    return revisions
 
 
 def coerce_numeric(value: float | int | str | None) -> Decimal | None:
@@ -1936,10 +2055,6 @@ class RuntimePersistenceBridge:
         if payload.get("human_decision") != "approve" or not payload.get("human_approved"):
             raise RuntimeError("Publication persistence requires explicit human approval.")
 
-        revision_ids = [coerce_uuid(item) for item in artifact.get("staged_symbol_revisions") or []]
-        if not revision_ids:
-            raise RuntimeError("Publication persistence requires at least one symbol revision.")
-
         pack_spec = self._publication_pack_from_artifact(artifact)
         effective_date = parse_timestamp(str(pack_spec["effective_date"]) + "T00:00:00Z").date()
         completed_at = parse_timestamp(queue_item.get("completed_at")) if queue_item.get("completed_at") else datetime.now(timezone.utc).replace(microsecond=0)
@@ -1947,7 +2062,15 @@ class RuntimePersistenceBridge:
         created_at = parse_timestamp(queue_item.get("created_at")) if queue_item.get("created_at") else started_at
 
         with self.session_scope() as session:
-            service_user = self.ensure_publication_service_user(session)
+            review_decision, approval_actor = resolve_durable_publication_approval(session, queue_item)
+            approval_actor_id = uuid.UUID(approval_actor["id"])
+            revisions = resolve_durable_publication_revisions(
+                session,
+                queue_item,
+                artifact,
+                review_decision,
+            )
+            revision_ids = [revision.id for revision in revisions]
             agent_definition = session.query(AgentDefinition).filter_by(slug="rupert").one_or_none()
             if agent_definition is None:
                 raise RuntimeError("Missing agent_definitions row for Rupert.")
@@ -1957,6 +2080,13 @@ class RuntimePersistenceBridge:
             if agent_queue_item is None:
                 agent_queue_item = AgentQueueItem(id=queue_item_id)
                 session.add(agent_queue_item)
+            else:
+                validate_existing_durable_publication_queue_item(
+                    agent_queue_item,
+                    queue_item,
+                    expected_agent_id=agent_definition.id,
+                )
+            service_user = self.ensure_publication_service_user(session)
             agent_queue_item.agent_id = agent_definition.id
             agent_queue_item.source_type = queue_item["source_type"]
             agent_queue_item.source_id = coerce_uuid(queue_item["source_id"])
@@ -2020,8 +2150,8 @@ class RuntimePersistenceBridge:
                 session.add(publication_job)
             publication_job.pack_id = publication_pack.id
             publication_job.status = "completed"
-            publication_job.requested_by = service_user.id
-            publication_job.approved_by = service_user.id
+            publication_job.requested_by = approval_actor_id
+            publication_job.approved_by = approval_actor_id
             publication_job.artifact_manifest_json = {
                 "queue_item_id": queue_item["id"],
                 "run_id": run_record["id"],
@@ -2030,6 +2160,9 @@ class RuntimePersistenceBridge:
                 "release_manifest_path": artifact.get("release_manifest_path"),
                 "release_target": artifact.get("release_target"),
                 "standards_availability_summary": artifact.get("standards_availability_summary") or {},
+                "review_decision_id": str(review_decision.id),
+                "approval_actor": approval_actor,
+                "execution_actor": {"id": str(service_user.id), "type": "service_user"},
                 "simulation": False,
             }
             publication_job.created_at = created_at
@@ -2037,10 +2170,8 @@ class RuntimePersistenceBridge:
 
             published_pages: list[dict[str, str]] = []
             pack_entries: list[dict[str, str]] = []
-            for sort_order, revision_id in enumerate(revision_ids, start=1):
-                revision = session.get(SymbolRevision, revision_id)
-                if revision is None:
-                    raise RuntimeError(f"Missing symbol_revisions row for id {revision_id}.")
+            for sort_order, revision in enumerate(revisions, start=1):
+                revision_id = revision.id
                 if revision.lifecycle_state not in {"approved", "published"}:
                     raise RuntimeError(
                         f"Symbol revision {revision_id} must be approved before publication; found {revision.lifecycle_state}."
@@ -2122,6 +2253,9 @@ class RuntimePersistenceBridge:
                 "pack_code": publication_pack.pack_code,
                 "published_pages": published_pages,
                 "pack_entries": pack_entries,
+                "review_decision_id": str(review_decision.id),
+                "approval_actor": approval_actor,
+                "execution_actor": {"id": str(service_user.id), "type": "service_user"},
             }
             for entity_type, entity_id, action in (
                 ("publication_pack", publication_pack.id, "publication_pack_published"),

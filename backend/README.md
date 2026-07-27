@@ -190,6 +190,7 @@ Current Workspace APIs:
 - reviewer-entered `Category` and `Discipline` values are remembered in `review_symbol_property_options`, normalized to capitalized mixed case, deduplicated by canonical key plus conservative fuzzy matching, and exposed through `GET /api/v1/workspace/review-symbol-property-options` for Reviews picklists
 - reviewer symbol properties now also include read-only `Format`, seeded from Libby classification when available and otherwise inferred from validation/intake metadata, source filename, or object key
 - review decisions are recorded through `POST /api/v1/workspace/review-cases/{id}/decisions`
+- review, rights, split-child, and symbol-property mutations use the authenticated session as the sole human actor authority; legacy `deciderName`, `deciderRole`, and `updatedBy` request fields are rejected. Human-approved publication jobs resolve requester/approver and governance audit attribution from the durable approval decision, with the publication service user retained only as executor metadata.
 - review-decision routing now uses:
   - `approve` -> Rupert publication handoff
   - every non-approval decision -> Libby review follow-up handoff

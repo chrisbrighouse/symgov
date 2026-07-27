@@ -145,11 +145,18 @@ def test_workspace_policy_inventory_has_exact_surface_equivalence():
 
 def test_every_workspace_route_has_the_same_central_authorization_dependency():
     routes = workspace_routes(create_app())
+    actor_attributed_mutations = {
+        ("PATCH", "/api/v1/workspace/review-cases/{review_case_id}/symbol-properties"),
+        ("POST", "/api/v1/workspace/rights-review-cases/{review_case_id}/decisions"),
+        ("POST", "/api/v1/workspace/review-cases/{review_case_id}/decisions"),
+        ("POST", "/api/v1/workspace/review-cases/{review_case_id}/split-items/process-decisions"),
+    }
 
     assert len(routes) == 49
-    for route in routes.values():
+    for key, route in routes.items():
         calls = [dependency.call for dependency in route.dependant.dependencies]
-        assert calls.count(require_workspace_access) == 1
+        expected_count = 2 if key in actor_attributed_mutations else 1
+        assert calls.count(require_workspace_access) == expected_count
 
 
 @pytest.mark.parametrize("entry", expand_workspace_operations(), ids=lambda entry: f"anonymous-{entry.surface}-{entry.method}-{entry.template}")

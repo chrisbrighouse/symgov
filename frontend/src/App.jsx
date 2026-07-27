@@ -4007,6 +4007,7 @@ function optionValueOrEmpty(options, value) {
 }
 
 function RightsReviewPage() {
+  const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const [rightsState, setRightsState] = useState({
@@ -4110,9 +4111,7 @@ function RightsReviewPage() {
       correctedProcessingOutcome: optionValueOrEmpty(RIGHTS_PROCESSING_OUTCOME_OPTIONS, item.processingOutcome || item.rightsEvidence?.processingOutcome),
       licenseLabel: item.rightsEvidence?.evidence?.license_label || item.rightsEvidence?.report?.license_label || '',
       sourceUrl: item.rightsEvidence?.evidence?.source_url || item.rightsEvidence?.sourceContext?.source_url || '',
-      evidenceNote: '',
-      deciderName: 'Human',
-      deciderRole: 'rights_reviewer'
+      evidenceNote: ''
     };
   }
 
@@ -4201,7 +4200,7 @@ function RightsReviewPage() {
         </div>
       </div>
       <p className={`page-status-text status-${rightsState.mode}`}>
-        {rightsState.loading ? 'Loading Rights reviews...' : rightsState.message} · Coordinator: Daisy
+        {rightsState.loading ? 'Loading Rights reviews...' : rightsState.message} · Reviewer: {auth.user?.displayName || auth.user?.email} · Coordinator: Daisy
       </p>
 
       <div className="rights-workbench-grid">
@@ -4389,6 +4388,7 @@ function RightsReviewPage() {
 }
 
 function ReviewsPage() {
+  const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const [queueFilter, setQueueFilter] = useState('new');
@@ -4663,8 +4663,6 @@ function ReviewsPage() {
       ...current,
       [changeId]: {
         decisionCode: current[changeId]?.decisionCode || '',
-        deciderName: current[changeId]?.deciderName || 'Human',
-        deciderRole: current[changeId]?.deciderRole || 'sme_reviewer',
         decisionNote: current[changeId]?.decisionNote || '',
         ...updates
       }
@@ -4675,8 +4673,6 @@ function ReviewsPage() {
     return (
       caseReviewState[changeId] || {
         decisionCode: '',
-        deciderName: 'Human',
-        deciderRole: 'sme_reviewer',
         decisionNote: ''
       }
     );
@@ -4729,8 +4725,7 @@ function ReviewsPage() {
 
     await updateWorkspaceReviewSymbolProperties(activeReviewCaseId, {
       splitItemId: activeChange.splitItemId || null,
-      ...properties,
-      updatedBy: 'Human'
+      ...properties
     });
     await Promise.all([refreshReviewData(), refreshPropertyOptions()]);
   }
@@ -4760,8 +4755,6 @@ function ReviewsPage() {
       const result = await submitWorkspaceReviewDecision(activeChange.id, {
         decisionCode: caseReview.decisionCode,
         decisionNote: caseReview.decisionNote,
-        deciderName: caseReview.deciderName,
-        deciderRole: caseReview.deciderRole,
         childDecisions,
         caseComment: sourceComments[activeChange.id] || ''
       });
@@ -4850,7 +4843,7 @@ function ReviewsPage() {
         </div>
       </div>
       <p className={`page-status-text status-${workspaceState.mode}`}>
-        {workspaceState.loading ? 'Loading reviews...' : workspaceState.message} · Reviewer: Human
+        {workspaceState.loading ? 'Loading reviews...' : workspaceState.message} · Reviewer: {auth.user?.displayName || auth.user?.email}
       </p>
 
       <div className="review-workbench-grid">
@@ -4982,7 +4975,7 @@ function ReviewsPage() {
                         key={value}
                         type="button"
                         className={`action-button case-decision-button case-decision-${value} ${selectedCaseDecision === value ? 'selected' : ''}`}
-                        onClick={() => updateCaseReview(activeChange.id, { decisionCode: selectedCaseDecision === value ? '' : value, deciderName: 'Human' })}
+                        onClick={() => updateCaseReview(activeChange.id, { decisionCode: selectedCaseDecision === value ? '' : value })}
                       >
                         {label}
                       </button>

@@ -35,6 +35,32 @@ class AuthenticatedUser:
     subscription_is_protected: bool = False
 
 
+@dataclass(frozen=True)
+class ReviewOperationActor:
+    id: uuid.UUID
+    display_name: str
+    effective_role: str
+    roles: tuple[str, ...]
+
+
+def derive_review_operation_actor(user: AuthenticatedUser) -> ReviewOperationActor:
+    actor_id = uuid.UUID(str(user.id))
+    display_name = normalize_display_name(user.display_name)
+    roles = tuple(sorted({str(role).strip().lower() for role in user.roles if str(role).strip()}))
+    if "reviewer" in roles:
+        effective_role = "reviewer"
+    elif "admin" in roles:
+        effective_role = "admin"
+    else:
+        raise ValueError("Authenticated user is not authorized for a review operation.")
+    return ReviewOperationActor(
+        id=actor_id,
+        display_name=display_name,
+        effective_role=effective_role,
+        roles=roles,
+    )
+
+
 def utc_now() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
 

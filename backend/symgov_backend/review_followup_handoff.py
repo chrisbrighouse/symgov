@@ -35,6 +35,18 @@ def list_value(value: Any) -> list:
     return value if isinstance(value, list) else []
 
 
+def review_actor_snapshot(decision: HumanReviewDecision) -> dict[str, str]:
+    display_name = text_value(decision.decider_name)
+    effective_role = text_value(decision.decider_role)
+    if decision.decided_by is None or not display_name or not effective_role:
+        raise RuntimeError("Review follow-up actor snapshot is incomplete.")
+    return {
+        "id": str(decision.decided_by),
+        "display_name": display_name,
+        "effective_role": effective_role,
+    }
+
+
 def classify_follow_up(decision_code: str, child_decisions: list[dict[str, Any]]) -> str:
     action_codes = {
         str(item.get("action") or "").strip().lower().replace("-", "_")
@@ -94,6 +106,7 @@ def build_libby_followup_payload(
     child_decisions = list_value(decision_payload.get("child_decisions"))
     follow_up_type = classify_follow_up(decision.decision_code, child_decisions)
     normalized_submission = intake.normalized_submission_json if intake is not None else {}
+    actor = review_actor_snapshot(decision)
 
     return {
         "task_type": "review_decision_follow_up",
@@ -105,6 +118,7 @@ def build_libby_followup_payload(
         "case_comment": decision_payload.get("case_comment") or "",
         "decider_name": decision.decider_name,
         "decider_role": decision.decider_role,
+        "review_actor": actor,
         "review_recorded_at": isoformat_utc(decision.created_at),
         "from_stage": decision.from_stage,
         "to_stage": decision.to_stage,
@@ -179,8 +193,19 @@ def execute_review_followup_handoff(
 
     review_case = session.get(ReviewCase, review_case_id)
     decision = session.get(HumanReviewDecision, decision_id)
+    if review_case is None or decision is None:
+        action.action_status = "failed"
+        action.action_payload_json = {
+            **(action.action_payload_json or {}),
+            "error": "Missing review case, decision, or Libby agent definition.",
+        }
+        action.completed_at = utc_now()
+        session.commit()
+        return {"status": "failed", "detail": action.action_payload_json["error"]}
+
+    actor = review_actor_snapshot(decision)
     libby_definition = session.query(AgentDefinition).filter_by(slug="libby").one_or_none()
-    if review_case is None or decision is None or libby_definition is None:
+    if libby_definition is None:
         action.action_status = "failed"
         action.action_payload_json = {
             **(action.action_payload_json or {}),
@@ -215,6 +240,7 @@ def execute_review_followup_handoff(
         **(action.action_payload_json or {}),
         "libby_queue_item_id": queue_id,
         "libby_follow_up_type": payload["libby_follow_up_type"],
+        "review_actor": actor,
     }
 
     db_queue_item = session.get(AgentQueueItem, coerce_uuid(queue_id))
@@ -239,12 +265,13 @@ def execute_review_followup_handoff(
             entity_type="review_case",
             entity_id=review_case.id,
             action="libby_review_followup_queued",
-            actor_id=None,
+            actor_id=decision.decided_by,
             payload_json={
                 "decision_id": str(decision.id),
                 "review_case_action_id": str(action.id),
                 "libby_queue_item_id": queue_id,
                 "libby_follow_up_type": payload["libby_follow_up_type"],
+                "review_actor": actor,
             },
             created_at=now,
         )
@@ -252,4 +279,9 @@ def execute_review_followup_handoff(
     session.commit()
 
     write_json(LIBBY_RUNTIME_ROOT / "agent_queue_items" / f"{queue_id}.json", queue_item)
-    return {"status": "completed", "libby_queue_item_id": queue_id, "libby_follow_up_type": payload["libby_follow_up_type"]}
+    return {
+        "status": "completed",
+        "libby_queue_item_id": queue_id,
+        "libby_follow_up_type": payload["libby_follow_up_type"],
+        "review_actor": actor,
+    }

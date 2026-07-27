@@ -4,7 +4,8 @@ import re
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 
 REVIEW_SYMBOL_NAME_PATTERN = re.compile(r"^[A-Za-z0-9 \-/$]*$")
@@ -734,11 +735,34 @@ class WorkspaceReviewChildDecisionInput(BaseModel):
     proposedSymbolId: str | None = None
 
 
-class WorkspaceReviewDecisionRequest(BaseModel):
+class SessionAuthoritativeHumanMutationRequest(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def reject_client_actor_identity(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        candidates = [value]
+        wrapped = value.get("request")
+        if isinstance(wrapped, dict):
+            candidates.append(wrapped)
+        forbidden = sorted(
+            key
+            for candidate in candidates
+            for key in ("deciderName", "deciderRole", "updatedBy")
+            if key in candidate
+        )
+        if forbidden:
+            raise PydanticCustomError(
+                "session_authoritative_identity",
+                "Human actor identity fields are session-authoritative and must not be supplied: {fields}",
+                {"fields": ", ".join(sorted(set(forbidden)))},
+            )
+        return value
+
+
+class WorkspaceReviewDecisionRequest(SessionAuthoritativeHumanMutationRequest):
     decisionCode: str = Field(min_length=1)
     decisionNote: str = ""
-    deciderName: str = "SME reviewer"
-    deciderRole: str = "sme_reviewer"
     childDecisions: list[WorkspaceReviewChildDecisionInput] = Field(default_factory=list)
     caseComment: str = ""
 
@@ -767,7 +791,7 @@ class WorkspaceRightsReviewCaseListResponse(BaseModel):
     items: list[WorkspaceRightsReviewCaseResponse]
 
 
-class WorkspaceRightsReviewDecisionRequest(BaseModel):
+class WorkspaceRightsReviewDecisionRequest(SessionAuthoritativeHumanMutationRequest):
     decisionCode: str = Field(min_length=1)
     correctedRightsStatus: str | None = Field(default=None, max_length=80)
     correctedRightsDisposition: str | None = Field(default=None, max_length=80)
@@ -775,9 +799,6 @@ class WorkspaceRightsReviewDecisionRequest(BaseModel):
     licenseLabel: str | None = Field(default=None, max_length=160)
     sourceUrl: str | None = Field(default=None, max_length=1000)
     evidenceNote: str = Field(default="", max_length=4000)
-    deciderName: str = "Human"
-    deciderRole: str = "rights_reviewer"
-
     @field_validator(
         "decisionCode",
         "correctedRightsStatus",
@@ -786,8 +807,6 @@ class WorkspaceRightsReviewDecisionRequest(BaseModel):
         "licenseLabel",
         "sourceUrl",
         "evidenceNote",
-        "deciderName",
-        "deciderRole",
     )
     @classmethod
     def trim_rights_text(cls, value: str | None) -> str | None:
@@ -796,14 +815,14 @@ class WorkspaceRightsReviewDecisionRequest(BaseModel):
         return value.strip()
 
 
-class WorkspaceReviewSymbolPropertiesUpdateRequest(BaseModel):
+class WorkspaceReviewSymbolPropertiesUpdateRequest(SessionAuthoritativeHumanMutationRequest):
     splitItemId: str | None = None
     name: str = Field(min_length=1, max_length=50)
     description: str = Field(default="", max_length=256)
     category: str | None = Field(default=None, max_length=80)
     discipline: str | None = Field(default=None, max_length=80)
     format: str | None = Field(default=None, max_length=40)
-    updatedBy: str = Field(default="Human", max_length=80)
+
 
     @field_validator("name")
     @classmethod
@@ -813,7 +832,7 @@ class WorkspaceReviewSymbolPropertiesUpdateRequest(BaseModel):
             raise ValueError("Name may only contain letters, numbers, spaces, hyphens, slashes, and dollar signs.")
         return trimmed
 
-    @field_validator("description", "category", "discipline", "format", "updatedBy")
+    @field_validator("description", "category", "discipline", "format")
     @classmethod
     def trim_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -821,9 +840,7 @@ class WorkspaceReviewSymbolPropertiesUpdateRequest(BaseModel):
         return value.strip()
 
 
-class WorkspaceSplitReviewProcessRequest(BaseModel):
-    deciderName: str = "SME reviewer"
-    deciderRole: str = "sme_reviewer"
+class WorkspaceSplitReviewProcessRequest(SessionAuthoritativeHumanMutationRequest):
     caseComment: str = ""
     childDecisions: list[WorkspaceReviewChildDecisionInput] = Field(default_factory=list)
 

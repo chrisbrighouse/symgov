@@ -17,9 +17,10 @@ from sqlalchemy import Text, and_, cast, func, inspect as inspect_database, sele
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
 
+from ..auth import AuthenticatedUser, ReviewOperationActor, derive_review_operation_actor
 from ..filename_inference import infer_filename_metadata
 from ..asset_manifest import choose_preview_asset, content_type_for_format, is_browser_previewable, list_available_assets
-from ..dependencies import get_db_session
+from ..dependencies import get_db_session, require_workspace_access
 from ..models import (
     AgentDefinition,
     AgentQueueItem,
@@ -155,6 +156,22 @@ TERMINAL_SPLIT_ITEM_STATUSES = frozenset().union(
     REVIEW_SPLIT_STATUS_GROUPS["terminal_non_publication"],
 )
 IMMEDIATE_TERMINAL_SPLIT_ACTION_STATUSES: dict[str, str] = {}
+
+
+def review_operation_actor(current_user: AuthenticatedUser) -> ReviewOperationActor:
+    try:
+        return derive_review_operation_actor(current_user)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=403, detail="Invalid authenticated review actor.") from exc
+
+
+def actor_snapshot(actor: ReviewOperationActor) -> dict[str, object]:
+    return {
+        "id": str(actor.id),
+        "display_name": actor.display_name,
+        "effective_role": actor.effective_role,
+        "roles": list(actor.roles),
+    }
 
 
 def split_item_status_group(status: str | None) -> str:
@@ -3828,8 +3845,10 @@ def create_review_action(
 def update_workspace_review_symbol_properties(
     review_case_id: str,
     request: WorkspaceReviewSymbolPropertiesUpdateRequest,
+    current_user: AuthenticatedUser = Depends(require_workspace_access),
     session: Session = Depends(get_db_session),
 ) -> WorkspaceReviewSymbolPropertiesResponse:
+    actor = review_operation_actor(current_user)
     parsed_case_id = parse_review_case_id(review_case_id)
     review_case = session.get(ReviewCase, parsed_case_id)
     if review_case is None:
@@ -3867,7 +3886,7 @@ def update_workspace_review_symbol_properties(
     properties.discipline = remember_property_option(session, field_name="discipline", value=request.discipline, now=now)
     properties.format = normalize_symbol_format(request.format) or properties.format
     properties.source = "reviewer"
-    properties.updated_by = request.updatedBy or "Human"
+    properties.updated_by = actor.display_name
     properties.updated_at = now
     updated_payload = {
         "name": properties.name,
@@ -3885,7 +3904,7 @@ def update_workspace_review_symbol_properties(
             previous=previous_payload,
             updated=updated_payload,
             reviewer_name=properties.updated_by,
-            reviewer_role="reviewer",
+            reviewer_role=actor.effective_role,
             reason="Human reviewer updated symbol properties.",
             evidence={
                 "review_case_id": str(review_case.id),
@@ -3899,10 +3918,11 @@ def update_workspace_review_symbol_properties(
             entity_type="review_symbol_property",
             entity_id=properties.id,
             action="review_symbol_properties_updated",
-            actor_id=None,
+            actor_id=actor.id,
             payload_json={
                 "review_case_id": str(review_case.id),
                 "review_split_item_id": str(split_item.id) if split_item is not None else None,
+                "actor": actor_snapshot(actor),
                 "previous": previous_payload,
                 "updated": {
                     "name": properties.name,
@@ -3956,8 +3976,10 @@ def list_workspace_review_symbol_property_options(
 def create_workspace_rights_review_decision(
     review_case_id: str,
     request: WorkspaceRightsReviewDecisionRequest,
+    current_user: AuthenticatedUser = Depends(require_workspace_access),
     session: Session = Depends(get_db_session),
 ) -> WorkspaceRightsReviewDecisionResponse:
+    actor = review_operation_actor(current_user)
     parsed_case_id = parse_review_case_id(review_case_id)
     review_case = session.get(ReviewCase, parsed_case_id)
     if review_case is None:
@@ -4018,8 +4040,8 @@ def create_workspace_rights_review_decision(
             "license_label": request.licenseLabel or None,
             "source_url": request.sourceUrl or None,
             "evidence_note": request.evidenceNote or None,
-            "decider_name": request.deciderName,
-            "decider_role": request.deciderRole or "rights_reviewer",
+            "decider_name": actor.display_name,
+            "decider_role": actor.effective_role,
             "corrected_at": isoformat_utc(now),
         }
         if request.licenseLabel:
@@ -4031,17 +4053,18 @@ def create_workspace_rights_review_decision(
     decision = HumanReviewDecision(
         review_case_id=review_case.id,
         decision_code=decision_code,
-        decision_summary=f"{request.deciderName} recorded rights decision {decision_code.replace('_', ' ')}.",
+        decision_summary=f"{actor.display_name} recorded rights decision {decision_code.replace('_', ' ')}.",
         decision_note=request.evidenceNote or None,
-        decided_by=None,
-        decider_name=request.deciderName,
-        decider_role=request.deciderRole or "rights_reviewer",
+        decided_by=actor.id,
+        decider_name=actor.display_name,
+        decider_role=actor.effective_role,
         from_stage=from_stage,
         to_stage=to_stage,
         decision_payload_json={
             "review_case_id": str(review_case.id),
             "rights_decision": decision_code,
             "updated_rights": updated_rights,
+            "actor": actor_snapshot(actor),
         },
         created_at=now,
     )
@@ -4065,7 +4088,7 @@ def create_workspace_rights_review_decision(
             entity_type="review_case",
             entity_id=review_case.id,
             action="rights_review_decision_recorded",
-            actor_id=None,
+            actor_id=actor.id,
             payload_json={
                 "decision_id": str(decision.id),
                 "decision_code": decision_code,
@@ -4074,6 +4097,7 @@ def create_workspace_rights_review_decision(
                 "updated_rights": updated_rights,
                 "previous_rights": previous_rights,
                 "provenance_assessment_id": str(provenance_assessment.id) if provenance_assessment is not None else None,
+                "actor": actor_snapshot(actor),
             },
             created_at=now,
         )
@@ -4108,8 +4132,10 @@ def create_workspace_rights_review_decision(
 def create_workspace_review_decision(
     review_case_id: str,
     request: WorkspaceReviewDecisionRequest,
+    current_user: AuthenticatedUser = Depends(require_workspace_access),
     session: Session = Depends(get_db_session),
 ) -> WorkspaceReviewDecisionResponse:
+    actor = review_operation_actor(current_user)
     parsed_case_id = parse_review_case_id(review_case_id)
     review_case = session.get(ReviewCase, parsed_case_id)
     if review_case is None:
@@ -4150,15 +4176,16 @@ def create_workspace_review_decision(
         "child_decisions": child_decisions,
         "case_comment": request.caseComment,
         "review_case_id": str(review_case.id),
+        "actor": actor_snapshot(actor),
     }
     decision = HumanReviewDecision(
         review_case_id=review_case.id,
         decision_code=decision_code,
-        decision_summary=f"{request.deciderName} recorded {decision_code.replace('_', ' ')}.",
+        decision_summary=f"{actor.display_name} recorded {decision_code.replace('_', ' ')}.",
         decision_note=request.decisionNote or None,
-        decided_by=None,
-        decider_name=request.deciderName,
-        decider_role=request.deciderRole,
+        decided_by=actor.id,
+        decider_name=actor.display_name,
+        decider_role=actor.effective_role,
         from_stage=from_stage,
         to_stage=to_stage,
         decision_payload_json=decision_payload,
@@ -4219,7 +4246,7 @@ def create_workspace_review_decision(
             entity_type="review_case",
             entity_id=review_case.id,
             action="human_review_decision_recorded",
-            actor_id=None,
+            actor_id=actor.id,
             payload_json={
                 "decision_id": str(decision.id),
                 "decision_code": decision_code,
@@ -4227,6 +4254,7 @@ def create_workspace_review_decision(
                 "to_stage": to_stage,
                 "child_decision_count": len(child_decisions),
                 "suppressed_parent_review_ids": suppressed_parent_review_ids,
+                "actor": actor_snapshot(actor),
             },
             created_at=now,
         )
@@ -4283,8 +4311,10 @@ def create_workspace_review_decision(
 def process_workspace_split_review_decisions(
     review_case_id: str,
     request: WorkspaceSplitReviewProcessRequest,
+    current_user: AuthenticatedUser = Depends(require_workspace_access),
     session: Session = Depends(get_db_session),
 ) -> WorkspaceSplitReviewProcessResponse:
+    actor = review_operation_actor(current_user)
     parsed_case_id = parse_review_case_id(review_case_id)
     row = session.execute(
         select(ReviewCase, ValidationReport)
@@ -4374,11 +4404,11 @@ def process_workspace_split_review_decisions(
         decision = HumanReviewDecision(
             review_case_id=review_case.id,
             decision_code=action_code,
-            decision_summary=f"{request.deciderName} processed {action_code.replace('_', ' ')} for {item.proposed_symbol_id}.",
+            decision_summary=f"{actor.display_name} processed {action_code.replace('_', ' ')} for {item.proposed_symbol_id}.",
             decision_note=child_payload.get("note") or child_payload.get("details") or None,
-            decided_by=None,
-            decider_name=request.deciderName,
-            decider_role=request.deciderRole,
+            decided_by=actor.id,
+            decider_name=actor.display_name,
+            decider_role=actor.effective_role,
             from_stage=review_case.current_stage,
             to_stage="ready_for_publication_handoff" if is_approval else transition["to_stage"],
             decision_payload_json={
@@ -4387,13 +4417,14 @@ def process_workspace_split_review_decisions(
                 "review_case_id": str(review_case.id),
                 "split_child_key": item.child_key,
                 "split_child_item_id": str(item.id),
+                "actor": actor_snapshot(actor),
                 **(
                     {
                         "duplicate_gate_override": {
                             "outcome": "false_duplicate",
                             "reason": child_payload.get("details") or child_payload.get("note") or request.caseComment or "Human reviewer confirmed this duplicate exception is a false positive.",
                             "review_split_item_id": str(item.id),
-                            "reviewed_by": request.deciderName,
+                            "reviewed_by": actor.display_name,
                             "reviewed_at": isoformat_utc(now),
                         }
                     }
@@ -4411,8 +4442,8 @@ def process_workspace_split_review_decisions(
                 build_duplicate_decision_feedback_events(
                     split_item=item,
                     action_code=action_code,
-                    reviewer_name=request.deciderName,
-                    reviewer_role=request.deciderRole,
+                    reviewer_name=actor.display_name,
+                    reviewer_role=actor.effective_role,
                     reason=child_payload.get("details") or child_payload.get("note") or request.caseComment,
                     evidence={
                         "review_case_id": str(review_case.id),
@@ -4445,12 +4476,13 @@ def process_workspace_split_review_decisions(
                 entity_type="review_split_item",
                 entity_id=item.id,
                 action="split_child_review_decision_recorded",
-                actor_id=None,
+                actor_id=actor.id,
                 payload_json={
                     "review_case_id": str(review_case.id),
                     "decision_id": str(decision.id),
                     "decision_code": action_code,
                     "target_agent_slug": target_agent_slug,
+                    "actor": actor_snapshot(actor),
                 },
                 created_at=now,
             )
@@ -4482,12 +4514,13 @@ def process_workspace_split_review_decisions(
                     entity_type="review_split_item",
                     entity_id=item.id,
                     action="split_child_terminal_disposition_recorded",
-                    actor_id=None,
+                    actor_id=actor.id,
                     payload_json={
                         "review_case_id": str(review_case.id),
                         "decision_id": str(decision.id),
                         "decision_code": action_code,
                         "status": terminal_split_status,
+                        "actor": actor_snapshot(actor),
                     },
                     created_at=now,
                 )
@@ -4516,11 +4549,12 @@ def process_workspace_split_review_decisions(
                     entity_type="review_split_item",
                     entity_id=item.id,
                     action="duplicate_exception_confirmed",
-                    actor_id=None,
+                    actor_id=actor.id,
                     payload_json={
                         "review_case_id": str(review_case.id),
                         "decision_id": str(decision.id),
                         "reason": item.latest_details,
+                        "actor": actor_snapshot(actor),
                     },
                     created_at=item.processed_at,
                 )
@@ -4582,8 +4616,8 @@ def process_workspace_split_review_decisions(
                     entity_type="review_case",
                     entity_id=review_case.id,
                     action="split_children_processed",
-                    actor_id=None,
-                    payload_json={"processed_count": len(processed_items)},
+                    actor_id=actor.id,
+                    payload_json={"processed_count": len(processed_items), "actor": actor_snapshot(actor)},
                     created_at=closed_at,
                 )
             )
