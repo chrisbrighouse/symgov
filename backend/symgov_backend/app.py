@@ -26,7 +26,7 @@ from .routes.llm import router as llm_router
 from .routes.workspace import legacy_router as legacy_workspace_router
 from .routes.workspace import router as workspace_router
 from .agent_queue_worker import AgentQueueWorkerConfig, AgentQueueWorkerState, run_agent_queue_worker
-from .dependencies import require_any_role, require_user
+from .dependencies import require_any_role, require_user, require_workspace_access
 from .email_worker import configured_email_sender, run_email_outbox_worker
 from .settings import get_settings
 
@@ -77,7 +77,7 @@ def create_app() -> FastAPI:
     app.include_router(
         workspace_router,
         prefix=settings.api_prefix,
-        dependencies=[Depends(require_any_role({"admin", "reviewer"}))],
+        dependencies=[Depends(require_workspace_access)],
     )
     app.include_router(llm_router, prefix=settings.api_prefix)
     app.include_router(legacy_auth_router, prefix="/api")
@@ -91,7 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(
         legacy_workspace_router,
         prefix="/api",
-        dependencies=[Depends(require_any_role({"admin", "reviewer"}))],
+        dependencies=[Depends(require_workspace_access)],
     )
     app.include_router(legacy_llm_router, prefix="/api")
 
