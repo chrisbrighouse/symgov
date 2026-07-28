@@ -52,6 +52,10 @@ import CatalogDeveloperHub from './CatalogDeveloperHub.jsx';
 import ProfilePage from './ProfilePage.jsx';
 import FavouriteButton from './FavouriteButton.js';
 import FavouriteFilter from './FavouriteFilter.js';
+import {
+  createPublishedFeedbackAttempt,
+  publishedFeedbackLifecycleNotice
+} from './publishedFeedbackLifecycle.js';
 import { changeQueue, daisyCoordinationReports, processingActivity, submissionPresets, symbols } from './data.js';
 import {
   DEFAULT_AGENT_RUN_DURATION_SECONDS,
@@ -893,6 +897,7 @@ function StandardsPage() {
   const [commandComment, setCommandComment] = useState('');
   const [commandStatus, setCommandStatus] = useState({ mode: '', message: '' });
   const [submittingCommand, setSubmittingCommand] = useState(false);
+  const publishedCommandAttemptRef = useRef(null);
   const [downloadFormat, setDownloadFormat] = useState('');
   const [downloadStatus, setDownloadStatus] = useState({ mode: '', message: '' });
   const [preparingDownload, setPreparingDownload] = useState(false);
@@ -1255,6 +1260,7 @@ function StandardsPage() {
     setCommandDialog(command);
     setCommandComment('');
     setCommandStatus({ mode: '', message: '' });
+    publishedCommandAttemptRef.current = null;
   }
 
   function closePublishedCommandDialog() {
@@ -1263,6 +1269,7 @@ function StandardsPage() {
     }
     setCommandDialog(null);
     setCommandComment('');
+    publishedCommandAttemptRef.current = null;
   }
 
   async function handleSubmitPublishedCommand() {
@@ -1277,25 +1284,40 @@ function StandardsPage() {
     setSubmittingCommand(true);
     setCommandStatus({ mode: 'info', message: commandDialog === 'comment' ? 'Posting comment…' : 'Sending selected symbol(s) for review…' });
     const submittedCommand = commandDialog;
-    const submittedSymbolIds = selectedSymbols.map((symbol) => symbol.id);
-    setCommandDialog(null);
-    setCommandComment('');
+    const submittedSymbolIds = selectedSymbols.map((symbol) => symbol.symbolId);
+    publishedCommandAttemptRef.current = createPublishedFeedbackAttempt(
+      publishedCommandAttemptRef.current,
+      {
+        command: submittedCommand,
+        symbolIds: submittedSymbolIds,
+        comment
+      }
+    );
+    const requestId = publishedCommandAttemptRef.current.requestId;
     try {
       const result = await submitPublishedSymbolCommand({
         command: submittedCommand,
         symbolIds: submittedSymbolIds,
-        comment
+        comment,
+        requestId
       });
+      const lifecycleNotice = publishedFeedbackLifecycleNotice(submittedCommand, result);
+      setCommandStatus(lifecycleNotice);
+      if (lifecycleNotice.mode === 'error') {
+        return;
+      }
       setStandardsState((current) => ({
         ...current,
         items: current.items.map((symbol) =>
-          submittedSymbolIds.includes(symbol.id)
+          submittedSymbolIds.includes(symbol.symbolId)
             ? { ...symbol, hasComments: true, commentCount: Number(symbol.commentCount || 0) + 1 }
             : symbol
         )
       }));
-      setCommandStatus({ mode: 'success', message: result?.message || 'Published symbol command submitted.' });
       setSelectedSymbolIds([]);
+      setCommandDialog(null);
+      setCommandComment('');
+      publishedCommandAttemptRef.current = null;
     } catch (error) {
       setCommandStatus({ mode: 'error', message: error instanceof Error ? error.message : 'Published symbol command failed.' });
     } finally {
@@ -2054,6 +2076,11 @@ function StandardsPage() {
                 </li>
               ))}
             </ul>
+            {commandDialog === 'send_for_review' ? (
+              <p className="copy-block">
+                Requesting review opens review work. The current published revision remains available unless an authorized human later withdraws it.
+              </p>
+            ) : null}
             <label className="field comment-field">
               <span>Comment</span>
               <textarea

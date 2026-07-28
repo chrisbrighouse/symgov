@@ -7,11 +7,14 @@ import logging
 import os
 import re
 import subprocess
+import uuid
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .models import AgentQueueItem
+from .published_feedback_gate import published_feedback_claims_paused
 from .runtime import RuntimePersistenceBridge
 
 
@@ -396,6 +399,99 @@ def process_agent_queue_item_with_hermes(agent: str, queue_path: Path, runtime_r
             "stderr": _redact_subprocess_output(completed.stderr),
         },
     }
+
+
+def queue_item_claim_blocked(
+    agent: str,
+    queue_item: dict[str, Any],
+    *,
+    published_feedback_paused: bool,
+) -> bool:
+    payload = queue_item.get("payload_json")
+    payload = payload if isinstance(payload, dict) else {}
+    return (
+        agent == "ed"
+        and published_feedback_paused
+        and (
+            queue_item.get("source_type") == "published_symbol_review_request"
+            or payload.get("task_type") == "published_symbol_review_request"
+        )
+    )
+
+
+def is_published_feedback_queue_item(agent: str, queue_item: dict[str, Any]) -> bool:
+    payload = queue_item.get("payload_json")
+    payload = payload if isinstance(payload, dict) else {}
+    return agent == "ed" and (
+        queue_item.get("source_type") == "published_symbol_review_request"
+        or payload.get("task_type") == "published_symbol_review_request"
+    )
+
+
+def _write_queue_item_atomically(path: Path, payload: dict[str, Any]) -> None:
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.claim.tmp")
+    try:
+        temporary.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _restore_queue_item_bytes_atomically(path: Path, payload: bytes) -> None:
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.rollback.tmp")
+    try:
+        temporary.write_bytes(payload)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def claim_published_feedback_queue_item(
+    queue_path: Path,
+    config: AgentQueueWorkerConfig,
+) -> bool:
+    """Own the durable/runtime queued-to-running transition at the live gate."""
+
+    queue_item = load_queue_item(queue_path)
+    if not queue_item or queue_item.get("status") != "queued":
+        return False
+    try:
+        queue_item_id = uuid.UUID(str(queue_item.get("id")))
+    except ValueError:
+        return False
+
+    original_queue_bytes = queue_path.read_bytes()
+    runtime_claim_written = False
+    bridge = RuntimePersistenceBridge(env_file=config.db_env_file)
+    try:
+        with bridge.session_scope() as session:
+            durable = session.get(AgentQueueItem, queue_item_id, with_for_update=True)
+            if durable is None or durable.status != "queued":
+                return False
+            if not is_published_feedback_queue_item("ed", queue_item):
+                return False
+
+            # Deliberately the final check before either authoritative mirror changes.
+            # The locked row prevents a second repository worker claiming this item.
+            if published_feedback_claims_paused():
+                return False
+
+            started_at = datetime.now(timezone.utc).replace(microsecond=0)
+            claimed = dict(queue_item)
+            claimed["status"] = "running"
+            claimed["started_at"] = started_at.isoformat().replace("+00:00", "Z")
+            durable.status = "running"
+            durable.started_at = started_at
+            session.flush()
+            _write_queue_item_atomically(queue_path, claimed)
+            runtime_claim_written = True
+    except Exception:
+        if runtime_claim_written:
+            _restore_queue_item_bytes_atomically(queue_path, original_queue_bytes)
+        raise
+    return True
+
+
 def process_agent_queue_once(agent: str, config: AgentQueueWorkerConfig) -> dict[str, Any]:
     if agent not in AGENT_SPECS:
         raise ValueError(f"Unsupported agent queue: {agent}")
@@ -419,6 +515,10 @@ def process_agent_queue_once(agent: str, config: AgentQueueWorkerConfig) -> dict
     per_agent_limit = 1 if agent == "hannah" else config.limit
     for queue_path in queued_item_paths(runtime_root, agent, per_agent_limit):
         try:
+            queue_item = load_queue_item(queue_path) or {}
+            if is_published_feedback_queue_item(agent, queue_item):
+                if not claim_published_feedback_queue_item(queue_path, config):
+                    continue
             if config.agent_runtime == "hermes":
                 result = process_agent_queue_item_with_hermes(agent, queue_path, runtime_root, config)
                 if (result.get("hermes_dispatch") or {}).get("returncode") != 0:
@@ -474,6 +574,7 @@ def process_agent_queue_once(agent: str, config: AgentQueueWorkerConfig) -> dict
         "errorCount": len(errors),
         "processed": processed,
         "errors": errors,
+        "publishedFeedbackClaimsPaused": published_feedback_claims_paused(),
     }
 
 

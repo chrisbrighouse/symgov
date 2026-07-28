@@ -77,6 +77,7 @@ def authenticate_catalog_api_key(
     token: str,
     *,
     now: datetime | None = None,
+    update_last_used: bool = True,
 ) -> IntegrationAuthContext | None:
     if not token:
         return None
@@ -94,7 +95,8 @@ def authenticate_catalog_api_key(
         return None
 
     scopes = _normalize_scopes(key_row.scopes_json)
-    key_row.last_used_at = _as_aware_utc(resolved_now)
+    if update_last_used:
+        key_row.last_used_at = _as_aware_utc(resolved_now)
     return IntegrationAuthContext(
         api_key_id=str(key_row.id),
         customer_name=redact_catalog_credential_label(key_row.customer_name),
@@ -127,6 +129,43 @@ def get_catalog_api_key_context(
             detail="Catalog API key authentication is temporarily unavailable.",
         ) from None
     return context
+
+
+def get_catalog_feedback_api_key_context(
+    request: Request,
+    session: Session = Depends(get_db_session),
+) -> IntegrationAuthContext:
+    """Authenticate feedback without committing usage before request acceptance."""
+    try:
+        context = authenticate_catalog_api_key(
+            session,
+            _bearer_token(request),
+            update_last_used=False,
+        )
+    except CatalogApiAuthenticationError:
+        _rollback_without_diagnostics(session)
+        raise HTTPException(
+            status_code=503,
+            detail="Catalog API key authentication is temporarily unavailable.",
+        ) from None
+    if context is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    return context
+
+
+def require_catalog_feedback_scope(
+    required_scope: str,
+) -> Callable[[IntegrationAuthContext], IntegrationAuthContext]:
+    normalized_scope = str(required_scope or "").strip()
+
+    def dependency(
+        context: IntegrationAuthContext = Depends(get_catalog_feedback_api_key_context),
+    ) -> IntegrationAuthContext:
+        if normalized_scope not in context.scopes:
+            raise HTTPException(status_code=403, detail="Insufficient scope for this operation.")
+        return context
+
+    return dependency
 
 
 def require_catalog_scope(required_scope: str) -> Callable[[IntegrationAuthContext], IntegrationAuthContext]:

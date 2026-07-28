@@ -60,6 +60,7 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 self.page_id = page_id
                 self.payload_json = revision.payload_json
                 self.pack_code = "0001"
+                self.sort_order = 3
 
         class FakeSession:
             def __init__(self):
@@ -97,6 +98,8 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 return SimpleNamespace(filter_by=lambda *a, **k: SimpleNamespace(one_or_none=lambda: None))
 
             def get(self, model, key, *, with_for_update=False):
+                if model.__name__ == "AuditEvent":
+                    return None
                 if model == SymbolRevision and key == revision_id:
                     self.revision_locked = with_for_update
                     return revision
@@ -125,15 +128,22 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         class FakeRequest:
             async def json(self):
-                return {"command": "send_for_review", "symbolIds": ["0001-3"], "comment": "Needs review."}
+                return {
+                    "command": "send_for_review",
+                    "symbolIds": [str(symbol_id)],
+                    "comment": "Needs review.",
+                    "requestId": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+                }
 
         request = FakeRequest()
-        await run_published_symbol_command(request, session)
+        await run_published_symbol_command(
+            request,
+            SimpleNamespace(id=UUID(int=15), display_name="Requester", roles=["user"]),
+            session,
+        )
 
-        # Verify revision was unpublished
-        # F0.4 will separate review requests from withdrawal; preserve current behaviour here.
-        self.assertEqual(revision.lifecycle_state, "review")
-        self.assertTrue(session.revision_locked)
+        self.assertEqual(revision.lifecycle_state, "published")
+        self.assertFalse(getattr(session, "revision_locked", False))
 
         # Verify review case was created with correct initial stage
         review_case = next(obj for obj in session.added if isinstance(obj, ReviewCase))

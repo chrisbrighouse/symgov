@@ -56,6 +56,7 @@ from ..agent_feedback import (
 )
 from ..agent_queue_reconciliation import reconcile_agent_queue_state
 from ..agent_queue_worker import AgentQueueWorkerState, agent_worker_health_payload
+from ..published_feedback_gate import published_feedback_claims_paused
 from ..tracy_operations import tracy_status_summary
 from ..publication_handoff import execute_publication_handoff
 from ..property_options import remember_property_option
@@ -2283,7 +2284,9 @@ def get_workspace_agent_worker_health(request: Request) -> dict:
     if state is None:
         state = AgentQueueWorkerState(configured_agents=())
     task = getattr(request.app.state, "agent_worker_task", None)
-    return agent_worker_health_payload(state, task_done=task.done() if task is not None else None)
+    payload = agent_worker_health_payload(state, task_done=task.done() if task is not None else None)
+    payload["publishedFeedbackClaimsPaused"] = published_feedback_claims_paused()
+    return payload
 
 
 @router.get(

@@ -1,4 +1,5 @@
 import { appConfig } from './config.js';
+import { buildPublishedFeedbackRequest } from './publishedFeedbackLifecycle.js';
 
 async function parseJson(response) {
   const text = await response.text();
@@ -1241,7 +1242,7 @@ export async function fetchPublishedSymbolComments(symbolId) {
   }
 }
 
-export async function submitPublishedSymbolCommand({ command, symbolIds, comment }) {
+export async function submitPublishedSymbolCommand({ command, symbolIds, comment, requestId }) {
   if (!appConfig.apiRoot) {
     throw new Error('API root is not configured.');
   }
@@ -1249,7 +1250,7 @@ export async function submitPublishedSymbolCommand({ command, symbolIds, comment
   const response = await fetch(`${appConfig.apiRoot}/published/symbols/commands`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ payload: { command, symbolIds, comment } })
+    body: JSON.stringify(buildPublishedFeedbackRequest({ command, symbolIds, comment, requestId }))
   });
   const payload = await parseJson(response);
 

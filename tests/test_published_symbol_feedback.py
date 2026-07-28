@@ -7,6 +7,8 @@ from unittest.mock import patch
 from types import SimpleNamespace
 from uuid import UUID
 
+REQUEST_ID = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+
 BACKEND_ROOT = pathlib.Path(__file__).resolve().parents[1] / "backend"
 sys.path.insert(0, str(BACKEND_ROOT))
 
@@ -32,6 +34,7 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
                     "command": "comment",
                     "symbolIds": [str(UUID(int=index + 1)) for index in range(MAX_PUBLISHED_SYMBOL_COMMAND_SELECTION + 1)],
                     "comment": "Please check these.",
+                    "requestId": str(REQUEST_ID),
                 }
             )
 
@@ -39,13 +42,20 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         normalized = normalize_published_symbol_command_request(
             {
                 "command": "send_for_review",
-                "symbolIds": [" 0002-32 ", "0002-33"],
+                "symbolIds": [
+                    "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA",
+                    "11111111-1111-4111-8111-111111111111",
+                ],
                 "comment": "Wrong designation on both records.",
+                "requestId": str(REQUEST_ID),
             }
         )
 
         self.assertEqual(normalized["command"], "send_for_review")
-        self.assertEqual(normalized["symbol_ids"], ["0002-32", "0002-33"])
+        self.assertEqual(
+            normalized["symbol_ids"],
+            ["11111111-1111-4111-8111-111111111111", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
+        )
         self.assertEqual(normalized["comment"], "Wrong designation on both records.")
 
     def test_ed_queue_display_parts_use_published_symbol_readable_id(self) -> None:
@@ -497,7 +507,12 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
 class PublishedSymbolCommandTransactionTests(unittest.IsolatedAsyncioTestCase):
     class Request:
         async def json(self):
-            return {"command": "comment", "symbolIds": ["0002-32"], "comment": "Please check this."}
+            return {
+                "command": "comment",
+                "symbolIds": ["11111111-1111-1111-1111-111111111111"],
+                "comment": "Please check this.",
+                "requestId": str(REQUEST_ID),
+            }
 
     class Session:
         def __init__(self):
@@ -517,6 +532,15 @@ class PublishedSymbolCommandTransactionTests(unittest.IsolatedAsyncioTestCase):
         def execute(self, *args, **kwargs):
             return SimpleNamespace(all=lambda: [self.row])
 
+        def get(self, model, key, *, with_for_update=False):
+            return None
+
+        def add(self, value):
+            return None
+
+        def flush(self):
+            return None
+
         def commit(self):
             self.commits += 1
 
@@ -529,20 +553,25 @@ class PublishedSymbolCommandTransactionTests(unittest.IsolatedAsyncioTestCase):
             record=SimpleNamespace(id=UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")),
             review_case=None,
             queue_item=None,
+            runtime_envelope=None,
         )
 
         with (
-            patch("symgov_backend.routes.published.get_or_create_ed_user", return_value=SimpleNamespace(id=UUID(int=14))),
             patch("symgov_backend.routes.published.submit_published_feedback", return_value=feedback) as service,
         ):
-            response = await run_published_symbol_command(self.Request(), session)
+            response = await run_published_symbol_command(
+                self.Request(),
+                SimpleNamespace(id=UUID(int=15), display_name="Requester", roles=["user"]),
+                session,
+            )
 
         self.assertEqual(session.commits, 1)
         self.assertEqual(session.rollbacks, 0)
-        self.assertEqual(response["items"][0]["symbolId"], "11111111-1111-1111-1111-111111111111")
-        self.assertEqual(response["items"][0]["commentId"], "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
-        self.assertIsNone(response["items"][0]["reviewCaseId"])
-        self.assertIsNone(response["items"][0]["edQueueItemId"])
+        payload = __import__("json").loads(response.body)
+        self.assertEqual(payload["items"][0]["symbolId"], "11111111-1111-1111-1111-111111111111")
+        self.assertEqual(payload["items"][0]["commentId"], "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        self.assertIsNone(payload["items"][0]["reviewCaseId"])
+        self.assertIsNone(payload["items"][0]["edQueueItemId"])
         self.assertEqual(service.call_args.kwargs["source"], "published_symbol_command_menu")
         self.assertEqual(service.call_args.kwargs["kind"], "comment")
         self.assertEqual(service.call_args.kwargs["context_json"], {})
@@ -551,11 +580,14 @@ class PublishedSymbolCommandTransactionTests(unittest.IsolatedAsyncioTestCase):
         session = self.Session()
 
         with (
-            patch("symgov_backend.routes.published.get_or_create_ed_user", return_value=SimpleNamespace(id=UUID(int=14))),
             patch("symgov_backend.routes.published.submit_published_feedback", side_effect=RuntimeError("queue failed")),
         ):
             with self.assertRaisesRegex(RuntimeError, "queue failed"):
-                await run_published_symbol_command(self.Request(), session)
+                await run_published_symbol_command(
+                    self.Request(),
+                    SimpleNamespace(id=UUID(int=15), display_name="Requester", roles=["user"]),
+                    session,
+                )
 
         self.assertEqual(session.commits, 0)
         self.assertEqual(session.rollbacks, 1)
@@ -566,6 +598,7 @@ class PublishedSymbolCommandTransactionTests(unittest.IsolatedAsyncioTestCase):
             record=SimpleNamespace(id=UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")),
             review_case=None,
             queue_item=None,
+            runtime_envelope=None,
         )
 
         def fail_commit():
@@ -574,11 +607,14 @@ class PublishedSymbolCommandTransactionTests(unittest.IsolatedAsyncioTestCase):
 
         session.commit = fail_commit
         with (
-            patch("symgov_backend.routes.published.get_or_create_ed_user", return_value=SimpleNamespace(id=UUID(int=14))),
             patch("symgov_backend.routes.published.submit_published_feedback", return_value=feedback),
         ):
             with self.assertRaisesRegex(RuntimeError, "commit failed"):
-                await run_published_symbol_command(self.Request(), session)
+                await run_published_symbol_command(
+                    self.Request(),
+                    SimpleNamespace(id=UUID(int=15), display_name="Requester", roles=["user"]),
+                    session,
+                )
 
         self.assertEqual(session.commits, 1)
         self.assertEqual(session.rollbacks, 1)

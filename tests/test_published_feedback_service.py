@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
+from sqlalchemy.exc import MultipleResultsFound
 
 from symgov_backend.models import (
     AgentDefinition,
@@ -21,6 +22,7 @@ from symgov_backend.models import (
 )
 from symgov_backend.services.published_feedback import (
     CatalogAuditAttribution,
+    PublishedFeedbackConflict,
     submit_published_feedback,
 )
 
@@ -138,7 +140,7 @@ def test_comment_creates_open_record_with_one_browser_submitter_without_committi
     assert result.record.source == "published_symbol_command_menu"
     assert result.record.kind == "comment"
     assert result.record.detail == "Please correct the designation."
-    assert result.record.context_json == {}
+    assert result.record.context_json["publication_snapshot"]["revision_id"] == str(REVISION_ID)
     assert result.record.submitted_by == ED_USER_ID
     assert result.record.external_submitter_id is None
     assert result.record.catalog_api_key_id is None
@@ -152,13 +154,9 @@ def test_comment_creates_open_record_with_one_browser_submitter_without_committi
     audit = added(session, AuditEvent)[0]
     assert audit.action == "published_symbol_comment"
     assert audit.actor_id == ED_USER_ID
-    assert audit.payload_json == {
-        "comment_id": str(result.record.id),
-        "comment": "Please correct the designation.",
-        "review_case_id": None,
-        "queue_item_id": None,
-        "managed_by": "ed",
-    }
+    assert audit.payload_json["comment_id"] == str(result.record.id)
+    assert audit.payload_json["published_availability_changed"] is False
+    assert audit.payload_json["publication_transition"] is None
 
 
 def test_catalog_comment_preserves_context_and_safe_api_key_attribution(tmp_path: Path):
@@ -186,7 +184,9 @@ def test_catalog_comment_preserves_context_and_safe_api_key_attribution(tmp_path
     assert result.record.catalog_api_key_id == CATALOG_KEY_ID
     assert result.record.submitted_by is None
     assert result.record.external_submitter_id is None
-    assert result.record.context_json == {"application": "AutoCAD", "projectRef": "bounded-ref"}
+    assert result.record.context_json["application"] == "AutoCAD"
+    assert result.record.context_json["projectRef"] == "bounded-ref"
+    assert result.record.context_json["publication_snapshot"]["revision_id"] == str(REVISION_ID)
 
     audit = added(session, AuditEvent)[0]
     serialized = json.dumps(audit.payload_json)
@@ -197,7 +197,7 @@ def test_catalog_comment_preserves_context_and_safe_api_key_attribution(tmp_path
         "customer": "Acme Engineering",
         "integration": "AutoCAD pilot",
     }
-    assert "raw" not in serialized.lower()
+    assert "raw_token" not in serialized.lower()
     assert "hash" not in serialized.lower()
 
 
@@ -222,7 +222,7 @@ def test_exactly_one_submitter_is_required(tmp_path: Path):
     assert session.commits == 0
 
 
-def test_send_for_review_changes_revision_and_creates_human_readable_workflow(tmp_path: Path):
+def test_send_for_review_preserves_revision_and_creates_human_readable_workflow(tmp_path: Path):
     session = FakeSession()
 
     result = submit_published_feedback(
@@ -243,13 +243,9 @@ def test_send_for_review_changes_revision_and_creates_human_readable_workflow(tm
         runtime_queue_dir=tmp_path,
     )
 
-    assert session.revision.lifecycle_state == "review"
-    # F0.4 will separate a review request from withdrawal; F0.1 preserves the current baseline.
-    assert session.get_calls == [
-        (UserSubscription, ED_USER_ID, False),
-        (SymbolRevision, REVISION_ID, True),
-    ]
-    assert session.workflow_events.index("revision_lock") < session.workflow_events.index("case_lookup")
+    assert session.revision.lifecycle_state == "published"
+    assert session.get_calls == []
+    assert "revision_lock" not in session.workflow_events
     assert result.record.catalog_api_key_id == CATALOG_KEY_ID
     assert result.record.submitted_by is None
     assert result.record.external_submitter_id is None
@@ -264,7 +260,8 @@ def test_send_for_review_changes_revision_and_creates_human_readable_workflow(tm
     assert result.action.action_payload_json["published_display_id"] == "0002-32"
     assert result.action.action_payload_json["symbol_slug"] == "check-valve"
     assert result.action.assigned_to == ED_USER_ID
-    assert result.action.created_by_id == ED_USER_ID
+    assert result.action.created_by_type == "catalog_api_key"
+    assert result.action.created_by_id == CATALOG_KEY_ID
 
     assert result.audit_event.actor_id is None
     assert result.audit_event.payload_json["catalog_api_key"] == {
@@ -281,8 +278,9 @@ def test_send_for_review_changes_revision_and_creates_human_readable_workflow(tm
     assert result.queue_item.payload_json["published_display_id"] == "0002-32"
     assert result.queue_item.payload_json["next_stage"] == "classification_review"
 
-    runtime_payload = json.loads((tmp_path / f"{result.queue_item.id}.json").read_text(encoding="utf-8"))
-    assert runtime_payload["payload_json"]["symbol_display_id"] == "0002-32"
+    assert not (tmp_path / f"{result.queue_item.id}.json").exists()
+    assert result.runtime_envelope is not None
+    assert result.runtime_envelope.payload["payload_json"]["symbol_display_id"] == "0002-32"
     assert session.commits == 0
 
 
@@ -308,7 +306,61 @@ def test_send_for_review_reuses_existing_open_case(tmp_path: Path):
     )
 
     assert result.review_case is existing_case
-    assert existing_case.current_stage == "ux_feedback_coordination"
+    assert existing_case.current_stage == "classification_review"
     assert added(session, ReviewCase) == []
     assert len(added(session, ReviewCaseAction)) == 1
     assert len(added(session, AgentQueueItem)) == 1
+
+
+def test_send_for_review_fails_closed_when_duplicate_open_cases_exist(tmp_path: Path):
+    class DuplicateCaseSession(FakeSession):
+        def query(self, model):
+            query = super().query(model)
+            if model is ReviewCase:
+                query.one_or_none = lambda: (_ for _ in ()).throw(MultipleResultsFound())
+            return query
+
+    session = DuplicateCaseSession()
+
+    with pytest.raises(PublishedFeedbackConflict, match="duplicate_open_review_cases"):
+        submit_published_feedback(
+            session,
+            row=published_row(),
+            source="published_symbol_command_menu",
+            kind="review_request",
+            message="Review this.",
+            context_json={},
+            submitted_by=ED_USER_ID,
+            audit_action="published_symbol_review_requested",
+            audit_actor_id=ED_USER_ID,
+            runtime_queue_dir=tmp_path,
+        )
+
+    assert session.added == []
+    assert session.flushes == 0
+
+
+def test_send_for_review_fails_closed_before_writes_for_non_ed_case_owner(tmp_path: Path):
+    existing_case = SimpleNamespace(
+        id=UUID("55555555-5555-5555-5555-555555555555"),
+        current_stage="classification_review",
+        owner_id=UUID("99999999-9999-4999-8999-999999999999"),
+    )
+    session = FakeSession(existing_case=existing_case)
+
+    with pytest.raises(PublishedFeedbackConflict, match="review_case_owner_conflict"):
+        submit_published_feedback(
+            session,
+            row=published_row(),
+            source="published_symbol_command_menu",
+            kind="review_request",
+            message="Review this.",
+            context_json={},
+            submitted_by=ED_USER_ID,
+            audit_action="published_symbol_review_requested",
+            audit_actor_id=ED_USER_ID,
+            runtime_queue_dir=tmp_path,
+        )
+
+    assert session.added == []
+    assert session.flushes == 0

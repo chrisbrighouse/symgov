@@ -16,6 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..asset_manifest import canonical_asset_format, content_type_for_format, list_download_assets
@@ -24,6 +25,7 @@ from ..catalog_api_auth import (
     CatalogApiAuthenticationError,
     IntegrationAuthContext,
     authenticate_catalog_api_key,
+    require_catalog_feedback_scope,
     require_catalog_scope,
 )
 from ..catalog_developer import contains_catalog_credentials
@@ -44,7 +46,16 @@ from ..catalog_taxonomy import (
 )
 from ..catalog_usage import log_catalog_usage_event_best_effort
 from ..dependencies import SESSION_COOKIE_NAME, get_db_session
-from ..models import Attachment
+from ..models import (
+    AgentQueueItem,
+    Attachment,
+    AuditEvent,
+    CatalogApiKey,
+)
+from ..published_feedback_gate import (
+    published_feedback_claims_paused,
+    published_feedback_paused_response_body,
+)
 from ..published_catalog import (
     PUBLISHED_SYMBOLS_SQL,
     choose_published_preview_asset,
@@ -53,9 +64,19 @@ from ..published_catalog import (
 )
 from ..runtime import download_object_bytes
 from ..services.published_feedback import (
+    canonical_request_fingerprint,
     CatalogAuditAttribution,
     DEFAULT_ED_RUNTIME_QUEUE_DIR,
+    load_ed_user_for_published_feedback,
+    load_replay_queue_item,
+    materialize_runtime_envelope,
+    normalize_publication_target,
+    PublishedFeedbackConflict,
+    published_feedback_advisory_lock_id,
+    published_feedback_request_anchor_id,
+    replay_workflow_delivery_state,
     submit_published_feedback,
+    validate_published_feedback_review_case,
 )
 from ..settings import get_settings
 
@@ -479,6 +500,33 @@ def _load_catalog_symbol_row(session: Session, symbol_ref: str):
     return rows[0]
 
 
+def _load_catalog_symbol_rows_for_feedback(session: Session, symbol_ref: str):
+    rows = session.execute(
+        text(
+            PUBLISHED_SYMBOLS_SQL
+            + _published_symbol_ref_filter_sql()
+            + """
+            ORDER BY CASE
+                WHEN ((sr.payload_json ->> 'package_display_id') || '-' || (sr.payload_json ->> 'package_symbol_sequence')) = :symbol_ref
+                    OR (sr.payload_json ->> 'display_name') = :symbol_ref
+                    OR (sr.payload_json ->> 'workspace_display_name') = :symbol_ref
+                    OR (sr.payload_json ->> 'symbol_display_id') = :symbol_ref THEN 0
+                WHEN gs.slug = :symbol_ref THEN 1
+                WHEN gs.id::text = :symbol_ref THEN 2
+                ELSE 3
+            END,
+            pk.pack_code ASC,
+            pe.sort_order ASC,
+            pp.id ASC
+            """
+        ),
+        {"symbol_ref": symbol_ref},
+    ).all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="Catalog symbol was not found.")
+    return rows
+
+
 def _catalog_symbol_preview_bytes(symbol_ref: str, session: Session) -> Response:
     row = _load_catalog_symbol_row(session, symbol_ref)
     preview_asset = choose_published_preview_asset(row.payload_json or {})
@@ -701,13 +749,77 @@ router.add_api_route(
 )
 
 
+def _catalog_feedback_replay_response(
+    session: Session,
+    *,
+    anchor: AuditEvent,
+    api_key_id: uuid.UUID,
+    auth_context: IntegrationAuthContext,
+    request: Request,
+    started_at: float,
+    symbol_ref: str,
+    kind_value: str,
+) -> JSONResponse:
+    anchor_payload = anchor.payload_json or {}
+    stored_response = anchor_payload.get("response")
+    if not isinstance(stored_response, dict):
+        raise PublishedFeedbackConflict("published_feedback_workflow_integrity")
+    replay_response = dict(stored_response)
+    replay_response["requestReplayed"] = True
+    queue_id = anchor_payload.get("ed_queue_item_id")
+    pending = False
+    if queue_id:
+        symbol = replay_response.get("symbol")
+        if not isinstance(symbol, dict):
+            raise PublishedFeedbackConflict("published_feedback_workflow_integrity")
+        queue_item = load_replay_queue_item(
+            session,
+            request_anchor_id=anchor.id,
+            queue_item_id=queue_id,
+            symbol_id=symbol.get("symbolId"),
+        )
+        replay_response["workflowDeliveryState"] = replay_workflow_delivery_state(
+            queue_item,
+            CATALOG_FEEDBACK_RUNTIME_QUEUE_DIR,
+            materialize=materialize_runtime_envelope,
+        )
+        pending = replay_response["workflowDeliveryState"] == "pending"
+        replay_response["status"] = "accepted_pending_delivery" if pending else "recorded"
+    elif kind_value == "send_for_review":
+        raise PublishedFeedbackConflict("published_feedback_workflow_integrity")
+    key_row = session.get(CatalogApiKey, api_key_id)
+    if key_row is not None:
+        key_row.last_used_at = datetime.now(timezone.utc).replace(microsecond=0)
+    session.commit()
+    replay_status = 202 if pending else 201
+    log_catalog_usage_event_best_effort(
+        session,
+        auth_context,
+        request=request,
+        scope_used=CATALOG_FEEDBACK_WRITE_SCOPE,
+        route_name="catalog_symbol_feedback",
+        status_code=replay_status,
+        latency_ms=_latency_ms(started_at),
+        symbol_ref=symbol_ref,
+        result_count=1,
+        ed_query_type=kind_value,
+    )
+    return JSONResponse(status_code=replay_status, content=replay_response)
+
+
 async def catalog_symbol_feedback(
     symbol_ref: str,
     request: Request,
-    auth_context: IntegrationAuthContext = Depends(require_catalog_scope(CATALOG_FEEDBACK_WRITE_SCOPE)),
+    auth_context: IntegrationAuthContext = Depends(require_catalog_feedback_scope(CATALOG_FEEDBACK_WRITE_SCOPE)),
     session: Session = Depends(get_db_session),
-) -> dict:
+) -> JSONResponse:
     started_at = perf_counter()
+    if published_feedback_claims_paused():
+        return JSONResponse(
+            status_code=503,
+            content=published_feedback_paused_response_body(),
+            headers={"Retry-After": "60"},
+        )
     body = await _parse_strict_catalog_json_object(request)
     if set(body) - {"kind", "message", "context"}:
         raise HTTPException(status_code=400, detail="Request body contains unknown fields.")
@@ -726,14 +838,74 @@ async def catalog_symbol_feedback(
     if not message or len(message) > 2000:
         raise HTTPException(status_code=400, detail="message must contain 1 to 2000 characters.")
     context = _validate_catalog_ed_context(body.get("context", {}))
+    try:
+        request_id = uuid.UUID(str(request.headers.get("Idempotency-Key") or ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Idempotency-Key must be a UUID.") from exc
 
     if contains_catalog_credentials(message):
         raise HTTPException(status_code=400, detail="message must not contain credentials.")
 
-    row = _load_catalog_symbol_row(session, symbol_ref)
     api_key_id = uuid.UUID(auth_context.api_key_id)
     review_requested = kind_value == "send_for_review"
+    anchor_id = published_feedback_request_anchor_id(
+        principal_type="catalog_api_key", principal_id=api_key_id, request_key=request_id
+    )
+    fingerprint = canonical_request_fingerprint(
+        {
+            "route_family": "catalog_published_feedback",
+            "target": symbol_ref.strip().casefold(),
+            "command_or_kind": kind_value,
+            "normalized_message": message,
+            "normalized_bounded_context": context,
+            "principal_type": "catalog_api_key",
+            "principal_id": str(api_key_id).lower(),
+        }
+    )
+    requester_payload = {
+        "type": "catalog_api_key",
+        "id": str(api_key_id),
+        "key_prefix": auth_context.key_prefix,
+        "customer_name": auth_context.customer_name,
+        "integration_name": auth_context.integration_name,
+    }
     try:
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_id)"),
+            {"lock_id": published_feedback_advisory_lock_id("published-feedback-request:", anchor_id)},
+        )
+        existing_anchor = session.get(AuditEvent, anchor_id)
+        if existing_anchor is not None:
+            anchor_payload = existing_anchor.payload_json or {}
+            if anchor_payload.get("request_fingerprint") != fingerprint:
+                raise HTTPException(status_code=409, detail="idempotency_conflict")
+            return _catalog_feedback_replay_response(
+                session,
+                anchor=existing_anchor,
+                api_key_id=api_key_id,
+                auth_context=auth_context,
+                request=request,
+                started_at=started_at,
+                symbol_ref=symbol_ref,
+                kind_value=kind_value,
+            )
+
+        rows = _load_catalog_symbol_rows_for_feedback(session, symbol_ref)
+        for symbol_id in sorted({uuid.UUID(str(row.symbol_id)) for row in rows}, key=str):
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(:lock_id)"),
+                {"lock_id": published_feedback_advisory_lock_id("published-feedback-symbol:", symbol_id)},
+            )
+        target = normalize_publication_target(rows)
+        row = next(row for row in rows if uuid.UUID(str(row.page_id)) == target.canonical_page_id)
+        ed_user = load_ed_user_for_published_feedback(session) if review_requested else None
+        review_case = (
+            validate_published_feedback_review_case(
+                session, symbol_id=target.symbol_id, workflow_owner_id=ed_user.id
+            )
+            if ed_user is not None
+            else None
+        )
         result = submit_published_feedback(
             session,
             row=row,
@@ -751,36 +923,98 @@ async def catalog_symbol_feedback(
             ),
             request_review=review_requested,
             runtime_queue_dir=CATALOG_FEEDBACK_RUNTIME_QUEUE_DIR,
+            request_anchor_id=anchor_id,
+            publication_target=target,
+            requester_payload=requester_payload,
+            workflow_owner_id=ed_user.id if ed_user is not None else None,
+            validated_review_case=review_case,
+            review_case_validated=ed_user is not None,
         )
+        response = {
+            "status": "recorded",
+            "feedbackId": str(result.record.id),
+            "kind": kind_value,
+            "symbol": {
+                "displayId": published_symbol_display_id(row),
+                "symbolId": str(target.symbol_id),
+            },
+            "reviewRequested": review_requested,
+            "mutatesPublishedState": False,
+            "remainsPublished": True,
+            "requestReplayed": False,
+            "workflowDeliveryState": "materialized" if result.queue_item else "not_applicable",
+        }
+        session.add(
+            AuditEvent(
+                id=anchor_id,
+                entity_type="published_feedback_request",
+                entity_id=anchor_id,
+                action="published_feedback_request_accepted",
+                actor_id=None,
+                payload_json={
+                    "idempotency_key": str(request_id),
+                    "request_fingerprint": fingerprint,
+                    "route_family": "catalog_published_feedback",
+                    "resolved_symbol_ids": [str(target.symbol_id)],
+                    "requester": requester_payload,
+                    "ed_queue_item_id": str(result.queue_item.id) if result.queue_item else None,
+                    "response": response,
+                },
+                created_at=datetime.now(timezone.utc).replace(microsecond=0),
+            )
+        )
+        key_row = session.get(CatalogApiKey, api_key_id)
+        if key_row is not None:
+            key_row.last_used_at = datetime.now(timezone.utc).replace(microsecond=0)
+        session.flush()
         session.commit()
+    except PublishedFeedbackConflict as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except IntegrityError as exc:
+        session.rollback()
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(:lock_id)"),
+            {"lock_id": published_feedback_advisory_lock_id("published-feedback-request:", anchor_id)},
+        )
+        winner = session.get(AuditEvent, anchor_id)
+        if winner is None or (winner.payload_json or {}).get("request_fingerprint") != fingerprint:
+            raise HTTPException(status_code=409, detail="idempotency_conflict") from exc
+        return _catalog_feedback_replay_response(
+            session,
+            anchor=winner,
+            api_key_id=api_key_id,
+            auth_context=auth_context,
+            request=request,
+            started_at=started_at,
+            symbol_ref=symbol_ref,
+            kind_value=kind_value,
+        )
     except Exception:
         session.rollback()
         raise
 
-    response = {
-        "status": "recorded",
-        "feedbackId": str(result.record.id),
-        "kind": kind_value,
-        "symbol": {
-            "displayId": published_symbol_display_id(row),
-            "symbolId": str(row.symbol_id),
-        },
-        "reviewRequested": review_requested,
-        "mutatesPublishedState": review_requested,
-    }
+    pending = False
+    if result.runtime_envelope is not None:
+        try:
+            materialize_runtime_envelope(result.runtime_envelope)
+        except OSError:
+            response["workflowDeliveryState"] = "pending"
+            response["status"] = "accepted_pending_delivery"
+            pending = True
     log_catalog_usage_event_best_effort(
         session,
         auth_context,
         request=request,
         scope_used=CATALOG_FEEDBACK_WRITE_SCOPE,
         route_name="catalog_symbol_feedback",
-        status_code=201,
+        status_code=202 if pending else 201,
         latency_ms=_latency_ms(started_at),
         symbol_ref=symbol_ref,
         result_count=1,
         ed_query_type=kind_value,
     )
-    return response
+    return JSONResponse(status_code=202 if pending else 201, content=response)
 
 
 router.add_api_route(
@@ -788,7 +1022,6 @@ router.add_api_route(
     catalog_symbol_feedback,
     methods=["POST"],
     status_code=201,
-    route_class_override=_CatalogBoundedJsonRoute,
 )
 
 

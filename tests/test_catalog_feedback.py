@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError, MultipleResultsFound
 
 from symgov_backend.app import create_app
 from symgov_backend.catalog_api_auth import hash_api_key
@@ -34,6 +35,7 @@ KEY_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 ED_USER_ID = UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
 ED_AGENT_ID = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
 TOKEN = "valid-token"
+IDEMPOTENCY_KEY = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
 
 def published_row():
@@ -132,6 +134,12 @@ class FakeSession:
         return SimpleNamespace(all=lambda: [] if self.row is None else [self.row])
 
     def get(self, model, key, *, with_for_update=False):
+        if model is AuditEvent:
+            return next((item for item in self.added if isinstance(item, AuditEvent) and item.id == key), None)
+        if model is CatalogApiKey and self.key_row is not None and key == self.key_row.id:
+            return self.key_row
+        if model is AgentQueueItem:
+            return next((item for item in self.added if isinstance(item, AgentQueueItem) and item.id == key), None)
         if model is SymbolRevision and key == REVISION_ID:
             return self.revision
         return None
@@ -182,6 +190,7 @@ def auth_headers(token=TOKEN, **extra):
         "X-Symgov-Application": "AutoCAD Plugin",
         "X-Symgov-Application-Version": "0.1.0",
         "X-Request-ID": "request-123",
+        "Idempotency-Key": IDEMPOTENCY_KEY,
     }
     headers.update(extra)
     return headers
@@ -371,7 +380,8 @@ def test_each_non_review_kind_persists_attributed_open_feedback_and_returns_safe
     assert record.kind == kind
     assert record.status == "open"
     assert record.detail == "A bounded feedback message."
-    assert record.context_json == context
+    assert {key: record.context_json[key] for key in context} == context
+    assert record.context_json["publication_snapshot"]["revision_id"] == str(REVISION_ID)
     assert record.catalog_api_key_id == KEY_ID
     assert record.submitted_by is None
     assert record.external_submitter_id is None
@@ -390,11 +400,14 @@ def test_each_non_review_kind_persists_attributed_open_feedback_and_returns_safe
         "symbol": {"displayId": "0002-32", "symbolId": str(SYMBOL_ID)},
         "reviewRequested": False,
         "mutatesPublishedState": False,
+        "remainsPublished": True,
+        "requestReplayed": False,
+        "workflowDeliveryState": "not_applicable",
     }
     serialized = response.text.lower()
     for forbidden in ("reviewcase", "queue", "action", "hash", "symgov_live", "acme", "autocad", "slug", "name", "/api/v1/published"):
         assert forbidden not in serialized
-    assert session.commit_phases == ["auth", "authoritative", "usage"]
+    assert session.commit_phases == ["authoritative", "usage"]
 
 
 def test_symbol_lookup_prioritizes_display_id_then_slug_then_uuid_while_preserving_publication_order(tmp_path, monkeypatch):
@@ -404,7 +417,7 @@ def test_symbol_lookup_prioritizes_display_id_then_slug_then_uuid_while_preservi
         "/api/v1/catalog/symbols/0002-32/feedback", json=valid_body(), headers=auth_headers()
     )
     assert response.status_code == 201
-    sql, params = session.sql[0]
+    sql, params = next((sql, params) for sql, params in session.sql if "symbol_ref" in params)
     normalized = " ".join(sql.split()).lower()
     assert params == {"symbol_ref": "0002-32"}
     assert "case" in normalized
@@ -414,8 +427,9 @@ def test_symbol_lookup_prioritizes_display_id_then_slug_then_uuid_while_preservi
     slug_position = ranking_sql.index("gs.slug = :symbol_ref")
     uuid_position = ranking_sql.index("gs.id::text = :symbol_ref")
     assert display_position < slug_position < uuid_position
-    assert "pp.effective_date desc" in normalized
-    assert "pk.effective_date desc" in normalized
+    assert "pk.pack_code asc" in normalized
+    assert "pe.sort_order asc" in normalized
+    assert "pp.id asc" in normalized
 
 
 @pytest.mark.parametrize("symbol_ref", ["check-valve", str(SYMBOL_ID)])
@@ -426,7 +440,7 @@ def test_feedback_symbol_lookup_retains_slug_and_uuid_compatibility(symbol_ref, 
         f"/api/v1/catalog/symbols/{symbol_ref}/feedback", json=valid_body(), headers=auth_headers()
     )
     assert response.status_code == 201
-    assert session.sql[0][1]["symbol_ref"] == symbol_ref
+    assert next(params["symbol_ref"] for _sql, params in session.sql if "symbol_ref" in params) == symbol_ref
 
 
 def test_unknown_symbol_returns_404_without_feedback_side_effect():
@@ -437,7 +451,100 @@ def test_unknown_symbol_returns_404_without_feedback_side_effect():
     assert response.status_code == 404
     assert records(session, ClarificationRecord) == []
     assert records(session, CatalogApiUsageEvent) == []
-    assert session.commit_phases == ["auth"]
+    assert session.commit_phases == []
+
+
+def test_same_catalog_key_rejects_disjoint_route_target_before_symbol_lookup(tmp_path, monkeypatch):
+    monkeypatch.setattr(catalog_routes, "CATALOG_FEEDBACK_RUNTIME_QUEUE_DIR", tmp_path)
+    session = FakeSession(key_row=api_key_row(), row=published_row())
+    client = build_client(session)
+    first = client.post(
+        "/api/v1/catalog/symbols/0002-32/feedback", json=valid_body(), headers=auth_headers()
+    )
+    assert first.status_code == 201
+    session.row = None
+    session.sql.clear()
+
+    conflict = client.post(
+        "/api/v1/catalog/symbols/completely-disjoint/feedback",
+        json=valid_body(),
+        headers=auth_headers(),
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json()["detail"] == "idempotency_conflict"
+    assert not any("FROM published_pages" in sql for sql, _params in session.sql)
+
+
+def test_review_case_owner_conflict_is_exact_409_without_intake_write(tmp_path, monkeypatch):
+    monkeypatch.setattr(catalog_routes, "CATALOG_FEEDBACK_RUNTIME_QUEUE_DIR", tmp_path)
+    session = FakeSession(
+        key_row=api_key_row(),
+        row=published_row(),
+        existing_case=SimpleNamespace(
+            id=UUID("55555555-5555-5555-5555-555555555555"),
+            current_stage="classification_review",
+            owner_id=UUID("99999999-9999-4999-8999-999999999999"),
+        ),
+    )
+
+    response = build_client(session, raise_server_exceptions=False).post(
+        "/api/v1/catalog/symbols/0002-32/feedback",
+        json=valid_body(kind="send_for_review"),
+        headers=auth_headers(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "review_case_owner_conflict"
+    assert records(session, ClarificationRecord) == []
+
+
+def test_catalog_boundary_recovers_request_anchor_primary_key_race(tmp_path, monkeypatch):
+    monkeypatch.setattr(catalog_routes, "CATALOG_FEEDBACK_RUNTIME_QUEUE_DIR", tmp_path)
+
+    class RaceSession(FakeSession):
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.raced = False
+
+        def add(self, value):
+            if isinstance(value, AuditEvent) and value.entity_type == "published_feedback_request" and not self.raced:
+                self.raced = True
+                self.added.append(value)
+                self.committed.append(value)
+                raise IntegrityError("request anchor primary key", {}, Exception("duplicate key"))
+            super().add(value)
+
+    session = RaceSession(key_row=api_key_row(), row=published_row())
+    response = build_client(session, raise_server_exceptions=False).post(
+        "/api/v1/catalog/symbols/0002-32/feedback", json=valid_body(), headers=auth_headers()
+    )
+
+    assert response.status_code == 201
+    assert response.json()["requestReplayed"] is True
+    assert session.rollbacks == 1
+
+
+def test_duplicate_open_review_cases_is_exact_catalog_409(tmp_path, monkeypatch):
+    monkeypatch.setattr(catalog_routes, "CATALOG_FEEDBACK_RUNTIME_QUEUE_DIR", tmp_path)
+
+    class DuplicateCaseSession(FakeSession):
+        def query(self, model):
+            query = super().query(model)
+            if model is ReviewCase:
+                query.one_or_none = lambda: (_ for _ in ()).throw(MultipleResultsFound())
+            return query
+
+    session = DuplicateCaseSession(key_row=api_key_row(), row=published_row())
+    response = build_client(session, raise_server_exceptions=False).post(
+        "/api/v1/catalog/symbols/0002-32/feedback",
+        json=valid_body(kind="send_for_review"),
+        headers=auth_headers(),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "duplicate_open_review_cases"
+    assert records(session, ClarificationRecord) == []
 
 
 def test_send_for_review_uses_shared_workflow_reuses_case_and_queues_before_success(tmp_path, monkeypatch):
@@ -462,21 +569,22 @@ def test_send_for_review_uses_shared_workflow_reuses_case_and_queues_before_succ
     second = client.post(
         "/api/v1/catalog/symbols/0002-32/feedback",
         json=valid_body(kind="send_for_review", message="Review it again."),
-        headers=auth_headers(),
+        headers=auth_headers(**{"Idempotency-Key": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"}),
     )
 
     assert first.status_code == second.status_code == 201
     assert first.json()["kind"] == "send_for_review"
     assert first.json()["reviewRequested"] is True
-    assert first.json()["mutatesPublishedState"] is True
-    assert session.revision.lifecycle_state == "review"
+    assert first.json()["mutatesPublishedState"] is False
+    assert first.json()["remainsPublished"] is True
+    assert session.revision.lifecycle_state == "published"
     assert records(session, ReviewCase) == []
     assert len(records(session, ReviewCaseAction)) == 2
     assert len(records(session, AgentQueueItem)) == 2
     assert len(records(session, ClarificationRecord)) == 2
     assert all(item.kind == "send_for_review" for item in records(session, ClarificationRecord))
     assert len(list(tmp_path.glob("*.json"))) == 2
-    assert existing_case.current_stage == "ux_feedback_coordination"
+    assert existing_case.current_stage == "classification_review"
 
 
 def test_feedback_usage_event_is_separate_safe_commit_with_kind_metadata(tmp_path, monkeypatch):
@@ -496,6 +604,47 @@ def test_feedback_usage_event_is_separate_safe_commit_with_kind_metadata(tmp_pat
     assert event.query_text is None
     assert event.status_code == 201
     assert session.commit_phases[-2:] == ["authoritative", "usage"]
+
+
+def test_post_commit_runtime_failure_returns_exact_pending_body_and_same_key_replay(tmp_path, monkeypatch):
+    monkeypatch.setattr(catalog_routes, "CATALOG_FEEDBACK_RUNTIME_QUEUE_DIR", tmp_path)
+    monkeypatch.setattr(
+        "symgov_backend.services.published_feedback.get_or_create_ed_user",
+        lambda session, now=None: SimpleNamespace(id=ED_USER_ID),
+    )
+    monkeypatch.setattr(
+        catalog_routes,
+        "materialize_runtime_envelope",
+        lambda _envelope: (_ for _ in ()).throw(OSError("disk unavailable")),
+    )
+    existing_case = SimpleNamespace(
+        id=UUID("55555555-5555-5555-5555-555555555555"),
+        current_stage="classification_review",
+        owner_id=ED_USER_ID,
+    )
+    session = FakeSession(key_row=api_key_row(), row=published_row(), existing_case=existing_case)
+    client = build_client(session)
+
+    first = client.post(
+        "/api/v1/catalog/symbols/0002-32/feedback",
+        json=valid_body(kind="send_for_review", message="Review this published symbol."),
+        headers=auth_headers(),
+    )
+    replay = client.post(
+        "/api/v1/catalog/symbols/0002-32/feedback",
+        json=valid_body(kind="send_for_review", message="Review this published symbol."),
+        headers=auth_headers(),
+    )
+
+    assert first.status_code == replay.status_code == 202
+    assert first.json()["status"] == replay.json()["status"] == "accepted_pending_delivery"
+    assert first.json()["workflowDeliveryState"] == replay.json()["workflowDeliveryState"] == "pending"
+    assert first.json()["requestReplayed"] is False
+    assert replay.json()["requestReplayed"] is True
+    assert first.json()["feedbackId"] == replay.json()["feedbackId"]
+    assert len(records(session, ClarificationRecord)) == 1
+    assert len(records(session, ReviewCaseAction)) == 1
+    assert len(records(session, AgentQueueItem)) == 1
 
 
 @pytest.mark.parametrize("failure", ["add", "commit"])

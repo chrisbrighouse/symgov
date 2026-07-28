@@ -201,8 +201,33 @@ def _operation(endpoint: dict) -> dict:
         }
         operation["responses"]["422"] = {"$ref": "#/components/responses/ValidationError"}
     if path.endswith("/feedback") and endpoint["method"] == "POST":
-        operation["responses"]["201"] = operation["responses"].pop("200")
-        operation["responses"]["201"]["description"] = "Feedback recorded."
+        success_response = operation["responses"].pop("200")
+        operation["responses"]["201"] = {**success_response, "description": "Feedback recorded."}
+        operation["responses"]["202"] = {
+            **success_response,
+            "description": (
+                "Feedback recorded; workflow delivery is pending because queued delivery is awaiting its "
+                "runtime mirror or the existing workflow remains active or awaiting an operator."
+            ),
+        }
+        operation["responses"]["409"] = {
+            "description": (
+                "Feedback request conflicts with its idempotency anchor or references corrupt workflow state."
+            ),
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}},
+        }
+        operation["responses"]["503"] = {
+            "description": "Published feedback intake is paused.",
+            "headers": {"Retry-After": {"schema": {"type": "string", "const": "60"}}},
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/PublishedFeedbackPaused"}}},
+        }
+        parameters.append({
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": True,
+            "schema": {"type": "string", "format": "uuid"},
+            "description": "Caller-stable UUID retained across transport retries of this feedback request.",
+        })
     if parameters:
         operation["parameters"] = parameters
     if endpoint["method"] == "POST":
@@ -286,8 +311,45 @@ def catalog_openapi_document() -> dict:
             "properties": {"conversationId": {"type": ["string", "null"]}, "mode": {"type": "string"}, "answer": {"type": "string"}, "searchQuery": {"type": "string"}, "interpretedFilters": object_schema, "symbols": {"type": "array", "items": object_schema}, "citations": {"type": "array", "items": object_schema}, "suggestedFollowups": {"type": "array", "items": {"type": "string"}}, "warnings": {"type": "array", "items": {"type": "string"}}, "downloadAvailable": {"type": "boolean", "const": False}, "mutatesRecords": {"type": "boolean", "const": False}},
         },
         "FeedbackResponse": {
-            "type": "object", "required": ["status", "feedbackId", "kind", "symbol", "reviewRequested", "mutatesPublishedState"],
-            "properties": {"status": {"type": "string", "const": "recorded"}, "feedbackId": {"type": "string", "format": "uuid"}, "kind": {"type": "string"}, "symbol": object_schema, "reviewRequested": {"type": "boolean"}, "mutatesPublishedState": {"type": "boolean"}},
+            "type": "object",
+            "required": ["status", "feedbackId", "kind", "symbol", "reviewRequested", "mutatesPublishedState", "remainsPublished", "requestReplayed", "workflowDeliveryState"],
+            "additionalProperties": False,
+            "properties": {
+                "status": {"type": "string", "enum": ["recorded", "accepted_pending_delivery"]},
+                "feedbackId": {"type": "string", "format": "uuid"},
+                "kind": {"type": "string"},
+                "symbol": {
+                    "type": "object",
+                    "required": ["displayId", "symbolId"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "displayId": {"type": "string"},
+                        "symbolId": {"type": "string", "format": "uuid"},
+                    },
+                },
+                "reviewRequested": {"type": "boolean"},
+                "mutatesPublishedState": {"type": "boolean", "const": False},
+                "remainsPublished": {"type": "boolean", "const": True},
+                "requestReplayed": {"type": "boolean"},
+                "workflowDeliveryState": {
+                    "type": "string",
+                    "enum": ["materialized", "pending", "not_applicable", "historical"],
+                    "description": (
+                        "materialized for queued work with a runtime mirror; pending for queued work without a "
+                        "mirror or existing active/operator-waiting work; historical only for completed or failed work."
+                    ),
+                },
+            },
+        },
+        "PublishedFeedbackPaused": {
+            "type": "object",
+            "required": ["error", "detail", "retryable"],
+            "additionalProperties": False,
+            "properties": {
+                "error": {"type": "string", "const": "published_feedback_paused"},
+                "detail": {"type": "string", "const": "Published feedback and review requests are temporarily unavailable."},
+                "retryable": {"type": "boolean", "const": True},
+            },
         },
     }
     return {

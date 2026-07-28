@@ -141,8 +141,53 @@ def test_developer_openapi_matches_filter_preview_and_feedback_wire_contracts():
         assert all(content["schema"] == {"type": "string", "format": "binary"} for content in response["content"].values())
 
     feedback = document["paths"]["/api/v1/catalog/symbols/{symbol_ref}/feedback"]["post"]
-    assert "201" in feedback["responses"]
+    assert set(feedback["responses"]) == {"201", "202", "400", "401", "403", "404", "409", "503"}
     assert "200" not in feedback["responses"]
+    for status in ("201", "202"):
+        assert feedback["responses"][status]["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/FeedbackResponse"
+        }
+    assert feedback["responses"]["201"]["description"] == "Feedback recorded."
+    assert feedback["responses"]["202"]["description"] == (
+        "Feedback recorded; workflow delivery is pending because queued delivery is awaiting its "
+        "runtime mirror or the existing workflow remains active or awaiting an operator."
+    )
+    assert feedback["responses"]["409"]["description"] == (
+        "Feedback request conflicts with its idempotency anchor or references corrupt workflow state."
+    )
+    assert {parameter["name"] for parameter in feedback["parameters"]} == {"symbol_ref", "Idempotency-Key"}
+    idempotency = next(parameter for parameter in feedback["parameters"] if parameter["name"] == "Idempotency-Key")
+    assert idempotency["in"] == "header"
+    assert idempotency["required"] is True
+    assert idempotency["schema"] == {"type": "string", "format": "uuid"}
+    feedback_schema = document["components"]["schemas"]["FeedbackResponse"]
+    assert "reviewCaseId" not in feedback_schema["properties"]
+    assert "edQueueItemId" not in feedback_schema["properties"]
+    assert feedback_schema["properties"]["mutatesPublishedState"] == {"type": "boolean", "const": False}
+    assert feedback_schema["properties"]["workflowDeliveryState"]["enum"] == [
+        "materialized", "pending", "not_applicable", "historical"
+    ]
+    assert feedback_schema["properties"]["workflowDeliveryState"]["description"] == (
+        "materialized for queued work with a runtime mirror; pending for queued work without a mirror "
+        "or existing active/operator-waiting work; historical only for completed or failed work."
+    )
+    paused = feedback["responses"]["503"]
+    assert paused["description"] == "Published feedback intake is paused."
+    assert paused["headers"]["Retry-After"]["schema"] == {"type": "string", "const": "60"}
+    assert paused["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/PublishedFeedbackPaused"
+    }
+    paused_schema = document["components"]["schemas"]["PublishedFeedbackPaused"]
+    assert paused_schema["required"] == ["error", "detail", "retryable"]
+    assert paused_schema["additionalProperties"] is False
+    assert paused_schema["properties"] == {
+        "error": {"type": "string", "const": "published_feedback_paused"},
+        "detail": {
+            "type": "string",
+            "const": "Published feedback and review requests are temporarily unavailable.",
+        },
+        "retryable": {"type": "boolean", "const": True},
+    }
 
     ed_schema = document["components"]["schemas"]["EdQueryRequest"]
     assert "conversationId" in ed_schema["properties"]
