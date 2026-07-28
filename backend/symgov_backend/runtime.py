@@ -2086,7 +2086,6 @@ class RuntimePersistenceBridge:
                     queue_item,
                     expected_agent_id=agent_definition.id,
                 )
-            service_user = self.ensure_publication_service_user(session)
             agent_queue_item.agent_id = agent_definition.id
             agent_queue_item.source_type = queue_item["source_type"]
             agent_queue_item.source_id = coerce_uuid(queue_item["source_id"])
@@ -2099,6 +2098,7 @@ class RuntimePersistenceBridge:
             agent_queue_item.started_at = started_at
             agent_queue_item.completed_at = completed_at
             session.flush()
+            service_user = self.ensure_publication_service_user(session)
 
             agent_run = session.get(AgentRun, coerce_uuid(run_record["id"]))
             if agent_run is None:

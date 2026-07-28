@@ -1220,6 +1220,14 @@ def test_runtime_publication_persistence_attributes_governance_to_human_and_exec
             yield session
 
         def ensure_publication_service_user(self, _session):
+            queue_row = next(item for item in _session.rows if isinstance(item, AgentQueueItem))
+            assert queue_row.agent_id is not None
+            assert queue_row.source_type is not None
+            assert queue_row.source_id is not None
+            assert queue_row.status is not None
+            assert queue_row.priority is not None
+            assert queue_row.created_at is not None
+            _session.flush()
             return service_user
 
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
