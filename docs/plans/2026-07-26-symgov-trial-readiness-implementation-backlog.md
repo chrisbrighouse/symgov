@@ -152,7 +152,7 @@ Status vocabulary: `SPECIFIED` means a controlling implementation-ready goal spe
 
 **Release boundary:** a later authorized F0.3 release must pause all review/publication mutations and Rupert claims, activate the backend, frontend, and repository-owned Rupert runner as one atomic release, pass the exact smoke gates in the controlling spec, and only then resume mutations. A mixed-version backend-first or frontend-first rollout is prohibited because strict 422 spoof rejection is intentionally retained.
 
-**Completion:** Final local checkpoint task `t_ae5e0550` closed F0.3 on 2026-07-27 from baseline `63edef801e45768ac3a402a44f6941f490226c58`. The final immutable implementation snapshot passed Stage 1 `t_bcd01d5d` and was approved by Stage 2 `t_af9698b2`; both reviews recorded the same 21 per-path SHA-256 values and unchanged staged/unstaged/HEAD-to-worktree patch identities. Fresh final gates passed: exact 12-file `py_compile`; 279 focused tests including both repository-runner import boundaries; portable backend 1,002 passed/3 deselected; frontend 67 passed; isolated and canonical Vite builds each transformed 54 modules; verification-wrapper contracts; tracked and all four untracked whitespace checks. No migration or historical backfill was added, and no push, deployment, runtime/service restart, database mutation, publication, withdrawal or external message occurred. F0.3 changes backend, frontend and the repository-owned Rupert runner, so the atomic paused rollout above remains mandatory before this goal can become `DEPLOYED`.
+**Completion:** Final local checkpoint task `t_ae5e0550` closed F0.3 on 2026-07-27 at commit `c7833c8ba19c0c19c1cc7c5267303d324964d39b` (`feat: enforce session-authoritative attribution`) from baseline `63edef801e45768ac3a402a44f6941f490226c58`. The final immutable implementation snapshot passed Stage 1 `t_bcd01d5d` and was approved by Stage 2 `t_af9698b2`; both reviews recorded the same 21 per-path SHA-256 values and unchanged staged/unstaged/HEAD-to-worktree patch identities. Fresh final gates passed: exact 12-file `py_compile`; 279 focused tests including both repository-runner import boundaries; portable backend 1,002 passed/3 deselected; frontend 67 passed; isolated and canonical Vite builds each transformed 54 modules; verification-wrapper contracts; tracked and all four untracked whitespace checks. No migration or historical backfill was added, and no push, deployment, runtime/service restart, database mutation, publication, withdrawal or external message occurred. F0.3 changes backend, frontend and the repository-owned Rupert runner, so the atomic paused rollout above remains mandatory before this goal can become `DEPLOYED`. The exact post-checkpoint identity and concise remaining-stage roadmap are recorded in `docs/plans/2026-07-27-f0-3-post-checkpoint-and-remaining-stages.md`.
 
 ### F0.4 Separate review requests from publication withdrawal — READY, LIVE GOVERNANCE BLOCKER
 
@@ -527,13 +527,13 @@ The corresponding fresh-session prompt must repeat those concrete values, not `<
 
 ### Current completed checkpoint: F0.3
 
-F0.1, F0.2 and F0.3 are complete. F0.2 commit `63edef801e45768ac3a402a44f6941f490226c58` is pushed and deployed; F0.3 has one local checkpoint commit recorded by final task `t_ae5e0550` and is not pushed or deployed.
+F0.1, F0.2 and F0.3 are complete. F0.2 commit `63edef801e45768ac3a402a44f6941f490226c58` is pushed and deployed; F0.3 is committed locally at `c7833c8ba19c0c19c1cc7c5267303d324964d39b` and is not pushed or deployed.
 
 The controlling F0.3 goal spec is:
 
 `docs/plans/2026-07-27-f0-3-session-authoritative-attribution-spec.md`
 
-The concrete restart handoff is `docs/plans/2026-07-27-f0-3-restart-handoff.md`. It records the baseline/deployment state, completed evidence, exact scope, review replacement history, fresh final gates, preserved safety boundaries and the separately authorized atomic release requirement. The implementation baseline was clean `main`/`origin/main` at `63edef801e45768ac3a402a44f6941f490226c58`; the exact resulting local commit is recorded by task `t_ae5e0550`. No push, deployment, migration or runtime change was authorized or performed.
+The concrete restart handoff is `docs/plans/2026-07-27-f0-3-restart-handoff.md`. It records the baseline/deployment state, completed evidence, exact scope, review replacement history, fresh final gates, preserved safety boundaries and the separately authorized atomic release requirement. The implementation baseline was clean `main`/`origin/main` at `63edef801e45768ac3a402a44f6941f490226c58`; final task `t_ae5e0550` created local commit `c7833c8ba19c0c19c1cc7c5267303d324964d39b`. The post-checkpoint record and concise remaining-stage roadmap are `docs/plans/2026-07-27-f0-3-post-checkpoint-and-remaining-stages.md`. No push, deployment, migration or runtime change was authorized or performed.
 
 ### Template for future goal-spec creation
 
@@ -553,3 +553,5 @@ have changed. Do not implement code in the planning session.
 ## 6. Immediate next action
 
 The next backlog goal is **F0.4 — Separate review requests from publication withdrawal**. Write and independently review its implementation-ready specification before any F0.4 code change; no F0.4 spec path exists yet. Keep F0.3 undeployed until a separately authorized atomic paused release executes every smoke, synthetic-attribution and rollback gate in its controlling specification.
+
+For a concise current checkpoint, the separate F0.3 release track, and the remaining F0–F6 programme stages, read `docs/plans/2026-07-27-f0-3-post-checkpoint-and-remaining-stages.md`.
