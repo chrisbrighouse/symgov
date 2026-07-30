@@ -1,0 +1,475 @@
+{
+  "schemaVersion": 1,
+  "auditedCommit": "182430932ae315f472b9e3611d54ad4f08cee038",
+  "markdownFileCount": 78,
+  "files": [
+    {
+      "path": ".hermes/plans/2026-05-30_140019-symbol-automation-order.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": ".hermes/plans/2026-06-17_081344-libby-filename-classification-plan.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": ".hermes/plans/2026-06-20_131100-daisy-rights-review-interface.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": ".hermes/plans/2026-07-10_140928-btx-doors-live-review-repair.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": ".hermes/plans/2026-07-14_161810Z-langfuse-phase-0-governance.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": ".hermes/plans/2026-07-14_170000Z-langfuse-phase-1-isolated-poc.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": ".hermes/plans/2026-07-14_172000Z-langfuse-phase-1-final-report.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "README.md",
+      "classification": "canonical",
+      "changed": true,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "artifacts/reviews/t_ea80369d-f0.4-b1-replay-lifecycle-report.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "backend/README.md",
+      "classification": "canonical",
+      "changed": true,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "docs/README.md",
+      "classification": "canonical",
+      "changed": true,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "docs/btx-submission-workflow.md",
+      "classification": "canonical",
+      "changed": false,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "docs/catalog-api/CHANGELOG.md",
+      "classification": "canonical",
+      "changed": true,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "docs/catalog-api/README.md",
+      "classification": "canonical",
+      "changed": true,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "docs/catalog-api/errors-and-security.md",
+      "classification": "canonical",
+      "changed": true,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "docs/catalog-api/integration-recipes.md",
+      "classification": "canonical",
+      "changed": true,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "docs/catalog-api/quickstart.md",
+      "classification": "canonical",
+      "changed": true,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "docs/plans/2026-05-31-beta-gtm-roadmap.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-06-agent-feedback-queue-state-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-06-symgov-architecture-first-two-steps-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-06-symgov-architecture-status-and-restart-plan.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-07-hannah-feedback-and-sourcing.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-07-reggie-queue-control-surface-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-09-published-symbol-feedback-review-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-10-ed-return-review-symbol-id-status.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-11-build-stamp-auto-date-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-11-scott-source-recommendations-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-12-scott-auth-wall-phase2-progress-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-12-scott-auth-wall-rollout-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-13-dxf-zip-symbol-intake-implementation-plan.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-14-dxf-derivative-persistence-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-14-dxf-intake-review-fix-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-14-dxf-preview-and-multiformat-symbol-assets.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-17-firealarms-review-queue-provenance-fix-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-17-firealarms-standalone-symbol-cleanup-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-17-libby-filename-classification-implementation-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-18-vlad-hardening-closeout.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-19-tracy-rights-state-separation-implementation-plan.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-21-tracy-agent-status-report.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-24-user-auth-and-roles.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-26-auth-live-rollout-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-06-26-hermes-dashboard-cloudflare-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-09-catalog-workbench-stage1-restart.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-09-catalog-workbench-taxonomy-preferences-plan.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-10-api-and-application-integrations.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-20-subscription-model.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-21-customer-profile-subscriptions.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-26-f0-1-restart-note.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-26-f0-1-test-baseline-spec.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-26-symgov-trial-readiness-implementation-backlog.md",
+      "classification": "current-plan",
+      "changed": true,
+      "reason": "Active trial-readiness roadmap reconciled to this source snapshot."
+    },
+    {
+      "path": "docs/plans/2026-07-27-f0-2-workspace-authorization-spec.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-27-f0-3-post-checkpoint-and-remaining-stages.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-27-f0-3-restart-handoff.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-27-f0-3-session-authoritative-attribution-spec.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-28-f0-3-deployment-addendum.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/plans/2026-07-28-f0-4-review-without-unpublication-spec.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/restart-notes/2026-06-19-provenance-rights-review-lane.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/restart-notes/2026-06-19-tracy-rights-state-separation-closeout.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/restart-notes/2026-06-20-daisy-rights-review-interface.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/restart-notes/2026-06-20-lighting-libby-review-visibility.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/restart-notes/2026-06-20-tracy-escalation-reason-cleanup.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/restart-notes/2026-06-21-tracy-rights-review-screen-improvements.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "docs/restart-notes/2026-07-10-btx-review-visibility-fix.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "integrations/btx/SymGov_BTX_Integration_Handoff/CODEX_TASK.md",
+      "classification": "generated-or-reference",
+      "changed": false,
+      "reason": "Supporting handoff, design, task, or format-reference material; not current implementation authority."
+    },
+    {
+      "path": "integrations/btx/SymGov_BTX_Integration_Handoff/README.md",
+      "classification": "generated-or-reference",
+      "changed": false,
+      "reason": "Supporting handoff, design, task, or format-reference material; not current implementation authority."
+    },
+    {
+      "path": "integrations/btx/SymGov_BTX_Integration_Handoff/reference/BTX_FORMAT_ANALYSIS.md",
+      "classification": "generated-or-reference",
+      "changed": false,
+      "reason": "Supporting handoff, design, task, or format-reference material; not current implementation authority."
+    },
+    {
+      "path": "langfuse-poc/README.md",
+      "classification": "canonical",
+      "changed": false,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "langfuse-poc/evidence/phase-1-verification.md",
+      "classification": "historical",
+      "changed": false,
+      "reason": "Point-in-time plan, restart note, decision, verification, or evidence record preserved without rewriting its verdict."
+    },
+    {
+      "path": "references/task-list.md",
+      "classification": "generated-or-reference",
+      "changed": true,
+      "reason": "Early checklist preserved as reference material with an explicit pointer to the current trial-readiness backlog."
+    },
+    {
+      "path": "symgov-agent-architecture.md",
+      "classification": "canonical",
+      "changed": true,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "symgov-governance-architecture.md",
+      "classification": "canonical",
+      "changed": true,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "symgov-product-brief.md",
+      "classification": "canonical",
+      "changed": true,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "symgov-review-decision-orchestration.md",
+      "classification": "canonical",
+      "changed": true,
+      "reason": "Maintained current source/product/API/operating documentation."
+    },
+    {
+      "path": "ui-design/README.md",
+      "classification": "generated-or-reference",
+      "changed": true,
+      "reason": "Historical design-pass index explicitly labelled as reference material rather than a current application inventory."
+    },
+    {
+      "path": "ui-design/component-list.md",
+      "classification": "generated-or-reference",
+      "changed": false,
+      "reason": "Supporting handoff, design, task, or format-reference material; not current implementation authority."
+    },
+    {
+      "path": "ui-design/design-briefs.md",
+      "classification": "generated-or-reference",
+      "changed": false,
+      "reason": "Supporting handoff, design, task, or format-reference material; not current implementation authority."
+    },
+    {
+      "path": "ui-design/svg-rendering-patterns.md",
+      "classification": "generated-or-reference",
+      "changed": false,
+      "reason": "Supporting handoff, design, task, or format-reference material; not current implementation authority."
+    },
+    {
+      "path": "ui-design/wireframes.md",
+      "classification": "generated-or-reference",
+      "changed": false,
+      "reason": "Supporting handoff, design, task, or format-reference material; not current implementation authority."
+    }
+  ]
+}

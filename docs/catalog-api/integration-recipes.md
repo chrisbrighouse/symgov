@@ -47,7 +47,7 @@ response.raise_for_status()
 items = response.json()["items"]
 ```
 
-Retry only transient transport failures and documented `5xx` responses with bounded exponential backoff. Do not automatically retry feedback submissions unless you can prevent duplicates.
+Retry only transient transport failures and documented `5xx` responses with bounded exponential backoff. Feedback submissions require a caller-stable UUID `Idempotency-Key`; replay the same key only for the same intended request.
 
 ## Apryse Viewer and drawing-review applications
 
@@ -57,7 +57,7 @@ Use a backend-for-frontend between Apryse Viewer and Symgov:
 2. Your backend calls `POST /api/v1/catalog/search` with an allowlisted context object.
 3. Show thumbnails and the human-readable ID beside each result.
 4. Let a reviewer submit `comment`, `usage_question`, `issue`, `request_alternative`, `not_found`, or `standards_question` feedback.
-5. Put `send_for_review` behind a distinct confirmation because it requests workflow/state change.
+5. Put `send_for_review` behind a distinct confirmation because it creates or reuses governance review work. It does not change the published lifecycle state or remove the symbol from the published Catalog.
 
 Example contextual body:
 
@@ -84,6 +84,6 @@ Example contextual body:
 
 ## Missing symbol or issue
 
-Use `/api/v1/catalog/symbols/{symbolRef}/feedback` when a known symbol exists. Use the existing `/support` experience for integration-support escalation. Never include credentials.
+Use `/api/v1/catalog/symbols/{symbolRef}/feedback` when a known symbol exists, and include a caller-generated UUID in `Idempotency-Key`. Use the existing `/support` experience for integration-support escalation. Never include credentials.
 
-Downloads are not available through any of these recipes.
+To download, call `POST /api/v1/catalog/symbols/download` with `symbolIds` (1–10 unique references) and one `format` advertised by the selected records. Keep the key server-side and stream the binary response rather than buffering it in browser code.

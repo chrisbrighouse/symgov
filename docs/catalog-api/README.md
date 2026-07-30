@@ -1,6 +1,6 @@
 # Symgov Catalog Integration API
 
-The Catalog Integration API lets customer applications search approved Catalog metadata, inspect symbol details and previews, ask Catalog Ed for symbol guidance, and submit structured feedback. Downloads are not available through the integration API in this release.
+The Catalog Integration API lets customer applications search approved Catalog metadata, inspect symbol details and previews, download available symbol assets, ask Catalog Ed for symbol guidance, and submit structured feedback.
 
 ## Access
 
@@ -34,15 +34,18 @@ The Developer Hub keeps a submitted key in page memory only. It does not save it
 | GET | `/api/v1/catalog/symbols/{symbolRef}` | `catalog.read` | Read one published symbol. |
 | GET | `/api/v1/catalog/symbols/{symbolRef}/thumbnail` | `catalog.read` | Retrieve its thumbnail. |
 | GET | `/api/v1/catalog/symbols/{symbolRef}/preview` | `catalog.read` | Retrieve its preview. |
+| POST | `/api/v1/catalog/symbols/download` | `catalog.read` | Download one asset or a ZIP of up to ten symbols in one available format. |
 | POST | `/api/v1/catalog/search` | `catalog.read` | Search using drawing/application context. |
 | POST | `/api/v1/catalog/ed/query` | `catalog.ed.query` | Ask for Catalog guidance or symbol discovery. |
-| POST | `/api/v1/catalog/symbols/{symbolRef}/feedback` | `catalog.feedback.write` | Submit feedback or an explicit review request. |
+| POST | `/api/v1/catalog/symbols/{symbolRef}/feedback` | `catalog.feedback.write` | Submit feedback or an explicit review request; requires a caller-stable UUID `Idempotency-Key`. |
 
 Use human-readable IDs such as `0003-12` as the primary label in integrator interfaces.
 
+Feedback and `send_for_review` create or reuse governance work while preserving the current published symbol. They do not implicitly withdraw or unpublish it.
+
 ## Current boundaries
 
-- Downloads are not available.
+- Downloads are limited to assets already attached to published symbols. A request selects 1–10 unique symbol references and one advertised format.
 - Conversation history is not persisted.
 - The Developer Hub sandbox is deterministic synthetic data, not a production clone.
 - CORS support is deployment-dependent; do not assume browser-origin access is enabled.

@@ -1,6 +1,6 @@
-# Symgov Backend Scaffold
+# Symgov backend
 
-This directory contains the first backend scaffold for Symgov:
+This directory contains the FastAPI, persistence, migration, and runtime-integration source for Symgov. Repository source does not establish external deployment state.
 
 - `symgov_backend/`
   - FastAPI ASGI app shell, route modules, service modules, and API schemas
@@ -11,7 +11,7 @@ This directory contains the first backend scaffold for Symgov:
 
 Current scope:
 
-- initial relational schema for the phase-1 Symgov backend
+- relational schema and migrations for governance, publication, authentication, subscriptions, Catalog integration, and agent workflows
 - PostgreSQL-first types including `jsonb`
 - a FastAPI/Uvicorn ASGI server shell for growable versioned APIs
 - a small bootstrap and health CLI in `manage_symgov.py`
@@ -35,7 +35,7 @@ Current API package shape:
 Typical commands once dependencies are available:
 
 ```bash
-cd /data/.openclaw/workspace/symgov/backend
+cd /path/to/symgov/backend
 alembic upgrade head
 alembic current
 python manage_symgov.py seed-agent-definitions
@@ -135,25 +135,13 @@ OpenClaw resilience notes:
 - `manage_symgov.py reconcile-openclaw` repairs the OpenClaw-side registration state from that manifest.
 - Per-agent LLM model access is configured through manifest `model_profiles` plus each agent's `model_profile`. Reconciliation resolves the profile to OpenClaw's concrete `agents.list[].model` and per-agent `agent.json` `model` field.
 - This is intended as the first post-upgrade recovery path when OpenClaw updates leave SymGov agent registration or plugin state inconsistent.
-- The current managed binding set is intentionally empty so `telegram:7643191699` remains handled by Alfi/main. Do not bind Telegram directly to `Libby` unless the orchestrator model is intentionally changed.
+- The audited manifest currently contains a direct Telegram-to-Libby binding. This conflicts with the Alfi-first orchestration policy recorded in the current trial-readiness backlog and remains F0.6 work; do not run reconciliation expecting an empty binding set until that source/config contradiction is resolved.
 - OpenClaw bindings currently support deterministic match fields such as channel, account, and peer; they do not provide arbitrary keyword-routing rules.
 
-Current VPS deployment notes:
+Deployment boundary:
 
-- The public Symgov API root is:
-  `https://apps.chrisbrighouse.com/api/v1`
-- The public apps nginx host proxies `/api/...` to:
-  `http://symgov-api:8010`
-- The live compose-managed backend service is:
-  `openclaw-hz0t-symgov-api-1`
-- The live service uses the official image:
-  `ghcr.io/openclaw/openclaw:2026.4.2`
-  rather than the older Hostinger sidecar image, because the verified Symgov
-  backend dependency set is aligned to Python `3.11`
-- Operational reminder:
-  - backend code changes under `/data/.openclaw/workspace/symgov/backend` do not affect the public API until the live `openclaw-hz0t-symgov-api-1` service is restarted or redeployed
-  - if public submissions still show older intake behavior after a local code change, treat that as a deployment/runtime refresh issue first
-  - testability in the VPS/containerized deployment only begins after the frontend build has been published and the live service has been refreshed; a local code edit alone is not enough
+- This document does not assert a public API root, proxy target, container name/image, migration state, or running service version.
+- Verify the intended environment independently before migrations, restarts, smoke tests, or operational conclusions. A local source change is not deployment evidence.
 
 Current external submission API:
 
@@ -164,8 +152,8 @@ Current external submission API:
   - optional `source_notes`
   - `files[]` where each file includes `name`, `note`, `content_type`, and `content_base64`
 - requires an authenticated `admin` or `submitter` session and stamps submitter identity from the current session user
-- the current intake path now supports `.svg`, `.png`, `.jpg`, `.jpeg`, and `.json` uploads
-- accepted raster intake can now reach `Vlad` for `raster_sheet_analysis`, including JPEG inputs normalized through Pillow in the live Python runtime
+- the current intake path supports `.svg`, `.png`, `.jpg`, `.jpeg`, `.json`, `.dxf`, `.btx`, and `.zip` uploads
+- accepted raster intake can reach `Vlad` for `raster_sheet_analysis`, including JPEG inputs normalized through Pillow in the configured Python runtime; DXF, BTX, and ZIP follow their bounded conversion/package workflows
 - one-symbol raster files now produce a `single_symbol_raster_candidate` artifact with filename-derived title, aliases, keywords, note-derived description hints, and attachment/object-key lineage; multi-symbol sheets still produce proposed child crops and `raster_split_review` follow-up
 - versioned health route: `GET /api/v1/health`
 - compatibility alias: `GET /api/health`
@@ -174,7 +162,7 @@ Current Workspace APIs:
 
 - versioned agent queue route: `GET /api/v1/workspace/agent-queue-items`
 - compatibility alias: `GET /api/workspace/agent-queue-items`
-- review cases and Daisy reports remain the other live Workspace dashboard inputs
+- review cases, Daisy reports, and Reggie queue controls are the other configured Workspace dashboard inputs
 - Scott source-discovery memory is exposed through `GET /api/v1/workspace/scott/source-sites`; the route returns URL, status, title, domain, descriptive metadata, `includeNextRun`, candidate-only source prompts, formats, evidence, relevance score, timestamps, and last queue item, with offset/limit lazy loading plus server-side filters and sorting for each grid column. Candidate source prompts are edited through `PATCH /api/v1/workspace/scott/source-sites/{source_site_id}/prompt`; `Next run` inclusion is edited through `PATCH /api/v1/workspace/scott/source-sites/{source_site_id}/include-next-run`. The frontend retries these PATCH calls with a wrapped `{request: ...}` body when the deployed API expects FastAPI's wrapped body shape.
 - Hannah published-symbol curation is started through `POST /api/v1/workspace/hannah/curation-searches`; the backend creates a Hannah queue item with a two-minute default run window, writes a runtime queue JSON record, and launches the Hannah runner with DB persistence.
 - Hannah published-symbol curation can be stopped through `POST /api/v1/workspace/hannah/curation-searches/{queue_item_id}/stop`; the backend marks the queue item `cancelled`, stamps `completed_at`, records stop metadata in the queue payload, updates the runtime queue JSON, and sends `SIGTERM` to the stored process group when available.
@@ -244,7 +232,8 @@ python manage_symgov.py check-storage
 
 Current runner bridge notes:
 
-- `manage_symgov.py seed-agent-definitions` upserts baseline `agent_definitions` rows for `scott`, `vlad`, `tracy`, `daisy`, `libby`, `rupert`, `ed`, `hannah`, and `whitney`
+- `manage_symgov.py seed-agent-definitions` upserts baseline `agent_definitions` rows for `scott`, `vlad`, `tracy`, `daisy`, `libby`, `rupert`, `ed`, `hannah`, `reggie`, and `whitney`
+- Repository-owned agent worker execution is selected by `SYMGOV_AGENT_RUNTIME`: `direct` (the default) or `hermes`. The OpenClaw manifest remains registration/workspace compatibility data and is not the sole worker-execution runtime.
 - Vlad's runner is repo-managed at `/data/symgov/scripts/run_vlad_validation.py`; the old `/data/.openclaw/workspaces/vlad/run_vlad_validation.py` code copy has been retired. Keep using `/data/.openclaw/workspaces/vlad/runtime` for queue/history artifacts.
 - `manage_symgov.py seed-scott-source-discovery` upserts Scott's durable source-discovery memory rows, prioritising the recommended standards/source backbone: IEC 60617, ISO 14617, ISA-5.1, ASME Y14.5 / ISO 1101, ProjectMaterials, Vista Projects, NECA 100, QElectroTech, readable GD&T references, and rights-gated CAD-library candidates; ignored domains such as `linecad.com`, `svghmi.pro`, and `autodesk.com` remain ignored
 - Scott source-search defaults now seed toward `ProjectMaterials P&ID symbols ISA-5.1 ISO 14617 IEC 60617 NECA 100 QElectroTech GD&T`, while ignored domains and checked `include_next_run` rows are passed into the next run payload

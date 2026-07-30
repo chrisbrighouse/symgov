@@ -1,6 +1,8 @@
-# Symgov Task List
+# Symgov historical task reference
 
-## Current Notes
+This file preserves an early implementation checklist. It is not the current roadmap, and some statements below describe conditions that have since changed. Use [`../docs/plans/2026-07-26-symgov-trial-readiness-implementation-backlog.md`](../docs/plans/2026-07-26-symgov-trial-readiness-implementation-backlog.md) for current source status and sequencing.
+
+## Original notes
 
 - Scott manual source-discovery control on the submissions page is now visible by default because admin mode defaults to `true` until login/auth exists.
 - Frontend build verified successfully after the submissions-page change.

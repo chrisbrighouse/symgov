@@ -1,10 +1,10 @@
 # symgov Product Brief
 
-Last updated: 2026-04-09
+Last updated: 2026-07-30 (source snapshot `182430932ae315f472b9e3611d54ad4f08cee038`)
 
 ## Product summary
 
-`symgov` is a symbol-governance product for engineering symbols and published standards content.
+`symgov` is a symbol-governance and reference product for engineering symbols and published standards content. It is not a broad drawing-management or document-management system.
 
 It has two core surfaces:
 
@@ -39,7 +39,7 @@ Symgov addresses that by separating the internal system of record from the publi
 - engineers
 - contractors
 - reviewers consuming approved content
-- document-control or pack consumers
+- engineers and integrators consuming governed symbol references or packs
 
 ## Product surfaces
 
@@ -142,27 +142,24 @@ Key interface principles:
 
 ## Technical direction
 
-Current state:
+Repository implementation at the audited source snapshot:
 
-- static HTML, CSS, and JavaScript prototype
-- route-based navigation
-- local demo data in `app.js`
+- React/Vite static SPA with authenticated, role-gated application routes
+- FastAPI application server under `/api/v1`, with selected legacy `/api` aliases
+- PostgreSQL/SQLAlchemy/Alembic system of record
+- S3-compatible object storage for source, preview, derivative, and export assets
+- specialist queue workers and repository-managed runners with durable database records plus bounded runtime-file handoffs
+- individual Free/Plus subscriptions; self-service Plus is £50/year and does not grant privileged roles
 
-Backend direction:
+Source code establishes implemented behavior, not whether a particular production deployment is active or current.
 
-- FastAPI application server
-- PostgreSQL system of record
-- Redis where lightweight async coordination is justified
-- S3-compatible object storage for SVG and export assets
-- static front-end build behind a reverse proxy
+Recommended first-phase deployment profile:
 
-Current first-phase VPS choice:
-
-- use local MinIO for S3-compatible object storage until a managed external option is justified
+- use an S3-compatible store such as local MinIO until a managed external option is justified; verify the selected environment independently
 
 ## Current implementation baseline
 
-The local prototype, architecture doc, README, and UI design packet are aligned around:
+The repository source and current architecture documentation are aligned around:
 
 - route-based implementation
 - queue-first Workspace review
@@ -173,18 +170,14 @@ The local prototype, architecture doc, README, and UI design packet are aligned 
 
 ## Supplemental operating model
 
-The spreadsheet in `Documentation/Symgov` adds a future operating model with named specialist agents covering intake, provenance, validation, classification, coordination, publication, curation, audit, intelligence, and documentation.
-
-Those agents are not implemented yet.
-
-The spreadsheet should be treated as future operating-model guidance, not as a replacement for the current Symgov architecture or prototype.
+The specialist operating model now has implemented slices for intake, provenance, validation, classification, coordination, publication, curation, experience/feedback, intelligence, and Reggie queue-control/audit visibility. Broader automated compliance monitoring remains a planned extension. Historical spreadsheets and plans remain design evidence, not authority over current source.
 
 ## Recommended near-term roadmap
 
-- browser-pass validation of current desktop and mobile prototype behavior
-- decision on long-term role of guided lookup relative to the Standards clarification rail
-- first agentization slice using independent agents with owned queues and durable outputs
-- initial focus on `Vlad`, then `Scott`, `Tracy`, and `Daisy`
+- continue the controlled-trial backlog in `docs/plans/2026-07-26-symgov-trial-readiness-implementation-backlog.md`
+- keep publication and withdrawal under explicit human governance
+- benchmark classification and conversion quality before expanding automation authority
+- preserve the individual £50/year Plus model unless a separate product decision changes it
 
 ## Short positioning statement
 

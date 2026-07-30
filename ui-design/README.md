@@ -1,6 +1,6 @@
 # symgov UI design artifacts
 
-This folder contains a lightweight update package for the two core experiences:
+This folder preserves the scope of an earlier design pass focused on two core experiences. It is reference material, not a complete inventory of the current application routes or Workspace lanes:
 
 - `design-briefs.md` - concise design briefs for Standards View and Workspace View, plus assumptions and follow-ups
 - `wireframes.md` - desktop and mobile ASCII wireframes for both views

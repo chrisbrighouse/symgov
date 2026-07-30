@@ -1,6 +1,8 @@
 # symgov Governance — Architecture
 
-Last updated: 2026-05-22
+Last updated: 2026-07-30 (source snapshot `182430932ae315f472b9e3611d54ad4f08cee038`)
+
+This is the canonical source architecture for engineering-symbol governance and reference. It is not a drawing/document-management architecture. “Implemented” statements are grounded in repository source, migrations, and tests; they do not assert external production activation. Sections explicitly labelled draft or recommended remain design guidance.
 
 ## Summary
 
@@ -9,8 +11,7 @@ Purpose
 - The product stays split between internal `Governance Workspace` workflows and external `Standards View` consumption.
 
 Implementation target
-- The local frontend source is now a React/Vite application developed inside the `openclaw` container.
-- The public VPS frontend may still reflect an older published bundle until the React/Vite build is intentionally published.
+- The repository frontend is a React/Vite static SPA. Build and publication are separate operational steps whose target and served version require independent verification.
 - `Standards View` uses a published-only home surface that combines browse, latest-approved detail, and clarification context, plus focused routes for symbol pages, downloads, and guided lookup.
 - `Governance Workspace` uses a queue-first review surface with compare and approval context, plus focused routes for record detail, audit, and publish flow.
 
@@ -25,7 +26,7 @@ Product rules
 ### Governance records
 
 - `users`
-  - id, email, display_name, role, created_at
+  - id, email, display_name, account state, subscription, normalized role assignments, created_at
 - `governed_symbols`
   - id, slug, canonical_name, category, discipline, owner_id, current_revision_id, created_at
 - `symbol_revisions`
@@ -94,8 +95,8 @@ This model keeps published page membership, pack membership, clarification captu
   - published page metadata and latest approved symbol/page payload
 - `GET /api/v1/published/packs`
   - current published packs and export metadata
-- `POST /api/v1/published/clarifications`
-  - log a clarification or issue tied to a symbol/page context
+- `POST /api/v1/published/symbols/commands`
+  - record a comment or request Ed-managed review without changing published availability; the request requires a caller-stable UUID `requestId`
 
 Phase-1 published API rule:
 
@@ -107,12 +108,8 @@ Phase-1 published API rule:
 
 ### Governance Workspace
 
-- `GET /api/v1/workspace/queue`
-  - queue-first review list with owner, due date, risk, impacted pages, and impacted packs
-- `GET /api/v1/workspace/change-requests/{id}`
-  - active compare context, linked clarifications, and review metadata
-- `POST /api/v1/workspace/change-requests/{id}/decision`
-  - approve, request changes, mark ready, or reassign
+- `GET /api/v1/workspace/agent-queue-items`
+  - agent queue monitor read model (admin-only under the operation policy)
 - `GET /api/v1/workspace/review-cases`
   - Daisy-visible review cases with source preview context and latest decision summary
   - open split children are projected as first-class human-review items with `reviewItemType: "split_item"`, `parentReviewCaseId`, one child payload, and the child preview as the primary visual while their `review_split_items.status` is `awaiting_decision` or `returned_for_review`
@@ -142,12 +139,7 @@ Phase-1 published API rule:
 - `PATCH /api/v1/workspace/review-cases/{id}/symbol-properties`
   - update reviewer-editable symbol properties for the active review record: `Name`, `Description`, `Category`, and `Discipline`, while showing read-only source `Format` as file-format context
   - remember reviewer-entered `Category` and `Discipline` values as reusable database-backed options, normalized to capitalized mixed case and deduplicated by canonical/fuzzy matching
-- `GET /api/v1/workspace/symbols/{symbol_id}`
-  - governed record detail across lifecycle states
-- `GET /api/v1/workspace/symbols/{symbol_id}/audit`
-  - revision and publication traceability
-- `POST /api/v1/workspace/publications`
-  - publish approved scope into pack/page outputs
+- Publication handoff is currently driven by approved review decisions and backend runner/service contracts; there is no generic `POST /api/v1/workspace/publications` route in this snapshot.
 
 ## Rendering and accessibility rules
 
@@ -209,12 +201,14 @@ This section turns the current architecture into a first-pass backend persistenc
 - `id uuid primary key`
 - `email text not null unique`
 - `display_name text not null`
-- `role text not null`
+- account/authentication fields including active/deleted/default-PIN state
 - `created_at timestamptz not null`
+
+Privileged roles are normalized in `user_roles` rather than stored as a scalar `users.role`. Current role values are `admin`, `integrator`, `submitter`, and `reviewer`; effective access also depends on active Plus entitlement.
 
 Recommended constraints:
 
-- `role` checked against the first role set used by Workspace
+- `user_roles.role` checked against the current four privileged role values
 - unique lowercased email
 
 #### `governed_symbols`
@@ -1043,7 +1037,7 @@ This section defines what must exist in an environment before Symgov backend ins
 
 #### 1. Application runtime
 
-- Python 3.12 or newer
+- Python 3.11 or newer
 - FastAPI application server
 - ASGI process runner such as `uvicorn` or `gunicorn` with `uvicorn` workers
 - database migration tool such as Alembic

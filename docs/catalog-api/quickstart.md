@@ -55,7 +55,19 @@ curl --fail-with-body \
   "$SYMGOV_API_BASE_URL/catalog/ed/query"
 ```
 
-Downloads are not available. `availableFormats` describes Catalog metadata; it is not a download entitlement.
+## 6. Download an available asset
+
+Use a format advertised by the selected symbols. A request containing one symbol ID returns its matching asset directly. A request containing multiple symbol IDs returns a ZIP, even if unavailable formats leave only one downloadable asset inside it. Skipped symbols are reported in response headers, and the request fails with `422` if none has the requested format.
+
+```bash
+curl --fail-with-body \
+  --request POST \
+  --header "Authorization: Bearer $SYMGOV_CATALOG_API_KEY" \
+  --header "Content-Type: application/json" \
+  --data '{"symbolIds":["0003-12"],"format":"DXF"}' \
+  --output 0003-12-download \
+  "$SYMGOV_API_BASE_URL/catalog/symbols/download"
+```
 
 ## JavaScript and TypeScript note
 

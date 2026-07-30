@@ -10,19 +10,12 @@ The design direction for this pass is:
 
 - Agents should be independent as much as possible.
 - Each agent should own its own queue and produce explicit outputs.
-- The default low-cost model path should use the local Ollama provider with `ollama/gemma4:e4b`.
+- Agent model assignments are selected through named `model_profiles` in `openclaw-agents.manifest.json`; the manifest is the source/config authority for concrete model IDs.
 - Human review remains the final authority for high-risk governance and publication actions, but low-risk symbols may bypass human review when Libby explicitly records that review is not required and the validation, provenance, classification, and release evidence is complete.
 
 ## Current fit with OpenClaw
 
-The current OpenClaw environment already supports the model and specialist-agent pattern needed for Symgov:
-
-- Local Ollama is configured at `http://ollama:11434`.
-- OpenClaw agent defaults already point to `ollama/gemma4:e4b`.
-- Existing specialist agents `Pat` and `Carly` already run on `ollama/gemma4:e4b`.
-- Agent-to-agent routing is enabled, and `Vlad` is now included in the current allow-list with `cody`, `pat`, `carly`, and `codex`.
-
-This means Symgov agent work does not need a new model strategy first. It needs agent definitions, queue contracts, and service boundaries.
+The repository defines specialist-agent identities, queue contracts, runner boundaries, and model profiles. External OpenClaw registration, credentials, provider availability, and allow-lists must be inspected in the intended runtime rather than inferred from this source document.
 
 Current implementation baseline:
 
@@ -44,7 +37,7 @@ Agents should strengthen the existing governance pipeline, not replace the core 
 
 ## Operating model vs implementation model
 
-The spreadsheet under `Documentation/Symgov` describes a future operating model with named specialist agents:
+Early operating-model material introduced the following named specialist agents; the repository manifest, runners, migrations, and tests now determine their implementation status:
 
 - `Scott` intake
 - `Tracy` provenance and rights
@@ -59,14 +52,14 @@ The spreadsheet under `Documentation/Symgov` describes a future operating model 
 
 Current implementation status is now mixed rather than empty:
 
-- `Scott`, `Vlad`, and `Tracy` exist as live local/file-backed runners with PostgreSQL write-through support
+- `Scott`, `Vlad`, and `Tracy` exist as repository-managed file-backed runners with PostgreSQL write-through support
 - `Daisy` now exists as the first review-coordination scaffold and can be created automatically from persisted `review_cases`
 - `Libby` now exists as the classification-and-research scaffold between `Tracy` and `Daisy`
 - `Rupert` now exists as the first publishing and release-management scaffold after either human approval or an auditable Libby no-human-review-required handoff
 - `Ed` now exists as the visual experience/help/feedback scaffold
 - `Hannah` now exists as the catalogue quality and long-term curation scaffold for published Standards records
 - `Whitney` now exists as the market intelligence and demand sensing scaffold for internal demand telemetry
-- `Reggie` remains the only named planning-wave agent without a current scaffold
+- `Reggie` has a seeded backend definition, a Workspace audit/control lane, queue-control APIs, and source-backed tests; broader automated compliance monitoring remains planned
 
 The implementation direction should be:
 
@@ -98,7 +91,7 @@ No agent should consume another agent's internal prompt history as its primary s
 
 Current bridge note:
 
-- the local runner bridge currently maps legacy string queue IDs and source IDs into deterministic UUIDs so the existing file-backed queue payloads can be mirrored into the live UUID-based schema without changing local runtime fixtures first
+- the local runner bridge currently maps legacy string queue IDs and source IDs into deterministic UUIDs so existing file-backed queue payloads can be mirrored into the configured UUID-based schema without changing local runtime fixtures first
 - queue status should describe the agent's responsibility, not the whole downstream lifecycle. For example, Vlad completes a Libby-routed graphic-change queue item once the changed image result has been returned to Libby, and Daisy completes human-review escalation work once the review request has been created/escalated.
 - agent runs should keep useful `tool_trace_json` because Workspace monitor cards can summarize Vlad's process/tool usage from that trace. Current UI labels include `Tess` for Tesseract/OCR, `Nano` for Nano Banana/Gemini image-edit fallback, and conversion/split labels such as `DXF to SVG`, `Format conversion`, `Raster split`, and `Raster candidate`.
 
@@ -181,7 +174,7 @@ To support independent agents cleanly, add these families of records:
 
 Current status:
 
-- these tables are no longer only planned; the first live schema exists and is now being exercised by the bootstrap CLI plus the `Scott` and `Vlad` write-through smoke path
+- these tables are implemented by migrations and exercised by the bootstrap CLI plus the `Scott` and `Vlad` write-through test/smoke path
 
 ### Intake and assessment records
 
@@ -459,7 +452,7 @@ Current implementation status:
 
 - Seed baseline agent rows with:
   - `python /data/.openclaw/workspace/symgov/backend/manage_symgov.py seed-agent-definitions`
-- Inspect the live database with:
+- Inspect the configured database with:
   - `python /data/.openclaw/workspace/symgov/backend/manage_symgov.py check-db`
 - Inspect local MinIO with:
   - `python /data/.openclaw/workspace/symgov/backend/manage_symgov.py check-storage`
@@ -472,7 +465,9 @@ Current implementation status:
   - `python /data/symgov/scripts/run_rupert_publication.py --queue-item ... --runtime-root /data/.openclaw/workspaces/rupert/runtime --persist-db`
   - `python /data/symgov/scripts/run_hannah_curation.py --queue-item ... --runtime-root /data/.openclaw/workspaces/hannah/runtime --persist-db`
 
-## Current verified live state
+## Source-backed implementation state
+
+The following is established by repository source, migrations, and tests. It does not claim that any external runtime or production deployment currently matches this snapshot.
 
 - `agent_definitions` contains seed definitions for `scott`, `vlad`, `tracy`, `daisy`, `libby`, `rupert`, `ed`, and `hannah`
 - `Scott` has been verified writing `agent_queue_items`, `agent_runs`, `agent_output_artifacts`, and `intake_records`
@@ -485,7 +480,7 @@ Current implementation status:
 - `Daisy` now:
   - accepts `review_case` coordination queue items
   - writes local `review_coordination_reports`
-  - can be auto-created from `Vlad` or `Tracy` review-case outputs on the live external submission path
+  - can be auto-created from `Vlad` or `Tracy` review-case outputs on the external submission path
   - is queryable through the backend Workspace API and visible in the Workspace UI as a read-only coordination lane
   - marks Libby follow-up/human-review escalation queue items `completed` once the human review request has been created/escalated, with related Daisy queue completions mirrored into PostgreSQL by the backend queue bridge
 - `Libby` now:
@@ -622,9 +617,9 @@ Why after wave 1:
 
 Libby, Rupert, Ed, Hannah, and Whitney have moved from planning slots into current scaffolded implementation slices.
 
-## Recommended first implementation slice
+## Historical first implementation sequence
 
-Build `Vlad` first, but define the shared queue and artifact model in a way that `Scott` and `Tracy` can adopt immediately after.
+This sequence records the order used to establish the first agent slices; it is not the current backlog.
 
 Reasoning:
 
@@ -643,9 +638,9 @@ Practical sequence:
 6. Add `Rupert` to stage approved symbols for release and Standards publication.
 7. Add `Hannah` to curate published Standards catalogue quality after publication.
 
-## Gemma usage policy
+## Historical Gemma usage policy
 
-Default model policy:
+This was the initial low-cost policy. The current manifest model profiles supersede concrete model selections while the deterministic-tool and authority rules below remain applicable.
 
 - Use `ollama/gemma4:e4b` for routine queue processing, extraction summaries, classification proposals, and escalation drafting.
 - Prefer deterministic local tools for validation, parsing, and packaging.
@@ -668,7 +663,7 @@ Bad Gemma tasks:
 
 ## OpenClaw integration notes
 
-To make Symgov agents real in the current environment, add:
+The source manifest and runner contracts expect:
 
 - new OpenClaw agent entries for each Symgov agent
 - workspaces such as `/data/.openclaw/workspaces/scott`, `/data/.openclaw/workspaces/vlad`, `/data/.openclaw/workspaces/tracy`, `/data/.openclaw/workspaces/daisy`
@@ -689,12 +684,12 @@ Current profile intent:
 
 If asynchronous external triggers are needed later, current hook allow-lists will also need extending because only `main` and `pat` are currently hook-enabled.
 
-## Minimal rollout decision
+## Historical minimal rollout decision
 
-For the next implementation pass, the recommended committed direction is:
+The initial committed direction was:
 
 - independent agents with owned queues and explicit outputs
-- local `ollama/gemma4:e4b` as the default model path
+- a low-cost default model path (now selected through the manifest rather than fixed here)
 - `Vlad` as the first implemented Symgov agent
 - `Scott` and `Tracy` immediately after
 - `Daisy` as the first coordination agent after those outputs exist

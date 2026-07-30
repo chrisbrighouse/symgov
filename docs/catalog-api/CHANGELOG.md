@@ -1,5 +1,11 @@
 # Catalog API changelog
 
+## 2026-07-21 — Catalog downloads and self-service keys
+
+- Added `POST /api/v1/catalog/symbols/download` for one direct asset or a ZIP of up to ten symbols in one available format.
+- Added Integrator Hub self-service API-key creation and revocation, limited to one active key per account.
+- Download availability is now reported by capabilities, taxonomy and symbol detail responses.
+
 ## 2026-07-16 — Developer Hub milestone 1
 
 Added documentation and integration tooling for the current v1 Catalog API:
@@ -12,7 +18,7 @@ Added documentation and integration tooling for the current v1 Catalog API:
 - stateless documentation-grounded Ed integration help;
 - Postman collection and support escalation guidance.
 
-Current boundaries remain unchanged:
+Boundaries at that milestone were:
 
 - Downloads are not available.
 - Conversation history is not persisted.

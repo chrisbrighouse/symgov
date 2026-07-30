@@ -91,8 +91,8 @@ Current known stale fixtures must be repaired in Goal F0.1 rather than accepted 
 | Customer/organization/trial membership already exists | There is no organization, tenant, membership or invitation domain. The confirmed commercial model is currently individual £50/year Plus. Do not introduce organizations without a separate product decision and real use case. |
 | Reviewer disciplines can be added as a profile filter | Review items contain discipline data, but reviewers have no qualifications/discipline assignments and the backend returns the full review queue. This is a new authorization domain, not just UI filtering. |
 | The proposed long symbol lifecycle describes current state | Revision lifecycle is only `draft/review/approved/published/deprecated`; review cases and split items use separate string states. Introduce transition services incrementally rather than replacing every state in one migration. |
-| Human reviewer identity is trustworthy | Decision requests accept client-supplied reviewer name/role and often persist no actor. Session identity must become authoritative before external review. |
-| Requesting review is harmless to publication | The current published-feedback path can move a published revision to `review`, removing it from the published read model before a governance withdrawal decision. Review and withdrawal must be separated. |
+| Human reviewer identity is trustworthy | At the plan baseline, decision requests accepted client-supplied reviewer name/role and often persisted no actor. F0.3 corrected this in source; its historical finding remains the reason for that goal. |
+| Requesting review is harmless to publication | At the plan baseline, published feedback could move a published revision to `review`. F0.4 corrected that behavior in source; explicit human withdrawal remains future F2.3 work. |
 | BTX output existence proves conversion quality | The converter safely produces multiple derivatives but silently ignores some operators/features. Vlad may mark emitted output as passed. Unsupported or lossy conversions need release-blocking warnings and quarantine. |
 | Libby's confidence threshold is meaningful | Classification and evidence records exist, but there is no labelled benchmark or calibration proving the `0.82` threshold. It must not authorize autonomous publication. |
 | Agent notifications form a notification service | Existing agent status notifications are direct wrappers with partial runner coverage. Only subscription email has a transactional outbox. A general durable notification domain is still absent. |
@@ -154,17 +154,19 @@ Status vocabulary: `SPECIFIED` means a controlling implementation-ready goal spe
 
 **Completion and deployment:** Final local checkpoint task `t_ae5e0550` closed F0.3 on 2026-07-27 at commit `c7833c8ba19c0c19c1cc7c5267303d324964d39b` (`feat: enforce session-authoritative attribution`) from baseline `63edef801e45768ac3a402a44f6941f490226c58`. The final immutable implementation snapshot passed Stage 1 `t_bcd01d5d` and was approved by Stage 2 `t_af9698b2`; both reviews recorded the same 21 per-path SHA-256 values and unchanged staged/unstaged/HEAD-to-worktree patch identities. Fresh final gates passed: exact 12-file `py_compile`; 279 focused tests including both repository-runner import boundaries; portable backend 1,002 passed/3 deselected; frontend 67 passed; isolated and canonical Vite builds each transformed 54 modules; verification-wrapper contracts; tracked and all four untracked whitespace checks. No migration or historical backfill was added at the checkpoint. The historical spec/handoff correctly record that no release occurred in that implementation session. Current read-only evidence in `docs/plans/2026-07-28-f0-3-deployment-addendum.md` establishes that `main`, `origin/main`, the immutable production backend/frontend release and repository-owned runner are now at `45fc6e00b1372fce1e092ebe282f264ccd401cb3`, containing F0.3 plus the verified Rupert durable-queue flush-order correction; both public root and health returned HTTP 200.
 
-### F0.4 Separate review requests from publication withdrawal — SPECIFIED, LIVE GOVERNANCE BLOCKER
+### F0.4 Separate review requests from publication withdrawal — COMPLETE, NOT DEPLOYMENT-VERIFIED
 
 **Purpose:** Stop feedback or a review request from silently removing a currently published symbol from the public catalogue.
 
 **Rules:** Feedback opens clarification/review work while the current revision remains published; only an authenticated, authorized human withdrawal decision may change public availability; record the actual requester and actor rather than attributing the action to Ed.
 
-**Code-backed evidence:** `backend/symgov_backend/services/published_feedback.py:194-196` locks the selected published revision and changes it to `review`; `backend/symgov_backend/published_catalog.py:30-40` excludes that revision immediately. `backend/symgov_backend/routes/published.py:390-443` runs behind a mount-level session guard but does not inject its `AuthenticatedUser`, instead persisting Ed as browser submitter/audit actor/workflow owner. Catalog API-key attribution and scope enforcement are already authoritative at `backend/symgov_backend/routes/catalog.py:704-754`, but the APIs have no caller-stable request ID, so a transport retry is indistinguishable from intentional new feedback and duplicates intake/actions/queues/files; Catalog also returns `mutatesPublishedState: true` (`tests/test_catalog_feedback.py:443-479`). Runtime files are exposed before DB commit, Catalog auth commits `last_used_at` before payload/symbol validity is known, and symbol-level routing can silently choose the first of several publication placements. Existing tests explicitly preserve these defects and must be inverted/extended.
+**Historical baseline:** The controlling specification preserves the pre-implementation defects and evidence without rewriting those point-in-time verdicts.
 
 **Controlling specification:** `docs/plans/2026-07-28-f0-4-review-without-unpublication-spec.md`. It separates publication state, clarification/review workflow and future withdrawal/replacement; defines session/API-key requester attribution, Ed executor attribution, authorization, an indexed deterministic request-level audit anchor plus exact per-symbol identities, schema-valid canonical-page anchoring with a complete multi-placement snapshot, database-first runtime handoff limits, exact browser 200/202 and Catalog 201/202/usage-telemetry contracts, a repository-owned fail-closed intake/Ed-claim pause marker with mandatory pre-F0.4 API/worker shutdown-and-drain before backend-first activation and safe rollback rules, no-migration/historical-data treatment, UI behavior, exact tests and a serialized fresh Stage 1/Stage 2 chain.
 
 **Acceptance:** every feedback/review-request route preserves the published read model, creates the expected exactly-once durable workflow under same-key replay (including disjoint-target conflicts), records the authenticated or API-key requester at request-anchor and symbol level, preserves valid open-case stage/ownership, returns the exact bounded wire contract, and has negative tests proving no implicit lifecycle change, invalid-request side effect or mixed-version activation window. This closes before any new reviewer, capability or submission feature work.
+
+**Completion:** Source implementation is commit `182430932ae315f472b9e3611d54ad4f08cee038`. The preserved correction report at `artifacts/reviews/t_ea80369d-f0.4-b1-replay-lifecycle-report.md` records 429 disposable-PostgreSQL focused tests, 1,136 backend tests with 3 skipped/3 deselected, all external partitions, 74 frontend tests, both frontend builds, wrapper contracts, compilation, whitespace, and added-line security checks. No migration was added. The report explicitly records no push or deployment; this source snapshot therefore does not establish production activation. F2.4 crash-proof automatic delivery remains residual work.
 
 ### F0.5 Enforce account security invariants in the backend — READY
 
@@ -527,9 +529,9 @@ Next backlog goal and exact next-spec path
 
 The corresponding fresh-session prompt must repeat those concrete values, not `<ID>` placeholders. Each CP0–CP6 note is an immutable phase record; if later work changes the facts, create a newer note rather than rewriting historical evidence.
 
-### Current completed checkpoint: F0.3
+### Current source checkpoint: F0.4
 
-F0.1, F0.2 and F0.3 are complete. F0.3 is pushed and deployed at production release `45fc6e00b1372fce1e092ebe282f264ccd401cb3`, which contains implementation commit `c7833c8ba19c0c19c1cc7c5267303d324964d39b` and the verified Rupert durable-queue flush-order correction. The current deployment evidence is in `docs/plans/2026-07-28-f0-3-deployment-addendum.md`; older “not deployed” statements remain valid historical checkpoint records.
+F0.1 through F0.4 are complete in repository source. Historical F0.1–F0.3 completion and deployment evidence remains in the referenced immutable records. F0.4 is present at `182430932ae315f472b9e3611d54ad4f08cee038`, but neither source nor its preserved report establishes deployment.
 
 The controlling F0.3 goal spec is:
 
@@ -554,6 +556,6 @@ have changed. Do not implement code in the planning session.
 
 ## 6. Immediate next action
 
-The next backlog goal is **F0.4 — Separate review requests from publication withdrawal**. Its implementation-ready controlling specification is `docs/plans/2026-07-28-f0-4-review-without-unpublication-spec.md`. This planning session authorizes no F0.4 source implementation; use its serialized Cody implementation, fresh immutable Stage 1, fresh immutable Stage 2 and final-verification chain in a later session. F0.3 is already deployed as recorded in the separate 2026-07-28 addendum.
+The next backlog goal is **F0.5 — Enforce account security invariants in the backend**. Before implementation, write and independently review its implementation-ready specification against the current source snapshot. F0.6 then resolves the manifest/Telegram routing contradiction. No deployment, migration, gateway, or production action is implied by this planning update.
 
-For a concise current checkpoint, the separate F0.3 release track, and the remaining F0–F6 programme stages, read `docs/plans/2026-07-27-f0-3-post-checkpoint-and-remaining-stages.md`.
+The F0.4 controlling specification and correction report remain the detailed source-completion records. Earlier F0.3 restart and deployment documents remain historical evidence and must not be rewritten to describe later states.

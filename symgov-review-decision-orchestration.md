@@ -66,7 +66,7 @@ Current backend status:
 - non-approval decisions create a durable Libby follow-up action through `review_followup_handoff.py`
 - Libby follow-up queue payloads include decision code, decision note, case comment, reviewer identity, source lineage, current classification context, and child decisions
 - `GET /api/v1/workspace/review-cases` now includes the latest unsuperseded decision summary
-- the live public API process still needs a restart or redeploy before the latest routing changes are active at `https://apps.chrisbrighouse.com/api/v1`
+- source and tests define this routing; deployment activation must be verified separately and is not inferred here
 
 ## Design goals
 
@@ -578,8 +578,8 @@ Status as of 2026-05-03:
 - every non-approval decision creates a Libby follow-up handoff with the full review response and child-decision details
 - Libby review follow-up can queue Daisy directly for re-review or queue Vlad for graphic changes
 - Vlad graphic-change results return to Libby, and Libby then queues Daisy for re-review
-- Reviews frontend filters and the decision panel are implemented and published to the static route
-- live API reload remains the deployment boundary before the latest routing behavior can be verified from the public browser UI
+- Reviews frontend filters and the decision panel are implemented in source
+- browser-visible deployment state must be verified against the intended runtime separately
 
 Do not implement the whole state machine at once.
 
@@ -608,7 +608,7 @@ This is enough to validate the human decision pipeline without introducing publi
 1. Add database schema for `human_review_decisions`. Done in migration `20260426_0004_human_review_decisions.py`.
 2. Add database schema for `review_case_actions`. Done in migration `20260426_0004_human_review_decisions.py`.
 3. Add review-case status, waiting, and resolution fields. Deferred; current first cut uses `review_cases.current_stage`, `closed_at`, latest decision summary, and action rows.
-4. Implement `POST /api/v1/workspace/review-cases/{id}/decisions`. Done in source, pending live API process reload.
+4. Implement `POST /api/v1/workspace/review-cases/{id}/decisions`. Done in source; runtime activation is a separate operational check.
 5. Generate deterministic follow-on action rows from the decision code. Done for the first SME decision set.
 6. Extend Workspace review APIs to show decision and action state. Partly done through `latestDecision` on review-case list responses; full detail/history remains pending.
 7. Extend Daisy reports to summarize pending action state instead of only pre-decision suggestions. Pending.

@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "Symgov Catalog Integration API v1",
-    "description": "Current customer Catalog integration endpoints. Downloads are not available.",
+    "description": "Current customer Catalog integration endpoints, including bounded symbol downloads and idempotent feedback.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -11,7 +11,8 @@
   "variable": [
     { "key": "baseUrl", "value": "https://YOUR_SYMGOV_HOST" },
     { "key": "catalogApiKey", "value": "YOUR_CATALOG_API_KEY", "type": "secret" },
-    { "key": "symbolRef", "value": "0003-12" }
+    { "key": "symbolRef", "value": "0003-12" },
+    { "key": "feedbackIdempotencyKey", "value": "00000000-0000-4000-8000-000000000001" }
   ],
   "item": [
     {
@@ -29,6 +30,15 @@
     {
       "name": "Symbol detail",
       "request": { "method": "GET", "url": { "raw": "{{baseUrl}}/api/v1/catalog/symbols/{{symbolRef}}", "host": ["{{baseUrl}}"], "path": ["catalog", "symbols", "{{symbolRef}}"] } }
+    },
+    {
+      "name": "Download symbol asset",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"symbolIds\": [\"{{symbolRef}}\"],\n  \"format\": \"SVG\"\n}" },
+        "url": { "raw": "{{baseUrl}}/api/v1/catalog/symbols/download", "host": ["{{baseUrl}}"], "path": ["catalog", "symbols", "download"] }
+      }
     },
     {
       "name": "Contextual search",
@@ -52,7 +62,10 @@
       "name": "Submit symbol feedback",
       "request": {
         "method": "POST",
-        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "Idempotency-Key", "value": "{{feedbackIdempotencyKey}}" }
+        ],
         "body": { "mode": "raw", "raw": "{\n  \"kind\": \"usage_question\",\n  \"message\": \"Is this suitable for our drawing review workflow?\",\n  \"context\": {\n    \"application\": \"Apryse Viewer\"\n  }\n}" },
         "url": { "raw": "{{baseUrl}}/api/v1/catalog/symbols/{{symbolRef}}/feedback", "host": ["{{baseUrl}}"], "path": ["catalog", "symbols", "{{symbolRef}}", "feedback"] }
       }

@@ -39,7 +39,9 @@ Ed and feedback messages contain 1–2000 characters. Their context is bounded a
 
 ## Feedback warning
 
-Most feedback records a question or comment. `send_for_review` explicitly requests review and may change published workflow/state. Require a clear human confirmation before using it.
+Every feedback request must include a caller-stable UUID in the required `Idempotency-Key` header. Reuse that key only when replaying the same intended request.
+
+Most feedback records a question or comment. `send_for_review` explicitly creates or reuses review work, but it does **not** change the published lifecycle state or remove the current symbol from the published Catalog. Require clear human confirmation because it starts governance work, not because it unpublishes the symbol.
 
 ## Sandbox boundary
 
