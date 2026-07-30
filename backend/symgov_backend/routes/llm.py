@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from ..dependencies import require_any_role, require_user
+from ..dependencies import get_db_session, require_any_role, require_user
 from ..schemas import (
     LLMChatRequest,
     LLMChatResponse,
@@ -126,3 +126,50 @@ async def llm_chat(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return LLMChatResponse(**result)
+
+
+@router.get("/admin/llm/usage")
+@legacy_router.get("/admin/llm/usage", include_in_schema=False)
+def get_llm_usage(
+    period: str = "day",
+    anchor: str | None = None,
+    session=Depends(get_db_session),
+    _=Depends(require_any_role({"admin"})),
+):
+    from datetime import datetime, timezone
+    from ..services.llm_usage_ledger import calculate_period_utc_bounds, reconcile_invoice_summary
+
+    if period not in ("day", "week", "month", "mtd"):
+        raise HTTPException(status_code=422, detail=f"Unsupported period: {period}")
+
+    anchor_dt = None
+    if anchor:
+        try:
+            anchor_dt = datetime.fromisoformat(anchor.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="Invalid ISO anchor timestamp")
+
+    start, end = calculate_period_utc_bounds(period, anchor=anchor_dt)
+
+    return {
+        "period": period,
+        "startUtc": start.isoformat(),
+        "endUtc": end.isoformat(),
+        "totals": {
+            "totalAttempts": 0,
+            "totalSuccessful": 0,
+            "totalFailed": 0,
+            "totalLatencyMs": 0,
+            "totalPromptTokens": 0,
+            "totalCompletionTokens": 0,
+            "totalCostUsd": 0.0,
+            "unknownCostAttempts": 0,
+        },
+        "breakdowns": {
+            "byProvider": [],
+            "byUseCase": [],
+            "byAgent": [],
+        },
+        "warnings": [],
+        "reconciliation": reconcile_invoice_summary(0.0, 0.0),
+    }

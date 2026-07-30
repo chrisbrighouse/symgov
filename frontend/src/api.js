@@ -359,6 +359,14 @@ export async function testAdminLlmPrompt(payload) {
   };
 }
 
+export async function fetchAdminLlmUsage(period = 'day') {
+  const result = await requestJson(`/admin/llm/usage?period=${encodeURIComponent(period)}`, { cache: 'no-store' });
+  return {
+    ...result,
+    usage: result.ok ? result.payload || null : null
+  };
+}
+
 export async function fetchWorkspaceReviewCases() {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };

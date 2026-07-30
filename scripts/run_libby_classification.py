@@ -7,8 +7,11 @@ import mimetypes
 import os
 import re
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -248,8 +251,82 @@ def call_gemini_symbol_property_review(
         headers={"Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        return parse_gemini_symbol_property_response(json.loads(response.read().decode("utf-8")))
+    started_at = time.time()
+    trace_id = str(uuid.uuid4())
+    observation_id = str(uuid.uuid4())
+    occurred_at_utc = datetime.now(timezone.utc).isoformat()
+    status = "succeeded"
+    error_class = None
+    error_code = None
+    res_data = None
+
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            res_data = json.loads(response.read().decode("utf-8"))
+            return parse_gemini_symbol_property_response(res_data)
+    except urllib.error.HTTPError as exc:
+        status = "failed"
+        error_class = "HTTPError"
+        error_code = str(exc.code)
+        raise
+    except urllib.error.URLError as exc:
+        status = "timed_out" if isinstance(exc.reason, TimeoutError) else "failed"
+        error_class = "URLError"
+        error_code = str(exc.reason)
+        raise
+    finally:
+        elapsed_ms = int((time.time() - started_at) * 1000)
+        usage = (res_data or {}).get("usageMetadata") or {}
+        event_payload = {
+            "event_id": str(uuid.uuid4()),
+            "occurred_at_utc": occurred_at_utc,
+            "environment": os.environ.get("SYMGOV_ENV", "development"),
+            "trace_id": trace_id,
+            "observation_id": observation_id,
+            "use_case": "symbol_property_vision",
+            "service_name": "libby",
+            "agent_slug": "libby",
+            "provider": "google",
+            "requested_model": model,
+            "resolved_model": model,
+            "request_kind": "vision",
+            "attempt_number": 1,
+            "status": status,
+            "latency_ms": elapsed_ms,
+            "cost_currency": "USD",
+            "cost_basis": "unknown",
+            "provider_reported_cost_usd": None,
+            "calculated_cost_usd": None,
+            "pricing_version": None,
+            "input_tokens": usage.get("promptTokenCount"),
+            "output_tokens": usage.get("candidatesTokenCount"),
+            "cached_input_tokens": usage.get("cachedContentTokenCount"),
+            "cache_write_input_tokens": None,
+            "reasoning_tokens": None,
+            "image_input_units": 1,
+            "image_output_units": None,
+            "other_usage_json": {},
+            "queue_item_id": None,
+            "agent_run_id": None,
+            "review_case_id": None,
+            "intake_record_id": None,
+            "source_package_id": None,
+            "symbol_id": None,
+            "symbol_display_id": None,
+            "feature": "symbol_property_vision",
+            "prompt_version": None,
+            "release": None,
+            "initiator_kind": "scheduled_worker",
+            "initiator_pseudonym": None,
+            "error_class": error_class,
+            "error_code": error_code,
+            "metadata": {},
+        }
+        try:
+            from symgov_backend.services.llm_telemetry import export_llm_event_best_effort
+            export_llm_event_best_effort(event_payload, trace_seed=trace_id)
+        except Exception:
+            pass
 
 
 def submission_context_for_task(task):

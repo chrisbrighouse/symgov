@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, Text, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -200,6 +200,106 @@ class CatalogApiUsageEvent(Base):
     application_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     application_version: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class LLMUsageEvent(Base):
+    """Authoritative, append-only record of one sanitized LLM attempt."""
+
+    __tablename__ = "llm_usage_events"
+    __table_args__ = (
+        CheckConstraint("environment in ('development', 'test', 'staging', 'production')", name="llm_usage_events_environment"),
+        CheckConstraint("use_case in ('workspace_chat', 'admin_llm_test', 'symbol_property_vision', 'vlad_graphic_edit')", name="llm_usage_events_use_case"),
+        CheckConstraint("service_name in ('symgov-api', 'libby', 'vlad')", name="llm_usage_events_service_name"),
+        CheckConstraint("agent_slug is null or agent_slug in ('libby', 'vlad', 'ed')", name="llm_usage_events_agent_slug"),
+        CheckConstraint("provider in ('openrouter', 'google', 'ollama')", name="llm_usage_events_provider"),
+        CheckConstraint("request_kind in ('text', 'vision', 'image_generation')", name="llm_usage_events_request_kind"),
+        CheckConstraint("status in ('succeeded', 'failed', 'timed_out', 'cancelled')", name="llm_usage_events_status"),
+        CheckConstraint("cost_currency = 'USD'", name="llm_usage_events_cost_currency"),
+        CheckConstraint("cost_basis in ('provider_reported', 'price_snapshot', 'local_policy', 'estimated', 'unknown')", name="llm_usage_events_cost_basis"),
+        CheckConstraint("initiator_kind in ('user', 'api_key', 'admin', 'scheduled_worker', 'system')", name="llm_usage_events_initiator_kind"),
+        CheckConstraint("attempt_number >= 1 and attempt_number <= 10000", name="llm_usage_events_attempt_number"),
+        CheckConstraint("latency_ms is null or (latency_ms >= 0 and latency_ms <= 604800000)", name="llm_usage_events_latency_ms"),
+        CheckConstraint("provider_reported_cost_usd is null or (provider_reported_cost_usd >= 0 and provider_reported_cost_usd <= 1000000)", name="llm_usage_events_provider_cost"),
+        CheckConstraint("calculated_cost_usd is null or (calculated_cost_usd >= 0 and calculated_cost_usd <= 1000000)", name="llm_usage_events_calculated_cost"),
+        CheckConstraint(
+            "(cost_basis = 'provider_reported' and provider_reported_cost_usd is not null and calculated_cost_usd is null and pricing_version is null) or "
+            "(cost_basis in ('price_snapshot', 'local_policy', 'estimated') and provider_reported_cost_usd is null and calculated_cost_usd is not null and pricing_version is not null) or "
+            "(cost_basis = 'unknown' and provider_reported_cost_usd is null and calculated_cost_usd is null and pricing_version is null)",
+            name="llm_usage_events_cost_provenance",
+        ),
+        CheckConstraint("(status = 'succeeded' and error_class is null and error_code is null) or (status <> 'succeeded' and (error_class is not null or error_code is not null))", name="llm_usage_events_status_errors"),
+        *(
+            CheckConstraint(f"{field} is null or ({field} >= 0 and {field} <= 1000000000000)", name=f"llm_usage_events_{field}")
+            for field in (
+                "input_tokens", "output_tokens", "cached_input_tokens", "cache_write_input_tokens",
+                "reasoning_tokens", "image_input_units", "image_output_units",
+            )
+        ),
+        CheckConstraint("jsonb_typeof(other_usage_json) = 'object'", name="llm_usage_events_other_usage_object"),
+        CheckConstraint("jsonb_typeof(metadata) = 'object'", name="llm_usage_events_metadata_object"),
+        UniqueConstraint("trace_id", "observation_id", name="llm_usage_events_trace_observation"),
+        Index("ix_llm_usage_events_occurred_at_utc", "occurred_at_utc"),
+        Index("ix_llm_usage_events_provider_occurred", "provider", "occurred_at_utc"),
+        Index("ix_llm_usage_events_provider_model_occurred", "provider", "resolved_model", "occurred_at_utc"),
+        Index("ix_llm_usage_events_use_case_occurred", "use_case", "occurred_at_utc"),
+        Index("ix_llm_usage_events_agent_slug_occurred", "agent_slug", "occurred_at_utc"),
+        Index("ix_llm_usage_events_feature_occurred", "feature", "occurred_at_utc"),
+        Index("ix_llm_usage_events_trace_id", "trace_id"),
+        Index("ix_llm_usage_events_trace_attempt", "trace_id", "attempt_number"),
+        Index("ix_llm_usage_events_initiator_occurred", "initiator_pseudonym", "occurred_at_utc"),
+        Index("ix_llm_usage_events_symbol_display_occurred", "symbol_display_id", "occurred_at_utc"),
+        Index("ix_llm_usage_events_queue_item_id", "queue_item_id"),
+        Index("ix_llm_usage_events_agent_run_id", "agent_run_id"),
+        Index("ix_llm_usage_events_review_case_id", "review_case_id"),
+        Index("ix_llm_usage_events_intake_record_id", "intake_record_id"),
+        Index("ix_llm_usage_events_source_package_id", "source_package_id"),
+        Index("ix_llm_usage_events_symbol_id", "symbol_id"),
+    )
+
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    occurred_at_utc: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    environment: Mapped[str] = mapped_column(Text, nullable=False)
+    trace_id: Mapped[str] = mapped_column(Text, nullable=False)
+    observation_id: Mapped[str] = mapped_column(Text, nullable=False)
+    use_case: Mapped[str] = mapped_column(Text, nullable=False)
+    service_name: Mapped[str] = mapped_column(Text, nullable=False)
+    agent_slug: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_model: Mapped[str] = mapped_column(Text, nullable=False)
+    resolved_model: Mapped[str] = mapped_column(Text, nullable=False)
+    request_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    attempt_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    latency_ms: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    cost_currency: Mapped[str] = mapped_column(Text, nullable=False)
+    cost_basis: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_reported_cost_usd: Mapped[object | None] = mapped_column(Numeric(20, 9), nullable=True)
+    calculated_cost_usd: Mapped[object | None] = mapped_column(Numeric(20, 9), nullable=True)
+    pricing_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    cached_input_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    cache_write_input_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    reasoning_tokens: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    image_input_units: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    image_output_units: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    other_usage_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    queue_item_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    agent_run_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    review_case_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    intake_record_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    source_package_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    symbol_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    symbol_display_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    feature: Mapped[str | None] = mapped_column(Text, nullable=True)
+    prompt_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    release: Mapped[str | None] = mapped_column(Text, nullable=True)
+    initiator_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    initiator_pseudonym: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_class: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column("metadata", JSONB, nullable=False)
+    recorded_at_utc: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 
 class GovernedSymbol(Base):

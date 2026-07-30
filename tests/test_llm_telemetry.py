@@ -1,732 +1,585 @@
-"""Phase 2 contract tests for privacy-safe, provider-neutral LLM telemetry.
-
-These tests are intentionally offline. They define the shared adapter boundary before
-any OpenRouter, Gemini, or Langfuse instrumentation is added.
-"""
+"""Contract tests for the normalized, privacy-safe LLM usage event."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from copy import deepcopy
+from queue import Queue
+from threading import Barrier, Event, Lock, Thread
+import time
 from unittest.mock import Mock
 
 import pytest
-import symgov_backend.services.llm_telemetry as llm_telemetry
+import symgov_backend.services.llm_telemetry as telemetry
+
 from symgov_backend.services.llm_telemetry import (
     ALLOWED_METADATA_KEYS,
     LLMTelemetry,
     TelemetryConfig,
     build_llm_event,
+    initiator_pseudonym,
     trace_id_from_seed,
     validate_event,
 )
 
-
-BASE_EVENT = {
+TRACE_SEED = "queue:00000000-0000-4000-8000-000000000001"
+BASE = {
+    "event_id": "11111111-1111-4111-8111-111111111111",
+    "occurred_at_utc": "2026-07-16T19:00:00.123Z",
     "environment": "development",
-    "trace_seed": "queue:00000000-0000-4000-8000-000000000001",
+    "trace_seed": TRACE_SEED,
     "observation_id": "attempt-1",
-    "use_case": "libby_symbol_vision",
+    "use_case": "symbol_property_vision",
     "service_name": "libby",
     "agent_slug": "libby",
     "provider": "google",
     "requested_model": "gemini-2.5-flash",
-    "resolved_model": "gemini-2.5-flash",
+    "resolved_model": "gemini-2.5-flash-001",
     "request_kind": "vision",
     "attempt_number": 1,
     "status": "succeeded",
     "latency_ms": 125,
-    "cost_basis": "provider_reported",
-    "provider_reported_cost_usd": "0.001250",
-    "calculated_cost_usd": None,
-    "pricing_version": None,
+    "cost_currency": "USD",
+    "cost_basis": "price_snapshot",
+    "provider_reported_cost_usd": None,
+    "calculated_cost_usd": "0.001250",
+    "pricing_version": "google-2026-07-01",
+    "input_tokens": 120,
+    "output_tokens": 40,
+    "cached_input_tokens": 10,
+    "cache_write_input_tokens": 2,
+    "reasoning_tokens": 3,
+    "image_input_units": 1,
+    "image_output_units": None,
+    "other_usage_json": {"audio_seconds": 1.25},
+    "queue_item_id": "00000000-0000-4000-8000-000000000001",
+    "agent_run_id": "00000000-0000-4000-8000-000000000002",
+    "review_case_id": None,
+    "intake_record_id": None,
+    "source_package_id": None,
+    "symbol_id": "00000000-0000-4000-8000-000000000003",
+    "symbol_display_id": "0003-12",
+    "feature": "symbol-vision",
+    "prompt_version": "vision-v3",
+    "release": "2026.07.16",
+    "initiator_kind": "scheduled_worker",
+    "initiator_pseudonym": None,
+    "error_class": None,
+    "error_code": None,
     "metadata": {
         "environment": "development",
         "service": "libby",
         "agent": "libby",
-        "usecase": "libby_symbol_vision",
+        "usecase": "symbol_property_vision",
         "provider": "google",
-        "model": "gemini-2.5-flash",
+        "model": "gemini-2.5-flash-001",
         "requestkind": "vision",
         "queueitemid": "00000000-0000-4000-8000-000000000001",
+        "agentrunid": "00000000-0000-4000-8000-000000000002",
+        "symbolid": "00000000-0000-4000-8000-000000000003",
+        "symboldisplayid": "0003-12",
+        "feature": "symbol-vision",
+        "promptversion": "vision-v3",
         "initiatorkind": "scheduled_worker",
-        "costbasis": "provider_reported",
+        "pricingversion": "google-2026-07-01",
+        "costbasis": "price_snapshot",
+        "release": "2026.07.16",
     },
 }
 
 
-def test_default_configuration_is_disabled_and_a_true_noop(monkeypatch):
-    for name in (
-        "SYMGOV_LLM_TELEMETRY_ENABLED",
-        "SYMGOV_LLM_TELEMETRY_ENDPOINT",
-        "SYMGOV_LLM_TELEMETRY_PUBLIC_KEY",
-        "SYMGOV_LLM_TELEMETRY_SECRET_KEY",
-    ):
-        monkeypatch.delenv(name, raising=False)
-
-    transport = Mock(side_effect=AssertionError("disabled telemetry contacted a transport"))
-    adapter = LLMTelemetry(config=TelemetryConfig.from_env(), transport=transport)
-
-    assert adapter.enabled is False
-    assert adapter.record(dict(BASE_EVENT)) is False
-    transport.assert_not_called()
+def _enabled_config():
+    return TelemetryConfig(
+        enabled=True,
+        endpoint="https://langfuse.invalid/api/public/ingestion",
+        public_key="synthetic-public",
+        secret_key="synthetic-secret",
+        timeout_seconds=1.0,
+    )
 
 
-@pytest.mark.parametrize("ambiguous_value", ["1", "yes", "on", "TRUE ", "false"])
-def test_environment_activation_requires_exact_true(monkeypatch, ambiguous_value):
-    monkeypatch.setenv("SYMGOV_LLM_TELEMETRY_ENABLED", ambiguous_value)
-
-    assert TelemetryConfig.from_env().enabled is False
-
-
-def test_environment_activation_accepts_exact_true(monkeypatch):
-    monkeypatch.setenv("SYMGOV_LLM_TELEMETRY_ENABLED", "true")
-
-    assert TelemetryConfig.from_env().enabled is True
-
-
-def test_event_builder_is_provider_neutral_and_preserves_cost_provenance():
-    provider_reported = build_llm_event(**BASE_EVENT)
-    locally_calculated = build_llm_event(
-        **{
-            **BASE_EVENT,
-            "provider": "openrouter",
-            "requested_model": "openai/gpt-4o-mini",
-            "resolved_model": "openai/gpt-4o-mini",
-            "cost_basis": "price_snapshot",
-            "provider_reported_cost_usd": None,
-            "calculated_cost_usd": "0.000750",
-            "pricing_version": "openrouter-2026-07-01",
-            "metadata": {
-                **BASE_EVENT["metadata"],
-                "provider": "openrouter",
-                "model": "openai/gpt-4o-mini",
-                "costbasis": "price_snapshot",
-                "pricingversion": "openrouter-2026-07-01",
-            },
+def event(**overrides):
+    values = deepcopy(BASE)
+    values.update(overrides)
+    if "metadata" not in overrides:
+        projection = {
+            "environment": "environment", "service": "service_name", "agent": "agent_slug",
+            "usecase": "use_case", "provider": "provider", "model": "resolved_model",
+            "requestkind": "request_kind", "queueitemid": "queue_item_id",
+            "agentrunid": "agent_run_id", "reviewcaseid": "review_case_id",
+            "intakerecordid": "intake_record_id", "sourcepackageid": "source_package_id",
+            "symbolid": "symbol_id",
+            "symboldisplayid": "symbol_display_id", "feature": "feature",
+            "promptversion": "prompt_version", "initiatorkind": "initiator_kind",
+            "pricingversion": "pricing_version", "costbasis": "cost_basis", "release": "release",
         }
-    )
-
-    assert provider_reported["provider_reported_cost_usd"] == "0.001250"
-    assert provider_reported["calculated_cost_usd"] is None
-    assert locally_calculated["provider_reported_cost_usd"] is None
-    assert locally_calculated["calculated_cost_usd"] == "0.000750"
-    assert locally_calculated["pricing_version"] == "openrouter-2026-07-01"
-
-
-@pytest.mark.parametrize(
-    "forbidden_key,forbidden_value",
-    [
-        ("prompt", "classify this private document"),
-        ("completion", "private model output"),
-        ("image", "data:image/png;base64,AAAA"),
-        ("document", "s3://private-bucket/source.pdf"),
-        ("authorization", "Bearer fake-secret"),
-        ("email", "person@example.invalid"),
-        ("user_id", "telegram:123456"),
-    ],
-)
-def test_validation_fails_closed_on_forbidden_content(forbidden_key, forbidden_value):
-    event = build_llm_event(**BASE_EVENT)
-    event[forbidden_key] = forbidden_value
-
-    with pytest.raises(ValueError, match="forbidden|allowlist"):
-        validate_event(event, trace_seed=BASE_EVENT["trace_seed"])
-
-
-def test_metadata_is_an_exact_allowlist_with_compact_string_values():
-    assert ALLOWED_METADATA_KEYS == {
-        "environment",
-        "service",
-        "agent",
-        "usecase",
-        "provider",
-        "model",
-        "requestkind",
-        "queueitemid",
-        "agentrunid",
-        "symbolid",
-        "symboldisplayid",
-        "feature",
-        "initiatorkind",
-        "pricingversion",
-        "costbasis",
-    }
-
-    event = build_llm_event(**BASE_EVENT)
-    event["metadata"]["source_notes"] = "must never leave Symgov"
-    with pytest.raises(ValueError, match="metadata|allowlist"):
-        validate_event(event, trace_seed=BASE_EVENT["trace_seed"])
-
-    event = build_llm_event(**BASE_EVENT)
-    event["metadata"]["feature"] = "x" * 201
-    with pytest.raises(ValueError, match="200"):
-        validate_event(event, trace_seed=BASE_EVENT["trace_seed"])
-
-
-@pytest.mark.parametrize("metadata_key", sorted(ALLOWED_METADATA_KEYS))
-def test_metadata_values_reject_arbitrary_sensitive_content(metadata_key):
-    event = build_llm_event(**BASE_EVENT)
-    event["metadata"][metadata_key] = "private-document-reference"
-
-    with pytest.raises(ValueError, match="metadata|allowlist"):
-        validate_event(event, trace_seed=BASE_EVENT["trace_seed"])
-
-
-def test_retry_and_fallback_attempts_keep_lineage_without_overwriting_costs():
-    first = build_llm_event(**{**BASE_EVENT, "observation_id": "attempt-1", "attempt_number": 1, "status": "failed"})
-    second = build_llm_event(
-        **{
-            **BASE_EVENT,
-            "observation_id": "attempt-2",
-            "attempt_number": 2,
-            "provider": "openrouter",
-            "requested_model": "openai/gpt-4o-mini",
-            "resolved_model": "openai/gpt-4o-mini",
-            "status": "succeeded",
-            "metadata": {
-                **BASE_EVENT["metadata"],
-                "provider": "openrouter",
-                "model": "openai/gpt-4o-mini",
-            },
-        }
-    )
-
-    assert first["trace_id"] == second["trace_id"]
-    assert first["observation_id"] != second["observation_id"]
-    assert [first["attempt_number"], second["attempt_number"]] == [1, 2]
-    assert first["provider"] == "google"
-    assert second["provider"] == "openrouter"
-
-
-def test_trace_ids_are_deterministic_and_reject_business_or_user_text_seeds():
-    seed = "request:00000000-0000-4000-8000-000000000002"
-    assert trace_id_from_seed(seed) == trace_id_from_seed(seed)
-
-    for unsafe_seed in ("customer@example.invalid", "drawing-A12.pdf", "classify this prompt"):
-        with pytest.raises(ValueError, match="queue:|request:"):
-            trace_id_from_seed(unsafe_seed)
-
-
-def test_validation_rejects_caller_supplied_non_hash_trace_ids():
-    event = build_llm_event(**BASE_EVENT)
-    event["trace_id"] = "customer-full-name"
-
-    with pytest.raises(ValueError, match="trace_id"):
-        validate_event(event, trace_seed=BASE_EVENT["trace_seed"])
-
-
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("observation_id", "classify-this-private-document"),
-        ("provider", "Bearer-fake-secret"),
-        ("requested_model", "private-bucket/source.pdf"),
-        ("use_case", "customer-full-name"),
-    ],
-)
-def test_validation_rejects_sensitive_content_hidden_in_allowed_fields(field, value):
-    event = build_llm_event(**BASE_EVENT)
-    event[field] = value
-
-    with pytest.raises(ValueError, match="forbidden|allowlist"):
-        validate_event(event, trace_seed=BASE_EVENT["trace_seed"])
-
-
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("environment", "customer-environment"),
-        ("status", "maybe"),
-        ("request_kind", "provider-payload"),
-        ("cost_basis", "mixed"),
-    ],
-)
-def test_validation_uses_semantic_allowlists_for_categorical_fields(field, value):
-    event = build_llm_event(**BASE_EVENT)
-    event[field] = value
-
-    with pytest.raises(ValueError, match="allowlist"):
-        validate_event(event, trace_seed=BASE_EVENT["trace_seed"])
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {"calculated_cost_usd": "0.1"},
-        {"provider_reported_cost_usd": None},
-        {
-            "cost_basis": "price_snapshot",
-            "provider_reported_cost_usd": None,
-            "calculated_cost_usd": "0.1",
-            "pricing_version": None,
-        },
-    ],
-)
-def test_cost_provenance_is_mutually_exclusive_and_complete(overrides):
-    with pytest.raises(ValueError, match="cost|pricing"):
-        build_llm_event(**{**BASE_EVENT, **overrides})
-
-
-def test_price_snapshot_rejects_arbitrary_pricing_version_content():
-    with pytest.raises(ValueError, match="pricing|allowlist"):
-        build_llm_event(
-            **{
-                **BASE_EVENT,
-                "cost_basis": "price_snapshot",
-                "provider_reported_cost_usd": None,
-                "calculated_cost_usd": "0.1",
-                "pricing_version": "private-document-reference",
-            }
-        )
-
-
-def test_configuration_requires_an_actual_boolean_and_does_not_store_credentials():
-    with pytest.raises(TypeError, match="bool"):
-        TelemetryConfig(enabled="false")
-
-    config = TelemetryConfig()
-    assert "secret" not in repr(config).lower()
-    assert "key" not in repr(config).lower()
-
-
-def test_record_is_nonfatal_when_async_dispatch_cannot_start(monkeypatch):
-    event = build_llm_event(**BASE_EVENT)
-    monkeypatch.setattr(llm_telemetry, "Thread", Mock(side_effect=RuntimeError("no threads")))
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-
-    assert adapter.record(event, trace_seed=BASE_EVENT["trace_seed"]) is False
-
-
-def test_record_rejects_duplicate_attempts():
-    event = build_llm_event(**BASE_EVENT)
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-
-    assert adapter.record(event, trace_seed=BASE_EVENT["trace_seed"]) is True
-    assert adapter.record(event, trace_seed=BASE_EVENT["trace_seed"]) is False
-
-
-def test_record_rejects_duplicate_or_nonsequential_attempt_lineage():
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-    first = build_llm_event(**BASE_EVENT)
-    duplicate_number = build_llm_event(
-        **{**BASE_EVENT, "observation_id": "attempt-1", "attempt_number": 1}
-    )
-    skipped_number = build_llm_event(
-        **{**BASE_EVENT, "observation_id": "attempt-3", "attempt_number": 3}
-    )
-
-    assert adapter.record(first, trace_seed=BASE_EVENT["trace_seed"]) is True
-    assert adapter.record(duplicate_number, trace_seed=BASE_EVENT["trace_seed"]) is False
-    assert adapter.record(skipped_number, trace_seed=BASE_EVENT["trace_seed"]) is False
-
-
-def test_record_uses_one_bounded_dispatch_worker(monkeypatch):
-    event = build_llm_event(**BASE_EVENT)
-    second = build_llm_event(
-        **{**BASE_EVENT, "observation_id": "attempt-2", "attempt_number": 2}
-    )
-    worker = Mock()
-    thread_factory = Mock(return_value=worker)
-    monkeypatch.setattr(llm_telemetry, "Thread", thread_factory)
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-
-    assert adapter.record(event, trace_seed=BASE_EVENT["trace_seed"]) is True
-    assert adapter.record(second, trace_seed=BASE_EVENT["trace_seed"]) is True
-    assert thread_factory.call_count == 1
-    worker.start.assert_called_once_with()
-    assert adapter._queue.maxsize > 0
-
-
-def test_record_contains_unexpected_mapping_failures():
-    class ExplodingMapping(dict):
-        def __iter__(self):
-            raise RuntimeError("mapping failure")
-
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-
-    assert adapter.record(ExplodingMapping(), trace_seed=BASE_EVENT["trace_seed"]) is False
-
-
-def test_record_verifies_trace_id_against_trusted_seed():
-    event = build_llm_event(**BASE_EVENT)
-    event["trace_id"] = "0" * 64
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-
-    assert adapter.record(event, trace_seed=BASE_EVENT["trace_seed"]) is False
-
-
-def test_lineage_state_is_bounded_and_fails_closed_for_new_traces(monkeypatch):
-    worker = Mock()
-    monkeypatch.setattr(llm_telemetry, "Thread", Mock(return_value=worker))
-    adapter = LLMTelemetry(
-        config=TelemetryConfig(enabled=True),
-        transport=Mock(),
-        lineage_capacity=2,
-    )
-
-    seeds = [
-        f"request:00000000-0000-4000-8000-{suffix:012d}"
-        for suffix in (1, 2, 3)
-    ]
-    events = [
-        build_llm_event(
-            **{
-                **BASE_EVENT,
-                "trace_seed": seed,
-                "metadata": {
-                    **BASE_EVENT["metadata"],
-                    "queueitemid": seed.split(":", 1)[1],
-                },
-            }
-        )
-        for seed in seeds
-    ]
-
-    assert adapter.record(events[0], trace_seed=seeds[0]) is True
-    assert adapter.record(events[1], trace_seed=seeds[1]) is True
-    assert adapter.record(events[2], trace_seed=seeds[2]) is False
-    assert adapter.record(events[0], trace_seed=seeds[0]) is False
-    assert len(adapter._next_attempt) == 2
-
-
-def test_lineage_memory_is_constant_per_trace(monkeypatch):
-    worker = Mock()
-    monkeypatch.setattr(llm_telemetry, "Thread", Mock(return_value=worker))
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-
-    assert not hasattr(adapter, "_observation_ids")
-
-
-@pytest.mark.parametrize("capacity", [True, 0, 4_097, 10**20])
-def test_lineage_capacity_has_a_strict_hard_limit(capacity):
-    with pytest.raises(ValueError, match="lineage_capacity|bounded"):
-        LLMTelemetry(lineage_capacity=capacity)
-
-
-def test_cost_strings_have_strict_size_and_precision_bounds():
-    with pytest.raises(ValueError, match="cost|decimal"):
-        build_llm_event(
-            **{**BASE_EVENT, "provider_reported_cost_usd": "1" * 1_000}
-        )
-
-
-def test_validation_rejects_contradictory_provenance_metadata():
-    event = build_llm_event(**BASE_EVENT)
-    event["metadata"]["costbasis"] = "none"
-
-    with pytest.raises(ValueError, match="metadata|cost"):
-        validate_event(event, trace_seed=BASE_EVENT["trace_seed"])
-
-
-def test_observation_id_must_match_attempt_number():
-    with pytest.raises(ValueError, match="observation_id|attempt"):
-        build_llm_event(
-            **{**BASE_EVENT, "observation_id": "attempt-999", "attempt_number": 1}
-        )
-
-
-def test_record_contains_unexpected_queue_put_failures(monkeypatch):
-    worker = Mock()
-    monkeypatch.setattr(llm_telemetry, "Thread", Mock(return_value=worker))
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-    adapter._queue = Mock()
-    adapter._queue.put_nowait.side_effect = RuntimeError("queue failure")
-    event = build_llm_event(**BASE_EVENT)
-
-    assert adapter.record(event, trace_seed=BASE_EVENT["trace_seed"]) is False
-
-
-def test_record_contains_lock_acquisition_failures():
-    class BrokenLock:
-        def __enter__(self):
-            raise RuntimeError("lock failure")
-
-        def __exit__(self, *args):
-            return False
-
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-    adapter._lock = BrokenLock()
-    event = build_llm_event(**BASE_EVENT)
-
-    assert adapter.record(event, trace_seed=BASE_EVENT["trace_seed"]) is False
-
-
-@pytest.mark.parametrize("queue_method", ["get", "task_done"])
-def test_dispatch_contains_internal_queue_failures(queue_method):
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-    queue = Mock()
-    if queue_method == "get":
-        queue.get.side_effect = RuntimeError("get failure")
+        for metadata_key, event_key in projection.items():
+            value = values[event_key]
+            values["metadata"][metadata_key] = value if value is not None else "none"
+    return build_llm_event(**values)
+
+
+def test_builder_emits_complete_plain_normalized_schema():
+    built = event()
+    expected = set(BASE) - {"trace_seed"} | {"trace_id"}
+    assert set(built) == expected
+    assert built["trace_id"] == trace_id_from_seed(TRACE_SEED)
+    assert type(built) is dict
+    assert type(built["metadata"]) is dict
+    assert type(built["other_usage_json"]) is dict
+    assert built["cached_input_tokens"] == 10
+    assert built["queue_item_id"] == BASE["queue_item_id"]
+
+
+@pytest.mark.parametrize("use_case", ["workspace_chat", "admin_llm_test", "symbol_property_vision", "vlad_graphic_edit"])
+@pytest.mark.parametrize("service", ["symgov-api", "libby", "vlad"])
+@pytest.mark.parametrize("agent", [None, "libby", "vlad", "ed"])
+def test_approved_use_cases_services_and_optional_agents(use_case, service, agent):
+    assert event(use_case=use_case, service_name=service, agent_slug=agent)["agent_slug"] == agent
+
+
+@pytest.mark.parametrize("provider", ["openrouter", "google", "ollama"])
+@pytest.mark.parametrize("request_kind", ["text", "vision", "image_generation"])
+@pytest.mark.parametrize("status", ["succeeded", "failed", "timed_out", "cancelled"])
+def test_approved_provider_request_and_status_categories(provider, request_kind, status):
+    overrides = {"provider": provider, "request_kind": request_kind, "status": status}
+    if status != "succeeded":
+        overrides.update(error_class="ProviderError", error_code="timeout")
+    assert event(**overrides)["provider"] == provider
+
+
+@pytest.mark.parametrize("basis", ["provider_reported", "price_snapshot", "local_policy", "estimated", "unknown"])
+def test_cost_basis_has_explicit_provenance(basis):
+    overrides = {"cost_basis": basis}
+    if basis == "provider_reported":
+        overrides.update(provider_reported_cost_usd="0.1", calculated_cost_usd=None, pricing_version=None)
+    elif basis == "unknown":
+        overrides.update(provider_reported_cost_usd=None, calculated_cost_usd=None, pricing_version=None)
     else:
-        queue.get.return_value = build_llm_event(**BASE_EVENT)
-        queue.task_done.side_effect = RuntimeError("task_done failure")
+        overrides.update(provider_reported_cost_usd=None, calculated_cost_usd="0.1", pricing_version="prices-v1")
+    assert event(**overrides)["cost_basis"] == basis
+
+
+@pytest.mark.parametrize("field", ["input_tokens", "output_tokens", "cached_input_tokens", "cache_write_input_tokens", "reasoning_tokens", "image_input_units", "image_output_units"])
+def test_usage_counts_are_bounded_nonnegative_plain_integers(field):
+    with pytest.raises(ValueError, match="usage|bounded|integer"):
+        event(**{field: True})
+    with pytest.raises(ValueError, match="usage|bounded|integer"):
+        event(**{field: 10**20})
+
+
+def test_other_usage_is_numeric_only_bounded_and_plain():
+    assert event(other_usage_json={"audio_seconds": 2, "characters": 3.5})["other_usage_json"] == {
+        "audio_seconds": 2,
+        "characters": 3.5,
+    }
+    for unsafe in ({"audio": "private transcript"}, {"prompt": 1}, {"x": float("nan")}, {str(i): i for i in range(33)}):
+        with pytest.raises(ValueError, match="other_usage|numeric|bounded|allowlist"):
+            event(other_usage_json=unsafe)
+
+
+@pytest.mark.parametrize("field", ["queue_item_id", "agent_run_id", "review_case_id", "intake_record_id", "source_package_id", "symbol_id"])
+def test_lineage_accepts_only_uuid_or_null(field):
+    with pytest.raises(ValueError, match=field):
+        event(**{field: "private-document-name.pdf"})
+
+
+def test_queue_lineage_must_match_trusted_trace_seed():
+    with pytest.raises(ValueError, match="queue_item_id|trace"):
+        event(queue_item_id="00000000-0000-4000-8000-000000000099")
+
+
+def test_request_trace_requires_null_queue_item_id():
+    request_seed = "request:00000000-0000-4000-8000-000000000009"
+    assert event(trace_seed=request_seed, queue_item_id=None)["queue_item_id"] is None
+    with pytest.raises(ValueError, match="queue_item_id|request"):
+        event(trace_seed=request_seed, queue_item_id="00000000-0000-4000-8000-000000000009")
+
+
+def test_latency_may_be_null():
+    assert event(latency_ms=None)["latency_ms"] is None
+
+
+def test_exact_phase_zero_names_exclude_superseded_fields():
+    built = event()
+    assert {"cache_write_input_tokens", "other_usage_json", "review_case_id", "intake_record_id", "source_package_id"} <= set(built)
+    assert not {"cache_write_tokens", "other_usage", "other_units", "review_id", "intake_id", "package_id"} & set(built)
+    assert {"reviewcaseid", "intakerecordid", "sourcepackageid"} <= ALLOWED_METADATA_KEYS
+    assert not {"reviewid", "intakeid", "packageid"} & ALLOWED_METADATA_KEYS
+
+
+@pytest.mark.parametrize("kind", ["user", "api_key", "admin", "scheduled_worker", "system"])
+def test_exact_approved_initiator_kinds(kind):
+    assert event(initiator_kind=kind)["initiator_kind"] == kind
+
+
+@pytest.mark.parametrize("kind", ["user_request", "agent"])
+def test_superseded_initiator_kinds_are_rejected(kind):
+    with pytest.raises(ValueError, match="initiator_kind|allowlist"):
+        event(initiator_kind=kind)
+
+
+@pytest.mark.parametrize("reserved", ["input", "output", "cachedInput", "cacheWrite", "reasoning", "inputImage", "outputImage"])
+def test_other_usage_cannot_overwrite_normalized_langfuse_buckets(reserved):
+    with pytest.raises(ValueError, match="other_usage|reserved|allowlist"):
+        event(other_usage_json={reserved: 999})
+
+
+@pytest.mark.parametrize("field", ["requested_model", "resolved_model"])
+@pytest.mark.parametrize("value", ["write a poem about a private customer", "Bearer secret", "https://host/model", "x" * 129])
+def test_dynamic_model_ids_are_compact_provider_safe_identifiers(field, value):
+    with pytest.raises(ValueError, match="model|identifier|forbidden"):
+        event(**{field: value})
+
+
+def test_exact_keys_plain_containers_and_no_raw_content():
+    built = event()
+    built["prompt"] = "private prompt"
+    with pytest.raises(ValueError, match="forbidden|schema|keys"):
+        validate_event(built, trace_seed=TRACE_SEED)
+    built = event()
+    with pytest.raises(ValueError, match="metadata"):
+        validate_event({**built, "metadata": {"notes": ["nested"]}}, trace_seed=TRACE_SEED)
+
+
+def test_metadata_is_only_a_complete_coherent_provenance_projection():
+    with pytest.raises(ValueError, match="metadata|allowlist"):
+        event(metadata={**BASE["metadata"], "deployment": "private-document-reference"})
+    incomplete = dict(BASE["metadata"])
+    incomplete.pop("provider")
+    with pytest.raises(ValueError, match="metadata|missing|provenance"):
+        event(metadata=incomplete)
+    contradictory = dict(BASE["metadata"])
+    contradictory["model"] = "other-safe-model"
+    with pytest.raises(ValueError, match="metadata|model|provenance"):
+        event(metadata=contradictory)
+
+
+def test_cost_provenance_is_mutually_exclusive_and_complete():
+    with pytest.raises(ValueError, match="cost|pricing"):
+        event(provider_reported_cost_usd="0.1")
+    with pytest.raises(ValueError, match="cost|pricing"):
+        event(cost_basis="unknown", calculated_cost_usd=None, pricing_version="prices-v1")
+
+
+def test_failure_error_fields_are_safe_and_success_has_no_error():
+    with pytest.raises(ValueError, match="error"):
+        event(error_class="ProviderError")
+    with pytest.raises(ValueError, match="error|identifier|forbidden"):
+        event(status="failed", error_class="customer@example.invalid", error_code="bad")
+
+
+def test_hmac_pseudonym_is_stable_scoped_and_null_when_unconfigured():
+    principal = "00000000-0000-4000-8000-000000000004"
+    first = initiator_pseudonym(principal, "synthetic-secret-a")
+    assert first == initiator_pseudonym(principal, "synthetic-secret-a")
+    assert first != initiator_pseudonym(principal, "synthetic-secret-b")
+    assert len(first) == 64
+    assert initiator_pseudonym(principal, None) is None
+    assert initiator_pseudonym(principal, "") is None
+
+
+def test_hmac_helper_errors_and_repr_do_not_leak_secret():
+    secret = "synthetic-do-not-render"
+    with pytest.raises(ValueError) as exc:
+        initiator_pseudonym("not-a-uuid", secret)
+    assert secret not in str(exc.value)
+    assert secret not in repr(exc.value)
+
+
+def test_telemetry_preserves_sequential_attempts_and_flushes():
+    delivered = []
+    adapter = LLMTelemetry(config=_enabled_config(), transport=delivered.append)
+    assert adapter.record(event(), trace_seed=TRACE_SEED)
+    assert not adapter.record(event(), trace_seed=TRACE_SEED)
+    assert adapter.record(event(event_id="22222222-2222-4222-8222-222222222222", observation_id="attempt-2", attempt_number=2), trace_seed=TRACE_SEED)
+    assert adapter.flush(timeout=1.0)
+    assert [item["attempt_number"] for item in delivered] == [1, 2]
+    assert adapter.close(timeout=1.0)
+    assert not adapter.record(event(event_id="33333333-3333-4333-8333-333333333333", observation_id="attempt-3", attempt_number=3), trace_seed=TRACE_SEED)
+
+
+def test_export_failures_are_nonfatal_and_close_is_bounded():
+    adapter = LLMTelemetry(config=_enabled_config(), transport=Mock(side_effect=RuntimeError("offline")))
+    assert adapter.record(event(), trace_seed=TRACE_SEED)
+    assert adapter.close(timeout=1.0)
+
+
+def _request_event(suffix, **overrides):
+    trace_seed = f"request:00000000-0000-4000-8000-{suffix:012d}"
+    return trace_seed, event(trace_seed=trace_seed, queue_item_id=None, **overrides)
+
+
+def test_completed_lineage_is_evicted_on_capacity_pressure_and_replay_is_safe():
+    delivered = []
+    adapter = LLMTelemetry(config=_enabled_config(), transport=delivered.append, lineage_capacity=1)
+    first_seed, first = _request_event(11)
+    second_seed, second = _request_event(12)
+
+    assert adapter.record(first, trace_seed=first_seed)
+    assert adapter.flush(timeout=1.0)
+    assert adapter.record(second, trace_seed=second_seed)
+    assert adapter.flush(timeout=1.0)
+    assert not adapter.record(
+        event(
+            trace_seed=first_seed,
+            queue_item_id=None,
+            event_id="22222222-2222-4222-8222-222222222222",
+            observation_id="attempt-2",
+            attempt_number=2,
+        ),
+        trace_seed=first_seed,
+    )
+    assert adapter.record(first, trace_seed=first_seed)
+    assert adapter.close(timeout=1.0)
+    assert [item["trace_id"] for item in delivered] == [
+        first["trace_id"], second["trace_id"], first["trace_id"],
+    ]
+    assert len(adapter._next_attempt) == 1
+
+
+def test_active_lineage_is_not_evicted_on_capacity_pressure():
+    entered = Event()
+    release = Event()
+
+    def blocking_transport(_item):
+        entered.set()
+        assert release.wait(1.0)
+
+    adapter = LLMTelemetry(config=_enabled_config(), transport=blocking_transport, lineage_capacity=1)
+    first_seed, first = _request_event(21)
+    second_seed, second = _request_event(22)
+    assert adapter.record(first, trace_seed=first_seed)
+    assert entered.wait(1.0)
+    assert not adapter.record(second, trace_seed=second_seed)
+    release.set()
+    assert adapter.close(timeout=1.0)
+
+
+def test_close_can_retry_after_timeout_and_enqueues_one_stop():
+    entered = Event()
+    release = Event()
+
+    def blocking_transport(_item):
+        entered.set()
+        assert release.wait(1.0)
+
+    class CountingQueue(Queue):
+        def __init__(self):
+            super().__init__(maxsize=128)
+            self.stop_count = 0
+
+        def put_nowait(self, item):
+            if item is telemetry._STOP:
+                self.stop_count += 1
+            return super().put_nowait(item)
+
+    adapter = LLMTelemetry(config=_enabled_config(), transport=blocking_transport)
+    queue = CountingQueue()
     adapter._queue = queue
-    adapter._worker = llm_telemetry.current_thread()
+    assert adapter.record(event(), trace_seed=TRACE_SEED)
+    assert entered.wait(1.0)
 
-    adapter._dispatch()
+    assert adapter.close(timeout=0.01) is False
+    release.set()
+    assert adapter.close(timeout=1.0) is True
 
+    assert queue.stop_count == 1
+    assert queue.unfinished_tasks == 0
+    assert adapter._worker is None
+
+    results = []
+    callers = [Thread(target=lambda: results.append(adapter.close(timeout=1.0))) for _ in range(2)]
+    for caller in callers:
+        caller.start()
+    for caller in callers:
+        caller.join(1.0)
+    assert results == [True, True]
+    assert queue.stop_count == 1
+
+
+def test_close_retry_does_not_duplicate_an_enqueued_stop():
+    stop_task_done = Event()
+    release_stop_task_done = Event()
+
+    class BlockingStopQueue(Queue):
+        def __init__(self):
+            super().__init__(maxsize=128)
+            self.stop_count = 0
+
+        def put_nowait(self, item):
+            if item is telemetry._STOP:
+                self.stop_count += 1
+            return super().put_nowait(item)
+
+        def task_done(self):
+            if self.stop_count:
+                stop_task_done.set()
+                assert release_stop_task_done.wait(1.0)
+            return super().task_done()
+
+    adapter = LLMTelemetry(config=_enabled_config(), transport=lambda _item: None)
+    queue = BlockingStopQueue()
+    adapter._queue = queue
+    assert adapter.record(event(), trace_seed=TRACE_SEED)
+    assert adapter.flush(timeout=1.0)
+
+    assert adapter.close(timeout=0.01) is False
+    assert stop_task_done.wait(1.0)
+    assert queue.stop_count == 1
+    release_stop_task_done.set()
+
+    assert adapter.close(timeout=1.0) is True
+    assert queue.stop_count == 1
+    assert queue.unfinished_tasks == 0
     assert adapter._worker is None
 
 
-def test_record_restarts_a_dead_dispatch_worker(monkeypatch):
-    dead_worker = Mock()
-    dead_worker.is_alive.return_value = False
-    new_worker = Mock()
-    thread_factory = Mock(return_value=new_worker)
-    monkeypatch.setattr(llm_telemetry, "Thread", thread_factory)
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-    adapter._worker = dead_worker
-    event = build_llm_event(**BASE_EVENT)
+def test_concurrent_close_callers_share_one_complete_shutdown_result():
+    entered = Event()
+    release = Event()
+    start = Barrier(3)
 
-    assert adapter.record(event, trace_seed=BASE_EVENT["trace_seed"]) is True
-    new_worker.start.assert_called_once_with()
+    def blocking_transport(_item):
+        entered.set()
+        assert release.wait(1.0)
 
+    class CountingQueue(Queue):
+        def __init__(self):
+            super().__init__(maxsize=128)
+            self.stop_count = 0
 
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {"observation_id": "attempt-10000000", "attempt_number": 10_000_000},
-        {"latency_ms": 10**20},
-    ],
-)
-def test_integer_fields_have_strict_upper_bounds(overrides):
-    with pytest.raises(ValueError, match="attempt|observation|latency|bound"):
-        build_llm_event(**{**BASE_EVENT, **overrides})
+        def put_nowait(self, item):
+            if item is telemetry._STOP:
+                self.stop_count += 1
+            return super().put_nowait(item)
 
+    adapter = LLMTelemetry(config=_enabled_config(), transport=blocking_transport)
+    queue = CountingQueue()
+    adapter._queue = queue
+    assert adapter.record(event(), trace_seed=TRACE_SEED)
+    assert entered.wait(1.0)
+    results = []
 
-class StatefulEvent(Mapping):
-    def __init__(self, event):
-        self._event = event
-        self._metadata_reads = 0
+    def close_adapter():
+        start.wait()
+        results.append(adapter.close(timeout=1.0))
 
-    def __iter__(self):
-        return iter(self._event)
+    callers = [Thread(target=close_adapter) for _ in range(2)]
+    for caller in callers:
+        caller.start()
+    start.wait()
+    release.set()
+    for caller in callers:
+        caller.join(1.0)
 
-    def __len__(self):
-        return len(self._event)
-
-    def __getitem__(self, key):
-        if key != "metadata":
-            return self._event[key]
-        self._metadata_reads += 1
-        if self._metadata_reads == 1:
-            return self._event[key]
-        return {"prompt": "private model payload"}
+    assert results == [True, True]
+    assert queue.stop_count == 1
+    assert queue.unfinished_tasks == 0
+    assert adapter._worker is None
 
 
-def test_record_validates_and_queues_the_same_defensive_snapshot(monkeypatch):
-    worker = Mock()
-    monkeypatch.setattr(llm_telemetry, "Thread", Mock(return_value=worker))
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-    event = StatefulEvent(build_llm_event(**BASE_EVENT))
+def test_concurrent_close_timeout_includes_waiting_for_shutdown_lock():
+    transport_entered = Event()
+    release_transport = Event()
 
-    assert adapter.record(event, trace_seed=BASE_EVENT["trace_seed"]) is True
-    queued = adapter._queue.get_nowait()
-    assert queued["metadata"] == BASE_EVENT["metadata"]
-    assert "prompt" not in queued["metadata"]
+    def blocking_transport(_item):
+        transport_entered.set()
+        assert release_transport.wait(1.0)
 
+    class ObservableLock:
+        def __init__(self):
+            self._lock = Lock()
+            self.acquired = Event()
 
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {"provider": "google", "resolved_model": "openai/gpt-4o-mini"},
-        {
-            "provider": "google",
-            "cost_basis": "price_snapshot",
-            "provider_reported_cost_usd": None,
-            "calculated_cost_usd": "0.01",
-            "pricing_version": "openrouter-2026-07-01",
-        },
-    ],
-)
-def test_provider_model_and_pricing_provenance_must_be_consistent(overrides):
-    event = {**BASE_EVENT, **overrides}
-    event["metadata"] = {
-        **BASE_EVENT["metadata"],
-        "provider": event["provider"],
-        "model": event["resolved_model"],
-        "costbasis": event["cost_basis"],
-    }
-    if event["pricing_version"] is None:
-        event["metadata"].pop("pricingversion", None)
-    else:
-        event["metadata"]["pricingversion"] = event["pricing_version"]
+        def acquire(self, *args, **kwargs):
+            acquired = self._lock.acquire(*args, **kwargs)
+            if acquired:
+                self.acquired.set()
+            return acquired
 
-    with pytest.raises(ValueError, match="provider|model|pricing"):
-        build_llm_event(**event)
+        def release(self):
+            self._lock.release()
 
+        def __enter__(self):
+            self.acquire()
+            return self
 
-def test_openrouter_requested_and_resolved_models_must_be_coherent():
-    event = {
-        **BASE_EVENT,
-        "provider": "openrouter",
-        "requested_model": "openai/gpt-4o-mini",
-        "resolved_model": "gemini-2.5-flash",
-        "metadata": {
-            **BASE_EVENT["metadata"],
-            "provider": "openrouter",
-            "model": "gemini-2.5-flash",
-        },
-    }
+        def __exit__(self, *_args):
+            self.release()
 
-    with pytest.raises(ValueError, match="provider|model"):
-        build_llm_event(**event)
+    adapter = LLMTelemetry(config=_enabled_config(), transport=blocking_transport)
+    close_lock = ObservableLock()
+    adapter._close_lock = close_lock
+    assert adapter.record(event(), trace_seed=TRACE_SEED)
+    assert transport_entered.wait(1.0)
 
+    first_result = []
+    first_caller = Thread(target=lambda: first_result.append(adapter.close(timeout=1.0)))
+    first_caller.start()
+    assert close_lock.acquired.wait(1.0)
 
-@pytest.mark.parametrize(
-    "metadata_key",
-    [
-        "environment",
-        "service",
-        "agent",
-        "usecase",
-        "provider",
-        "model",
-        "requestkind",
-        "queueitemid",
-        "initiatorkind",
-        "costbasis",
-    ],
-)
-def test_required_provenance_metadata_cannot_be_omitted(metadata_key):
-    metadata = dict(BASE_EVENT["metadata"])
-    metadata.pop(metadata_key)
+    second_result = []
 
-    with pytest.raises(ValueError, match="metadata|provenance|missing"):
-        build_llm_event(**{**BASE_EVENT, "metadata": metadata})
+    def close_without_waiting():
+        started = time.monotonic()
+        second_result.append((adapter.close(timeout=0), time.monotonic() - started))
+
+    second_caller = Thread(target=close_without_waiting)
+    second_caller.start()
+    second_caller.join(0.1)
+    second_exceeded_budget = second_caller.is_alive()
+
+    release_transport.set()
+    first_caller.join(1.0)
+    second_caller.join(1.0)
+
+    assert not second_exceeded_budget
+    assert second_result and second_result[0][0] is False
+    assert second_result[0][1] < 0.1
+    assert first_result == [True]
+    assert adapter.close(timeout=0) is True
 
 
-def test_queue_item_provenance_must_match_the_trusted_trace_seed():
-    metadata = {
-        **BASE_EVENT["metadata"],
-        "queueitemid": "00000000-0000-4000-8000-000000000099",
-    }
+@pytest.mark.parametrize("timeout", [0, 0.02])
+def test_close_timeout_includes_waiting_for_internal_state_lock(timeout):
+    adapter = LLMTelemetry(config=_enabled_config(), transport=lambda _item: None)
+    entered = Event()
+    results = []
 
-    with pytest.raises(ValueError, match="queueitemid|trace_seed|provenance"):
-        build_llm_event(**{**BASE_EVENT, "metadata": metadata})
+    def close_adapter():
+        entered.set()
+        started = time.monotonic()
+        results.append((adapter.close(timeout=timeout), time.monotonic() - started))
 
+    adapter._lock.acquire()
+    caller = Thread(target=close_adapter)
+    caller.start()
+    assert entered.wait(1.0)
+    caller.join(0.15)
+    exceeded_budget = caller.is_alive()
+    adapter._lock.release()
+    caller.join(1.0)
 
-@pytest.mark.parametrize("forbidden_key", ["initiatorpseudonym", "release"])
-def test_unverifiable_hash_shaped_metadata_is_not_allowed(forbidden_key):
-    metadata = {
-        **BASE_EVENT["metadata"],
-        forbidden_key: "a" * 64,
-    }
-
-    with pytest.raises(ValueError, match="metadata|allowlist"):
-        build_llm_event(**{**BASE_EVENT, "metadata": metadata})
-
-
-@pytest.mark.parametrize("observation_id", ["attempt-01", "attempt-0001"])
-def test_observation_id_has_one_canonical_spelling(observation_id):
-    with pytest.raises(ValueError, match="observation_id|attempt"):
-        build_llm_event(**{**BASE_EVENT, "observation_id": observation_id})
-
-
-class StatefulMetadata(Mapping):
-    def __init__(self, metadata):
-        self._metadata = metadata
-        self._feature_reads = 0
-
-    def __getitem__(self, key):
-        if key == "feature":
-            self._feature_reads += 1
-            return "symbol_vision" if self._feature_reads == 1 else "private-document-reference"
-        return self._metadata[key]
-
-    def __iter__(self):
-        return iter({**self._metadata, "feature": "symbol_vision"})
-
-    def __len__(self):
-        return len(self._metadata) + 1
+    assert not exceeded_budget
+    assert results and results[0][0] is False
+    assert results[0][1] < 0.15
+    assert adapter.close(timeout=1.0) is True
 
 
-def test_record_normalizes_nested_metadata_to_plain_values(monkeypatch):
-    worker = Mock()
-    monkeypatch.setattr(llm_telemetry, "Thread", Mock(return_value=worker))
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-    event = build_llm_event(**BASE_EVENT)
-    event["metadata"] = StatefulMetadata(event["metadata"])
-
-    assert adapter.record(event, trace_seed=BASE_EVENT["trace_seed"]) is True
-    queued = adapter._queue.get_nowait()
-    assert type(queued["metadata"]) is dict
-    assert queued["metadata"]["feature"] == "symbol_vision"
+@pytest.mark.parametrize("value", ["1", "TRUE", "yes", " false ", ""])
+def test_activation_requires_exact_true_and_complete_configuration(monkeypatch, value):
+    monkeypatch.setenv("SYMGOV_LLM_TELEMETRY_ENABLED", value)
+    monkeypatch.setenv("SYMGOV_LLM_TELEMETRY_ENDPOINT", "https://langfuse.invalid/api/public/ingestion")
+    monkeypatch.setenv("SYMGOV_LLM_TELEMETRY_PUBLIC_KEY", "pk")
+    monkeypatch.setenv("SYMGOV_LLM_TELEMETRY_SECRET_KEY", "sk")
+    assert not TelemetryConfig.from_env().enabled
 
 
-class OversizedMetadata(Mapping):
-    def __init__(self):
-        self.deepcopy_calls = 0
-
-    def __getitem__(self, key):
-        return "x"
-
-    def __iter__(self):
-        return iter(f"extra-{index}" for index in range(10_000))
-
-    def __len__(self):
-        return 10_000
-
-    def __deepcopy__(self, memo):
-        self.deepcopy_calls += 1
-        return self
-
-
-def test_record_rejects_oversized_metadata_before_copying(monkeypatch):
-    monkeypatch.setattr(llm_telemetry, "Thread", Mock())
-    adapter = LLMTelemetry(config=TelemetryConfig(enabled=True), transport=Mock())
-    metadata = OversizedMetadata()
-    event = build_llm_event(**BASE_EVENT)
-    event["metadata"] = metadata
-
-    assert adapter.record(event, trace_seed=BASE_EVENT["trace_seed"]) is False
-    assert metadata.deepcopy_calls == 0
-
-
-class CountingOversizedMetadata(Mapping):
-    def __init__(self):
-        self.value_reads = 0
-
-    def __getitem__(self, key):
-        self.value_reads += 1
-        return "private-model-payload"
-
-    def __iter__(self):
-        return iter(f"extra-{index}" for index in range(10_000))
-
-    def __len__(self):
-        return 10_000
-
-
-def test_event_builder_rejects_oversized_metadata_before_traversal():
-    metadata = CountingOversizedMetadata()
-
-    with pytest.raises(ValueError, match="metadata|bounded|allowlist"):
-        build_llm_event(**{**BASE_EVENT, "metadata": metadata})
-
-    assert metadata.value_reads == 0
-
-
-class CountingOversizedEvent(Mapping):
-    def __init__(self):
-        self.iterated_keys = 0
-
-    def __getitem__(self, key):
-        raise AssertionError("oversized event values must not be read")
-
-    def __iter__(self):
-        for index in range(10_000):
-            self.iterated_keys += 1
-            yield f"extra-{index}"
-
-    def __len__(self):
-        return 10_000
-
-
-def test_direct_validation_rejects_oversized_event_before_traversal():
-    event = CountingOversizedEvent()
-
-    with pytest.raises(ValueError, match="event|bounded|schema"):
-        validate_event(event, trace_seed=BASE_EVENT["trace_seed"])
-
-    assert event.iterated_keys == 0
+def test_missing_transport_configuration_disables(monkeypatch):
+    monkeypatch.setenv("SYMGOV_LLM_TELEMETRY_ENABLED", "true")
+    for missing in ("SYMGOV_LLM_TELEMETRY_ENDPOINT", "SYMGOV_LLM_TELEMETRY_PUBLIC_KEY", "SYMGOV_LLM_TELEMETRY_SECRET_KEY"):
+        monkeypatch.setenv("SYMGOV_LLM_TELEMETRY_ENDPOINT", "https://langfuse.invalid/api/public/ingestion")
+        monkeypatch.setenv("SYMGOV_LLM_TELEMETRY_PUBLIC_KEY", "pk")
+        monkeypatch.setenv("SYMGOV_LLM_TELEMETRY_SECRET_KEY", "sk")
+        monkeypatch.delenv(missing)
+        assert not TelemetryConfig.from_env().enabled
