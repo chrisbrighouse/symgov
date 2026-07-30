@@ -1,0 +1,120 @@
+{
+  "schema": "symgov-f0.4-post-deployment-validation-evidence/v1",
+  "task_id": "t_be7695a8",
+  "observed_utc": "2026-07-29T20:04:06Z",
+  "verdict": "PASS",
+  "safety": {
+    "read_only_validation_only": true,
+    "service_recreation_by_this_task": false,
+    "production_mutation_by_this_task": false,
+    "expanded_compose_emitted": false,
+    "credentials_tokens_keys_cookies_emitted": false,
+    "sensitive_response_bodies_emitted": false
+  },
+  "authority": {
+    "f0_4_spec": "/data/symgov/docs/plans/2026-07-28-f0-4-review-without-unpublication-spec.md",
+    "release_runbook": "/root/.hermes/profiles/symgov/skills/symgov/symgov-release-operations/references/paused-atomic-governance-release.md",
+    "release_sha": "182430932ae315f472b9e3611d54ad4f08cee038",
+    "release_identity": "f0.4-1824309",
+    "rollback_sha_retained": "45fc6e00b1372fce1e092ebe282f264ccd401cb3",
+    "rollback_compose_backup_retained": "/data/symgov-release-state/f0.4-20260728T221111.687815566Z/docker-compose.rollback-evidence.yml"
+  },
+  "public_assets": {
+    "evidence_source": "Accepted operator handoff on this task; no duplicate public asset fetch was performed solely for provenance.",
+    "index": {
+      "http_status": 200,
+      "expected_sha256": "8d7307ed3848daefb6ccb903f78eb6f8484741027275df46d45e3a23e8cad82d",
+      "observed_sha256": "8d7307ed3848daefb6ccb903f78eb6f8484741027275df46d45e3a23e8cad82d",
+      "byte_equal": true
+    },
+    "javascript": {
+      "path": "assets/index-BJYUGZdx.js",
+      "http_status": 200,
+      "expected_sha256": "d733c597e957b8ef2bcd609d5f763e6b12c2b8e859c232b81ac6b61debcfc01b",
+      "observed_sha256": "d733c597e957b8ef2bcd609d5f763e6b12c2b8e859c232b81ac6b61debcfc01b",
+      "byte_equal": true
+    },
+    "css": {
+      "path": "assets/index-DwfsD6QJ.css",
+      "http_status": 200,
+      "expected_sha256": "594886e833e0231dc1ee99fd142ffc37b7ab4a0b5fbb1b867d981171d7cb6133",
+      "observed_sha256": "594886e833e0231dc1ee99fd142ffc37b7ab4a0b5fbb1b867d981171d7cb6133",
+      "byte_equal": true
+    },
+    "feature_markers": {
+      "review_success_copy_present": true,
+      "pending_delivery_copy_present": true,
+      "verification": "Fresh exact-string search in the immutable release JS returned one match for each required marker; sealed artifact report also records PASS."
+    }
+  },
+  "openapi_contract": {
+    "source": "Generated read-only inside the running symgov-hermes-api container from symgov_backend.catalog_developer.catalog_openapi_document.",
+    "openapi_version": "3.1.0",
+    "canonical_json_sha256": "f422d93b4930d3df77ecdb7d605972780f9e3f1a891d2bc63636f16b2d2c3015",
+    "operation": "POST /api/v1/catalog/symbols/{symbol_ref}/feedback",
+    "exact_response_statuses": ["201", "202", "400", "401", "403", "404", "409", "503"],
+    "response_200_absent": true,
+    "response_201_schema_ref": "#/components/schemas/FeedbackResponse",
+    "response_202_schema_ref": "#/components/schemas/FeedbackResponse",
+    "response_503_schema_ref": "#/components/schemas/PublishedFeedbackPaused",
+    "retry_after_const": "60",
+    "idempotency_key": {
+      "location": "header",
+      "required": true,
+      "schema": {"type": "string", "format": "uuid"}
+    },
+    "feedback_schema_bounded": true,
+    "mutates_published_state_const": false,
+    "remains_published_const": true,
+    "private_workflow_ids_absent": true,
+    "paused_schema_exact": true,
+    "all_assertions_passed": true
+  },
+  "single_version_identity": {
+    "api_state": "running/healthy",
+    "api_image_id": "sha256:7edf094a0bfb805a6ed1c092d18e6c82294b944ea88a83f40988ff75a9dd929a",
+    "api_workdir": "/data/symgov-releases/f0.4-1824309/backend",
+    "api_import_path": "/data/symgov-releases/f0.4-1824309/backend/symgov_backend/__init__.py",
+    "api_package_version": "0.1.6",
+    "frontend_state": "running/healthy",
+    "frontend_image_id": "sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10",
+    "frontend_mount": "/docker/openclaw-hz0t/data/symgov-releases/f0.4-1824309/dist -> /usr/share/nginx/html (read-only)",
+    "frontend_package_version": "0.1.6",
+    "frontend_build_stamp": "2026-07-28.01",
+    "same_release_root": true,
+    "same_package_version": true,
+    "mixed_version_detected": false
+  },
+  "migration_state": {
+    "alembic_current": "20260721_0024",
+    "alembic_heads": ["20260721_0024"],
+    "current_equals_all_heads": true,
+    "migration_required": false,
+    "migration_executed": false,
+    "migration_backup_required": false,
+    "migration_backup_created": false,
+    "statement": "F0.4 is migration-free; no migration and no migration backup were required."
+  },
+  "health_and_pause": {
+    "api_container": "running/healthy",
+    "frontend_container": "running/healthy",
+    "public_boundary_root_http": 200,
+    "public_api_health_http": 200,
+    "application_directory_route_unfollowed_http": 308,
+    "application_directory_route_note": "Expected redirect response when redirects are not followed; the accepted public index fetch above reached HTTP 200 and supplied exact bytes.",
+    "pause_marker_host": "regular empty file, mode 0600, size 0",
+    "pause_marker_container": "regular empty file, mode 0600, size 0",
+    "published_feedback_pause_installed": true
+  },
+  "cleanup_and_residue": {
+    "temporary_credentials": "Absent, accepted from the original API-stage verifier's finally-cleaned zero-residue database proof; this task created none.",
+    "host_tmp_hermes_verify_file_count": 0,
+    "container_tmp_hermes_verify_file_count": 0,
+    "temporary_verifier_residue_absent": true
+  },
+  "rollback": {
+    "required": false,
+    "executed": false,
+    "reason": "Every required post-deployment hard gate passed."
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "schema": "symgov-f0.4-deployment-prerequisites-evidence/v1",
+  "task_id": "t_2777e89f",
+  "observed_utc": "2026-07-29T19:54:30Z",
+  "verdict": "PASS",
+  "release_decision": "All required API-stage gates and immutable artifact/rollback prerequisites are evidenced as passed. No rollback condition was observed by this task.",
+  "safety": {
+    "candidate_rebuilt": false,
+    "candidate_edited": false,
+    "replacement_pulled": false,
+    "expanded_compose_printed_or_saved": false,
+    "production_mutation_by_this_task": false,
+    "temporary_credentials_created_by_this_task": false,
+    "temporary_credentials_remaining_from_api_stage": false
+  },
+  "authority_and_runbook": {
+    "release_runbook": "/root/.hermes/profiles/symgov/skills/symgov/symgov-release-operations/references/paused-atomic-governance-release.md",
+    "f0_4_spec_section_10": "/data/symgov/docs/plans/2026-07-28-f0-4-review-without-unpublication-spec.md#10-rollback-and-deploymentruntime-implications",
+    "post_remediation_prepared_addendum": "/data/symgov-release-backups/f0.4-daisy-row-deletion-20260729T112002Z/final-read-only-release-gate.md",
+    "historical_blocked_manifest_treatment": "The sealed deployment manifest retains its historical BLOCKED verdict. The post-remediation addendum is the later authority for the cleared zero-blocker PREPARED gate; sealed history was not rewritten."
+  },
+  "candidate_provenance": {
+    "release_sha": "182430932ae315f472b9e3611d54ad4f08cee038",
+    "release_worktree": "/data/symgov-releases/f0.4-1824309",
+    "release_worktree_head_matches": true,
+    "release_worktree_detached": true,
+    "release_worktree_tracked_dirty_count": 0,
+    "release_worktree_untracked_nonignored_count": 0,
+    "candidate_compose": {
+      "path": "/data/symgov-release-state/f0.4-20260728T221111.687815566Z/docker-compose.candidate.yml",
+      "type": "regular file",
+      "mode": "0600",
+      "sha256": "fc1ef48d7b3202d3d23ea4b49d85e1e1dc60a4418f51ce122c0084f224a77902",
+      "config_quiet_fresh_result": "PASS",
+      "known_warning": "Top-level version attribute is obsolete and ignored",
+      "expanded_configuration_emitted": false,
+      "declared_api_context": "/data/symgov-releases/f0.4-1824309",
+      "declared_api_workdir": "/data/symgov-releases/f0.4-1824309/backend",
+      "declared_api_image": "symgov-hermes-api:f0.4-1824309",
+      "declared_frontend_dist": "/docker/openclaw-hz0t/data/symgov-releases/f0.4-1824309/dist"
+    },
+    "candidate_image": {
+      "tag": "symgov-hermes-api:f0.4-1824309",
+      "expected_image_id": "sha256:7edf094a0bfb805a6ed1c092d18e6c82294b944ea88a83f40988ff75a9dd929a",
+      "fresh_image_id_matches": true
+    },
+    "prepared_frontend_dist": {
+      "root": "/data/symgov-releases/f0.4-1824309/dist",
+      "index": {
+        "path": "/data/symgov-releases/f0.4-1824309/dist/index.html",
+        "sha256": "8d7307ed3848daefb6ccb903f78eb6f8484741027275df46d45e3a23e8cad82d"
+      },
+      "javascript": {
+        "path": "/data/symgov-releases/f0.4-1824309/dist/assets/index-BJYUGZdx.js",
+        "sha256": "d733c597e957b8ef2bcd609d5f763e6b12c2b8e859c232b81ac6b61debcfc01b"
+      },
+      "css": {
+        "path": "/data/symgov-releases/f0.4-1824309/dist/assets/index-DwfsD6QJ.css",
+        "sha256": "594886e833e0231dc1ee99fd142ffc37b7ab4a0b5fbb1b867d981171d7cb6133"
+      },
+      "feature_markers_from_sealed_artifact_report": "PASS",
+      "forbidden_client_identity_markers_from_sealed_artifact_report": "ABSENT"
+    },
+    "same_candidate_proof": {
+      "result": "PASS",
+      "reason": "The candidate Compose, API image tag/workdir, release worktree HEAD, and prepared frontend dist all name the same f0.4-1824309 release. Fresh hashes of Compose and all prepared frontend files match the sealed manifest/artifact report values.",
+      "sealed_manifest_path": "/data/symgov-release-state/f0.4-20260728T221111.687815566Z/deployment-manifest.json",
+      "sealed_manifest_sha256": "516268a88ab34b1f1105238cabbf42be57484ec70d62e2e1ebdfec79563f701a",
+      "release_state_report_sha256": "70a616d79ab7d823d9ae8ed4c2a3cd5eb188552fd0c5a61fec42ba619b74c479",
+      "artifact_report_sha256": "a959f08af7538dab0c76ce49cf2968c8f8b292a2604702ab15c498290e46066e"
+    }
+  },
+  "api_stage_gates": {
+    "primary_evidence_card": "t_3b9962b8",
+    "accepted_evidence_card": "t_a14357dc",
+    "all_required_gates_passed": true,
+    "gates": {
+      "candidate_api_recreated_without_build": "PASS",
+      "api_running_healthy": "PASS",
+      "api_image_identity": "PASS",
+      "api_cwd_and_import_provenance_f0_4_release": "PASS",
+      "pause_marker_visible_host_and_container": "PASS",
+      "browser_v1_alias_exact_503_retry_after_60_body": "PASS",
+      "browser_legacy_alias_exact_503_retry_after_60_body": "PASS",
+      "catalog_feedback_exact_503_retry_after_60_body": "PASS",
+      "database_audit_queue_workflow_publication_runtime_zero_delta": "PASS",
+      "published_reads_http_200_with_items": "PASS",
+      "worker_health_publishedFeedbackClaimsPaused_true": "PASS",
+      "worker_task_running_and_last_error_null": "PASS",
+      "no_matching_ed_claim_started": "PASS",
+      "temporary_credentials_removed_and_zero_residue": "PASS",
+      "temporary_verifier_removed": "PASS"
+    },
+    "exact_paused_response": {
+      "http_status": 503,
+      "retry_after": "60",
+      "body": {
+        "error": "published_feedback_paused",
+        "detail": "Published feedback and review requests are temporarily unavailable.",
+        "retryable": true
+      }
+    },
+    "evidence_note": "The original API-stage verifier used random temporary admin/browser and Catalog credentials, removed them in finally-style cleanup, proved zero matching residue, and compared a 15-second pre/post state interval with zero deltas. This task consumed that durable secret-safe evidence and did not recreate credentials or rerun mutation probes."
+  },
+  "rollback_and_pause_prerequisites": {
+    "rollback_sha": "45fc6e00b1372fce1e092ebe282f264ccd401cb3",
+    "rollback_worktree": "/data/symgov-releases/f0.3-45fc6e0",
+    "rollback_head_matches": true,
+    "rollback_worktree_detached": true,
+    "rollback_worktree_status_count": 0,
+    "compose_backup": {
+      "path": "/data/symgov-release-state/f0.4-20260728T221111.687815566Z/docker-compose.rollback-evidence.yml",
+      "type": "regular file",
+      "mode": "0600",
+      "sha256": "751547dd5dab826f3f6303c747d55526dfad41c1040c5a42e21180a03ff1f041"
+    },
+    "pause_marker": {
+      "path": "/data/symgov-runtime/maintenance/published-feedback.pause",
+      "parent_type": "directory",
+      "parent_mode": "0700",
+      "type": "regular empty file",
+      "mode": "0600",
+      "size_bytes": 0,
+      "result": "PASS"
+    },
+    "result": "PASS"
+  },
+  "fresh_read_only_spot_check": {
+    "live_compose_sha256": "fc1ef48d7b3202d3d23ea4b49d85e1e1dc60a4418f51ce122c0084f224a77902",
+    "live_compose_matches_candidate": true,
+    "api_state_health": "running/healthy",
+    "api_image_id_matches_candidate": true,
+    "api_workdir": "/data/symgov-releases/f0.4-1824309/backend",
+    "api_restart_count": 0,
+    "web_state_health": "running/healthy",
+    "web_dist_mount": "/docker/openclaw-hz0t/data/symgov-releases/f0.4-1824309/dist",
+    "web_restart_count": 0,
+    "public_root_http": 200,
+    "public_health_http": 200
+  },
+  "rollback_action": {
+    "required": false,
+    "executed": false,
+    "reason": "No prerequisite or API-stage gate failed."
+  }
+}
