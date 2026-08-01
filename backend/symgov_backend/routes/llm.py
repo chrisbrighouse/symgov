@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from ..dependencies import get_db_session, require_any_role, require_user
 from ..schemas import (
@@ -19,6 +19,7 @@ from ..services.llm import (
     resolve_model_for_feature,
     save_llm_settings,
 )
+from ..settings import runtime_environment
 
 
 router = APIRouter(tags=["llm"])
@@ -128,48 +129,98 @@ async def llm_chat(
     return LLMChatResponse(**result)
 
 
+def _utc_text(value):
+    return value.isoformat().replace("+00:00", "Z")
+
+
+def _reconcile_usage(ledger, langfuse):
+    if ledger.get("status") != "available" or langfuse.get("status") != "available":
+        return {"status": "unavailable"}
+    ledger_totals = ledger["totals"]
+    langfuse_totals = langfuse["totals"]
+    ledger_tokens = ledger_totals.get("inputTokens")
+    output_tokens = ledger_totals.get("outputTokens")
+    langfuse_tokens = langfuse_totals.get("totalTokens") if langfuse_totals else None
+    ledger_cost = ledger_totals.get("effectiveCostUsd")
+    langfuse_cost = langfuse_totals.get("totalCostUsd") if langfuse_totals else None
+    differences = {}
+    tokens_known = not (
+        ledger_totals.get("unknownInputTokenAttempts", 0)
+        or ledger_totals.get("unknownOutputTokenAttempts", 0)
+    )
+    if tokens_known and ledger_tokens is not None and output_tokens is not None and langfuse_tokens is not None:
+        differences["tokenDifference"] = abs(ledger_tokens + output_tokens - langfuse_tokens)
+    if not ledger_totals.get("unknownCostAttempts", 0) and ledger_cost is not None and langfuse_cost is not None:
+        differences["costDifferenceUsd"] = round(abs(ledger_cost - langfuse_cost), 9)
+    if not differences:
+        return {"status": "notComparable"}
+    return {"status": "matched" if all(value == 0 for value in differences.values()) else "different", **differences}
+
+
 @router.get("/admin/llm/usage")
 @legacy_router.get("/admin/llm/usage", include_in_schema=False)
 def get_llm_usage(
+    response: Response,
     period: str = "day",
     anchor: str | None = None,
     session=Depends(get_db_session),
     _=Depends(require_any_role({"admin"})),
 ):
-    from datetime import datetime, timezone
-    from ..services.llm_usage_ledger import calculate_period_utc_bounds, reconcile_invoice_summary
+    from datetime import datetime
+    from ..services import langfuse_reporting, llm_usage_ledger
 
     if period not in ("day", "week", "month", "mtd"):
         raise HTTPException(status_code=422, detail=f"Unsupported period: {period}")
-
     anchor_dt = None
-    if anchor:
-        try:
-            anchor_dt = datetime.fromisoformat(anchor.replace("Z", "+00:00"))
-        except ValueError:
+    if anchor is not None:
+        if not 1 <= len(anchor) <= 64:
             raise HTTPException(status_code=422, detail="Invalid ISO anchor timestamp")
+        try:
+            anchor_dt = datetime.fromisoformat(anchor.removesuffix("Z") + ("+00:00" if anchor.endswith("Z") else ""))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Invalid ISO anchor timestamp") from None
+        if not 2000 <= anchor_dt.year <= 2100:
+            raise HTTPException(status_code=422, detail="Anchor timestamp is outside the supported range")
 
-    start, end = calculate_period_utc_bounds(period, anchor=anchor_dt)
+    response.headers["Cache-Control"] = "no-store, private"
+    try:
+        environment = runtime_environment()
+    except RuntimeError:
+        raise HTTPException(
+            status_code=503,
+            detail="The server runtime environment is not safely configured.",
+        ) from None
 
+    start, end = llm_usage_ledger.calculate_period_utc_bounds(period, anchor=anchor_dt)
+    warnings = []
+    try:
+        ledger_report = llm_usage_ledger.aggregate_llm_usage(
+            session,
+            start,
+            end,
+            environment=environment,
+        )
+        ledger = {"status": "available", **ledger_report}
+        warnings.extend(ledger_report.get("warnings", []))
+    except Exception:
+        message = "The authoritative Symgov ledger is temporarily unavailable."
+        ledger = {
+            "status": "unavailable",
+            "message": message,
+            "totals": None,
+            "breakdowns": None,
+        }
+        warnings.append(message)
+    langfuse, langfuse_warnings = langfuse_reporting.safe_langfuse_usage(
+        langfuse_reporting.LangfuseQueryConfig.from_env(), start, end
+    )
+    warnings.extend(langfuse_warnings)
     return {
         "period": period,
-        "startUtc": start.isoformat(),
-        "endUtc": end.isoformat(),
-        "totals": {
-            "totalAttempts": 0,
-            "totalSuccessful": 0,
-            "totalFailed": 0,
-            "totalLatencyMs": 0,
-            "totalPromptTokens": 0,
-            "totalCompletionTokens": 0,
-            "totalCostUsd": 0.0,
-            "unknownCostAttempts": 0,
-        },
-        "breakdowns": {
-            "byProvider": [],
-            "byUseCase": [],
-            "byAgent": [],
-        },
-        "warnings": [],
-        "reconciliation": reconcile_invoice_summary(0.0, 0.0),
+        "startUtc": _utc_text(start),
+        "endUtcExclusive": _utc_text(end),
+        "ledger": ledger,
+        "langfuse": langfuse,
+        "reconciliation": _reconcile_usage(ledger, langfuse),
+        "warnings": warnings[:20],
     }

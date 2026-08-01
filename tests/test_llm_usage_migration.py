@@ -12,11 +12,23 @@ def test_llm_usage_migration_head_is_single_and_linear():
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
     assert len(heads) == 1
-    assert heads[0] == "20260730_0025"
+    assert heads[0] == "20260801_0026"
 
-    rev = script.get_revision("20260730_0025")
+    rev = script.get_revision("20260801_0026")
     assert rev is not None
-    assert rev.down_revision == "20260721_0024"
+    assert rev.down_revision == "20260730_0025"
+
+
+def test_llm_usage_runtime_role_receives_append_and_report_permissions():
+    migration = (
+        __import__("pathlib").Path("backend/alembic/versions/20260801_0026_llm_usage_runtime_grants.py")
+        .read_text(encoding="utf-8")
+    )
+
+    assert "GRANT SELECT, INSERT ON TABLE llm_usage_events TO symgov_app" in migration
+    assert "GRANT UPDATE" not in migration
+    assert "GRANT DELETE" not in migration
+    assert "REVOKE SELECT, INSERT ON TABLE llm_usage_events FROM symgov_app" in migration
 
 
 def test_llm_usage_event_orm_matches_table_name():

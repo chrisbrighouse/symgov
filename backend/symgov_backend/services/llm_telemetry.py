@@ -24,8 +24,13 @@ from threading import Lock, Thread, current_thread
 import time
 from typing import Any, Callable, Mapping
 from urllib.parse import urlparse
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 import uuid
+
+
+_APPROVED_INTERNAL_INGESTION_ENDPOINT = (
+    "http://symgov-langfuse:3000/api/public/ingestion"
+)
 
 
 ALLOWED_METADATA_KEYS = {
@@ -99,7 +104,7 @@ class _NoRedirectHandler(HTTPRedirectHandler):
         return None
 
 
-_NO_REDIRECT_OPENER = build_opener(_NoRedirectHandler())
+_NO_REDIRECT_OPENER = build_opener(ProxyHandler({}), _NoRedirectHandler())
 
 
 def urlopen(request: Request, *, timeout: float):
@@ -372,9 +377,12 @@ def _valid_endpoint(value: str | None) -> str | None:
             or all(_NONCANONICAL_IP_LABEL_RE.fullmatch(label) for label in labels)
         ):
             return None
+    normalized = value.rstrip("/")
+    if normalized == _APPROVED_INTERNAL_INGESTION_ENDPOINT:
+        return normalized
     if parsed.scheme == "http" and hostname not in {"127.0.0.1", "::1"}:
         return None
-    return value.rstrip("/")
+    return normalized
 
 
 def _valid_credential(value: Any) -> bool:

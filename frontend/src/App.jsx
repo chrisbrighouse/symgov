@@ -7,6 +7,7 @@ import {
   deleteAdminUser,
   fetchAdminUsers,
   fetchAdminLlmSettings,
+  fetchAdminLlmUsage,
   fetchOpenRouterModels,
   fetchReggieQueueControls,
   fetchScottSourceSites,
@@ -48,6 +49,7 @@ import {
   updateWorkspaceReviewSymbolProperties
 } from './api.js';
 import { appConfig } from './config.js';
+import LlmConsumptionReport, { LlmConsumptionControls } from './LlmConsumptionView.js';
 import CatalogDeveloperHub from './CatalogDeveloperHub.jsx';
 import ProfilePage from './ProfilePage.jsx';
 import FavouriteButton from './FavouriteButton.js';
@@ -6410,6 +6412,10 @@ function AdminLlmPage() {
   const [testBusy, setTestBusy] = useState(false);
   const [testPrompt, setTestPrompt] = useState('Summarize why controlled engineering symbols improve safety and governance in 2 bullet points.');
   const [testResult, setTestResult] = useState('');
+  const [consumptionPeriod, setConsumptionPeriod] = useState('day');
+  const [consumptionAnchor, setConsumptionAnchor] = useState(() => new Date().toISOString().slice(0, 10));
+  const [consumptionRefresh, setConsumptionRefresh] = useState(0);
+  const [consumptionState, setConsumptionState] = useState({ loading: true, error: '', usage: null });
 
   const providerForModel = (modelId) => {
     const normalized = String(modelId || '').trim();
@@ -6492,6 +6498,20 @@ function AdminLlmPage() {
     loadModels();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    setConsumptionState((current) => ({ ...current, loading: true, error: '' }));
+    fetchAdminLlmUsage(consumptionPeriod, consumptionAnchor).then((result) => {
+      if (cancelled) return;
+      if (!result.ok) {
+        setConsumptionState({ loading: false, error: result.message || 'Consumption data could not be loaded.', usage: null });
+        return;
+      }
+      setConsumptionState({ loading: false, error: '', usage: result.usage });
+    });
+    return () => { cancelled = true; };
+  }, [consumptionAnchor, consumptionPeriod, consumptionRefresh]);
+
   const handleDefaultProviderChange = (nextProvider) => {
     const matchingModels = modelOptions.filter((modelId) => providerForModel(modelId) === nextProvider);
     setForm((current) => ({
@@ -6563,6 +6583,24 @@ function AdminLlmPage() {
           <p className="title-support">Configure OpenRouter models for shared Symgov LLM routing.</p>
         </div>
       </div>
+
+      <section className="glass-panel pane llm-consumption-panel" aria-labelledby="llm-consumption-heading">
+        <div className="llm-consumption-heading-row">
+          <div>
+            <h3 id="llm-consumption-heading">LLM consumption</h3>
+            <p className="muted-text">Authoritative local usage with a bounded Langfuse comparison.</p>
+          </div>
+          <LlmConsumptionControls
+            period={consumptionPeriod}
+            anchor={consumptionAnchor}
+            onPeriodChange={setConsumptionPeriod}
+            onAnchorChange={setConsumptionAnchor}
+            onRefresh={() => setConsumptionRefresh((value) => value + 1)}
+          />
+        </div>
+
+        <LlmConsumptionReport state={consumptionState} />
+      </section>
 
       <p className="page-status-text">{state.message}</p>
       <p className="page-status-text">{modelsState.message}</p>

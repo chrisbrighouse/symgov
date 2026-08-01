@@ -3,6 +3,7 @@ from pathlib import Path
 
 APP_JSX = Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.jsx"
 API_JS = Path(__file__).resolve().parents[1] / "frontend" / "src" / "api.js"
+LLM_CONSUMPTION_VIEW_JS = Path(__file__).resolve().parents[1] / "frontend" / "src" / "LlmConsumptionView.js"
 
 
 def test_admin_user_management_page_and_navigation_exist():
@@ -118,3 +119,27 @@ def test_admin_llm_management_api_client_methods_exist():
     assert "export async function fetchOpenRouterModels()" in source
     assert "export async function testAdminLlmPrompt(" in source
     assert "requestJson('/admin/llm/settings'" in source
+
+
+def test_admin_llm_consumption_ui_has_required_states_controls_and_tables():
+    app = APP_JSX.read_text(encoding="utf-8") + LLM_CONSUMPTION_VIEW_JS.read_text(encoding="utf-8")
+    api = API_JS.read_text(encoding="utf-8")
+
+    assert "fetchAdminLlmUsage" in app
+    assert "LLM consumption" in app
+    assert all(label in app for label in ("Today", "This week", "This month", "Month to date"))
+    assert all(label in app for label in ("Known spend", "Attempts", "Successful", "Failures", "Input tokens", "Output tokens", "Cost unknown"))
+    assert "Symgov ledger" in app
+    assert "Authoritative source" in app
+    assert "Langfuse export/query" in app
+    assert "asynchronous" in app
+    assert all(caption in app for caption in ("Provider and model breakdown", "Use case breakdown", "Agent breakdown"))
+    assert "Updating consumption report" in app
+    assert 'aria-live="polite"' in app
+    assert "type: 'date'" in app
+    assert "Refresh" in app
+    assert "endUtcExclusive" in app
+    assert "No LLM attempts were recorded" in app
+    assert "Consumption data could not be loaded" in app
+    assert "export async function fetchAdminLlmUsage(period = 'day', anchor)" in api
+    assert "params.set('anchor', anchor)" in api

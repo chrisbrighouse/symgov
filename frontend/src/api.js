@@ -359,8 +359,10 @@ export async function testAdminLlmPrompt(payload) {
   };
 }
 
-export async function fetchAdminLlmUsage(period = 'day') {
-  const result = await requestJson(`/admin/llm/usage?period=${encodeURIComponent(period)}`, { cache: 'no-store' });
+export async function fetchAdminLlmUsage(period = 'day', anchor) {
+  const params = new URLSearchParams({ period });
+  if (anchor) params.set('anchor', anchor);
+  const result = await requestJson(`/admin/llm/usage?${params.toString()}`, { cache: 'no-store' });
   return {
     ...result,
     usage: result.ok ? result.payload || null : null

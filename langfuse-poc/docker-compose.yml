@@ -148,12 +148,19 @@ services:
       LANGFUSE_INIT_USER_EMAIL: ${POC_LANGFUSE_INIT_USER_EMAIL}
       LANGFUSE_INIT_USER_NAME: ${POC_LANGFUSE_INIT_USER_NAME}
       LANGFUSE_INIT_USER_PASSWORD: ${POC_LANGFUSE_INIT_USER_PASSWORD}
-    networks: [poc-internal]
+    networks:
+      poc-internal:
+      symgov-internal:
+        aliases:
+          - symgov-langfuse
 
 networks:
   poc-internal:
     name: langfuse-poc-internal
     driver: bridge
+  symgov-internal:
+    name: ai-stack
+    external: true
 
 volumes:
   postgres-data:
