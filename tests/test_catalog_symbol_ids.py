@@ -41,6 +41,7 @@ class _NestedTransaction(AbstractContextManager[None]):
         self.pending_snapshot: list[object] = []
         self.symbol_snapshot: dict[str, object] = {}
         self.registry_snapshots: list[tuple[object, dict[str, object]]] = []
+        self.database_snapshot: dict[str, dict[str, object]] = {}
 
     def __enter__(self) -> None:
         self.pending_snapshot = list(self.session.pending)
@@ -54,6 +55,11 @@ class _NestedTransaction(AbstractContextManager[None]):
             vars(self.session.symbol).update(self.symbol_snapshot)
             for row, snapshot in self.registry_snapshots:
                 vars(row).update(snapshot)
+            if self.database_snapshot:
+                self.session.database_rows = {
+                    identifier: state.copy()
+                    for identifier, state in self.database_snapshot.items()
+                }
         return False
 
 
@@ -162,6 +168,48 @@ class CorrectionSession(AllocationSession):
             vars(self.registry_rows[identifier]).update(state)
 
 
+class AutoflushFalseCorrectionSession(CorrectionSession):
+    """Correction fake with database-visible partial canonical uniqueness."""
+
+    def __init__(self, symbol: object, registry_rows: list[object]) -> None:
+        super().__init__(symbol, registry_rows)
+        self.database_rows = {
+            identifier: vars(row).copy()
+            for identifier, row in self.registry_rows.items()
+        }
+
+    def flush(self) -> None:
+        super().flush()
+        for identifier, row in self.registry_rows.items():
+            self.database_rows[identifier] = vars(row).copy()
+
+    def execute(self, statement):
+        if isinstance(statement, Insert):
+            values = statement.compile().params
+            if any(
+                row["role"] == "canonical"
+                and row["governed_symbol_id"] == values["governed_symbol_id"]
+                for row in self.database_rows.values()
+            ):
+                original = _UniqueViolation(
+                    "uq_catalog_symbol_identifiers_canonical_governed_symbol"
+                )
+                raise IntegrityError("insert", values, original)
+        result = super().execute(statement)
+        if isinstance(statement, Insert):
+            values = statement.compile().params
+            self.database_rows[values["identifier"]] = dict(values)
+        return result
+
+    def begin_nested(self) -> _NestedTransaction:
+        nested = super().begin_nested()
+        nested.database_snapshot = {
+            identifier: state.copy()
+            for identifier, state in self.database_rows.items()
+        }
+        return nested
+
+
 def _registry_row(
     identifier: str,
     role: str,
@@ -226,6 +274,27 @@ def test_reviewed_correction_preserves_old_identifier_as_historical_alias() -> N
         (CatalogSymbolIdentifier, "S-900001", True),
     ]
     assert session.commit_calls == 0
+
+
+def test_reviewed_correction_flushes_old_canonical_before_core_insert() -> None:
+    symbol_id = uuid.uuid4()
+    symbol = SimpleNamespace(id=symbol_id, catalog_symbol_id="S-000001")
+    old_row = _registry_row("S-000001", "canonical", symbol_id)
+    session = AutoflushFalseCorrectionSession(symbol, [old_row])
+
+    result = catalog_symbol_ids_service.correct_catalog_symbol_id(
+        session,
+        symbol_id,
+        "S-900001",
+        actor_id=uuid.uuid4(),
+        reason="Reviewer corrected a transposed legacy ID",
+        preserve_old_link=True,
+        changed_at=datetime(2026, 8, 2, 13, 45, tzinfo=timezone.utc),
+    )
+
+    assert result == "S-900001"
+    assert session.database_rows["S-000001"]["role"] == "historical_alias"
+    assert session.database_rows["S-900001"]["role"] == "canonical"
 
 
 def _run_correction(

@@ -201,6 +201,9 @@ def correct_catalog_symbol_id(
             current_row.changed_at = changed_at
             current_row.changed_by = actor_id
             current_row.change_reason = normalized_reason
+            # autoflush=False means the Core INSERT would otherwise see the
+            # old canonical row still present in the partial unique index.
+            session.flush()
             session.execute(registry_insert)
             symbol.catalog_symbol_id = normalized_identifier
     except IntegrityError as error:
