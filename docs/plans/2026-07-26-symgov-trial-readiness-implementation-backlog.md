@@ -168,7 +168,7 @@ Status vocabulary: `SPECIFIED` means a controlling implementation-ready goal spe
 
 **Completion:** Source implementation is commit `182430932ae315f472b9e3611d54ad4f08cee038`. The preserved correction report at `artifacts/reviews/t_ea80369d-f0.4-b1-replay-lifecycle-report.md` records 429 disposable-PostgreSQL focused tests, 1,136 backend tests with 3 skipped/3 deselected, all external partitions, 74 frontend tests, both frontend builds, wrapper contracts, compilation, whitespace, and added-line security checks. No migration was added. The report explicitly records no push or deployment; this source snapshot therefore does not establish production activation. F2.4 crash-proof automatic delivery remains residual work.
 
-### F0.5 Enforce account security invariants in the backend — READY
+### F0.5 Enforce account security invariants in the backend — SPECIFIED
 
 **Slices:**
 1. enforce `must_change_pin` in backend dependencies while allowing only auth/profile/PIN-change essentials;
@@ -176,6 +176,8 @@ Status vocabulary: `SPECIFIED` means a controlling implementation-ready goal spe
 3. revoke sessions on deactivation and PIN reset;
 4. add bounded per-account and per-IP login throttling plus attempt audit;
 5. define and apply one consistent Origin/Referer/JSON CSRF policy for cookie-authenticated mutations.
+
+**Controlling specification:** `docs/plans/2026-07-30-f0-5-account-security-invariants-spec.md`.
 
 **Acceptance:** direct API calls cannot bypass forced PIN change; reactivated accounts do not regain old sessions; throttling has deterministic tests and safe operator recovery.
 

@@ -33,6 +33,8 @@ The machine-readable file-by-file inventory is [`audit-current-state.json`](audi
 
 The dated files under [`plans/`](plans/) and [`restart-notes/`](restart-notes/) are immutable point-in-time plans, handoffs, completion records, and operational snapshots. The `.hermes/plans/` files and `artifacts/reviews/` report are also historical. They may intentionally contradict later source or later operational evidence; follow the current plan and canonical docs for present guidance, while preserving the old verdict in its original context.
 
+Historical records may mention the former OpenClaw container stack. That stack was decommissioned on 2026-08-01 and is not a current Symgov dependency. Retained `/docker/openclaw-hz0t/data` and `/data/.openclaw` paths remain live storage locations and must not be interpreted as evidence that those containers still exist.
+
 ## Generated and reference material
 
 - [`../ui-design/`](../ui-design/) contains the design packet and prototypes; it is reference material, not a claim that every surface is implemented.

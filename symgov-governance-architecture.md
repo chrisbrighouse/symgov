@@ -155,12 +155,12 @@ Initial backend target remains:
 - PostgreSQL for system of record
 - Redis for cache and lightweight async coordination when needed
 - S3-compatible object storage for SVG and export assets
-- a frontend application developed inside the `openclaw` container, with the current VPS continuing to serve the published bundle until a new publication step is chosen
+- a Vite frontend built from the repository/release tree and served by the independent `applications-web` service
 
 Frontend transition note for this phase:
-- keep the current public frontend and nginx routing stable while the React/Vite frontend is developed locally in-container
-- do not lock the final VPS publication shape yet
-- choose the eventual VPS publication path later, once the React/Vite frontend is ready to publish
+- keep the current public frontend and nginx routing stable while React/Vite changes are developed in the repository
+- publish immutable release builds through the current `applications-web` deployment boundary
+- treat retained `.openclaw` paths as storage compatibility paths, not a frontend build environment or container dependency
 
 Operational simplifications for this phase:
 - no proposal/vote subsystem

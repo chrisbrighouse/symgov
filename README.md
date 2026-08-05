@@ -116,7 +116,7 @@ Supporting routes still exist for focused tasks, but the product intent is now e
 The product docs now also include the first agentization slice for Symgov:
 
 - `symgov-agent-architecture.md` defines the shared agent runtime contract and the first concrete `Vlad` validation contract
-- `Vlad` was the first OpenClaw scaffold; current model assignments are defined by `model_profiles` in `openclaw-agents.manifest.json`, not by this README
+- `Vlad` was the first specialist-agent scaffold; current model assignments are defined by repository runtime configuration, not by this README
 - the first runnable `Vlad` queue is intentionally local file-backed while the Symgov backend queue is still being introduced
 - the local `Vlad` workspace writes queue items, run records, output artifacts, and validation reports in a queue-shaped contract that mirrors the intended backend model
 
@@ -140,7 +140,7 @@ The product docs now also include the first agentization slice for Symgov:
 
 `Ed` now also exists as the Symgov visual experience and feedback scaffold:
 
-- Ed is registered through the SymGov-owned OpenClaw manifest and backend agent seed list
+- Ed is defined by the repository agent manifest and backend agent seed list
 - Ed writes local UX feedback artifacts under `/data/.openclaw/workspaces/ed/runtime`
 - Ed can summarize provided feedback or collect recent messages from the existing SymGov Ops Telegram group when invoked
 - Ed remains non-authoritative and does not approve, classify, publish, or change governance records
@@ -148,7 +148,7 @@ The product docs now also include the first agentization slice for Symgov:
 `Hannah` now also exists as the Symgov catalogue quality and long-term curation scaffold:
 
 - Hannah owns the catalogue-curation scope for published Standards records
-- Hannah is registered through the SymGov-owned OpenClaw manifest and backend agent seed list
+- Hannah is defined by the repository agent manifest and backend agent seed list
 - Hannah writes local curation reports under `/data/.openclaw/workspaces/hannah/runtime`
 - Hannah works only on public published Standards symbols that have reasonable Name, Title, Category, and Discipline values
 - Hannah records scored external photo candidates, attaches only low-risk supplemental photos, and keeps the public schematic preview distinct from real-world equipment photos. Candidate images should be photographic representations of real examples of the equipment represented by the symbol, not text documents, manuals, description pages, or diagram-only references.
@@ -157,7 +157,7 @@ The product docs now also include the first agentization slice for Symgov:
 `Whitney` now also exists as the Symgov market intelligence and demand sensing scaffold:
 
 - Whitney owns internal demand sensing for market intelligence, catalogue demand, and operator prioritization
-- Whitney is registered through the SymGov-owned OpenClaw manifest and backend agent seed list
+- Whitney is defined by the repository agent manifest and backend agent seed list
 - Whitney writes local queue records, run logs, run records, output artifacts, and market intelligence reports under `/data/.openclaw/workspaces/whitney/runtime`
 - Whitney's first slice uses internal telemetry only: published Standards coverage, clarification volume, intake patterns, and open review pressure
 - Whitney records durable demand signals and market intelligence reports through `whitney_demand_signals` and `whitney_market_intelligence_reports`
@@ -252,23 +252,25 @@ Agreed target routing after Libby implementation:
 - `Libby` sends revised items back to `Daisy` for re-review when human review remains required, or to `Rupert` when the item is now publication-ready without human review
 - `Rupert` accepts either explicit Daisy/human approval handoffs or Libby no-human-review-required publication handoffs; Rupert still blocks publication when validation, provenance, classification, policy, approval, or release evidence is incomplete
 
-## OpenClaw compatibility and resilience
+## Legacy workspace compatibility
 
-Repository-owned worker execution is selected independently through `SYMGOV_AGENT_RUNTIME`: `direct` (the default) or `hermes`. OpenClaw remains a compatibility/registration boundary for agent workspaces, bindings, model profiles, and recovery after OpenClaw upgrades. The SymGov-owned manifest is:
+Repository-owned worker execution is selected through `SYMGOV_AGENT_RUNTIME`: `direct` (the default) or `hermes`. The live Symgov application does not require or run an OpenClaw container. The old OpenClaw container set was decommissioned on 2026-08-01.
+
+Some retained runtime directories still live under `/data/.openclaw/workspaces`, and the historical compatibility manifest remains in the repository as:
 
 - `openclaw-agents.manifest.json`
 
-That manifest is the local source of truth for OpenClaw compatibility data:
+That manifest records legacy workspace and registration compatibility data:
 
-- the expected safe OpenClaw plugin profile for SymGov operations
-- registered SymGov agent ids, names, workspaces, model profiles, resolved model ids, and tool profile
-- managed OpenClaw `bindings[]` entries for deterministic channel/account/peer routing; the audited manifest currently contains one direct Libby binding that conflicts with the intended policy
-- expected OpenClaw `agent.json` metadata paths
-- required workspace files that prove each SymGov agent is still runnable
+- historical plugin and registration expectations
+- Symgov agent ids, names, retained workspace paths, model profiles, resolved model ids, and tool profiles
+- historical channel/account/peer bindings
+- legacy `agent.json` metadata paths
+- retained workspace files used by repository-owned runners
 
-Per-agent LLM model access is configured through top-level `model_profiles` in the manifest. Each agent references a `model_profile`, and `reconcile-openclaw` expands that profile into the concrete OpenClaw `agents.list[].model` and per-agent `agent.json` model field. This keeps model policy in one SymGov-owned place while leaving provider credentials and runtime access in OpenClaw's normal configuration.
+The manifest's `model_profiles` remain source data for compatibility and migration tooling. Live provider credentials and worker execution are configured by the selected repository/Hermes runtime, independently of that legacy registration model.
 
-Use the backend CLI to audit or repair OpenClaw registration after upgrades:
+The backend still exposes legacy audit and reconstruction commands for migration or forensic use:
 
 ```bash
 cd /path/to/symgov/backend
@@ -276,14 +278,7 @@ python manage_symgov.py check-openclaw
 python manage_symgov.py reconcile-openclaw
 ```
 
-Current intent:
-
-- SymGov-owned files remain the source of truth for OpenClaw registration and workspace compatibility; `SYMGOV_AGENT_RUNTIME` separately selects repository-worker execution
-- OpenClaw config and agent metadata are treated as rebuildable runtime state
-- OpenClaw bindings are also treated as rebuildable runtime state
-- after an OpenClaw upgrade, `reconcile-openclaw` should be the first repair step before doing manual edits
-- the current manifest binding set is not empty; resolve F0.6 before treating reconciliation as a safe repair action
-- OpenClaw bindings are deterministic channel/account/peer matches; they are not free-form keyword routing rules
+These commands are not part of normal live operations and must not be used to recreate or start the retired container stack without an explicit migration decision. The retained `.openclaw` directory name is a storage-path compatibility detail, not evidence of a running OpenClaw service.
 
 ## Repeatable quality gates
 
@@ -402,7 +397,7 @@ This repository is now referred to as **symgov** (symbol governance). See the ar
 - `.env.backend.storage.example` — object-storage configuration example.
 - `backend/` — backend source containing SQLAlchemy models, Alembic config, and migrations.
 - `backend/manage_symgov.py` — current backend bootstrap and inspection entrypoint for agent-definition seeding, DB/storage health checks, and the FastAPI server.
-- `openclaw-agents.manifest.json` — Symgov-owned OpenClaw registration manifest. At this snapshot it contains a direct Telegram-to-Libby binding, which conflicts with the documented Alfi-first orchestration intent and remains an explicit F0.6 backlog item; do not describe the binding as empty.
+- `openclaw-agents.manifest.json` — retained legacy registration/workspace manifest for compatibility and migration tooling; it is not the live worker-runtime authority.
 
 No database migration state, object-store reachability, seeded runtime rows, container image, public route, or external service health is asserted by this repository document. Verify those against the intended environment.
 

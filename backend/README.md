@@ -15,7 +15,7 @@ Current scope:
 - PostgreSQL-first types including `jsonb`
 - a FastAPI/Uvicorn ASGI server shell for growable versioned APIs
 - a small bootstrap and health CLI in `manage_symgov.py`
-- a SymGov-owned OpenClaw registration audit and repair path for the local agent workspaces
+- legacy registration audit and reconstruction utilities for retained agent workspaces; these are not a live container dependency
 
 Current API package shape:
 
@@ -42,9 +42,14 @@ python manage_symgov.py seed-agent-definitions
 python manage_symgov.py seed-scott-source-discovery
 python manage_symgov.py check-db
 python manage_symgov.py check-storage
+python manage_symgov.py serve-api --host 0.0.0.0 --port 8010
+```
+
+Legacy migration/forensic commands, not normal live operations:
+
+```bash
 python manage_symgov.py check-openclaw
 python manage_symgov.py reconcile-openclaw
-python manage_symgov.py serve-api --host 0.0.0.0 --port 8010
 ```
 
 ## Tests from a clean environment
@@ -120,7 +125,10 @@ python manage_symgov.py revoke-catalog-api-key --key-id 00000000-0000-0000-0000-
 
 **Secret warning:** successful create output writes `rawKey` exactly once to stdout. Treat it as one-time secret material; avoid placing secrets in shell history and secure any stdout capture immediately. List and revoke output contain metadata only.
 
-OpenClaw resilience notes:
+Legacy workspace compatibility notes:
+
+- The live Symgov API does not require or run an OpenClaw container. The old container set was decommissioned on 2026-08-01.
+- The `.openclaw` name survives in persisted workspace paths for compatibility; it does not indicate a running service.
 
 - The canonical SymGov-to-OpenClaw registration data now lives in:
   `/data/.openclaw/workspace/symgov/openclaw-agents.manifest.json`
@@ -132,9 +140,9 @@ OpenClaw resilience notes:
   - `agent.json` presence and contents
   - workspace state files
   - required SymGov runner and definition files
-- `manage_symgov.py reconcile-openclaw` repairs the OpenClaw-side registration state from that manifest.
+- `manage_symgov.py reconcile-openclaw` can reconstruct the retired registration state from that manifest for an explicit migration or forensic task.
 - Per-agent LLM model access is configured through manifest `model_profiles` plus each agent's `model_profile`. Reconciliation resolves the profile to OpenClaw's concrete `agents.list[].model` and per-agent `agent.json` `model` field.
-- This is intended as the first post-upgrade recovery path when OpenClaw updates leave SymGov agent registration or plugin state inconsistent.
+- These commands are retained for compatibility and must not be treated as routine deployment or recovery steps.
 - The audited manifest currently contains a direct Telegram-to-Libby binding. This conflicts with the Alfi-first orchestration policy recorded in the current trial-readiness backlog and remains F0.6 work; do not run reconciliation expecting an empty binding set until that source/config contradiction is resolved.
 - OpenClaw bindings currently support deterministic match fields such as channel, account, and peer; they do not provide arbitrary keyword-routing rules.
 
@@ -233,7 +241,7 @@ python manage_symgov.py check-storage
 Current runner bridge notes:
 
 - `manage_symgov.py seed-agent-definitions` upserts baseline `agent_definitions` rows for `scott`, `vlad`, `tracy`, `daisy`, `libby`, `rupert`, `ed`, `hannah`, `reggie`, and `whitney`
-- Repository-owned agent worker execution is selected by `SYMGOV_AGENT_RUNTIME`: `direct` (the default) or `hermes`. The OpenClaw manifest remains registration/workspace compatibility data and is not the sole worker-execution runtime.
+- Repository-owned agent worker execution is selected by `SYMGOV_AGENT_RUNTIME`: `direct` (the default) or `hermes`. The legacy manifest is compatibility data and is not a live worker-execution runtime.
 - Vlad's runner is repo-managed at `/data/symgov/scripts/run_vlad_validation.py`; the old `/data/.openclaw/workspaces/vlad/run_vlad_validation.py` code copy has been retired. Keep using `/data/.openclaw/workspaces/vlad/runtime` for queue/history artifacts.
 - `manage_symgov.py seed-scott-source-discovery` upserts Scott's durable source-discovery memory rows, prioritising the recommended standards/source backbone: IEC 60617, ISO 14617, ISA-5.1, ASME Y14.5 / ISO 1101, ProjectMaterials, Vista Projects, NECA 100, QElectroTech, readable GD&T references, and rights-gated CAD-library candidates; ignored domains such as `linecad.com`, `svghmi.pro`, and `autodesk.com` remain ignored
 - Scott source-search defaults now seed toward `ProjectMaterials P&ID symbols ISA-5.1 ISO 14617 IEC 60617 NECA 100 QElectroTech GD&T`, while ignored domains and checked `include_next_run` rows are passed into the next run payload
@@ -244,9 +252,7 @@ Current runner bridge notes:
 - Whitney market intelligence uses Alembic revision `20260522_0011_whitney_market_intelligence.py` for `whitney_market_intelligence_reports` and `whitney_demand_signals`. The runner currently reads internal Symgov telemetry only, writes `market_intelligence_reports` runtime records, and persists `whitney_market_intelligence_report` artifacts through the runtime bridge. Demand signals are upserted by `(source_type, source_ref, signal_type)` so repeated scans refresh the durable signal instead of duplicating it.
 - `manage_symgov.py check-db` reports basic connectivity plus counts for the current agent runtime tables
 - `manage_symgov.py check-storage` probes the configured MinIO endpoint and live health URL
-- `manage_symgov.py check-openclaw` audits whether local OpenClaw registration still matches the SymGov manifest
-- `manage_symgov.py reconcile-openclaw` repairs missing or drifted OpenClaw registration state from the SymGov manifest
-- the same audit/reconcile flow now also owns top-level OpenClaw `bindings[]` so future routing rules can survive upgrades
+- `manage_symgov.py check-openclaw` and `reconcile-openclaw` are retained only for explicit migration or forensic work against the archived registration model
 - `manage_symgov.py serve-api` now runs the FastAPI/Uvicorn server shell for Symgov APIs
 - the current `Scott`, `Vlad`, and `Tracy` file-backed runners now support `--persist-db` to mirror queue execution into PostgreSQL while keeping the local JSON runtime records
 - Libby is the required classification and publication-readiness triage step for submitted single symbols and split-sheet child symbols; it supports classification work, `review_decision_follow_up` queue items for non-approval review outcomes, and `vlad_graphic_update_completed` queue items for Vlad returns

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, PrimaryKeyConstraint, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -306,6 +306,7 @@ class GovernedSymbol(Base):
     __tablename__ = "governed_symbols"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    catalog_symbol_id: Mapped[str | None] = mapped_column(Text, ForeignKey("catalog_symbol_identifiers.identifier", ondelete="RESTRICT"), nullable=True, unique=True)
     slug: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(Text, nullable=False)
@@ -314,6 +315,47 @@ class GovernedSymbol(Base):
     current_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_revisions.id"), nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CatalogSymbolIdentifier(Base):
+    __tablename__ = "catalog_symbol_identifiers"
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "identifier",
+            name="pk_catalog_symbol_identifiers",
+        ),
+        CheckConstraint(
+            "role in ('canonical', 'historical_alias', 'tombstone')",
+            name="role",
+        ),
+        CheckConstraint(
+            "allocation_source in ('legacy_backfill', 'global_sequence', 'reviewed_correction')",
+            name="allocation_source",
+        ),
+        CheckConstraint(
+            "(role = 'tombstone' and governed_symbol_id is null) or (role in ('canonical', 'historical_alias') and governed_symbol_id is not null)",
+            name="role_target",
+        ),
+        CheckConstraint(
+            "identifier = upper(identifier) and identifier ~ '^[A-Z0-9](?:[A-Z0-9-]{0,30}[A-Z0-9])?$'",
+            name="grammar",
+        ),
+        Index(
+            "uq_catalog_symbol_identifiers_canonical_governed_symbol",
+            "governed_symbol_id",
+            unique=True,
+            postgresql_where=text("role = 'canonical'"),
+        ),
+    )
+
+    identifier: Mapped[str] = mapped_column(Text, primary_key=True)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    governed_symbol_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("governed_symbols.id", ondelete="SET NULL"), nullable=True)
+    allocation_source: Mapped[str] = mapped_column(Text, nullable=False)
+    allocated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    changed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    changed_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    change_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Attachment(Base):

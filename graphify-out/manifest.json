@@ -1,0 +1,462 @@
+{
+  "alembic/env.py": {
+    "mtime": 1775738010.4644063,
+    "ast_hash": "27ff4cac196f8c5ffab2aa32e74d9ae6",
+    "semantic_hash": "27ff4cac196f8c5ffab2aa32e74d9ae6"
+  },
+  "alembic/versions/13ae79a44f79_add_scott_auth_fields.py": {
+    "mtime": 1781274596.6872795,
+    "ast_hash": "005f8bbb0056243417008952a3d5a22a",
+    "semantic_hash": "005f8bbb0056243417008952a3d5a22a"
+  },
+  "alembic/versions/20260409_0001_initial_symgov_schema.py": {
+    "mtime": 1775737159.9332716,
+    "ast_hash": "2cc45e2ec5ae809cec82132d0e46b025",
+    "semantic_hash": "2cc45e2ec5ae809cec82132d0e46b025"
+  },
+  "alembic/versions/20260419_0002_libby_classification_expansion.py": {
+    "mtime": 1776607756.3899238,
+    "ast_hash": "f4887162402baaf92001c7263e573f91",
+    "semantic_hash": "f4887162402baaf92001c7263e573f91"
+  },
+  "alembic/versions/20260426_0003_published_view_refresh_function.py": {
+    "mtime": 1777202177.6708372,
+    "ast_hash": "56065a3e611f70aa1a53b37ee7860c46",
+    "semantic_hash": "56065a3e611f70aa1a53b37ee7860c46"
+  },
+  "alembic/versions/20260426_0004_human_review_decisions.py": {
+    "mtime": 1777221758.6435888,
+    "ast_hash": "929ae5c78a16708742036974d0ac9b72",
+    "semantic_hash": "929ae5c78a16708742036974d0ac9b72"
+  },
+  "alembic/versions/20260503_0005_review_split_items.py": {
+    "mtime": 1777815891.8665674,
+    "ast_hash": "ee54b018712933d5953e888ea842f91a",
+    "semantic_hash": "ee54b018712933d5953e888ea842f91a"
+  },
+  "alembic/versions/20260512_0006_review_symbol_properties.py": {
+    "mtime": 1779723291.0641336,
+    "ast_hash": "b8e92667618fda95fd6d81f7bbda813f",
+    "semantic_hash": "b8e92667618fda95fd6d81f7bbda813f"
+  },
+  "alembic/versions/20260515_0007_review_symbol_property_options.py": {
+    "mtime": 1779723291.0641336,
+    "ast_hash": "302c8d2e9ff7d582ec29ab8de0176719",
+    "semantic_hash": "302c8d2e9ff7d582ec29ab8de0176719"
+  },
+  "alembic/versions/20260515_0008_review_symbol_property_format.py": {
+    "mtime": 1779723291.0641336,
+    "ast_hash": "c3eb5e89fc23749357164a64b381bb30",
+    "semantic_hash": "c3eb5e89fc23749357164a64b381bb30"
+  },
+  "alembic/versions/20260516_0009_scott_source_discovery.py": {
+    "mtime": 1779723291.0641336,
+    "ast_hash": "df6ca35906dff4cc1f6525eda28c0886",
+    "semantic_hash": "df6ca35906dff4cc1f6525eda28c0886"
+  },
+  "alembic/versions/20260519_0010_hannah_curation.py": {
+    "mtime": 1779723291.0641336,
+    "ast_hash": "98f03defd3a8ff4da95decd3fa255ef0",
+    "semantic_hash": "98f03defd3a8ff4da95decd3fa255ef0"
+  },
+  "alembic/versions/20260522_0011_whitney_market_intelligence.py": {
+    "mtime": 1779723291.0641336,
+    "ast_hash": "54b5e06e96237b10e9c0e3e25df05bb0",
+    "semantic_hash": "54b5e06e96237b10e9c0e3e25df05bb0"
+  },
+  "alembic/versions/20260523_0012_scott_source_prompt.py": {
+    "mtime": 1779723291.0641336,
+    "ast_hash": "cc1817c8e1df7cb14cbd94e6d973c193",
+    "semantic_hash": "cc1817c8e1df7cb14cbd94e6d973c193"
+  },
+  "alembic/versions/20260523_0013_scott_source_include_next_run.py": {
+    "mtime": 1779723291.0641336,
+    "ast_hash": "3347853138f96a22609057424f6ef7e6",
+    "semantic_hash": "3347853138f96a22609057424f6ef7e6"
+  },
+  "alembic/versions/20260530_0014_hannah_source_sites.py": {
+    "mtime": 1780167212.1936417,
+    "ast_hash": "e236d4d8667e99902259fdf6dad3a947",
+    "semantic_hash": "e236d4d8667e99902259fdf6dad3a947"
+  },
+  "alembic/versions/20260606_0015_agent_feedback_events.py": {
+    "mtime": 1780759769.9798248,
+    "ast_hash": "09311f546672eff47372f463cfd5255c",
+    "semantic_hash": "09311f546672eff47372f463cfd5255c"
+  },
+  "alembic/versions/20260619_0016_tracy_rights_state_separation.py": {
+    "mtime": 1781865560.32791,
+    "ast_hash": "35e94468a78e89608ebda6da911a97dd",
+    "semantic_hash": "35e94468a78e89608ebda6da911a97dd"
+  },
+  "alembic/versions/20260624_0017_user_auth_roles.py": {
+    "mtime": 1782344268.6919997,
+    "ast_hash": "e4de42c18717b531519a1c2aa9c85642",
+    "semantic_hash": "e4de42c18717b531519a1c2aa9c85642"
+  },
+  "alembic/versions/20260710_0018_catalog_api_keys.py": {
+    "mtime": 1783689324.1969917,
+    "ast_hash": "64fc005d5b893698c80dd0e5fc338c09",
+    "semantic_hash": "64fc005d5b893698c80dd0e5fc338c09"
+  },
+  "alembic/versions/20260710_0019_catalog_api_usage_events.py": {
+    "mtime": 1783689324.2139916,
+    "ast_hash": "571d6c0443358cf8e2a2c5c7ff423282",
+    "semantic_hash": "571d6c0443358cf8e2a2c5c7ff423282"
+  },
+  "alembic/versions/20260714_0020_catalog_feedback_attribution.py": {
+    "mtime": 1784125357.5872412,
+    "ast_hash": "f4a8032682fde0e323eae099fbffa710",
+    "semantic_hash": "f4a8032682fde0e323eae099fbffa710"
+  },
+  "alembic/versions/20260717_0021_integrator_role.py": {
+    "mtime": 1784272338.7946777,
+    "ast_hash": "252280eb82862d228e66f797ec98a134",
+    "semantic_hash": "252280eb82862d228e66f797ec98a134"
+  },
+  "alembic/versions/20260718_0022_catalog_favourites.py": {
+    "mtime": 1784376429.296574,
+    "ast_hash": "5a203e5831fe1c6c70eddae136143955",
+    "semantic_hash": "5a203e5831fe1c6c70eddae136143955"
+  },
+  "alembic/versions/20260720_0023_user_subscriptions.py": {
+    "mtime": 1784646074.16421,
+    "ast_hash": "4485d64b713e3a88f30eea87fb1399b0",
+    "semantic_hash": "4485d64b713e3a88f30eea87fb1399b0"
+  },
+  "alembic/versions/20260721_0024_profile_subscription_outbox.py": {
+    "mtime": 1784651911.2399487,
+    "ast_hash": "12b3593e7346949888b34bcaed325164",
+    "semantic_hash": "12b3593e7346949888b34bcaed325164"
+  },
+  "alembic/versions/20260730_0025_llm_usage_events.py": {
+    "mtime": 1785425562.877003,
+    "ast_hash": "37d5ab07385d909f0cfab0bc6947353a",
+    "semantic_hash": "37d5ab07385d909f0cfab0bc6947353a"
+  },
+  "alembic/versions/20260802_0026_catalog_symbol_identifiers.py": {
+    "mtime": 1785679955.4010074,
+    "ast_hash": "45a841710bbd824c24ffbe8d1221d5c1",
+    "semantic_hash": "45a841710bbd824c24ffbe8d1221d5c1"
+  },
+  "manage_symgov.py": {
+    "mtime": 1784130669.8261647,
+    "ast_hash": "ffc0b2e2b890ecf70c9d0b1c35463db9",
+    "semantic_hash": "ffc0b2e2b890ecf70c9d0b1c35463db9"
+  },
+  "symgov_backend/__init__.py": {
+    "mtime": 1776333313.598137,
+    "ast_hash": "9e384ce828e053827eb5df2fe6a37de4",
+    "semantic_hash": "9e384ce828e053827eb5df2fe6a37de4"
+  },
+  "symgov_backend/agent_feedback.py": {
+    "mtime": 1780759671.0419393,
+    "ast_hash": "36c35b7a2ffb76ec95cce508b0d8346f",
+    "semantic_hash": "36c35b7a2ffb76ec95cce508b0d8346f"
+  },
+  "symgov_backend/agent_queue_reconciliation.py": {
+    "mtime": 1783495682.4207852,
+    "ast_hash": "14754498c404bb45986069dec6a10ea9",
+    "semantic_hash": "14754498c404bb45986069dec6a10ea9"
+  },
+  "symgov_backend/agent_queue_worker.py": {
+    "mtime": 1785238383.1391592,
+    "ast_hash": "a525f612cbf16943733ee80dc5c3f493",
+    "semantic_hash": "a525f612cbf16943733ee80dc5c3f493"
+  },
+  "symgov_backend/api.py": {
+    "mtime": 1775761738.1901047,
+    "ast_hash": "d30f20735c9b075bf4371d8b722978a9",
+    "semantic_hash": "d30f20735c9b075bf4371d8b722978a9"
+  },
+  "symgov_backend/app.py": {
+    "mtime": 1785123584.4262402,
+    "ast_hash": "99a587188cfdfefefc7821f525e72952",
+    "semantic_hash": "99a587188cfdfefefc7821f525e72952"
+  },
+  "symgov_backend/asset_manifest.py": {
+    "mtime": 1784377863.5598514,
+    "ast_hash": "e8151b0c20b847e048f468a2a45be13e",
+    "semantic_hash": "e8151b0c20b847e048f468a2a45be13e"
+  },
+  "symgov_backend/auth.py": {
+    "mtime": 1785185189.7404842,
+    "ast_hash": "37af5039c9bea9ae84bd98d9f679699d",
+    "semantic_hash": "37af5039c9bea9ae84bd98d9f679699d"
+  },
+  "symgov_backend/automation_policy.py": {
+    "mtime": 1781865780.6683598,
+    "ast_hash": "392be1de2bcda9542ac7293afb3763c8",
+    "semantic_hash": "392be1de2bcda9542ac7293afb3763c8"
+  },
+  "symgov_backend/catalog_api_auth.py": {
+    "mtime": 1785210501.4784358,
+    "ast_hash": "b6cab4b327c2b5a8e4fa08c22856a861",
+    "semantic_hash": "b6cab4b327c2b5a8e4fa08c22856a861"
+  },
+  "symgov_backend/catalog_api_keys.py": {
+    "mtime": 1784360225.5485775,
+    "ast_hash": "1c556038f8a4f69bfb3273d5a8ed0358",
+    "semantic_hash": "1c556038f8a4f69bfb3273d5a8ed0358"
+  },
+  "symgov_backend/catalog_developer.py": {
+    "mtime": 1785240671.1394272,
+    "ast_hash": "76a6b19adcaf37d0c3601393caf5c174",
+    "semantic_hash": "76a6b19adcaf37d0c3601393caf5c174"
+  },
+  "symgov_backend/catalog_ed.py": {
+    "mtime": 1784063669.6686008,
+    "ast_hash": "675539ebe83faef2635d3fa8b7fa3f95",
+    "semantic_hash": "675539ebe83faef2635d3fa8b7fa3f95"
+  },
+  "symgov_backend/catalog_favourites.py": {
+    "mtime": 1784393283.3896468,
+    "ast_hash": "6c3c5754d92cfa6aa1147b1341c5d3d7",
+    "semantic_hash": "6c3c5754d92cfa6aa1147b1341c5d3d7"
+  },
+  "symgov_backend/catalog_integration_ed.py": {
+    "mtime": 1784646074.16521,
+    "ast_hash": "e1d8de0f13382ec036a4cd5f0dab309e",
+    "semantic_hash": "e1d8de0f13382ec036a4cd5f0dab309e"
+  },
+  "symgov_backend/catalog_sandbox.py": {
+    "mtime": 1784223162.8837156,
+    "ast_hash": "5f2e0fef95fa0a03e3b26662933cd84c",
+    "semantic_hash": "5f2e0fef95fa0a03e3b26662933cd84c"
+  },
+  "symgov_backend/catalog_search.py": {
+    "mtime": 1784646074.16521,
+    "ast_hash": "288e280702f248314b18f06ec2ca226c",
+    "semantic_hash": "288e280702f248314b18f06ec2ca226c"
+  },
+  "symgov_backend/catalog_symbol_ids.py": {
+    "mtime": 1785680676.1689038,
+    "ast_hash": "dc4a6e6b5f051394cbc2d370c1331428",
+    "semantic_hash": "dc4a6e6b5f051394cbc2d370c1331428"
+  },
+  "symgov_backend/catalog_taxonomy.py": {
+    "mtime": 1783694031.4555857,
+    "ast_hash": "0aee70b952f6bc0851894222698008c9",
+    "semantic_hash": "0aee70b952f6bc0851894222698008c9"
+  },
+  "symgov_backend/catalog_usage.py": {
+    "mtime": 1784362416.5795534,
+    "ast_hash": "875aecc6a3f9bdac46c6a5f6d77039fc",
+    "semantic_hash": "875aecc6a3f9bdac46c6a5f6d77039fc"
+  },
+  "symgov_backend/db.py": {
+    "mtime": 1780255880.229984,
+    "ast_hash": "3893ce8916ae7c73357dab93f444b43d",
+    "semantic_hash": "3893ce8916ae7c73357dab93f444b43d"
+  },
+  "symgov_backend/dependencies.py": {
+    "mtime": 1785123900.4386678,
+    "ast_hash": "cd21a9c802f062df6ac43fcba021639b",
+    "semantic_hash": "cd21a9c802f062df6ac43fcba021639b"
+  },
+  "symgov_backend/email_outbox.py": {
+    "mtime": 1784651911.2399487,
+    "ast_hash": "b417d52369d148c246f0fb09dcc2ed58",
+    "semantic_hash": "b417d52369d148c246f0fb09dcc2ed58"
+  },
+  "symgov_backend/email_worker.py": {
+    "mtime": 1784659675.6440578,
+    "ast_hash": "5eea717344bb3cc5cd0464164df72d1e",
+    "semantic_hash": "5eea717344bb3cc5cd0464164df72d1e"
+  },
+  "symgov_backend/filename_inference.py": {
+    "mtime": 1783693994.6696484,
+    "ast_hash": "fc417826cfc1658ffd91d42a4dc1e9c4",
+    "semantic_hash": "fc417826cfc1658ffd91d42a4dc1e9c4"
+  },
+  "symgov_backend/management.py": {
+    "mtime": 1784646074.16521,
+    "ast_hash": "224642925c545d8f935bcfbc1e9db8cb",
+    "semantic_hash": "224642925c545d8f935bcfbc1e9db8cb"
+  },
+  "symgov_backend/models/__init__.py": {
+    "mtime": 1785676336.7155395,
+    "ast_hash": "531189db27e9206b1dc8669d0cb2da00",
+    "semantic_hash": "531189db27e9206b1dc8669d0cb2da00"
+  },
+  "symgov_backend/models/base.py": {
+    "mtime": 1775736830.9454513,
+    "ast_hash": "0d82c0b87bc5b98bfe6048747f873e9f",
+    "semantic_hash": "0d82c0b87bc5b98bfe6048747f873e9f"
+  },
+  "symgov_backend/models/schema.py": {
+    "mtime": 1785679966.5729897,
+    "ast_hash": "21030cdf2ef76019b4dc1ec179ccb3d5",
+    "semantic_hash": "21030cdf2ef76019b4dc1ec179ccb3d5"
+  },
+  "symgov_backend/notifications.py": {
+    "mtime": 1777220044.863874,
+    "ast_hash": "ec325deebf9bf4216cd072c8c58a2203",
+    "semantic_hash": "ec325deebf9bf4216cd072c8c58a2203"
+  },
+  "symgov_backend/openclaw_sync.py": {
+    "mtime": 1779723291.0661337,
+    "ast_hash": "86ed41f02891fbe12cdb4eb863c457b8",
+    "semantic_hash": "86ed41f02891fbe12cdb4eb863c457b8"
+  },
+  "symgov_backend/property_options.py": {
+    "mtime": 1780348993.7019043,
+    "ast_hash": "284103f65f0ae04e54354be958fd6cf4",
+    "semantic_hash": "284103f65f0ae04e54354be958fd6cf4"
+  },
+  "symgov_backend/publication_handoff.py": {
+    "mtime": 1785190759.7731395,
+    "ast_hash": "04df1063e156537b008f24206b805830",
+    "semantic_hash": "04df1063e156537b008f24206b805830"
+  },
+  "symgov_backend/published_catalog.py": {
+    "mtime": 1784377875.4388366,
+    "ast_hash": "ad0aea4477b87e5ad579c3e946463e8e",
+    "semantic_hash": "ad0aea4477b87e5ad579c3e946463e8e"
+  },
+  "symgov_backend/published_feedback_gate.py": {
+    "mtime": 1785210470.4494808,
+    "ast_hash": "3166da6db20863dbf1249d00bd296a58",
+    "semantic_hash": "3166da6db20863dbf1249d00bd296a58"
+  },
+  "symgov_backend/review_followup_handoff.py": {
+    "mtime": 1785188282.5455484,
+    "ast_hash": "c714f0d7885e90ba75d2439203380386",
+    "semantic_hash": "c714f0d7885e90ba75d2439203380386"
+  },
+  "symgov_backend/routes/__init__.py": {
+    "mtime": 1775761738.1891048,
+    "ast_hash": "fba865af608054420983e8e371b62dec",
+    "semantic_hash": "fba865af608054420983e8e371b62dec"
+  },
+  "symgov_backend/routes/admin.py": {
+    "mtime": 1784646074.16721,
+    "ast_hash": "d75266e11abf375ae31591399e655926",
+    "semantic_hash": "d75266e11abf375ae31591399e655926"
+  },
+  "symgov_backend/routes/auth.py": {
+    "mtime": 1784646074.16721,
+    "ast_hash": "589be0fbd05889ac52e6c6b53f4ecad5",
+    "semantic_hash": "589be0fbd05889ac52e6c6b53f4ecad5"
+  },
+  "symgov_backend/routes/catalog.py": {
+    "mtime": 1785241428.7345157,
+    "ast_hash": "83912221515ebace0063f80ded4e062a",
+    "semantic_hash": "83912221515ebace0063f80ded4e062a"
+  },
+  "symgov_backend/routes/catalog_developer.py": {
+    "mtime": 1784364447.5926793,
+    "ast_hash": "652b9d55751a7d2cc997231cfe0dd644",
+    "semantic_hash": "652b9d55751a7d2cc997231cfe0dd644"
+  },
+  "symgov_backend/routes/llm.py": {
+    "mtime": 1785425562.878003,
+    "ast_hash": "60f7d9a95222c90807270ed9ad91259f",
+    "semantic_hash": "60f7d9a95222c90807270ed9ad91259f"
+  },
+  "symgov_backend/routes/profile.py": {
+    "mtime": 1784651911.2409487,
+    "ast_hash": "6f643252fbce7b4b0d5dadb8285c2d69",
+    "semantic_hash": "6f643252fbce7b4b0d5dadb8285c2d69"
+  },
+  "symgov_backend/routes/public.py": {
+    "mtime": 1782346311.3280115,
+    "ast_hash": "8dfc0391a29567589bb8421ccfd0b6e6",
+    "semantic_hash": "8dfc0391a29567589bb8421ccfd0b6e6"
+  },
+  "symgov_backend/routes/published.py": {
+    "mtime": 1785241426.5595188,
+    "ast_hash": "7ffe9f5f1d535baac47661e5d5da7e87",
+    "semantic_hash": "7ffe9f5f1d535baac47661e5d5da7e87"
+  },
+  "symgov_backend/routes/workspace.py": {
+    "mtime": 1785211773.3536105,
+    "ast_hash": "4dc4151c504bbed887f832ceaece0d1e",
+    "semantic_hash": "4dc4151c504bbed887f832ceaece0d1e"
+  },
+  "symgov_backend/runtime.py": {
+    "mtime": 1785203104.2521577,
+    "ast_hash": "d34c10cd333bba9d5879449c06137eba",
+    "semantic_hash": "d34c10cd333bba9d5879449c06137eba"
+  },
+  "symgov_backend/schemas.py": {
+    "mtime": 1785185463.9528768,
+    "ast_hash": "1b786f856a5ee920e1f8232bf770d641",
+    "semantic_hash": "1b786f856a5ee920e1f8232bf770d641"
+  },
+  "symgov_backend/service_users.py": {
+    "mtime": 1784651911.2409487,
+    "ast_hash": "84fa594d497cd093ed296cc9dbd62a5e",
+    "semantic_hash": "84fa594d497cd093ed296cc9dbd62a5e"
+  },
+  "symgov_backend/services/__init__.py": {
+    "mtime": 1775761738.1891048,
+    "ast_hash": "c6d56a740745f715e809949220ec1994",
+    "semantic_hash": "c6d56a740745f715e809949220ec1994"
+  },
+  "symgov_backend/services/btx_converter.py": {
+    "mtime": 1783696057.3477366,
+    "ast_hash": "5c6115828fd4373bad61e13487ff6d78",
+    "semantic_hash": "5c6115828fd4373bad61e13487ff6d78"
+  },
+  "symgov_backend/services/external_submissions.py": {
+    "mtime": 1783690320.4775422,
+    "ast_hash": "86bfc99fb66b0779f5717da028da4ef0",
+    "semantic_hash": "86bfc99fb66b0779f5717da028da4ef0"
+  },
+  "symgov_backend/services/llm.py": {
+    "mtime": 1785425562.878003,
+    "ast_hash": "f5515feb44e6554cb47ad5f8dd775bb6",
+    "semantic_hash": "f5515feb44e6554cb47ad5f8dd775bb6"
+  },
+  "symgov_backend/services/llm_telemetry.py": {
+    "mtime": 1785425562.878003,
+    "ast_hash": "c2250ae72ab2edfa808a360f37c74751",
+    "semantic_hash": "c2250ae72ab2edfa808a360f37c74751"
+  },
+  "symgov_backend/services/llm_usage_ledger.py": {
+    "mtime": 1785425562.878003,
+    "ast_hash": "835510b7420bcd698466c8f0f76b0724",
+    "semantic_hash": "835510b7420bcd698466c8f0f76b0724"
+  },
+  "symgov_backend/services/published_feedback.py": {
+    "mtime": 1785241424.1765223,
+    "ast_hash": "1066b48c7f6530f6d927e033ea5e4443",
+    "semantic_hash": "1066b48c7f6530f6d927e033ea5e4443"
+  },
+  "symgov_backend/settings.py": {
+    "mtime": 1784659138.7946985,
+    "ast_hash": "99bb6736244435fc2e86b8be279ee1bf",
+    "semantic_hash": "99bb6736244435fc2e86b8be279ee1bf"
+  },
+  "symgov_backend/subscriptions.py": {
+    "mtime": 1784651911.2419488,
+    "ast_hash": "aa64230fa3948a7969a1d9bb924727e7",
+    "semantic_hash": "aa64230fa3948a7969a1d9bb924727e7"
+  },
+  "symgov_backend/tracy_operations.py": {
+    "mtime": 1782052614.2645888,
+    "ast_hash": "4a0c6e96588153a9b54088e9c09fa320",
+    "semantic_hash": "4a0c6e96588153a9b54088e9c09fa320"
+  },
+  "symgov_backend/workspace.py": {
+    "mtime": 1781768915.9485867,
+    "ast_hash": "6ead1b52a3d8f4b96ec43c15869aadf9",
+    "semantic_hash": "6ead1b52a3d8f4b96ec43c15869aadf9"
+  },
+  "README.md": {
+    "mtime": 1785601205.0362554,
+    "ast_hash": "758691e999368d5d856fd15c1027b209",
+    "semantic_hash": "758691e999368d5d856fd15c1027b209"
+  },
+  "requirements-test.txt": {
+    "mtime": 1785106139.4247987,
+    "ast_hash": "9ed1aad8f5ac318d9515539106f251d4",
+    "semantic_hash": "9ed1aad8f5ac318d9515539106f251d4"
+  },
+  "requirements.txt": {
+    "mtime": 1783690598.2511199,
+    "ast_hash": "7f2e5dec275d5b887a5a206ddc9dccac",
+    "semantic_hash": "7f2e5dec275d5b887a5a206ddc9dccac"
+  }
+}

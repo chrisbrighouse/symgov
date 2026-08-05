@@ -1,6 +1,6 @@
 # symgov Agent Architecture
 
-Last updated: 2026-05-22
+Last updated: 2026-08-01
 
 ## Purpose
 
@@ -10,19 +10,19 @@ The design direction for this pass is:
 
 - Agents should be independent as much as possible.
 - Each agent should own its own queue and produce explicit outputs.
-- Agent model assignments are selected through named `model_profiles` in `openclaw-agents.manifest.json`; the manifest is the source/config authority for concrete model IDs.
+- Agent model assignments are selected by the configured repository/Hermes runtime. The retained `openclaw-agents.manifest.json` is legacy compatibility data, not the live runtime authority.
 - Human review remains the final authority for high-risk governance and publication actions, but low-risk symbols may bypass human review when Libby explicitly records that review is not required and the validation, provenance, classification, and release evidence is complete.
 
-## Current fit with OpenClaw
+## Current runtime fit
 
-The repository defines specialist-agent identities, queue contracts, runner boundaries, and model profiles. External OpenClaw registration, credentials, provider availability, and allow-lists must be inspected in the intended runtime rather than inferred from this source document.
+The repository defines specialist-agent identities, queue contracts, runner boundaries, and model profiles. The live Symgov application uses repository-owned workers with the configured direct/Hermes runtime and does not require an OpenClaw container. The former container stack was decommissioned on 2026-08-01.
 
 Current implementation baseline:
 
 - baseline `agent_definitions` rows for `scott`, `vlad`, `tracy`, `daisy`, `libby`, `rupert`, `ed`, and `hannah` are now defined by the backend seed path
 - the current local runners remain file-backed first, but now support a first verified PostgreSQL write-through bridge for queue items, agent runs, output artifacts, and durable agent-specific records
 - the current verified smoke path is `Scott` intake -> downstream enqueue -> `Vlad` validation + `Tracy` provenance
-- the current bootstrap and inspection entrypoint is `/data/.openclaw/workspace/symgov/backend/manage_symgov.py`
+- the current bootstrap and inspection entrypoint is `/data/symgov/backend/manage_symgov.py` inside the API data mount, or `backend/manage_symgov.py` from a repository checkout
 
 ## Product alignment
 
@@ -443,7 +443,7 @@ Agreed operating rules:
 
 Current implementation status:
 
-- Hannah is registered in the SymGov-owned OpenClaw manifest and backend agent seed list with queue family `curation`.
+- Hannah is defined by the repository agent manifest and backend agent seed list with queue family `curation`.
 - The Workspace Curation tab starts Hannah through `POST /api/v1/workspace/hannah/curation-searches`, stops active searches through `POST /api/v1/workspace/hannah/curation-searches/{queue_item_id}/stop`, and reads candidates through `GET /api/v1/workspace/hannah/photo-candidates`.
 - Alembic revision `20260519_0010_hannah_curation.py` creates `hannah_symbol_curation_states` and `hannah_photo_candidates`.
 - The runner at `/data/symgov/scripts/run_hannah_curation.py` queries Wikimedia Commons image metadata, scores candidates, uploads permitted low-risk image files when storage is configured, and persists reports through the runtime bridge.
@@ -451,17 +451,16 @@ Current implementation status:
 ## Current bootstrap and usage notes
 
 - Seed baseline agent rows with:
-  - `python /data/.openclaw/workspace/symgov/backend/manage_symgov.py seed-agent-definitions`
+  - `python /data/symgov/backend/manage_symgov.py seed-agent-definitions`
 - Inspect the configured database with:
-  - `python /data/.openclaw/workspace/symgov/backend/manage_symgov.py check-db`
+  - `python /data/symgov/backend/manage_symgov.py check-db`
 - Inspect local MinIO with:
-  - `python /data/.openclaw/workspace/symgov/backend/manage_symgov.py check-storage`
+  - `python /data/symgov/backend/manage_symgov.py check-storage`
 - Mirror a local runner execution into PostgreSQL with:
-  - `python /data/.openclaw/workspaces/scott/run_scott_intake.py --queue-item ... --runtime-root ... --persist-db`
+  - `python /data/symgov/scripts/run_scott_intake.py --queue-item ... --runtime-root /data/.openclaw/workspaces/scott/runtime --persist-db`
   - `python /data/symgov/scripts/run_vlad_validation.py --queue-item ... --runtime-root /data/.openclaw/workspaces/vlad/runtime --persist-db`
-  - `python /data/.openclaw/workspaces/tracy/run_tracy_provenance.py --queue-item ... --runtime-root ... --persist-db`
+  - `python /data/symgov/scripts/run_tracy_provenance.py --queue-item ... --runtime-root /data/.openclaw/workspaces/tracy/runtime --persist-db`
 - Run the remaining local agent runners with:
-  - `python /data/.openclaw/workspaces/daisy/run_daisy_coordination.py --queue-item ... --runtime-root ...`
   - `python /data/symgov/scripts/run_rupert_publication.py --queue-item ... --runtime-root /data/.openclaw/workspaces/rupert/runtime --persist-db`
   - `python /data/symgov/scripts/run_hannah_curation.py --queue-item ... --runtime-root /data/.openclaw/workspaces/hannah/runtime --persist-db`
 
@@ -501,7 +500,7 @@ The following is established by repository source, migrations, and tests. It doe
   - writes release-area manifests for staged symbol revisions
   - can persist durable publication records with `--persist-db`, writing publication jobs, packs, published pages, pack entries, audit events, and published symbol lifecycle updates
   - causes Workspace Rupert cards to show `PUBLISHED` and link to the Standards record only after the queued symbol revision has a public published page
-  - is registered in the SymGov-owned OpenClaw manifest and backend agent seed list
+  - is defined by the repository agent manifest and backend agent seed list
 - `Hannah` now:
   - accepts `published_symbol_photo_search` queue items
   - writes local curation reports
@@ -534,8 +533,8 @@ Does not own:
 
 Current implementation status:
 
-- Ed has a local OpenClaw workspace at `/data/.openclaw/workspaces/ed`
-- Ed is registered in the SymGov-owned OpenClaw manifest and backend agent seed list with queue family `ux_feedback`
+- Ed uses the retained runtime directory `/data/.openclaw/workspaces/ed`
+- Ed is defined by the repository agent manifest and backend agent seed list with queue family `ux_feedback`
 - Ed writes local `ux_feedback_reports`, `interface_review_reports`, and `design_recommendations` artifacts
 - Ed feedback remains artifact-backed in phase 1; no durable Symgov feedback table is required yet
 
@@ -576,8 +575,8 @@ Does not own:
 
 Current implementation status:
 
-- Whitney has a local OpenClaw workspace at `/data/.openclaw/workspaces/whitney`
-- Whitney is registered in the SymGov-owned OpenClaw manifest and backend agent seed list with queue family `market_intelligence`
+- Whitney uses the retained runtime directory `/data/.openclaw/workspaces/whitney`
+- Whitney is defined by the repository agent manifest and backend agent seed list with queue family `market_intelligence`
 - Whitney writes local queue records, `market_intelligence_logs`, `agent_runs`, `agent_output_artifacts`, and `market_intelligence_reports` under `/data/.openclaw/workspaces/whitney/runtime`
 - Whitney's first slice uses internal Symgov telemetry only: published coverage, clarification volume, intake records, and open review pressure over the runner lookback window
 - Workspace starts Whitney through `POST /api/v1/workspace/whitney/demand-scans`; request payload is `durationSeconds` plus optional `focus`
@@ -661,18 +660,16 @@ Bad Gemma tasks:
 - overriding rights conflicts without evidence
 - silently repairing malformed data without traceability
 
-## OpenClaw integration notes
+## Legacy workspace compatibility notes
 
-The source manifest and runner contracts expect:
+The `.openclaw` directory name survives in retained runtime paths, but no OpenClaw container is part of the current deployment. Repository-owned workers still use these directories for queue/history artifacts:
 
-- new OpenClaw agent entries for each Symgov agent
 - workspaces such as `/data/.openclaw/workspaces/scott`, `/data/.openclaw/workspaces/vlad`, `/data/.openclaw/workspaces/tracy`, `/data/.openclaw/workspaces/daisy`
-- the current SymGov agent workspace set also includes `/data/.openclaw/workspaces/libby` and `/data/.openclaw/workspaces/rupert`
+- the current Symgov retained workspace set also includes `/data/.openclaw/workspaces/libby` and `/data/.openclaw/workspaces/rupert`
 - `AGENTS.md` instructions per workspace
 - helper scripts for structured task execution where deterministic tools exist
-- agent-to-agent allow-list updates for the new agent IDs
 
-Per-agent LLM access is configured through the SymGov OpenClaw manifest. The manifest defines named `model_profiles` such as `fast`, `vision`, `research`, `deep_reasoning`, and `design`; each agent references a profile with `model_profile`. The OpenClaw reconciliation path resolves that profile to the concrete model id written into OpenClaw `agents.list[].model` and each managed `agent.json`.
+The legacy manifest defines named `model_profiles` such as `fast`, `vision`, `research`, `deep_reasoning`, and `design`. Those values remain useful to migration and audit tooling, but live model/provider access comes from the configured repository/Hermes runtime.
 
 Current profile intent:
 
@@ -681,8 +678,6 @@ Current profile intent:
 - `research`: provenance, classification, curation, and intelligence tasks
 - `deep_reasoning`: release and governance decisions
 - `design`: UI, documentation, copy, and experience review
-
-If asynchronous external triggers are needed later, current hook allow-lists will also need extending because only `main` and `pat` are currently hook-enabled.
 
 ## Historical minimal rollout decision
 
@@ -698,14 +693,13 @@ The initial committed direction was:
 
 ## Deferred decisions
 
-- whether agent queues live inside the main Symgov database only or also map to OpenClaw session state
 - whether `Daisy` should be a true orchestrator agent or a workflow service plus human UI affordance
 - whether `Rupert` should perform final durable publication automatically after human approval or Libby no-review handoff, or only stage for operator release
 - whether higher-cost external models should be allowed for policy ambiguity, rights ambiguity, or only for offline review
 
 ## Shared runtime contract for the first local implementation
 
-The first runnable Symgov agent slice is file-backed in the `Vlad` OpenClaw workspace, but the contract should match the future backend record families as closely as possible.
+The first runnable Symgov agent slice is file-backed in Vlad's retained runtime directory, but the contract should match the future backend record families as closely as possible.
 
 Shared runtime records for this phase:
 
@@ -838,7 +832,7 @@ Initial `Vlad` rule-code families:
 - `VLAD-RASTER-*`
 - `VLAD-TASK-*`
 
-The first local implementation is intentionally queue-shaped and evidence-heavy, but still file-backed. This keeps the contract aligned with the future backend while letting the `Vlad` OpenClaw workspace execute real queue items immediately.
+The first local implementation is intentionally queue-shaped and evidence-heavy, but still file-backed. This keeps the contract aligned with the future backend while letting Vlad's retained runtime directory hold real queue items.
 
 ## `Scott` first concrete queue contract
 
