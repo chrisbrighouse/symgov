@@ -7,6 +7,7 @@ images, documents, user identifiers, and provider payloads are never accepted.
 
 from __future__ import annotations
 
+import atexit
 import base64
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -158,6 +159,19 @@ def _validate_identifier(name: str, value: Any, *, optional: bool = False, patte
         raise ValueError(f"{name} contains forbidden content")
 
 
+def _validate_model_identifier(name: str, value: Any) -> None:
+    _validate_identifier(name, value, pattern=_MODEL_RE)
+
+
+def is_safe_model_identifier(value: Any) -> bool:
+    """Return whether a model identifier satisfies the authoritative telemetry boundary."""
+    try:
+        _validate_model_identifier("model", value)
+    except ValueError:
+        return False
+    return True
+
+
 def _validate_cost(name: str, value: Any) -> None:
     if value is None:
         return
@@ -261,8 +275,8 @@ def validate_event(event: Mapping[str, Any], *, trace_seed: str) -> None:
     if item["cost_currency"] != "USD":
         raise ValueError("cost_currency is outside the categorical allowlist")
 
-    _validate_identifier("requested_model", item["requested_model"], pattern=_MODEL_RE)
-    _validate_identifier("resolved_model", item["resolved_model"], pattern=_MODEL_RE)
+    _validate_model_identifier("requested_model", item["requested_model"])
+    _validate_model_identifier("resolved_model", item["resolved_model"])
     _validate_cost("provider_reported_cost_usd", item["provider_reported_cost_usd"])
     _validate_cost("calculated_cost_usd", item["calculated_cost_usd"])
     _validate_identifier("pricing_version", item["pricing_version"], optional=True)
@@ -682,3 +696,32 @@ class LLMTelemetry:
                 self._close_lock.release()
         except Exception:
             return False
+
+
+_default_telemetry: LLMTelemetry | None = None
+_default_telemetry_lock = Lock()
+
+
+def _get_default_telemetry() -> LLMTelemetry:
+    global _default_telemetry
+    with _default_telemetry_lock:
+        if _default_telemetry is None:
+            _default_telemetry = LLMTelemetry.from_env()
+        return _default_telemetry
+
+
+def export_llm_event_best_effort(event: Mapping[str, Any], *, trace_seed: str | None = None) -> bool:
+    """Record through Symgov's privacy-bounded transport; never raise."""
+    try:
+        return _get_default_telemetry().record(event, trace_seed=trace_seed)
+    except Exception:
+        return False
+
+
+def _close_default_telemetry() -> None:
+    telemetry = _default_telemetry
+    if telemetry is not None:
+        telemetry.close(timeout=1.0)
+
+
+atexit.register(_close_default_telemetry)

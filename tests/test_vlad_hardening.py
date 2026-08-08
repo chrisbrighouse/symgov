@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib
 import importlib.util
 import sys
@@ -63,3 +64,39 @@ def test_vlad_accepts_profile_gemini_key_alias(monkeypatch):
 
     assert vlad_runner.get_gemini_api_key() == "profile-key"
     assert vlad_runner.resolve_vlad_model().startswith("gemini/")
+
+
+def test_vlad_image_edit_uses_litellm_router(tmp_path, monkeypatch):
+    vlad_runner = load_module("vlad_runner_litellm_image_edit", VLAD_RUNNER_PATH)
+    source = tmp_path / "source.png"
+    output = tmp_path / "edited.png"
+    source.write_bytes(b"synthetic-source-image")
+    generated = b"synthetic-generated-image"
+    captured = {}
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return {
+            "outputImages": [
+                {
+                    "url": "data:image/png;base64," + base64.b64encode(generated).decode("ascii"),
+                    "detail": None,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(vlad_runner, "request_llm_completion", fake_completion)
+
+    result = vlad_runner.edit_image_with_router(source, output, "remove the label")
+
+    assert result["status"] == "edited"
+    assert result["provider"] == "google"
+    assert output.read_bytes() == generated
+    assert captured["provider"] == "google"
+    assert captured["use_case"] == "vlad_graphic_edit"
+    assert captured["service_name"] == "vlad"
+    assert captured["request_kind"] == "image_generation"
+    assert captured["modalities"] == ["image", "text"]
+    content = captured["messages"][0]["content"]
+    assert content[0] == {"type": "text", "text": "remove the label"}
+    assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")

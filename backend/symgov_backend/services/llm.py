@@ -4,12 +4,10 @@ import json
 import os
 import re
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 import urllib.error
 import urllib.request
-import uuid
 
 
 DEFAULT_LLM_SETTINGS_PATH = Path("/data/.openclaw/workspace/symgov/symgov-llm-settings.json")
@@ -174,156 +172,6 @@ def openrouter_headers(api_key: str) -> dict[str, str]:
     if referer:
         headers["HTTP-Referer"] = referer
     return headers
-
-
-def _parse_openrouter_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if isinstance(item, dict) and item.get("type") == "text":
-                text = str(item.get("text") or "").strip()
-                if text:
-                    parts.append(text)
-        return "\n".join(parts)
-    return ""
-
-
-def request_openrouter_completion(
-    *,
-    prompt: str,
-    model: str,
-    temperature: float = 0.2,
-    max_tokens: int = 700,
-    use_case: str = "workspace_chat",
-    agent_slug: str | None = None,
-    session_factory: Any | None = None,
-    initiator_kind: str = "user",
-    initiator_pseudonym: str | None = None,
-) -> dict[str, Any]:
-    api_key = openrouter_api_key()
-    if not api_key:
-        raise RuntimeError("OpenRouter API key is not configured on the server.")
-
-    body = {
-        "model": model,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "messages": [
-            {
-                "role": "system",
-                "content": "You are Symgov's assistant. Be concise, practical, and safe for engineering governance workflows.",
-            },
-            {"role": "user", "content": prompt},
-        ],
-    }
-    url = f"{DEFAULT_OPENROUTER_BASE_URL}/chat/completions"
-    request = urllib.request.Request(
-        url,
-        data=json.dumps(body).encode("utf-8"),
-        method="POST",
-        headers=openrouter_headers(api_key),
-    )
-
-    started_at = time.time()
-    trace_id = str(uuid.uuid4())
-    observation_id = str(uuid.uuid4())
-    occurred_at_utc = datetime.now(timezone.utc).isoformat()
-    status = "succeeded"
-    error_class = None
-    error_code = None
-    payload: dict[str, Any] = {}
-
-    try:
-        with urllib.request.urlopen(request, timeout=45) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        status = "failed"
-        error_class = "HTTPError"
-        error_code = str(exc.code)
-        detail = exc.read().decode("utf-8", errors="replace") if exc.fp else str(exc)
-        raise RuntimeError(f"OpenRouter request failed ({exc.code}): {detail[:300]}") from exc
-    except urllib.error.URLError as exc:
-        status = "timed_out" if isinstance(exc.reason, TimeoutError) else "failed"
-        error_class = "URLError"
-        error_code = str(exc.reason)
-        raise RuntimeError(f"OpenRouter request failed: {exc.reason}") from exc
-    finally:
-        elapsed_ms = int((time.time() - started_at) * 1000)
-        usage = payload.get("usage") or {}
-        provider_cost = usage.get("cost") or usage.get("total_cost")
-
-        event_payload = {
-            "event_id": str(uuid.uuid4()),
-            "occurred_at_utc": occurred_at_utc,
-            "environment": os.environ.get("SYMGOV_ENV", "development"),
-            "trace_id": trace_id,
-            "observation_id": observation_id,
-            "use_case": use_case,
-            "service_name": "symgov-api",
-            "agent_slug": agent_slug,
-            "provider": "openrouter",
-            "requested_model": model,
-            "resolved_model": payload.get("model") or model,
-            "request_kind": "text",
-            "attempt_number": 1,
-            "status": status,
-            "latency_ms": elapsed_ms,
-            "cost_currency": "USD",
-            "cost_basis": "provider_reported" if provider_cost is not None else "unknown",
-            "provider_reported_cost_usd": str(provider_cost) if provider_cost is not None else None,
-            "calculated_cost_usd": None,
-            "pricing_version": None,
-            "input_tokens": usage.get("prompt_tokens"),
-            "output_tokens": usage.get("completion_tokens"),
-            "cached_input_tokens": usage.get("prompt_tokens_details", {}).get("cached_tokens") if isinstance(usage.get("prompt_tokens_details"), dict) else None,
-            "cache_write_input_tokens": None,
-            "reasoning_tokens": usage.get("completion_tokens_details", {}).get("reasoning_tokens") if isinstance(usage.get("completion_tokens_details"), dict) else None,
-            "image_input_units": None,
-            "image_output_units": None,
-            "other_usage_json": {},
-            "queue_item_id": None,
-            "agent_run_id": None,
-            "review_case_id": None,
-            "intake_record_id": None,
-            "source_package_id": None,
-            "symbol_id": None,
-            "symbol_display_id": None,
-            "feature": use_case,
-            "prompt_version": None,
-            "release": None,
-            "initiator_kind": initiator_kind,
-            "initiator_pseudonym": initiator_pseudonym,
-            "error_class": error_class,
-            "error_code": error_code,
-            "metadata": {},
-        }
-
-        if session_factory is not None:
-            try:
-                from .llm_usage_ledger import record_llm_usage_event_best_effort
-                record_llm_usage_event_best_effort(session_factory, event_payload, trace_seed=trace_id)
-            except Exception:
-                pass
-
-        try:
-            from .llm_telemetry import export_llm_event_best_effort
-            export_llm_event_best_effort(event_payload, trace_seed=trace_id)
-        except Exception:
-            pass
-
-    choices = payload.get("choices") or []
-    first_choice = choices[0] if choices else {}
-    content = _parse_openrouter_text((first_choice.get("message") or {}).get("content"))
-
-    return {
-        "provider": "openrouter",
-        "model": model,
-        "outputText": content,
-        "latencyMs": elapsed_ms,
-        "usage": usage,
-    }
 
 
 def fetch_openrouter_models() -> list[dict[str, Any]]:

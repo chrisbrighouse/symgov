@@ -1,6 +1,4 @@
 import importlib.util
-import json
-import os
 from pathlib import Path
 import unittest
 
@@ -35,22 +33,12 @@ class LibbySymbolVisionTests(unittest.TestCase):
         self.assertIn("BreakGlass", artifact["search_terms"])
         self.assertEqual(artifact["evidence"]["filename_inference"]["discipline_hint"], "Electrical")
 
-    def test_parse_gemini_symbol_property_json_from_text_part(self):
+    def test_parse_litellm_symbol_property_json_from_output_text(self):
         response = {
-            "candidates": [
-                {
-                    "content": {
-                        "parts": [
-                            {
-                                "text": "```json\n{\"name\": \"Gate valve\", \"description\": \"Manual isolation valve symbol\", \"category\": \"gate valve\", \"discipline\": \"piping\"}\n```"
-                            }
-                        ]
-                    }
-                }
-            ]
+            "outputText": "```json\n{\"name\": \"Gate valve\", \"description\": \"Manual isolation valve symbol\", \"category\": \"gate valve\", \"discipline\": \"piping\"}\n```"
         }
 
-        parsed = libby.parse_gemini_symbol_property_response(response)
+        parsed = libby.parse_symbol_property_response(response)
 
         self.assertEqual(parsed["name"], "Gate valve")
         self.assertEqual(parsed["category"], "gate valve")
@@ -81,43 +69,19 @@ class LibbySymbolVisionTests(unittest.TestCase):
         self.assertIn("A gate valve isolation symbol.", artifact["classification_summary"])
         self.assertEqual(artifact["evidence"]["llm_symbol_properties"], llm_properties)
 
-    def test_gemini_symbol_property_prompt_includes_filename_hints(self):
+    def test_litellm_symbol_property_prompt_includes_filename_hints(self):
         captured = {}
 
-        class FakeResponse:
-            def __enter__(self):
-                return self
+        def fake_completion(**kwargs):
+            captured.update(kwargs)
+            return {
+                "outputText": '{"name":"Electrical FireAlarm BreakGlass","description":"Electrical fire alarm break glass symbol.","category":"Fire alarm symbols","discipline":"Electrical"}'
+            }
 
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def read(self):
-                return json.dumps(
-                    {
-                        "candidates": [
-                            {
-                                "content": {
-                                    "parts": [
-                                        {
-                                            "text": '{"name":"Electrical FireAlarm BreakGlass","description":"Electrical fire alarm break glass symbol.","category":"Fire alarm symbols","discipline":"Electrical"}'
-                                        }
-                                    ]
-                                }
-                            }
-                        ]
-                    }
-                ).encode("utf-8")
-
-        def fake_urlopen(request, timeout=60):
-            captured["body"] = json.loads(request.data.decode("utf-8"))
-            return FakeResponse()
-
-        previous_key = os.environ.get("SYMGOV_GEMINI_API_KEY")
-        os.environ["SYMGOV_GEMINI_API_KEY"] = "test-key"
-        original_urlopen = libby.urllib.request.urlopen
-        libby.urllib.request.urlopen = fake_urlopen
+        original_completion = libby.request_llm_completion
+        libby.request_llm_completion = fake_completion
         try:
-            properties = libby.call_gemini_symbol_property_review(
+            properties = libby.call_symbol_property_review(
                 b"fake-image",
                 "image/png",
                 submission_context={
@@ -134,13 +98,16 @@ class LibbySymbolVisionTests(unittest.TestCase):
                 },
             )
         finally:
-            libby.urllib.request.urlopen = original_urlopen
-            if previous_key is None:
-                os.environ.pop("SYMGOV_GEMINI_API_KEY", None)
-            else:
-                os.environ["SYMGOV_GEMINI_API_KEY"] = previous_key
+            libby.request_llm_completion = original_completion
 
-        prompt = captured["body"]["contents"][0]["parts"][0]["text"]
+        content = captured["messages"][0]["content"]
+        prompt = content[0]["text"]
+        self.assertEqual(captured["provider"], "google")
+        self.assertEqual(captured["use_case"], "symbol_property_vision")
+        self.assertEqual(captured["service_name"], "libby")
+        self.assertEqual(captured["request_kind"], "vision")
+        self.assertEqual(captured["response_format"], {"type": "json_object"})
+        self.assertTrue(content[1]["image_url"]["url"].startswith("data:image/png;base64,"))
         self.assertIn("Filename hints", prompt)
         self.assertIn("Elec_FireAlarm_BreakGlass.dxf", prompt)
         self.assertIn("Electrical FireAlarm BreakGlass", prompt)

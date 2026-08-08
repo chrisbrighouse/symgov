@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from ..dependencies import get_db_session, require_any_role, require_user
+from ..db import create_session_factory
+from ..settings import SymgovAPISettings, get_settings
 from ..schemas import (
     LLMChatRequest,
     LLMChatResponse,
@@ -15,10 +18,10 @@ from ..services.llm import (
     fetch_openrouter_models,
     load_llm_settings,
     openrouter_api_key,
-    request_openrouter_completion,
     resolve_model_for_feature,
     save_llm_settings,
 )
+from ..services.llm_router import request_llm_completion
 
 
 router = APIRouter(tags=["llm"])
@@ -86,19 +89,36 @@ def list_openrouter_models(
 @legacy_router.post("/admin/llm/test", response_model=LLMChatResponse, include_in_schema=False)
 async def test_llm(
     http_request: Request,
+    settings: SymgovAPISettings = Depends(get_settings),
     _=Depends(require_any_role({"admin"})),
 ) -> LLMChatResponse:
     request_json = await http_request.json()
     payload = LLMChatRequest.model_validate(request_json.get("payload") or request_json)
-    selected_model = payload.model.strip() if payload.model else resolve_model_for_feature(payload.feature)
+    selected_model = (payload.model or "").strip() or resolve_model_for_feature(payload.feature)
 
     try:
-        result = request_openrouter_completion(
-            prompt=payload.prompt,
+        result = await run_in_threadpool(
+            request_llm_completion,
             model=selected_model,
+            provider="openrouter",
+            messages=[
+                {"role": "system", "content": "You are Symgov's assistant. Be concise, practical, and safe for engineering governance workflows."},
+                {"role": "user", "content": payload.prompt},
+            ],
             temperature=payload.temperature,
             max_tokens=payload.maxTokens,
+            timeout=45,
+            use_case="admin_llm_test",
+            service_name="symgov-api",
+            feature="admin_llm_test",
+            initiator_kind="admin",
+            session_factory_provider=lambda: create_session_factory(
+                env_file=settings.db_env_file,
+                nopool=True,
+            ),
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -109,19 +129,35 @@ async def test_llm(
 @legacy_router.post("/llm/chat", response_model=LLMChatResponse, include_in_schema=False)
 async def llm_chat(
     http_request: Request,
+    settings: SymgovAPISettings = Depends(get_settings),
     _=Depends(require_user),
 ) -> LLMChatResponse:
     request_json = await http_request.json()
     payload = LLMChatRequest.model_validate(request_json.get("payload") or request_json)
-    selected_model = payload.model.strip() if payload.model else resolve_model_for_feature(payload.feature)
+    selected_model = (payload.model or "").strip() or resolve_model_for_feature(payload.feature)
 
     try:
-        result = request_openrouter_completion(
-            prompt=payload.prompt,
+        result = await run_in_threadpool(
+            request_llm_completion,
             model=selected_model,
+            provider="openrouter",
+            messages=[
+                {"role": "system", "content": "You are Symgov's assistant. Be concise, practical, and safe for engineering governance workflows."},
+                {"role": "user", "content": payload.prompt},
+            ],
             temperature=payload.temperature,
             max_tokens=payload.maxTokens,
+            timeout=45,
+            use_case="workspace_chat",
+            service_name="symgov-api",
+            feature="workspace_chat",
+            session_factory_provider=lambda: create_session_factory(
+                env_file=settings.db_env_file,
+                nopool=True,
+            ),
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

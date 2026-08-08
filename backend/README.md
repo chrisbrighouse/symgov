@@ -32,6 +32,43 @@ Current API package shape:
 - `symgov_backend/settings.py`
   - API runtime settings and defaults
 
+## Central LLM Router SDK boundary
+
+In-process LLM calls use `symgov_backend/services/llm_router.py`, which wraps the
+LiteLLM Python `Router` SDK. The API chat/admin-test routes, Libby symbol-property
+vision review, and Vlad's optional Gemini image-edit fallback all use this boundary.
+Provider-specific HTTP completion calls must not be added beside it.
+
+- OpenRouter requests retain their existing logical model names (for example
+  `openai/gpt-4o-mini`) while the deployment is normalized to LiteLLM's
+  `openrouter/openai/gpt-4o-mini` provider form.
+- Google requests are normalized to `gemini/<model>` deployments. Provider keys are
+  read from `SYMGOV_OPENROUTER_API_KEY`/`OPENROUTER_API_KEY` and
+  `SYMGOV_GEMINI_API_KEY`/`GEMINI_API_KEY`/`GOOGLE_API_KEY`, including the protected
+  Hermes profile `.env` fallback already used by Symgov.
+- `SYMGOV_LITELLM_MODEL_LIST` may contain a JSON LiteLLM deployment list. All rows
+  whose `model_name` matches the requested logical model are given to one cached
+  Router, enabling deployment load balancing. Without it, one deployment is created
+  lazily from the requested provider and model.
+- Router retries are fixed at zero in this boundary so every native usage event maps
+  to exactly one provider attempt. Add retry/fallback accounting before enabling
+  SDK-level retries.
+- LiteLLM `callbacks`, `success_callback`, and `failure_callback` configuration is
+  rejected. In particular, do not enable LiteLLM's Langfuse callback.
+- `services/llm_telemetry.py` remains the trace owner and
+  `services/llm_usage_ledger.py` remains the authoritative API usage ledger. Their
+  normalized events contain model/provider, bounded usage/cost, status, latency, and
+  approved lineage only. Prompts, responses, images, provider payloads, raw users,
+  and credentials are excluded.
+- `GET /admin/llm/openrouter-models` still reads OpenRouter's public model catalog;
+  that metadata request is not an LLM inference boundary.
+
+The runtime queue worker's `hermes chat` subprocess dispatch—including Ed—and other
+external specialist runners remain orchestration boundaries. Their model execution
+is owned by the selected Hermes profile or external runtime and must not be wrapped
+again as an in-process LiteLLM call. Deterministic runners that merely record a model
+label are likewise not LLM invocation sites.
+
 Typical commands once dependencies are available:
 
 ```bash

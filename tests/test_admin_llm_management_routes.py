@@ -104,10 +104,12 @@ def test_admin_openrouter_model_list_and_test_endpoint(tmp_path, monkeypatch):
         "fetch_openrouter_models",
         lambda: [{"id": "openai/gpt-4o-mini", "name": "GPT-4o mini", "contextLength": 128000}],
     )
+    monkeypatch.setattr(llm_routes, "resolve_model_for_feature", lambda _feature: "fallback/admin-model")
+    calls = []
     monkeypatch.setattr(
         llm_routes,
-        "request_openrouter_completion",
-        lambda **_: {
+        "request_llm_completion",
+        lambda **kwargs: calls.append(kwargs) or {
             "provider": "openrouter",
             "model": "openai/gpt-4o-mini",
             "outputText": "ok",
@@ -128,6 +130,28 @@ def test_admin_openrouter_model_list_and_test_endpoint(tmp_path, monkeypatch):
     )
     assert test_result.status_code == 200
     assert test_result.json()["outputText"] == "ok"
+    assert calls[0]["provider"] == "openrouter"
+    assert calls[0]["use_case"] == "admin_llm_test"
+    assert calls[0]["service_name"] == "symgov-api"
+    assert calls[0]["timeout"] == 45
+
+    whitespace_model_result = client.post(
+        "/api/v1/admin/llm/test",
+        json={"prompt": "hello", "model": "   ", "feature": "edConcierge"},
+    )
+    assert whitespace_model_result.status_code == 200
+    assert calls[1]["model"] == "fallback/admin-model"
+
+    monkeypatch.setattr(
+        llm_routes,
+        "request_llm_completion",
+        lambda **_: (_ for _ in ()).throw(ValueError("LLM model must be a bounded provider model identifier.")),
+    )
+    invalid_model_result = client.post(
+        "/api/v1/admin/llm/test",
+        json={"prompt": "hello", "model": "invalid model", "feature": "edConcierge"},
+    )
+    assert invalid_model_result.status_code == 422
 
 
 def test_authenticated_users_can_call_llm_chat(tmp_path, monkeypatch):
@@ -136,10 +160,12 @@ def test_authenticated_users_can_call_llm_chat(tmp_path, monkeypatch):
 
     from symgov_backend.routes import llm as llm_routes
 
+    monkeypatch.setattr(llm_routes, "resolve_model_for_feature", lambda _feature: "fallback/chat-model")
+    calls = []
     monkeypatch.setattr(
         llm_routes,
-        "request_openrouter_completion",
-        lambda **_: {
+        "request_llm_completion",
+        lambda **kwargs: calls.append(kwargs) or {
             "provider": "openrouter",
             "model": "openai/gpt-4o-mini",
             "outputText": "assistant output",
@@ -150,6 +176,31 @@ def test_authenticated_users_can_call_llm_chat(tmp_path, monkeypatch):
 
     login(client, "reviewer@symgov.local")
 
-    response = client.post("/api/v1/llm/chat", json={"prompt": "ping", "feature": "edConcierge"})
+    response = client.post(
+        "/api/v1/llm/chat",
+        json={"prompt": "ping", "feature": "customer-confidential-alpha"},
+    )
     assert response.status_code == 200
     assert response.json()["outputText"] == "assistant output"
+    assert calls[0]["provider"] == "openrouter"
+    assert calls[0]["use_case"] == "workspace_chat"
+    assert calls[0]["feature"] == "workspace_chat"
+    assert calls[0]["timeout"] == 45
+
+    whitespace_model_result = client.post(
+        "/api/v1/llm/chat",
+        json={"prompt": "ping", "model": "   ", "feature": "edConcierge"},
+    )
+    assert whitespace_model_result.status_code == 200
+    assert calls[1]["model"] == "fallback/chat-model"
+
+    monkeypatch.setattr(
+        llm_routes,
+        "request_llm_completion",
+        lambda **_: (_ for _ in ()).throw(ValueError("LLM model must be a bounded provider model identifier.")),
+    )
+    invalid_model_result = client.post(
+        "/api/v1/llm/chat",
+        json={"prompt": "ping", "model": "invalid model", "feature": "edConcierge"},
+    )
+    assert invalid_model_result.status_code == 422

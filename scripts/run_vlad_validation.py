@@ -13,8 +13,6 @@ import subprocess
 import sys
 import struct
 import tempfile
-import urllib.error
-import urllib.request
 import zlib
 import binascii
 import uuid
@@ -35,6 +33,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from symgov_backend.runtime import RuntimePersistenceBridge, env_flag
 from symgov_backend.notifications import send_agent_status_update
 from symgov_backend.services.btx_converter import BtxConversionError, convert_btx
+from symgov_backend.services.llm_router import request_llm_completion
 
 try:
     from PIL import Image, ImageDraw, ImageOps
@@ -1453,72 +1452,61 @@ def gemini_edit_prompt(child_decision, requested_changes):
     )
 
 
-def response_part_image_bytes(response_payload):
-    for candidate in response_payload.get("candidates") or []:
-        content = candidate.get("content") or {}
-        for part in content.get("parts") or []:
-            inline_data = part.get("inlineData") or part.get("inline_data")
-            if not isinstance(inline_data, dict):
-                continue
-            data = inline_data.get("data")
-            if not data:
-                continue
-            return base64.b64decode(data), inline_data.get("mimeType") or inline_data.get("mime_type")
+def response_image_bytes(response):
+    for image in response.get("outputImages") or []:
+        if not isinstance(image, dict):
+            continue
+        data_url = str(image.get("url") or "")
+        if not data_url.startswith("data:") or "," not in data_url:
+            continue
+        header, encoded = data_url.split(",", 1)
+        if ";base64" not in header:
+            continue
+        try:
+            return base64.b64decode(encoded, validate=True), header[5:].split(";", 1)[0]
+        except (ValueError, binascii.Error):
+            continue
     return None, None
 
 
-def edit_image_with_gemini(source_path, output_path, prompt):
-    api_key = get_gemini_api_key()
-    if not api_key:
-        return {"status": "failed", "reason": "missing_gemini_api_key", "provider": "gemini"}
-
+def edit_image_with_router(source_path, output_path, prompt):
     source_path = Path(source_path)
     max_source_bytes = int(os.environ.get("SYMGOV_GEMINI_MAX_SOURCE_BYTES", "7000000"))
     if source_path.stat().st_size > max_source_bytes:
-        return {"status": "failed", "reason": "source_image_too_large", "provider": "gemini"}
+        return {"status": "failed", "reason": "source_image_too_large", "provider": "google"}
 
     model = os.environ.get("SYMGOV_GEMINI_IMAGE_MODEL", "gemini-2.5-flash-image").strip() or "gemini-2.5-flash-image"
     timeout = float(os.environ.get("SYMGOV_GEMINI_TIMEOUT_SECONDS", "60"))
-    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-    body = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": prompt},
-                    {
-                        "inline_data": {
-                            "mime_type": image_mime_type(source_path),
-                            "data": base64.b64encode(source_path.read_bytes()).decode("ascii"),
-                        }
-                    },
-                ]
-            }
-        ],
-        "generationConfig": {
-            "responseModalities": ["Image"],
-        },
-    }
-    request = urllib.request.Request(
-        endpoint,
-        data=json.dumps(body).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "x-goog-api-key": api_key,
-        },
-        method="POST",
-    )
+    source_mime_type = image_mime_type(source_path)
+    data_url = f"data:{source_mime_type};base64,{base64.b64encode(source_path.read_bytes()).decode('ascii')}"
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            response_payload = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace")[:1000]
-        return {"status": "failed", "reason": f"gemini_http_{exc.code}", "provider": "gemini", "detail": error_body}
-    except (OSError, TimeoutError, json.JSONDecodeError) as exc:
-        return {"status": "failed", "reason": "gemini_request_failed", "provider": "gemini", "detail": str(exc)}
+        response = request_llm_completion(
+            model=model,
+            provider="google",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": data_url}},
+                    ],
+                }
+            ],
+            timeout=timeout,
+            use_case="vlad_graphic_edit",
+            service_name="vlad",
+            agent_slug="vlad",
+            request_kind="image_generation",
+            modalities=["image", "text"],
+            initiator_kind="scheduled_worker",
+            prompt_version=PROMPT_VERSION,
+        )
+    except RuntimeError:
+        return {"status": "failed", "reason": "litellm_router_request_failed", "provider": "google"}
 
-    image_bytes, mime_type = response_part_image_bytes(response_payload)
+    image_bytes, mime_type = response_image_bytes(response)
     if not image_bytes:
-        return {"status": "failed", "reason": "gemini_no_image_returned", "provider": "gemini"}
+        return {"status": "failed", "reason": "litellm_router_no_image_returned", "provider": "google"}
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if Image is not None:
@@ -1531,7 +1519,7 @@ def edit_image_with_gemini(source_path, output_path, prompt):
         output_path.write_bytes(image_bytes)
     return {
         "status": "edited",
-        "provider": "gemini",
+        "provider": "google",
         "model": model,
         "mime_type": "image/png",
         "source_mime_type": mime_type or image_mime_type(output_path),
@@ -1565,7 +1553,7 @@ def create_graphic_change_assets(task, requested_changes, runtime_root):
             if gemini_image_edit_enabled():
                 output_name = f"{source_path.stem}-gemini-text-removed.png"
                 output_path = output_root / output_name
-                edit_result = edit_image_with_gemini(
+                edit_result = edit_image_with_router(
                     source_path,
                     output_path,
                     gemini_edit_prompt(child_decision, requested_changes),
