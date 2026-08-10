@@ -43,16 +43,7 @@
       "description": "Interface, documentation, copy, and experience review tasks."
     }
   },
-  "bindings": [
-    {
-      "type": "route",
-      "agentId": "libby",
-      "match": {
-        "channel": "telegram",
-        "accountId": "7643191699"
-      }
-    }
-  ],
+  "bindings": [],
   "agents": [
     {
       "id": "scott",

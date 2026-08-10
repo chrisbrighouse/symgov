@@ -213,7 +213,7 @@ Agreed Libby workflow:
 - Daisy-managed human review should start only when Libby or another upstream control explicitly requires human review after Libby has completed its classification pass
 - items may cycle between Daisy review and Libby follow-up several times before final approval
 - multi-item queue work produces a parent `libby_batch_report` and per-item downstream Daisy or Vlad queue items
-- The intended policy is Alfi/main as Telegram-facing orchestrator, but the current manifest directly binds the Telegram account to Libby. F0.6 must resolve that contradiction before reconciliation or runtime claims.
+- Alfi/main via the active Hermes `symgov` profile is the sole Telegram-facing orchestrator. The managed manifest `bindings` set is intentionally empty; any future direct worker Telegram binding requires an explicit decision, must start read-only, and must keep auditable authorization boundaries for mutation commands.
 
 Agreed Libby persistence direction:
 

@@ -10,8 +10,7 @@ from typing import Any
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 WORKSPACE_ROOT = BACKEND_ROOT.parent
-OPENCLAW_ROOT = WORKSPACE_ROOT.parents[1]
-OPENCLAW_CONFIG = OPENCLAW_ROOT / "openclaw.json"
+OPENCLAW_CONFIG = WORKSPACE_ROOT.parent / ".openclaw" / "openclaw.json"
 MANIFEST_PATH = WORKSPACE_ROOT / "openclaw-agents.manifest.json"
 
 

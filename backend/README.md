@@ -180,7 +180,7 @@ Legacy workspace compatibility notes:
 - `manage_symgov.py reconcile-openclaw` can reconstruct the retired registration state from that manifest for an explicit migration or forensic task.
 - Per-agent LLM model access is configured through manifest `model_profiles` plus each agent's `model_profile`. Reconciliation resolves the profile to OpenClaw's concrete `agents.list[].model` and per-agent `agent.json` `model` field.
 - These commands are retained for compatibility and must not be treated as routine deployment or recovery steps.
-- The audited manifest currently contains a direct Telegram-to-Libby binding. This conflicts with the Alfi-first orchestration policy recorded in the current trial-readiness backlog and remains F0.6 work; do not run reconciliation expecting an empty binding set until that source/config contradiction is resolved.
+- Alfi/main via the active Hermes `symgov` profile is the sole Telegram-facing orchestrator. The repository-managed manifest currently carries an intentionally empty `bindings[]`; any future direct worker Telegram binding requires an explicit decision and should begin read-only with auditable mutation authorization boundaries.
 - OpenClaw bindings currently support deterministic match fields such as channel, account, and peer; they do not provide arbitrary keyword-routing rules.
 
 Deployment boundary:

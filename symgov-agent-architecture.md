@@ -350,7 +350,7 @@ Agreed operating rules:
 - Libby may send items to `Rupert` only through a structured no-human-review-required publication-readiness handoff with validation, provenance, and classification evidence
 - Libby may prepare audited metadata/source/classification/disposition instructions, but durable write/delete mutations must go through Symgov-controlled backend helpers
 - explicit non-graphic follow-up types route back to Daisy even if the reviewer text mentions graphics in a negative or contextual phrase
-- Telegram remains orchestrated by Alfi/main; Libby is not directly bound to `telegram:7643191699`. Any future direct Libby Telegram binding should start read-only and mutation commands would require explicit authorization and audit.
+- Telegram is exclusively orchestrated by Alfi/main via the active Hermes `symgov` profile; the managed repository `bindings[]` baseline is intentionally empty, and Libby is not directly bound to `telegram:7643191699`. Any future direct Libby Telegram binding should start read-only and mutation commands would require explicit authorization and audit.
 
 Review-flow implication:
 
