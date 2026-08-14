@@ -7,11 +7,13 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..auth import AuthenticatedUser, hash_pin, normalize_display_name, normalize_email, normalize_roles, user_roles, utc_now, validate_pin
+from ..auth import AuthenticatedUser, hash_pin, normalize_display_name, normalize_email, normalize_roles, revoke_all_user_sessions, user_roles, utc_now, validate_pin, verify_pin
+from ..auth_security import login_throttle_policy, recover_throttle_bucket
 from ..dependencies import get_db_session, require_any_role
 from ..models import User, UserRole, UserSession, UserSubscription
 from ..schemas import (
     APIHealthResponse,
+    AdminAuthThrottleRecoveryRequest,
     AdminSubscriptionMonthsRequest,
     AdminUserCreateRequest,
     AdminUserListResponse,
@@ -22,7 +24,7 @@ from ..schemas import (
     SubscriptionResponse,
 )
 from ..services.external_submissions import iso_now
-from ..settings import get_settings
+from ..settings import SymgovAPISettings, get_settings
 from ..subscriptions import adjust_plus_months, cancel_plus, ensure_subscription, reconcile_subscription, today_utc, upgrade_to_plus
 
 router = APIRouter(tags=["admin"])
@@ -83,6 +85,30 @@ def _parse_payload(model, request: dict):
 def health() -> APIHealthResponse:
     settings = get_settings()
     return APIHealthResponse(ok=True, service=settings.service_name, time=iso_now())
+
+
+@router.post("/admin/auth/throttles/recover")
+@legacy_router.post("/admin/auth/throttles/recover", include_in_schema=False)
+async def recover_login_throttle(
+    http_request: Request,
+    session: Session = Depends(get_db_session),
+    current: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    settings: SymgovAPISettings = Depends(get_settings),
+) -> dict[str, bool | int]:
+    payload = _parse_payload(AdminAuthThrottleRecoveryRequest, await http_request.json())
+    try:
+        cleared = recover_throttle_bucket(
+            session,
+            scope=payload.scope,
+            key=payload.key,
+            actor_id=uuid.UUID(current.id),
+            reason=payload.reason,
+            policy=login_throttle_policy(settings),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.commit()
+    return {"ok": True, "cleared": cleared}
 
 
 @router.get("/admin/users", response_model=AdminUserListResponse)
@@ -213,7 +239,10 @@ async def update_user(
     if payload.isActive is not None:
         if subscription.is_protected and not payload.isActive:
             raise HTTPException(status_code=400, detail="The protected owner cannot be deactivated.")
+        was_active = bool(user.is_active)
         user.is_active = bool(payload.isActive)
+        if was_active and not user.is_active:
+            revoke_all_user_sessions(session, user.id)
     if payload.roles is not None:
         try:
             roles = normalize_roles(payload.roles)
@@ -299,7 +328,7 @@ def delete_user(
     user.is_active = False
     user.deleted_at = now
     user.updated_at = now
-    session.query(UserSession).filter(UserSession.auth_user_id == user.id, UserSession.revoked_at.is_(None)).update({UserSession.revoked_at: now}, synchronize_session=False)
+    revoke_all_user_sessions(session, user.id, now=now)
     session.commit()
     return AdminUserMutationResponse(user=_admin_user_response(session, user, subscription=subscription))
 
@@ -316,10 +345,13 @@ async def reset_user_pin(
         pin = validate_pin(payload.pin)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if verify_pin(pin, user.pin_hash):
+        raise HTTPException(status_code=400, detail="Reset PIN must be different from the current PIN.")
     now = utc_now()
     user.pin_hash = hash_pin(pin)
     user.pin_set_at = now
     user.must_change_pin = True
     user.updated_at = now
+    revoke_all_user_sessions(session, user.id, now=now)
     session.commit()
     return AdminUserMutationResponse(user=_admin_user_response(session, user))

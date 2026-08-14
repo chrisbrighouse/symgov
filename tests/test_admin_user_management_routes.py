@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 from symgov_backend.app import create_app
 from symgov_backend.auth import authenticate_user, upsert_user
 from symgov_backend.dependencies import get_db_session
-from symgov_backend.models import SubscriptionEvent, User, UserRole, UserSession, UserSubscription
+from symgov_backend.models import AuthLoginAttemptEvent, AuthLoginThrottleBucket, AuthThrottleRecoveryEvent, SubscriptionEvent, User, UserRole, UserSession, UserSubscription
 from symgov_backend.subscriptions import upgrade_to_plus
 
 OWNER_EMAIL = "chris.brighouse@hotmail.co.uk"
@@ -17,12 +17,12 @@ OWNER_EMAIL = "chris.brighouse@hotmail.co.uk"
 
 def build_client_with_users():
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    for table in (User.__table__, UserRole.__table__, UserSession.__table__, UserSubscription.__table__, SubscriptionEvent.__table__):
+    for table in (User.__table__, UserRole.__table__, UserSession.__table__, AuthLoginThrottleBucket.__table__, AuthLoginAttemptEvent.__table__, AuthThrottleRecoveryEvent.__table__, UserSubscription.__table__, SubscriptionEvent.__table__):
         table.create(engine)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     with Session() as session:
-        upsert_user(session, email=OWNER_EMAIL, display_name="Chris", roles=["admin", "submitter", "reviewer"], pin="4590")
-        reviewer = upsert_user(session, email="reviewer@symgov.local", display_name="Rupert", roles=["reviewer"], pin="4590")
+        upsert_user(session, email=OWNER_EMAIL, display_name="Chris", roles=["admin", "submitter", "reviewer"], pin="4590", must_change_pin=False)
+        reviewer = upsert_user(session, email="reviewer@symgov.local", display_name="Rupert", roles=["reviewer"], pin="4590", must_change_pin=False)
         upgrade_to_plus(session, reviewer, months=12)
         session.commit()
     app = create_app()
@@ -32,7 +32,7 @@ def build_client_with_users():
             yield session
 
     app.dependency_overrides[get_db_session] = override_db_session
-    return TestClient(app), Session
+    return TestClient(app, headers={"origin": "http://testserver"}), Session
 
 
 def login_admin(client):

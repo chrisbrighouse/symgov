@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 
 from ..auth import AuthenticatedUser
-from ..dependencies import get_runtime_bridge, require_any_role
+from ..dependencies import get_runtime_bridge, require_authoritative_external_submission_user
 from ..runtime import RuntimePersistenceBridge
 from ..schemas import APIErrorResponse, ExternalSubmissionRequest, ExternalSubmissionResponse
 from ..services.external_submissions import ExternalSubmissionService, SubmissionError
@@ -37,8 +37,8 @@ legacy_router = APIRouter(tags=["public"])
 )
 def create_external_submission(
     request: dict[str, Any] = Body(...),
+    current_user: AuthenticatedUser = Depends(require_authoritative_external_submission_user),
     bridge: RuntimePersistenceBridge = Depends(get_runtime_bridge),
-    current_user: AuthenticatedUser = Depends(require_any_role({"admin", "submitter"})),
 ) -> ExternalSubmissionResponse:
     service = ExternalSubmissionService(
         bridge=bridge,

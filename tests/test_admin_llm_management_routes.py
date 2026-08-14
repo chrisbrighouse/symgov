@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from symgov_backend.app import create_app
 from symgov_backend.auth import upsert_user
 from symgov_backend.dependencies import get_db_session
-from symgov_backend.models import SubscriptionEvent, User, UserRole, UserSession, UserSubscription
+from symgov_backend.models import AuthLoginAttemptEvent, AuthLoginThrottleBucket, AuthThrottleRecoveryEvent, SubscriptionEvent, User, UserRole, UserSession, UserSubscription
 from symgov_backend.subscriptions import upgrade_to_plus
 
 
@@ -18,7 +18,7 @@ def build_client_with_users():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    for table in (User.__table__, UserRole.__table__, UserSession.__table__, UserSubscription.__table__, SubscriptionEvent.__table__):
+    for table in (User.__table__, UserRole.__table__, UserSession.__table__, AuthLoginThrottleBucket.__table__, AuthLoginAttemptEvent.__table__, AuthThrottleRecoveryEvent.__table__, UserSubscription.__table__, SubscriptionEvent.__table__):
         table.create(engine)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
@@ -29,6 +29,7 @@ def build_client_with_users():
             display_name="Alfi",
             roles=[],
             pin="4590",
+            must_change_pin=False,
         )
         reviewer = upsert_user(
             session,
@@ -36,6 +37,7 @@ def build_client_with_users():
             display_name="Rupert",
             roles=[],
             pin="4590",
+            must_change_pin=False,
         )
         upgrade_to_plus(session, admin, months=12)
         upgrade_to_plus(session, reviewer, months=12)
@@ -51,7 +53,7 @@ def build_client_with_users():
             yield session
 
     app.dependency_overrides[get_db_session] = override_db_session
-    return TestClient(app)
+    return TestClient(app, headers={"origin": "http://testserver"})
 
 
 def login(client: TestClient, email: str):

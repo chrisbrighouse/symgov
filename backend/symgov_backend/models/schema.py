@@ -42,7 +42,16 @@ class UserRole(Base):
 
 class UserSession(Base):
     __tablename__ = "user_sessions"
-    __table_args__ = (Index("uq_user_sessions_token_hash", "token_hash", unique=True),)
+    __table_args__ = (
+        CheckConstraint("purpose in ('application', 'credential_change')", name="purpose"),
+        CheckConstraint("session_mode in ('personal', 'organization')", name="mode"),
+        CheckConstraint(
+            "(session_mode = 'personal' and active_organization_id is null) or "
+            "(session_mode = 'organization' and active_organization_id is not null)",
+            name="mode_active_org",
+        ),
+        Index("uq_user_sessions_token_hash", "token_hash", unique=True),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     auth_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
@@ -51,6 +60,255 @@ class UserSession(Base):
     expires_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    purpose: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'application'"))
+    session_mode: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'personal'"))
+    active_organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    recent_step_up_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Organization(Base):
+    __tablename__ = "organizations"
+    __table_args__ = (
+        CheckConstraint("normalized_code ~ '^[a-z][a-z0-9-]{1,31}$'", name="normalized_code_format"),
+        CheckConstraint(
+            "(code = 'symgov' and normalized_code = 'symgov') or "
+            "(code ~ '^[A-Z][A-Z0-9-]{1,31}$' and normalized_code = lower(code))",
+            name="code_format",
+        ),
+        CheckConstraint(
+            "(normalized_code = 'symgov' and code = 'symgov' and is_protected = true) or "
+            "(normalized_code <> 'symgov' and is_protected = false)",
+            name="reserved_identity",
+        ),
+        CheckConstraint("entitlement_status in ('active', 'suspended')", name="status"),
+        UniqueConstraint("normalized_code", name="uq_organizations_normalized_code"),
+        Index("ix_organizations_active_status", "is_active", "entitlement_status", "normalized_code"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_code: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str] = mapped_column(Text, nullable=False)
+    legal_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    name_key: Mapped[str] = mapped_column(Text, nullable=False)
+    legal_name_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    locale: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'en-US'"))
+    entitlement_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    is_protected: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    icon_seed_version: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'v1'"))
+    fallback_icon_svg: Mapped[str] = mapped_column(Text, nullable=False)
+    uploaded_icon_storage_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uploaded_icon_content_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    uploaded_icon_uploaded_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OrganizationMembership(Base):
+    __tablename__ = "organization_memberships"
+    __table_args__ = (
+        CheckConstraint("status in ('active', 'invited', 'inactive', 'suspended')", name="status"),
+        UniqueConstraint("organization_id", "user_id", name="uq_organization_memberships_org_user"),
+        Index("ix_org_memberships_user_status", "user_id", "status", "organization_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    invited_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    activated_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deactivated_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OrganizationRoleAssignment(Base):
+    __tablename__ = "organization_role_assignments"
+    __table_args__ = (
+        CheckConstraint("base_role in ('admin', 'user')", name="base_role"),
+        CheckConstraint(
+            "(is_active = true and revoked_at is null) or (is_active = false and revoked_at is not null)",
+            name="active_revoked",
+        ),
+        Index("uq_org_role_active_membership", "membership_id", unique=True, postgresql_where=text("is_active = true")),
+        Index("ix_org_role_membership_active", "membership_id", "is_active"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    membership_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organization_memberships.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    base_role: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    assigned_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    assigned_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    revoked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    revoke_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class OrganizationMemberCapability(Base):
+    __tablename__ = "organization_member_capabilities"
+    __table_args__ = (
+        CheckConstraint("capability in ('contributor', 'symbol_reviewer')", name="capability"),
+        CheckConstraint(
+            "(is_active = true and revoked_at is null) or (is_active = false and revoked_at is not null)",
+            name="active_revoked",
+        ),
+        Index(
+            "uq_org_capability_active_membership",
+            "membership_id",
+            "capability",
+            unique=True,
+            postgresql_where=text("is_active = true"),
+        ),
+        Index("ix_org_capability_membership_active", "membership_id", "is_active"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    membership_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organization_memberships.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    capability: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    granted_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    granted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    revoked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    revoke_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class PlatformRoleAssignment(Base):
+    __tablename__ = "platform_role_assignments"
+    __table_args__ = (
+        CheckConstraint("role in ('platform_admin')", name="role"),
+        CheckConstraint(
+            "(is_active = true and revoked_at is null) or (is_active = false and revoked_at is not null)",
+            name="active_revoked",
+        ),
+        Index(
+            "uq_platform_role_active_user_role",
+            "user_id",
+            "role",
+            unique=True,
+            postgresql_where=text("is_active = true"),
+        ),
+        Index("ix_platform_role_user_active", "user_id", "is_active"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    assigned_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    assigned_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    revoked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    revoke_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class AuthOrganizationSelectionChallenge(Base):
+    __tablename__ = "auth_organization_selection_challenges"
+    __table_args__ = (
+        CheckConstraint("max_attempts = 5", name="max_attempts"),
+        CheckConstraint("attempt_count >= 0 and attempt_count <= max_attempts", name="attempt_bounds"),
+        CheckConstraint("token_hash ~ '^[0-9a-f]{64}$'", name="token_hash"),
+        CheckConstraint(
+            "eligible_organizations_hash ~ '^[0-9a-f]{64}$'",
+            name="eligible_hash",
+        ),
+        CheckConstraint(
+            "expires_at = created_at + interval '10 minutes'",
+            name="expiry",
+        ),
+        Index("uq_org_selection_token_hash", "token_hash", unique=True),
+        Index("ix_org_selection_user_expires", "user_id", "expires_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    eligible_organizations_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    eligible_organizations_json: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("5"))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    consumed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AuthLoginThrottleBucket(Base):
+    __tablename__ = "auth_login_throttle_buckets"
+    __table_args__ = (
+        CheckConstraint("scope in ('account', 'ip')", name="ck_scope"),
+        CheckConstraint("failure_count >= 0", name="ck_failure_count"),
+        Index("uq_auth_login_throttle_scope_key", "scope", "bucket_key_hash", unique=True),
+        Index("ix_auth_login_throttle_blocked_until", "blocked_until"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+    bucket_key_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    window_started_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    blocked_until: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AuthLoginAttemptEvent(Base):
+    __tablename__ = "auth_login_attempt_events"
+    __table_args__ = (
+        CheckConstraint("outcome in ('success', 'failure', 'throttled')", name="ck_outcome"),
+        CheckConstraint(
+            "failure_reason is null or failure_reason in "
+            "('invalid_credentials', 'inactive_or_deleted', 'throttled_account', 'throttled_ip')",
+            name="ck_failure_reason",
+        ),
+        Index("ix_auth_login_attempt_occurred", "occurred_at"),
+        Index("ix_auth_login_attempt_user_occurred", "resolved_user_id", "occurred_at"),
+        Index("ix_auth_login_attempt_email_occurred", "email_key_hash", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    occurred_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    email_key_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    resolved_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    client_ip_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_metadata_json: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'{}'"))
+
+
+class AuthThrottleRecoveryEvent(Base):
+    __tablename__ = "auth_throttle_recovery_events"
+    __table_args__ = (
+        CheckConstraint("scope in ('account', 'ip')", name="ck_scope"),
+        Index("ix_auth_throttle_recovery_created", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    actor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+    target_key_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    cleared_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class UserSubscription(Base):

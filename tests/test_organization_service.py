@@ -1,0 +1,413 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+import uuid
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from symgov_backend.organization_service import (
+    assign_platform_admin,
+    create_organization_with_initial_admin,
+    deactivate_membership,
+    list_memberships_for_login_choice,
+    revoke_platform_admin,
+    replace_membership_base_role,
+)
+from symgov_backend.models import (
+    Organization,
+    OrganizationMembership,
+    OrganizationRoleAssignment,
+    PlatformRoleAssignment,
+    User,
+    UserRole,
+)
+
+
+def _session_factory():
+    engine = create_engine("sqlite:///:memory:")
+
+    # Filter out PostgreSQL-specific constraints that SQLite doesn't understand
+    from sqlalchemy import CheckConstraint
+    for table in (
+        User.__table__,
+        UserRole.__table__,
+        Organization.__table__,
+        OrganizationMembership.__table__,
+        OrganizationRoleAssignment.__table__,
+        PlatformRoleAssignment.__table__,
+    ):
+        original_constraints = table.constraints
+        try:
+            table.constraints = {
+                c for c in table.constraints
+                if not (isinstance(c, CheckConstraint) and "~" in str(c.sqltext))
+            }
+            table.create(engine)
+        finally:
+            table.constraints = original_constraints
+    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+
+def _seed_user(session, *, email: str, display_name: str | None = None) -> User:
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    user = User(
+        id=uuid.uuid4(),
+        email=email,
+        display_name=display_name or email,
+        pin_hash="pbkdf2_sha256$260000$c2FsdA==$ZGlnZXN0",
+        pin_set_at=now,
+        must_change_pin=False,
+        is_active=True,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(user)
+    session.flush()
+    return user
+
+
+def _seed_platform_admin_actor(session, *, email: str = "platform@example.test") -> User:
+    actor = _seed_user(session, email=email)
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    organization = Organization(
+        id=uuid.uuid4(),
+        code="symgov",
+        normalized_code="symgov",
+        display_name="Symgov",
+        name_key="symgov",
+        is_active=True,
+        is_protected=True,
+        fallback_icon_svg="<svg/>",
+        created_at=now,
+        updated_at=now,
+    )
+    membership = OrganizationMembership(
+        id=uuid.uuid4(),
+        organization_id=organization.id,
+        user_id=actor.id,
+        status="active",
+        activated_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add_all(
+        [
+            organization,
+            membership,
+            OrganizationRoleAssignment(
+                id=uuid.uuid4(),
+                membership_id=membership.id,
+                base_role="admin",
+                is_active=True,
+                assigned_at=now,
+            ),
+            PlatformRoleAssignment(
+                id=uuid.uuid4(),
+                user_id=actor.id,
+                role="platform_admin",
+                is_active=True,
+                assigned_at=now,
+            ),
+        ]
+    )
+    session.flush()
+    return actor
+
+
+def test_create_organization_with_initial_admin_is_atomic_and_normalized():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        admin = _seed_user(session, email="admin@example.test")
+        created = create_organization_with_initial_admin(
+            session,
+            code="ACME-01",
+            display_name="Acme Engineering",
+            legal_name="Acme Engineering Limited",
+            locale="en-GB",
+            initial_admin_user_id=admin.id,
+            actor_user_id=actor.id,
+        )
+        session.commit()
+
+        org = session.get(Organization, created.organization.id)
+        assert org is not None
+        assert org.code == "ACME-01"
+        assert org.normalized_code == "acme-01"
+        assert org.name_key == "acme engineering"
+        assert org.legal_name_key == "acme engineering limited"
+        assert org.fallback_icon_svg is not None
+        assert "svg" in org.fallback_icon_svg.lower()
+
+        membership = session.query(OrganizationMembership).filter(OrganizationMembership.user_id == admin.id).one()
+        assert membership.status == "active"
+
+        active_admin_role = session.query(OrganizationRoleAssignment).filter(
+            OrganizationRoleAssignment.membership_id == membership.id,
+            OrganizationRoleAssignment.is_active.is_(True),
+        ).one()
+        assert active_admin_role.base_role == "admin"
+
+
+def test_login_membership_selection_is_bounded_deterministic_and_supports_more_than_five_memberships():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        admin = _seed_user(session, email="selector@example.test")
+        for index in range(7):
+            result = create_organization_with_initial_admin(
+                session,
+                code=f"ORG-{index:02d}",
+                display_name=f"Organization {index}",
+                legal_name=f"Organization {index} Limited",
+                locale="en-US",
+                initial_admin_user_id=admin.id,
+                actor_user_id=actor.id,
+            )
+        session.commit()
+
+        first = list_memberships_for_login_choice(session, user_id=admin.id, limit=5)
+        second = list_memberships_for_login_choice(session, user_id=admin.id, limit=5)
+
+        assert len(first) == 5
+        assert [item.organization_code for item in first] == [item.organization_code for item in second]
+        assert [item.organization_code for item in first] == sorted(item.organization_code for item in first)
+
+
+def test_replace_membership_base_role_blocks_last_active_admin():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        owner = _seed_user(session, email="owner@example.test")
+        created = create_organization_with_initial_admin(
+            session,
+            code="LOCK-01",
+            display_name="Lock Org",
+            legal_name="Lock Org Ltd",
+            locale="en-US",
+            initial_admin_user_id=owner.id,
+            actor_user_id=actor.id,
+        )
+        session.commit()
+
+        try:
+            replace_membership_base_role(
+                session,
+                membership_id=created.membership.id,
+                new_base_role="user",
+                actor_user_id=owner.id,
+            )
+        except ValueError as exc:
+            assert "last active organization admin" in str(exc).lower()
+        else:
+            raise AssertionError("Expected last-admin protection to fail before write.")
+
+        session.expire_all()
+        active_roles = session.query(OrganizationRoleAssignment).filter(
+            OrganizationRoleAssignment.membership_id == created.membership.id,
+            OrganizationRoleAssignment.is_active.is_(True),
+        ).all()
+        assert [role.base_role for role in active_roles] == ["admin"]
+
+
+def test_last_active_admin_guard_ignores_inactive_and_deleted_admin_users():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        for index, eligibility in enumerate(("inactive", "deleted"), start=1):
+            owner = _seed_user(session, email=f"eligible-owner-{index}@example.test")
+            ineligible_admin = _seed_user(session, email=f"ineligible-admin-{index}@example.test")
+            if eligibility == "inactive":
+                ineligible_admin.is_active = False
+            else:
+                ineligible_admin.deleted_at = now
+            created = create_organization_with_initial_admin(
+                session,
+                code=f"ELIGIBILITY-{index:02d}",
+                display_name=f"Eligibility {index}",
+                initial_admin_user_id=owner.id,
+                actor_user_id=actor.id,
+            )
+            ineligible_membership = OrganizationMembership(
+                id=uuid.uuid4(),
+                organization_id=created.organization.id,
+                user_id=ineligible_admin.id,
+                status="active",
+                activated_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add_all(
+                [
+                    ineligible_membership,
+                    OrganizationRoleAssignment(
+                        id=uuid.uuid4(),
+                        membership_id=ineligible_membership.id,
+                        base_role="admin",
+                        is_active=True,
+                        assigned_at=now,
+                    ),
+                ]
+            )
+            session.flush()
+
+            try:
+                replace_membership_base_role(
+                    session,
+                    membership_id=created.membership.id,
+                    new_base_role="user",
+                    actor_user_id=actor.id,
+                )
+            except ValueError as exc:
+                assert "last active organization admin" in str(exc).lower()
+            else:
+                raise AssertionError(f"Expected {eligibility} admin user to be excluded from the active-admin count.")
+
+
+def test_create_fails_before_write_for_ineligible_actor_or_inactive_initial_admin():
+    Session = _session_factory()
+    with Session() as session:
+        ordinary_actor = _seed_user(session, email="ordinary@example.test")
+        inactive_admin = _seed_user(session, email="inactive@example.test")
+        inactive_admin.is_active = False
+        session.flush()
+
+        cases = (
+            (ordinary_actor.id, ordinary_actor.id, "platform administrator"),
+            (
+                _seed_platform_admin_actor(session, email="eligible@example.test").id,
+                inactive_admin.id,
+                "initial administrator must be an active",
+            ),
+        )
+        for index, (actor_id, admin_id, expected) in enumerate(cases):
+            try:
+                create_organization_with_initial_admin(
+                    session,
+                    code=f"FAIL-{index + 1:02d}",
+                    display_name="Must Not Exist",
+                    initial_admin_user_id=admin_id,
+                    actor_user_id=actor_id,
+                )
+            except ValueError as exc:
+                assert expected in str(exc).lower()
+            else:
+                raise AssertionError("Expected creation eligibility validation to fail.")
+        assert session.query(Organization).filter(Organization.normalized_code.like("fail-%")).count() == 0
+
+
+def test_login_choices_filter_suspended_entitlement_and_validate_bound():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        member = _seed_user(session, email="member@example.test")
+        active = create_organization_with_initial_admin(
+            session,
+            code="ACTIVE-01",
+            display_name="Active Org",
+            initial_admin_user_id=member.id,
+            actor_user_id=actor.id,
+        )
+        suspended = create_organization_with_initial_admin(
+            session,
+            code="SUSPEND-01",
+            display_name="Suspended Org",
+            initial_admin_user_id=member.id,
+            actor_user_id=actor.id,
+        )
+        suspended.organization.entitlement_status = "suspended"
+        session.commit()
+
+        choices = list_memberships_for_login_choice(session, user_id=member.id, limit=100)
+        assert [choice.organization_id for choice in choices] == [active.organization.id]
+        for invalid_limit in (0, 101):
+            try:
+                list_memberships_for_login_choice(session, user_id=member.id, limit=invalid_limit)
+            except ValueError as exc:
+                assert "limit" in str(exc).lower()
+            else:
+                raise AssertionError("Expected bounded membership limit validation.")
+
+
+def test_normalized_name_duplicates_warn_but_distinct_codes_remain_allowed():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        admin = _seed_user(session, email="duplicate-name-admin@example.test")
+        first = create_organization_with_initial_admin(
+            session,
+            code="ENTITY-ONE",
+            display_name="Shared   Entity",
+            legal_name="Shared Legal Name",
+            initial_admin_user_id=admin.id,
+            actor_user_id=actor.id,
+        )
+        second = create_organization_with_initial_admin(
+            session,
+            code="ENTITY-TWO",
+            display_name=" shared entity ",
+            legal_name="SHARED LEGAL NAME",
+            initial_admin_user_id=admin.id,
+            actor_user_id=actor.id,
+        )
+
+        assert first.duplicate_warnings == ()
+        assert second.organization.normalized_code == "entity-two"
+        assert len(second.duplicate_warnings) == 1
+        assert second.duplicate_warnings[0].organization_id == first.organization.id
+        assert second.duplicate_warnings[0].organization_code == "ENTITY-ONE"
+        assert second.duplicate_warnings[0].matched_fields == ("display_name", "legal_name")
+        assert session.query(Organization).count() == 3  # protected Symgov plus both entities
+
+
+def test_platform_admin_assignment_requires_symgov_admin_and_last_revoke_is_blocked():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        candidate = _seed_user(session, email="candidate@example.test")
+
+        try:
+            assign_platform_admin(session, user_id=candidate.id, actor_user_id=actor.id)
+        except ValueError as exc:
+            assert "symgov organization admin" in str(exc).lower()
+        else:
+            raise AssertionError("Expected platform-admin eligibility validation.")
+
+        try:
+            revoke_platform_admin(session, user_id=actor.id, actor_user_id=actor.id)
+        except ValueError as exc:
+            assert "last eligible platform administrator" in str(exc).lower()
+        else:
+            raise AssertionError("Expected last eligible platform-admin protection.")
+
+
+def test_symgov_admin_with_active_platform_role_cannot_be_demoted_or_deactivated():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        symgov_membership = session.query(OrganizationMembership).filter(
+            OrganizationMembership.user_id == actor.id
+        ).one()
+
+        operations = (
+            lambda: replace_membership_base_role(
+                session,
+                membership_id=symgov_membership.id,
+                new_base_role="user",
+                actor_user_id=actor.id,
+            ),
+            lambda: deactivate_membership(
+                session,
+                membership_id=symgov_membership.id,
+                actor_user_id=actor.id,
+            ),
+        )
+        for operation in operations:
+            try:
+                operation()
+            except ValueError as exc:
+                assert "platform administrator" in str(exc).lower()
+            else:
+                raise AssertionError("Expected active Platform Admin eligibility protection.")

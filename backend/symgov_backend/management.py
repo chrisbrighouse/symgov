@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .auth import upsert_user, user_roles
 from .db import create_session_factory
 from .models import User
+from .organization_service import BootstrapSummary, reconcile_symgov_organization_bootstrap
 from .subscriptions import PROTECTED_OWNER_EMAIL, ensure_subscription
 from .settings import get_settings
 
@@ -39,6 +40,20 @@ def bootstrap_first_user(
     return user
 
 
+def manage_symgov_organization(
+    session: Session,
+    *,
+    apply: bool = False,
+) -> BootstrapSummary:
+    """Audit by default; reconcile and commit only after explicit apply."""
+    summary = reconcile_symgov_organization_bootstrap(session, apply=apply)
+    if apply:
+        session.commit()
+    else:
+        session.rollback()
+    return summary
+
+
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Manage Symgov application users.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -48,6 +63,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     bootstrap.add_argument("--pin", default=os.environ.get("SYMGOV_BOOTSTRAP_PIN"))
     bootstrap.add_argument("--display-name", default=os.environ.get("SYMGOV_BOOTSTRAP_DISPLAY_NAME", DEFAULT_BOOTSTRAP_DISPLAY_NAME))
     bootstrap.add_argument("--role", action="append", dest="roles", default=None)
+
+    symgov_organization = subparsers.add_parser(
+        "bootstrap-symgov-organization",
+        help="Audit or explicitly reconcile the protected Symgov organization.",
+    )
+    symgov_organization.add_argument(
+        "--apply",
+        action="store_true",
+        help="Commit the reconciliation. Without this flag the command is read-only.",
+    )
     return parser.parse_args(argv)
 
 
@@ -82,6 +107,13 @@ def main(argv: Sequence[str] | None = None) -> None:
                 )
             )
             return
+    if args.command == "bootstrap-symgov-organization":
+        settings = get_settings()
+        session_factory = create_session_factory(env_file=settings.db_env_file)
+        with session_factory() as session:
+            summary = manage_symgov_organization(session, apply=args.apply)
+        print(json.dumps(summary, indent=2))
+        return
     raise SystemExit(f"Unknown command: {args.command}")
 
 

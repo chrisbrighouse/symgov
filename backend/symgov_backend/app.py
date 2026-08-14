@@ -26,8 +26,17 @@ from .routes.llm import router as llm_router
 from .routes.workspace import legacy_router as legacy_workspace_router
 from .routes.workspace import router as workspace_router
 from .agent_queue_worker import AgentQueueWorkerConfig, AgentQueueWorkerState, run_agent_queue_worker
-from .dependencies import require_any_role, require_user, require_workspace_access
+from .dependencies import (
+    BoundedMutationBodyMiddleware,
+    require_any_role,
+    require_cookie_mutation_security,
+    require_session_access,
+    require_user,
+    require_workspace_access,
+    validate_request_security_settings,
+)
 from .email_worker import configured_email_sender, run_email_outbox_worker
+from .auth_security import login_throttle_policy
 from .settings import get_settings
 
 
@@ -38,6 +47,8 @@ def load_app_version() -> str:
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    login_throttle_policy(settings)
+    validate_request_security_settings(settings)
     app = FastAPI(
         title="Symgov API",
         version=load_app_version(),
@@ -45,12 +56,20 @@ def create_app() -> FastAPI:
         redoc_url=None,
         openapi_url=None,
     )
+    app.add_middleware(
+        BoundedMutationBodyMiddleware,
+        max_body_bytes=settings.mutation_max_body_bytes,
+    )
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(_, exc: StarletteHTTPException) -> JSONResponse:
         detail = exc.detail if isinstance(exc.detail, str) else "Request failed."
         error = "not_found" if exc.status_code == 404 else "request_error"
-        return JSONResponse(status_code=exc.status_code, content={"error": error, "detail": detail})
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"error": error, "detail": detail},
+            headers=exc.headers,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(_, exc: RequestValidationError) -> JSONResponse:
@@ -59,41 +78,43 @@ def create_app() -> FastAPI:
             content={"error": "validation_error", "detail": "Request validation failed.", "issues": exc.errors()},
         )
 
-    app.include_router(auth_router, prefix=settings.api_prefix)
-    app.include_router(admin_router, prefix=settings.api_prefix)
-    app.include_router(catalog_router, prefix=settings.api_prefix)
+    csrf = Depends(require_cookie_mutation_security)
+    session_access = Depends(require_session_access)
+    app.include_router(auth_router, prefix=settings.api_prefix, dependencies=[csrf])
+    app.include_router(admin_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
+    app.include_router(catalog_router, prefix=settings.api_prefix, dependencies=[csrf])
     app.include_router(
         catalog_developer_router,
         prefix=settings.api_prefix,
-        dependencies=[Depends(require_any_role({"admin", "integrator"}))],
+        dependencies=[csrf, session_access, Depends(require_any_role({"admin", "integrator"}))],
     )
     app.include_router(
         public_router,
         prefix=settings.api_prefix,
-        dependencies=[Depends(require_any_role({"admin", "submitter"}))],
+        dependencies=[csrf, session_access, Depends(require_any_role({"admin", "submitter"}))],
     )
-    app.include_router(published_router, prefix=settings.api_prefix, dependencies=[Depends(require_user)])
-    app.include_router(profile_router, prefix=settings.api_prefix)
+    app.include_router(published_router, prefix=settings.api_prefix, dependencies=[csrf, session_access, Depends(require_user)])
+    app.include_router(profile_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
     app.include_router(
         workspace_router,
         prefix=settings.api_prefix,
-        dependencies=[Depends(require_workspace_access)],
+        dependencies=[csrf, session_access, Depends(require_workspace_access)],
     )
-    app.include_router(llm_router, prefix=settings.api_prefix)
-    app.include_router(legacy_auth_router, prefix="/api")
-    app.include_router(legacy_admin_router, prefix="/api")
+    app.include_router(llm_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
+    app.include_router(legacy_auth_router, prefix="/api", dependencies=[csrf])
+    app.include_router(legacy_admin_router, prefix="/api", dependencies=[csrf, session_access])
     app.include_router(
         legacy_public_router,
         prefix="/api",
-        dependencies=[Depends(require_any_role({"admin", "submitter"}))],
+        dependencies=[csrf, session_access, Depends(require_any_role({"admin", "submitter"}))],
     )
-    app.include_router(legacy_published_router, prefix="/api", dependencies=[Depends(require_user)])
+    app.include_router(legacy_published_router, prefix="/api", dependencies=[csrf, session_access, Depends(require_user)])
     app.include_router(
         legacy_workspace_router,
         prefix="/api",
-        dependencies=[Depends(require_workspace_access)],
+        dependencies=[csrf, session_access, Depends(require_workspace_access)],
     )
-    app.include_router(legacy_llm_router, prefix="/api")
+    app.include_router(legacy_llm_router, prefix="/api", dependencies=[csrf, session_access])
 
     @app.on_event("startup")
     async def start_background_workers() -> None:

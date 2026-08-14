@@ -245,7 +245,7 @@ def test_catalog_download_api_accepts_the_interactive_user_session(monkeypatch):
     monkeypatch.setattr(
         catalog_routes,
         "current_user_from_token",
-        lambda current_session, token: AuthenticatedUser(
+        lambda current_session, token, **_kwargs: AuthenticatedUser(
             id=str(uuid.uuid4()),
             email="catalog.user@example.com",
             display_name="Catalog User",
@@ -260,7 +260,7 @@ def test_catalog_download_api_accepts_the_interactive_user_session(monkeypatch):
         lambda *, object_key, env_file: {"payload": b"png-bytes", "content_type": "image/png"},
     )
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"origin": "http://testserver"})
     client.cookies.set("symgov_session", "browser-session")
     response = client.post(
         "/api/v1/catalog/symbols/download",

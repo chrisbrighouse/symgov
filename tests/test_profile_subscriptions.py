@@ -8,18 +8,18 @@ from sqlalchemy.pool import StaticPool
 from symgov_backend.app import create_app
 from symgov_backend.auth import upsert_user
 from symgov_backend.dependencies import get_db_session
-from symgov_backend.models import EmailOutbox, SubscriptionEvent, User, UserRole, UserSession, UserSubscription
+from symgov_backend.models import AuthLoginAttemptEvent, AuthLoginThrottleBucket, AuthThrottleRecoveryEvent, EmailOutbox, SubscriptionEvent, User, UserRole, UserSession, UserSubscription
 from symgov_backend.settings import SymgovAPISettings, get_settings
 
 
 def build_client(*, admin_email="chris.brighouse@hotmail.co.uk"):
     engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-    for table in (User.__table__, UserRole.__table__, UserSession.__table__, UserSubscription.__table__, SubscriptionEvent.__table__, EmailOutbox.__table__):
+    for table in (User.__table__, UserRole.__table__, UserSession.__table__, AuthLoginThrottleBucket.__table__, AuthLoginAttemptEvent.__table__, AuthThrottleRecoveryEvent.__table__, UserSubscription.__table__, SubscriptionEvent.__table__, EmailOutbox.__table__):
         table.create(engine)
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     with Session() as session:
-        upsert_user(session, email="customer@example.com", display_name="Customer", roles=[], pin="4590")
-        upsert_user(session, email="chris.brighouse@hotmail.co.uk", display_name="Chris", roles=["admin"], pin="4590")
+        upsert_user(session, email="customer@example.com", display_name="Customer", roles=[], pin="4590", must_change_pin=False)
+        upsert_user(session, email="chris.brighouse@hotmail.co.uk", display_name="Chris", roles=["admin"], pin="4590", must_change_pin=False)
         session.commit()
     app = create_app()
 
@@ -29,7 +29,7 @@ def build_client(*, admin_email="chris.brighouse@hotmail.co.uk"):
 
     app.dependency_overrides[get_db_session] = override_db_session
     app.dependency_overrides[get_settings] = lambda: SymgovAPISettings(subscription_admin_email=admin_email)
-    return TestClient(app), Session
+    return TestClient(app, headers={"origin": "http://testserver"}), Session
 
 
 def login(client, email="customer@example.com"):

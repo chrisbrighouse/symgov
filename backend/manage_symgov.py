@@ -31,7 +31,6 @@ from symgov_backend.catalog_api_keys import (
     revoke_catalog_api_key,
 )
 from symgov_backend.db import create_session_factory
-from symgov_backend.openclaw_sync import audit_openclaw_registration, reconcile_openclaw_registration
 from symgov_backend.runtime import RuntimePersistenceBridge, check_database_health, check_storage_health
 from symgov_backend.tracy_operations import (
     archive_agent_runtime_queue,
@@ -87,20 +86,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     storage_parser = subparsers.add_parser("check-storage", help="Run a small storage health and inspection check.")
     storage_parser.add_argument("--storage-env-file", help="Path to the Symgov storage env file.")
-
-    openclaw_check_parser = subparsers.add_parser(
-        "check-openclaw",
-        help="Audit whether OpenClaw registration still matches the SymGov agent manifest.",
-    )
-    openclaw_check_parser.add_argument("--manifest", help="Path to the SymGov OpenClaw agent manifest.")
-    openclaw_check_parser.add_argument("--config", help="Path to the OpenClaw config file.")
-
-    openclaw_reconcile_parser = subparsers.add_parser(
-        "reconcile-openclaw",
-        help="Repair OpenClaw registration from the SymGov agent manifest.",
-    )
-    openclaw_reconcile_parser.add_argument("--manifest", help="Path to the SymGov OpenClaw agent manifest.")
-    openclaw_reconcile_parser.add_argument("--config", help="Path to the OpenClaw config file.")
 
     api_parser = subparsers.add_parser("serve-api", help="Run the Symgov API server.")
     api_parser.add_argument("--host", default="0.0.0.0", help="Host interface to bind.")
@@ -390,14 +375,6 @@ def main(argv: Sequence[str] | None = None):
 
     if args.command == "check-storage":
         print(json.dumps(check_storage_health(env_file=args.storage_env_file), indent=2))
-        return
-
-    if args.command == "check-openclaw":
-        print(json.dumps(audit_openclaw_registration(manifest_path=args.manifest, config_path=args.config), indent=2))
-        return
-
-    if args.command == "reconcile-openclaw":
-        print(json.dumps(reconcile_openclaw_registration(manifest_path=args.manifest, config_path=args.config), indent=2))
         return
 
     if args.command == "serve-api":

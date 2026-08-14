@@ -45,7 +45,13 @@ from ..catalog_taxonomy import (
     catalog_taxonomy_for_symbol,
 )
 from ..catalog_usage import log_catalog_usage_event_best_effort
-from ..dependencies import SESSION_COOKIE_NAME, get_db_session
+from ..dependencies import (
+    SESSION_COOKIE_NAME,
+    enforce_session_access_state,
+    get_db_session,
+    matched_route_template,
+    session_access_decision,
+)
 from ..models import (
     AgentQueueItem,
     Attachment,
@@ -185,8 +191,20 @@ def require_catalog_download_access(
     session: Session = Depends(get_db_session),
 ) -> AuthenticatedUser | IntegrationAuthContext:
     session_token = request.cookies.get(SESSION_COOKIE_NAME, "")
-    current_user = current_user_from_token(session, session_token)
+    current_user = current_user_from_token(
+        session,
+        session_token,
+        before_maintenance=lambda must_change_pin, session_purpose: enforce_session_access_state(
+            must_change_pin,
+            session_purpose,
+            request.method,
+            matched_route_template(request),
+        ),
+    )
     if current_user is not None:
+        decision = session_access_decision(current_user, request.method, matched_route_template(request))
+        if not decision.allowed:
+            raise HTTPException(status_code=403, detail=decision.detail)
         session.commit()
         return current_user
 

@@ -1,11 +1,53 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .db import DEFAULT_ENV_FILE
 from .runtime import DEFAULT_STORAGE_ENV_FILE
+
+
+LOCAL_SECURITY_ENVIRONMENTS = frozenset({"local", "test"})
+NORMALIZED_ORGANIZATION_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
+
+
+def _environment() -> str:
+    return os.environ.get("SYMGOV_ENVIRONMENT", "production").strip().lower() or "production"
+
+
+def _csv_setting(name: str, local_default: str = "") -> tuple[str, ...]:
+    raw = os.environ.get(name)
+    if raw is None and _environment() in LOCAL_SECURITY_ENVIRONMENTS:
+        raw = local_default
+    return tuple(item.strip() for item in (raw or "").split(",") if item.strip())
+
+
+def _organization_pilot_codes() -> tuple[str, ...]:
+    values = os.environ.get("SYMGOV_ORGANIZATION_PILOT_CODES", "")
+    normalized = {
+        item.strip().lower()
+        for item in values.split(",")
+        if item.strip()
+    }
+    invalid = sorted(
+        code for code in normalized if not NORMALIZED_ORGANIZATION_CODE_PATTERN.fullmatch(code)
+    )
+    if invalid:
+        raise ValueError("Organization pilot codes must use normalized lowercase code grammar.")
+    return tuple(sorted(normalized))
+
+
+def _login_hash_secret() -> str:
+    configured = os.environ.get("SYMGOV_AUTH_LOGIN_HASH_SECRET", "").strip()
+    if configured:
+        return configured
+    if _environment() == "test":
+        return "symgov-explicit-test-auth-throttle-secret"
+    if _environment() == "local":
+        return "symgov-explicit-local-auth-throttle-secret"
+    return ""
 
 
 def _read_env_value(path: Path, key: str) -> str:
@@ -34,6 +76,7 @@ def _agentmail_api_key() -> str:
 
 @dataclass(frozen=True)
 class SymgovAPISettings:
+    environment: str = field(default_factory=_environment)
     service_name: str = "symgov-api"
     api_prefix: str = "/api/v1"
     host: str = "0.0.0.0"
@@ -78,6 +121,58 @@ class SymgovAPISettings:
     smtp_starttls: bool = os.environ.get("SYMGOV_SMTP_STARTTLS", "1").strip().lower() in {"1", "true", "yes", "on"}
     smtp_ssl: bool = os.environ.get("SYMGOV_SMTP_SSL", "0").strip().lower() in {"1", "true", "yes", "on"}
     email_worker_interval_seconds: float = float(os.environ.get("SYMGOV_EMAIL_WORKER_INTERVAL_SECONDS", "30"))
+    auth_login_account_failure_limit: int = int(os.environ.get("SYMGOV_AUTH_LOGIN_ACCOUNT_FAILURE_LIMIT", "5"))
+    auth_login_ip_failure_limit: int = int(os.environ.get("SYMGOV_AUTH_LOGIN_IP_FAILURE_LIMIT", "20"))
+    auth_login_window_seconds: int = int(os.environ.get("SYMGOV_AUTH_LOGIN_WINDOW_SECONDS", "900"))
+    auth_login_block_seconds: int = int(os.environ.get("SYMGOV_AUTH_LOGIN_BLOCK_SECONDS", "900"))
+    auth_login_hash_secret: str = field(
+        default_factory=_login_hash_secret,
+        repr=False,
+    )
+    trusted_proxy_cidrs: tuple[str, ...] = field(
+        default_factory=lambda: _csv_setting("SYMGOV_TRUSTED_PROXY_CIDRS", "127.0.0.0/8,::1/128")
+    )
+    trusted_proxy_hops: int = int(os.environ.get("SYMGOV_TRUSTED_PROXY_HOPS", "1"))
+    csrf_trusted_origins: tuple[str, ...] = field(
+        default_factory=lambda: _csv_setting("SYMGOV_CSRF_TRUSTED_ORIGINS", "http://testserver,http://localhost")
+    )
+    csrf_trusted_hosts: tuple[str, ...] = field(
+        default_factory=lambda: _csv_setting("SYMGOV_CSRF_TRUSTED_HOSTS", "testserver,localhost")
+    )
+    mutation_max_body_bytes: int = int(
+        os.environ.get("SYMGOV_MUTATION_MAX_BODY_BYTES", str(128 * 1024 * 1024))
+    )
+    organizations_enabled: bool = os.environ.get("SYMGOV_ORGANIZATIONS_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    organization_admin_enabled: bool = os.environ.get("SYMGOV_ORGANIZATION_ADMIN_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    symbol_sets_enabled: bool = os.environ.get("SYMGOV_SYMBOL_SETS_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    organization_symbols_enabled: bool = os.environ.get("SYMGOV_ORGANIZATION_SYMBOLS_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    organization_agents_enabled: bool = os.environ.get("SYMGOV_ORGANIZATION_AGENTS_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    organization_pilot_codes: tuple[str, ...] = field(default_factory=_organization_pilot_codes)
 
 
 def get_settings() -> SymgovAPISettings:

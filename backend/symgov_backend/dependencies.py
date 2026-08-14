@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from dataclasses import dataclass
+import ipaddress
+import json
 from types import MappingProxyType
 from typing import Callable
+from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from .auth import AuthenticatedUser, current_user_from_token
+from .auth import AuthenticatedUser, authoritative_user_from_token, current_user_from_token
 from .db import create_session_factory
 from .runtime import RuntimePersistenceBridge
 from .settings import SymgovAPISettings, get_settings
@@ -29,6 +32,201 @@ def get_runtime_bridge(settings: SymgovAPISettings | None = None) -> RuntimePers
 
 
 SESSION_COOKIE_NAME = "symgov_session"
+COOKIE_MUTATION_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+UNAUTHENTICATED_LOGIN_OPERATIONS = frozenset(
+    {
+        ("POST", "/api/v1/auth/login"),
+        ("POST", "/api/auth/login"),
+    }
+)
+API_KEY_ONLY_MUTATION_OPERATIONS = frozenset(
+    {
+        ("POST", "/api/v1/catalog/ed/query"),
+        ("POST", "/api/v1/catalog/search"),
+        ("POST", "/api/v1/catalog/symbols/{symbol_ref}/feedback"),
+    }
+)
+
+
+class BoundedMutationBodyMiddleware:
+    """Bound mutation bodies before routing, parsing, or authentication."""
+
+    def __init__(self, app, *, max_body_bytes: int):
+        self.app = app
+        self.max_body_bytes = max_body_bytes
+
+    def _must_bound(self, scope: dict) -> bool:
+        method = str(scope.get("method", "")).upper()
+        return scope.get("type") == "http" and method in COOKIE_MUTATION_METHODS
+
+    async def __call__(self, scope, receive, send) -> None:
+        if not self._must_bound(scope):
+            await self.app(scope, receive, send)
+            return
+
+        body = bytearray()
+        disconnected = False
+        while True:
+            message = await receive()
+            if message.get("type") != "http.request":
+                disconnected = True
+                break
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > self.max_body_bytes:
+                response_body = b'{"error":"request_error","detail":"Request body is too large."}'
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 413,
+                        "headers": [
+                            (b"content-type", b"application/json"),
+                            (b"content-length", str(len(response_body)).encode()),
+                        ],
+                    }
+                )
+                await send({"type": "http.response.body", "body": response_body})
+                return
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+
+        replayed = False
+
+        async def replay_receive():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                if disconnected:
+                    return {"type": "http.disconnect"}
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return {"type": "http.disconnect"}
+
+        await self.app(scope, replay_receive, send)
+
+
+def validate_request_security_settings(settings: SymgovAPISettings) -> None:
+    if settings.mutation_max_body_bytes < 1:
+        raise ValueError("Mutation request body limit must be positive.")
+    if not 1 <= settings.trusted_proxy_hops <= 10:
+        raise ValueError("Trusted proxy hops must be between 1 and 10.")
+    try:
+        tuple(ipaddress.ip_network(value, strict=False) for value in settings.trusted_proxy_cidrs)
+    except ValueError as exc:
+        raise ValueError("Trusted proxy CIDRs must contain valid IP networks.") from exc
+
+    if not settings.csrf_trusted_origins:
+        raise ValueError("At least one trusted CSRF origin is required.")
+    for value in settings.csrf_trusted_origins:
+        parsed = urlsplit(value)
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in {"", "/"}
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("Trusted CSRF origins must be HTTP(S) origins without paths or credentials.")
+
+    if not settings.csrf_trusted_hosts:
+        raise ValueError("At least one trusted CSRF host is required.")
+    for value in settings.csrf_trusted_hosts:
+        host = value.strip().lower()
+        parsed = urlsplit(f"//{host}")
+        if not host or parsed.hostname != host or parsed.port is not None:
+            raise ValueError("Trusted CSRF hosts must contain hostnames without schemes, paths, or ports.")
+
+
+def _normalized_ip(value: str | None) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        return ipaddress.ip_address(str(value or "").strip())
+    except ValueError:
+        return None
+
+
+def resolve_client_ip(
+    peer_ip: str | None,
+    forwarded_for: str | None,
+    settings: SymgovAPISettings,
+) -> str | None:
+    if not 1 <= settings.trusted_proxy_hops <= 10:
+        raise ValueError("Trusted proxy hops must be between 1 and 10.")
+    peer = _normalized_ip(peer_ip)
+    if peer is None:
+        return None
+    try:
+        trusted_networks = tuple(ipaddress.ip_network(value, strict=False) for value in settings.trusted_proxy_cidrs)
+    except ValueError as exc:
+        raise ValueError("Trusted proxy CIDRs must contain valid IP networks.") from exc
+    if not any(peer in network for network in trusted_networks):
+        return peer.compressed
+    if not forwarded_for:
+        return peer.compressed
+    forwarded_values = tuple(value.strip() for value in forwarded_for.split(","))
+    if not 1 <= len(forwarded_values) <= settings.trusted_proxy_hops:
+        return peer.compressed
+    forwarded = tuple(_normalized_ip(value) for value in forwarded_values)
+    if any(value is None for value in forwarded):
+        return peer.compressed
+    for candidate in reversed(forwarded):
+        assert candidate is not None
+        if not any(candidate in network for network in trusted_networks):
+            return candidate.compressed
+    first = forwarded[0]
+    return first.compressed if first is not None else None
+
+
+def _peer_is_trusted(peer_ip: str | None, settings: SymgovAPISettings) -> bool:
+    peer = _normalized_ip(peer_ip)
+    if peer is None:
+        return False
+    try:
+        return any(peer in ipaddress.ip_network(value, strict=False) for value in settings.trusted_proxy_cidrs)
+    except ValueError as exc:
+        raise ValueError("Trusted proxy CIDRs must contain valid IP networks.") from exc
+
+
+def _canonical_http_origin(scheme: str, authority: str) -> tuple[str, str, int] | None:
+    normalized_scheme = str(scheme or "").strip().lower()
+    if normalized_scheme not in {"http", "https"}:
+        return None
+    try:
+        parsed = urlsplit(f"{normalized_scheme}://{str(authority or '').strip()}")
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        return None
+    return normalized_scheme, parsed.hostname.lower(), port or (443 if normalized_scheme == "https" else 80)
+
+
+def _canonical_source_origin(value: str) -> tuple[str, str, int] | None:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    scheme = parsed.scheme.lower()
+    if (
+        scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        return None
+    return scheme, parsed.hostname.lower(), port or (443 if scheme == "https" else 80)
+
+
+def _reject_non_finite_json_constant(value: str) -> None:
+    raise ValueError(f"Non-finite JSON constant is not permitted: {value}")
 
 
 @dataclass(frozen=True)
@@ -136,15 +334,162 @@ def matched_route_template(request: Request) -> object:
     return getattr(route, "path", None)
 
 
+async def require_cookie_mutation_security(
+    request: Request,
+    settings: SymgovAPISettings = Depends(get_settings),
+) -> None:
+    method = request.method.upper()
+    if method not in COOKIE_MUTATION_METHODS:
+        return
+
+    operation = (method, matched_route_template(request))
+    if operation in API_KEY_ONLY_MUTATION_OPERATIONS:
+        return
+
+    body = await request.body()
+    if body:
+        if not request.headers.get("content-type", "").lower().startswith("application/json"):
+            raise HTTPException(status_code=415, detail="Content-Type must be application/json.")
+        try:
+            payload = json.loads(body, parse_constant=_reject_non_finite_json_constant)
+        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Request body must be valid JSON.") from exc
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Request body must be a JSON object.")
+
+    if operation in UNAUTHENTICATED_LOGIN_OPERATIONS:
+        return
+    if not request.cookies.get(SESSION_COOKIE_NAME):
+        return
+    if operation in API_KEY_ONLY_MUTATION_OPERATIONS:
+        return
+
+    origin = request.headers.get("origin")
+    referer = request.headers.get("referer")
+    if not (origin or referer):
+        raise HTTPException(status_code=403, detail="Origin or Referer is required for browser mutations.")
+    source = origin or referer
+    assert source is not None
+    source_origin = _canonical_source_origin(source)
+    trusted_origins = {
+        canonical
+        for value in settings.csrf_trusted_origins
+        if (canonical := _canonical_source_origin(value)) is not None
+    }
+    if source_origin is None or source_origin not in trusted_origins:
+        raise HTTPException(status_code=403, detail="Cross-origin request is not permitted.")
+    host = request.headers.get("host", "").strip().lower()
+    scheme = request.url.scheme.lower()
+    if _peer_is_trusted(request.client.host if request.client else None, settings):
+        forwarded_host = request.headers.get("x-forwarded-host", "").strip().lower()
+        forwarded_proto = request.headers.get("x-forwarded-proto", "").strip().lower()
+        if forwarded_host:
+            if "," in forwarded_host:
+                raise HTTPException(status_code=403, detail="Forwarded request host is not trusted.")
+            host = forwarded_host
+        if forwarded_proto:
+            if "," in forwarded_proto or forwarded_proto not in {"http", "https"}:
+                raise HTTPException(status_code=403, detail="Forwarded request scheme is not trusted.")
+            scheme = forwarded_proto
+    effective_origin = _canonical_http_origin(scheme, host)
+    if effective_origin is None or effective_origin[1] not in {
+        value.lower() for value in settings.csrf_trusted_hosts
+    }:
+        raise HTTPException(status_code=403, detail="Request host is not trusted.")
+    if source_origin != effective_origin:
+        raise HTTPException(status_code=403, detail="Cross-origin request is not permitted.")
+
+
 def get_current_user(request: Request, session: Session = Depends(get_db_session)) -> AuthenticatedUser | None:
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
-    current = current_user_from_token(session, token)
+    current = current_user_from_token(
+        session,
+        token,
+        before_maintenance=lambda must_change_pin, session_purpose: enforce_session_access_state(
+            must_change_pin,
+            session_purpose,
+            request.method,
+            matched_route_template(request),
+        ),
+    )
     if current is not None:
         session.commit()
     return current
 
 
-def require_user(current_user: AuthenticatedUser | None = Depends(get_current_user)) -> AuthenticatedUser:
+FORCED_PIN_ALLOWED_OPERATIONS = frozenset(
+    {
+        ("GET", "/api/v1/auth/me"),
+        ("GET", "/api/auth/me"),
+        ("POST", "/api/v1/auth/change-pin"),
+        ("POST", "/api/auth/change-pin"),
+        ("POST", "/api/v1/auth/logout"),
+        ("POST", "/api/auth/logout"),
+        ("GET", "/api/v1/profile"),
+    }
+)
+
+
+@dataclass(frozen=True)
+class SessionAccessDecision:
+    allowed: bool
+    detail: str | None = None
+
+
+def session_access_decision_for_state(
+    must_change_pin: bool,
+    session_purpose: str,
+    method: object,
+    route_template: object,
+) -> SessionAccessDecision:
+    if not must_change_pin and session_purpose != "credential_change":
+        return SessionAccessDecision(allowed=True)
+    operation = (str(method).upper(), route_template)
+    if operation in FORCED_PIN_ALLOWED_OPERATIONS:
+        return SessionAccessDecision(allowed=True)
+    return SessionAccessDecision(
+        allowed=False,
+        detail="PIN change is required before accessing this operation.",
+    )
+
+
+def session_access_decision(
+    current_user: AuthenticatedUser | None,
+    method: object,
+    route_template: object,
+) -> SessionAccessDecision:
+    if current_user is None:
+        return SessionAccessDecision(allowed=True)
+    return session_access_decision_for_state(
+        current_user.must_change_pin,
+        current_user.session_purpose,
+        method,
+        route_template,
+    )
+
+
+def enforce_session_access_state(
+    must_change_pin: bool,
+    session_purpose: str,
+    method: object,
+    route_template: object,
+) -> None:
+    decision = session_access_decision_for_state(must_change_pin, session_purpose, method, route_template)
+    if not decision.allowed:
+        raise HTTPException(status_code=403, detail=decision.detail)
+
+
+def require_session_access(
+    request: Request,
+    current_user: AuthenticatedUser | None = Depends(get_current_user),
+) -> AuthenticatedUser | None:
+    decision = session_access_decision(current_user, request.method, matched_route_template(request))
+    if not decision.allowed:
+        raise HTTPException(status_code=403, detail=decision.detail)
+    return current_user
+
+
+def require_user(current_user: AuthenticatedUser | None = Depends(require_session_access)) -> AuthenticatedUser:
     if current_user is None:
         raise HTTPException(status_code=401, detail="Authentication required.")
     return current_user
@@ -173,3 +518,25 @@ def require_any_role(roles: set[str]) -> Callable[[AuthenticatedUser], Authentic
         return current_user
 
     return dependency
+
+
+def require_authoritative_external_submission_user(
+    request: Request,
+    session: Session = Depends(get_db_session),
+    _: AuthenticatedUser = Depends(require_any_role({"admin", "submitter"})),
+) -> AuthenticatedUser:
+    current_user = authoritative_user_from_token(
+        session,
+        request.cookies.get(SESSION_COOKIE_NAME, ""),
+    )
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    enforce_session_access_state(
+        current_user.must_change_pin,
+        current_user.session_purpose,
+        request.method,
+        matched_route_template(request),
+    )
+    if not {"admin", "submitter"}.intersection(current_user.roles):
+        raise HTTPException(status_code=403, detail="Insufficient role for this operation.")
+    return current_user
