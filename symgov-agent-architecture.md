@@ -10,7 +10,7 @@ The design direction for this pass is:
 
 - Agents should be independent as much as possible.
 - Each agent should own its own queue and produce explicit outputs.
-- Agent model assignments are selected by the configured repository/Hermes runtime. The retained `openclaw-agents.manifest.json` is legacy compatibility data, not the live runtime authority.
+- Agent model assignments are selected by the configured repository/Hermes runtime. No retired registration manifest is read by the live runtime.
 - Human review remains the final authority for high-risk governance and publication actions, but low-risk symbols may bypass human review when Libby explicitly records that review is not required and the validation, provenance, classification, and release evidence is complete.
 
 ## Current runtime fit
@@ -639,7 +639,7 @@ Practical sequence:
 
 ## Historical Gemma usage policy
 
-This was the initial low-cost policy. The current manifest model profiles supersede concrete model selections while the deterministic-tool and authority rules below remain applicable.
+This was the initial low-cost policy. The configured repository/Hermes runtime now supersedes concrete model selections while the deterministic-tool and authority rules below remain applicable.
 
 - Use `ollama/gemma4:e4b` for routine queue processing, extraction summaries, classification proposals, and escalation drafting.
 - Prefer deterministic local tools for validation, parsing, and packaging.
@@ -669,7 +669,7 @@ The `.openclaw` directory name survives in retained runtime paths, but no OpenCl
 - `AGENTS.md` instructions per workspace
 - helper scripts for structured task execution where deterministic tools exist
 
-The legacy manifest defines named `model_profiles` such as `fast`, `vision`, `research`, `deep_reasoning`, and `design`. Those values remain useful to migration and audit tooling, but live model/provider access comes from the configured repository/Hermes runtime.
+Live model/provider access comes from the configured repository/Hermes runtime; the retired registration manifest and its model profiles are no longer read by the application.
 
 Current profile intent:
 
@@ -684,7 +684,7 @@ Current profile intent:
 The initial committed direction was:
 
 - independent agents with owned queues and explicit outputs
-- a low-cost default model path (now selected through the manifest rather than fixed here)
+- a low-cost default model path (now selected through the configured repository/Hermes runtime rather than fixed here)
 - `Vlad` as the first implemented Symgov agent
 - `Scott` and `Tracy` immediately after
 - `Daisy` as the first coordination agent after those outputs exist

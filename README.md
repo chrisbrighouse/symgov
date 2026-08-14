@@ -254,31 +254,9 @@ Agreed target routing after Libby implementation:
 
 ## Legacy workspace compatibility
 
-Repository-owned worker execution is selected through `SYMGOV_AGENT_RUNTIME`: `direct` (the default) or `hermes`. The live Symgov application does not require or run an OpenClaw container. The old OpenClaw container set was decommissioned on 2026-08-01.
+Repository-owned worker execution is selected through `SYMGOV_AGENT_RUNTIME`: `direct` (the default) or `hermes`. The live Symgov application does not require or run an OpenClaw container; the retired OpenClaw registration/sync layer is no longer part of the backend.
 
-Some retained runtime directories still live under `/data/.openclaw/workspaces`, and the historical compatibility manifest remains in the repository as:
-
-- `openclaw-agents.manifest.json`
-
-That manifest records legacy workspace and registration compatibility data:
-
-- historical plugin and registration expectations
-- Symgov agent ids, names, retained workspace paths, model profiles, resolved model ids, and tool profiles
-- historical channel/account/peer bindings
-- legacy `agent.json` metadata paths
-- retained workspace files used by repository-owned runners
-
-The manifest's `model_profiles` remain source data for compatibility and migration tooling. Live provider credentials and worker execution are configured by the selected repository/Hermes runtime, independently of that legacy registration model.
-
-The backend still exposes legacy audit and reconstruction commands for migration or forensic use:
-
-```bash
-cd /path/to/symgov/backend
-python manage_symgov.py check-openclaw
-python manage_symgov.py reconcile-openclaw
-```
-
-These commands are not part of normal live operations and must not be used to recreate or start the retired container stack without an explicit migration decision. The retained `.openclaw` directory name is a storage-path compatibility detail, not evidence of a running OpenClaw service.
+Some retained runtime directories still live under `/data/.openclaw/workspaces`. The `.openclaw` directory name is a storage-path compatibility detail used by existing repository-owned workers for queue/history artifacts, not evidence of a running OpenClaw service. No OpenClaw manifest or reconciliation command is supported by the current application.
 
 ## Repeatable quality gates
 
@@ -396,8 +374,7 @@ This repository is now referred to as **symgov** (symbol governance). See the ar
 - `.env.backend.database.example` — database-only backend environment snippet for the `symgov_app` runtime path, with a commented `symgov_migrator` migration example.
 - `.env.backend.storage.example` — object-storage configuration example.
 - `backend/` — backend source containing SQLAlchemy models, Alembic config, and migrations.
-- `backend/manage_symgov.py` — current backend bootstrap and inspection entrypoint for agent-definition seeding, DB/storage health checks, and the FastAPI server.
-- `openclaw-agents.manifest.json` — retained legacy registration/workspace manifest for compatibility and migration tooling; it is not the live worker-runtime authority.
+- `backend/manage_symgov.py` — current backend bootstrap and inspection entrypoint for agent-definition seeding, DB/storage health checks, queue processing, and the FastAPI server.
 
 No database migration state, object-store reachability, seeded runtime rows, container image, public route, or external service health is asserted by this repository document. Verify those against the intended environment.
 
