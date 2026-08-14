@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -70,10 +71,34 @@ class AuthUserResponse(BaseModel):
     roles: list[str]
     mustChangePin: bool
     subscription: SubscriptionResponse
+    session: dict[str, Any]
+    organization: dict[str, Any] | None
+    isPlatformAdmin: bool
+    capabilities: dict[str, bool]
+
+
+class AuthSelectionChallengeResponse(BaseModel):
+    token: str
+    expiresAt: str
+    choices: list[dict[str, str]]
+    page: int
+    pageSize: int
+    total: int
+    hasMore: bool
+
+
+class AuthSelectOrganizationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    token: str = Field(min_length=1, max_length=256)
+    organizationId: uuid.UUID | None = None
+    page: int = Field(default=1, ge=1)
+    pageSize: int = Field(default=5, ge=1, le=5)
 
 
 class AuthLoginResponse(BaseModel):
-    user: AuthUserResponse
+    user: AuthUserResponse | None
+    selectionChallenge: AuthSelectionChallengeResponse | None = None
 
 
 class AuthMeResponse(BaseModel):
@@ -121,7 +146,8 @@ class AuthChangePinRequest(BaseModel):
 
 
 class AuthChangePinResponse(BaseModel):
-    user: AuthUserResponse
+    user: AuthUserResponse | None
+    selectionChallenge: AuthSelectionChallengeResponse | None = None
 
 
 class AdminUserResponse(BaseModel):
@@ -171,6 +197,12 @@ class AdminSubscriptionMonthsRequest(BaseModel):
 
 class AdminUserResetPinRequest(BaseModel):
     pin: str = Field(default="4590", min_length=4, max_length=4)
+
+
+class AdminAuthThrottleRecoveryRequest(BaseModel):
+    scope: str = Field(pattern="^(account|ip)$")
+    key: str = Field(min_length=1, max_length=320)
+    reason: str = Field(min_length=10, max_length=500)
 
 
 class AdminUserMutationResponse(BaseModel):

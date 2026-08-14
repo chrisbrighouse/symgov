@@ -7,12 +7,12 @@ import hashlib
 import hmac
 import secrets
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
-from sqlalchemy import func
+from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session
 
-from .models import User, UserRole, UserSession
+from .models import AuthOrganizationSelectionChallenge, User, UserRole, UserSession, UserSubscription
 from .subscriptions import PROTECTED_OWNER_EMAIL, ensure_subscription
 
 PIN_HASH_ALGORITHM = "pbkdf2_sha256"
@@ -33,6 +33,14 @@ class AuthenticatedUser:
     subscription_started_on: date = date(1970, 1, 1)
     subscription_expires_on: date | None = None
     subscription_is_protected: bool = False
+    session_purpose: str = "application"
+    session_mode: str = "personal"
+    active_organization_id: str | None = None
+    organization_code: str | None = None
+    organization_display_name: str | None = None
+    organization_base_role: str | None = None
+    organization_capabilities: tuple[str, ...] = ()
+    is_platform_admin: bool = False
 
 
 @dataclass(frozen=True)
@@ -202,22 +210,105 @@ def authenticate_user(session: Session, *, email: str, pin: str) -> User | None:
     return user
 
 
-def create_user_session(session: Session, *, user: User, ttl_hours: int = 24 * 14) -> str:
+def create_user_session(
+    session: Session,
+    *,
+    user: User,
+    ttl_hours: float = 24 * 14,
+    purpose: str | None = None,
+    session_mode: str = "personal",
+    active_organization_id: uuid.UUID | None = None,
+) -> str:
+    session.flush()
+    locked_user = (
+        session.query(User)
+        .filter(User.id == user.id)
+        .with_for_update()
+        .populate_existing()
+        .one_or_none()
+    )
+    if locked_user is None or not locked_user.is_active or locked_user.deleted_at is not None:
+        raise ValueError("An active user is required to issue a session.")
     raw_token, token_hash = create_session_token()
     now = utc_now()
+    resolved_purpose = purpose or ("credential_change" if locked_user.must_change_pin else "application")
+    if resolved_purpose == "application" and locked_user.must_change_pin:
+        raise ValueError("PIN change is required before issuing an application session.")
+    if resolved_purpose == "credential_change" and not locked_user.must_change_pin:
+        raise ValueError("A credential-change session requires a pending PIN change.")
     session.add(
         UserSession(
             id=uuid.uuid4(),
-            auth_user_id=user.id,
+            auth_user_id=locked_user.id,
             token_hash=token_hash,
             created_at=now,
             expires_at=now + timedelta(hours=ttl_hours),
             revoked_at=None,
             last_seen_at=now,
+            purpose=resolved_purpose,
+            session_mode=session_mode,
+            active_organization_id=active_organization_id,
         )
     )
     session.flush()
     return raw_token
+
+
+def complete_credential_change(
+    session: Session,
+    *,
+    token: str,
+    current_pin: str,
+    new_pin: str,
+) -> tuple[User, str | None]:
+    if not token:
+        raise ValueError("Authentication required.")
+    token_hash = hash_session_token(token)
+    initial_session = session.query(UserSession).filter(UserSession.token_hash == token_hash).one_or_none()
+    if initial_session is None:
+        raise ValueError("Authentication required.")
+    user = (
+        session.query(User)
+        .filter(User.id == initial_session.auth_user_id)
+        .with_for_update()
+        .populate_existing()
+        .one_or_none()
+    )
+    if user is None or not user.is_active or user.deleted_at is not None:
+        raise ValueError("Authentication required.")
+    session_row = (
+        session.query(UserSession)
+        .filter(UserSession.id == initial_session.id)
+        .with_for_update()
+        .populate_existing()
+        .one_or_none()
+    )
+    now = utc_now()
+    if (
+        session_row is None
+        or session_row.revoked_at is not None
+        or _as_aware_utc(session_row.expires_at) <= _as_aware_utc(now)
+    ):
+        raise ValueError("Authentication required.")
+    if session_row.purpose == "credential_change" and not user.must_change_pin:
+        raise ValueError("Authentication required.")
+    if session_row.purpose == "application" and user.must_change_pin:
+        raise ValueError("Authentication required.")
+    if not verify_pin(current_pin, user.pin_hash):
+        raise ValueError("Current PIN is incorrect.")
+    if verify_pin(new_pin, user.pin_hash):
+        raise ValueError("New PIN must be different from the current PIN.")
+    user.pin_hash = hash_pin(new_pin)
+    user.pin_set_at = now
+    user.must_change_pin = False
+    user.updated_at = now
+    revoke_outstanding_selection_challenges(session, user.id, now=now)
+    session.flush()
+    if session_row.purpose == "credential_change":
+        session_row.revoked_at = now
+        session.flush()
+        return user, None
+    return user, token
 
 
 def _as_aware_utc(value: datetime) -> datetime:
@@ -226,7 +317,13 @@ def _as_aware_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def current_user_from_token(session: Session, token: str, *, now: datetime | None = None) -> AuthenticatedUser | None:
+def current_user_from_token(
+    session: Session,
+    token: str,
+    *,
+    now: datetime | None = None,
+    before_maintenance: Callable[[bool, str], None] | None = None,
+) -> AuthenticatedUser | None:
     if not token:
         return None
     resolved_now = now or utc_now()
@@ -238,8 +335,17 @@ def current_user_from_token(session: Session, token: str, *, now: datetime | Non
     user = session.get(User, session_row.auth_user_id)
     if user is None or not user.is_active or user.deleted_at is not None:
         return None
+    if before_maintenance is not None:
+        before_maintenance(bool(user.must_change_pin), session_row.purpose)
     subscription = ensure_subscription(session, user, as_of=_as_aware_utc(resolved_now).date())
     session_row.last_seen_at = _as_aware_utc(resolved_now)
+    organization_context = None
+    if session_row.session_mode == "organization" and session_row.active_organization_id is not None:
+        from .organization_authorization import resolve_bound_organization_context
+
+        organization_context = resolve_bound_organization_context(session, user, session_row.active_organization_id)
+        if organization_context is None:
+            return None
     return AuthenticatedUser(
         id=str(user.id),
         email=user.email,
@@ -250,6 +356,91 @@ def current_user_from_token(session: Session, token: str, *, now: datetime | Non
         subscription_started_on=subscription.started_on,
         subscription_expires_on=subscription.expires_on,
         subscription_is_protected=bool(subscription.is_protected),
+        session_purpose=session_row.purpose,
+        session_mode=session_row.session_mode,
+        active_organization_id=str(session_row.active_organization_id) if session_row.active_organization_id else None,
+        organization_code=organization_context.code if organization_context else None,
+        organization_display_name=organization_context.display_name if organization_context else None,
+        organization_base_role=organization_context.base_role if organization_context else None,
+        organization_capabilities=organization_context.capabilities if organization_context else (),
+        is_platform_admin=organization_context.is_platform_admin if organization_context else False,
+    )
+
+
+def authoritative_user_from_token(
+    session: Session,
+    token: str,
+    *,
+    now: datetime | None = None,
+) -> AuthenticatedUser | None:
+    """Revalidate a session while retaining the user lock through caller side effects."""
+    if not token:
+        return None
+    token_hash = hash_session_token(token)
+    initial_session = (
+        session.query(UserSession)
+        .filter(UserSession.token_hash == token_hash)
+        .populate_existing()
+        .one_or_none()
+    )
+    if initial_session is None:
+        return None
+
+    user = (
+        session.query(User)
+        .filter(User.id == initial_session.auth_user_id)
+        .with_for_update()
+        .populate_existing()
+        .one_or_none()
+    )
+    session_row = (
+        session.query(UserSession)
+        .filter(UserSession.id == initial_session.id, UserSession.token_hash == token_hash)
+        .with_for_update()
+        .populate_existing()
+        .one_or_none()
+    )
+    resolved_now = now or utc_now()
+    if (
+        user is None
+        or not user.is_active
+        or user.deleted_at is not None
+        or session_row is None
+        or session_row.auth_user_id != user.id
+        or session_row.revoked_at is not None
+        or _as_aware_utc(session_row.expires_at) <= _as_aware_utc(resolved_now)
+    ):
+        return None
+
+    cached_subscription = session.get(UserSubscription, user.id)
+    if cached_subscription is not None:
+        session.refresh(cached_subscription)
+    subscription = ensure_subscription(session, user, as_of=_as_aware_utc(resolved_now).date())
+    organization_context = None
+    if session_row.session_mode == "organization" and session_row.active_organization_id is not None:
+        from .organization_authorization import resolve_bound_organization_context
+
+        organization_context = resolve_bound_organization_context(session, user, session_row.active_organization_id)
+        if organization_context is None:
+            return None
+    return AuthenticatedUser(
+        id=str(user.id),
+        email=user.email,
+        display_name=user.display_name,
+        roles=user_roles(session, user.id) if subscription.tier == "plus" else (),
+        must_change_pin=bool(user.must_change_pin),
+        subscription_tier=subscription.tier,
+        subscription_started_on=subscription.started_on,
+        subscription_expires_on=subscription.expires_on,
+        subscription_is_protected=bool(subscription.is_protected),
+        session_purpose=session_row.purpose,
+        session_mode=session_row.session_mode,
+        active_organization_id=str(session_row.active_organization_id) if session_row.active_organization_id else None,
+        organization_code=organization_context.code if organization_context else None,
+        organization_display_name=organization_context.display_name if organization_context else None,
+        organization_base_role=organization_context.base_role if organization_context else None,
+        organization_capabilities=organization_context.capabilities if organization_context else (),
+        is_platform_admin=organization_context.is_platform_admin if organization_context else False,
     )
 
 
@@ -259,6 +450,51 @@ def revoke_session(session: Session, token: str, *, now: datetime | None = None)
     session_row = session.query(UserSession).filter(UserSession.token_hash == hash_session_token(token)).one_or_none()
     if session_row is None or session_row.revoked_at is not None:
         return False
-    session_row.revoked_at = now or utc_now()
+    revoked_at = now or utc_now()
+    session_row.revoked_at = revoked_at
+    revoke_outstanding_selection_challenges(session, session_row.auth_user_id, now=revoked_at)
     session.flush()
     return True
+
+
+def revoke_all_user_sessions(session: Session, user_id: uuid.UUID, *, now: datetime | None = None) -> int:
+    revoked_at = now or utc_now()
+    revoked = session.query(UserSession).filter(
+        UserSession.auth_user_id == user_id,
+        UserSession.revoked_at.is_(None),
+    ).update({UserSession.revoked_at: revoked_at}, synchronize_session=False)
+    revoke_outstanding_selection_challenges(session, user_id, now=revoked_at)
+    return revoked
+
+
+def revoke_outstanding_selection_challenges(
+    session: Session,
+    user_id: uuid.UUID,
+    *,
+    now: datetime | None = None,
+) -> int:
+    bind = session.get_bind()
+    if bind is None:
+        return 0
+    table_name = AuthOrganizationSelectionChallenge.__tablename__
+    if bind.dialect.name == "sqlite":
+        exists = session.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type='table' AND name=:name"),
+            {"name": table_name},
+        ).first() is not None
+        if not exists:
+            return 0
+    elif not inspect(bind).has_table(table_name):
+        return 0
+    revoked_at = now or utc_now()
+    return session.query(AuthOrganizationSelectionChallenge).filter(
+        AuthOrganizationSelectionChallenge.user_id == user_id,
+        AuthOrganizationSelectionChallenge.consumed_at.is_(None),
+        AuthOrganizationSelectionChallenge.revoked_at.is_(None),
+    ).update(
+        {
+            AuthOrganizationSelectionChallenge.revoked_at: revoked_at,
+            AuthOrganizationSelectionChallenge.updated_at: revoked_at,
+        },
+        synchronize_session=False,
+    )
