@@ -841,6 +841,76 @@ These targets are initial engineering goals rather than contractual SLAs and sho
 | O5     | Which logical LLM model alias should each agent use after per-agent model configuration is available?             | Configure by environment and task; do not hard-code a provider or model in this specification.             |
 | O6     | Should immutable Symbol Set releases be introduced for regulated customers, and at what stage?                   | Keep the data model future-capable and add release UI only when a concrete customer need is confirmed.     |
 
+## 17.3 Additional decision support (accepted post v0.3)
+
+The following sections record decisions and semantic clarifications accepted after the v0.3 draft was published. They form part of the implementation contract for the Symbol Set Management capability.
+
+### Project semantics
+
+A **Project** represents a real piece of work, contract, programme, asset-development activity, or comparable customer undertaking.
+
+Examples include an airport extension, nuclear power station construction programme, rail upgrade contract, or other defined piece of work undertaken by the organization.
+
+Projects are not intended merely as generic discipline groupings or arbitrary user workspaces.
+
+An Organization Admin creates, updates and closes Projects. Organization Users may select from the Projects to which their organization's Symbol Sets have been made available, but do not administer Project definitions.
+
+### Public-to-private symbol eligibility
+
+An organization-owned private symbol may be promoted to the Public Catalog through the defined public governance and review process while retaining its stable governed-symbol identity.
+
+After publication, the originating organization may request that the symbol be returned to organization-private visibility **only while the symbol remains exclusively used by that originating organization**.
+
+A public symbol is eligible to become private only when all of the following are true:
+
+* the requesting organization is the organization that originally created and owns the symbol;
+* no other organization has used the symbol;
+* the symbol is not referenced by a Symbol Set belonging to another organization; and
+* there is no other persistent cross-organization dependency that requires continued public availability.
+
+Once a public symbol has been used or adopted by another organization, it **cannot subsequently be made private**.
+
+This restriction is permanent for that governed-symbol identity. Removal of the external Symbol Set reference or other later cessation of use does not restore eligibility for private visibility.
+
+The public-to-private workflow must therefore perform a deterministic eligibility check before allowing the governance action. Where external adoption has occurred, the action is unavailable and the UI must explain why, for example:
+
+> **This symbol cannot be made private.** It has been used by another organization and must therefore remain available in the Public Catalog.
+
+The system must not resolve this situation by removing another organization's Symbol Set membership, breaking an existing reference, cloning the symbol, or creating a new private identity.
+
+### Governance principle
+
+**Private → Public:** permitted subject to the defined public review and governance process.
+
+**Public → Private:** permitted only for an organization-owned symbol that remains exclusively used by its originating organization.
+
+**External adoption makes public availability irreversible for that symbol identity.**
+
+### Implementation impact
+
+**Stage 4 — Projects and Symbol Sets**
+
+Treat Projects as real customer work/contract/programme contexts. Retain the existing many-to-many relationship whereby a Symbol Set can be made available to multiple Projects.
+
+**Stage 7 — Publication/demotion**
+
+Replace generic "demotion blast-radius handling" with an explicit public-to-private eligibility service/check.
+
+Before offering or executing public-to-private transition, determine whether the symbol has ever been used by another organization or referenced from another organization's Symbol Set or other persistent organization-specific configuration.
+
+If external adoption exists, reject the transition.
+
+The check must be server-authoritative, auditable and race-safe so that another organization's adoption cannot occur concurrently with a public-to-private transition.
+
+Tests must include:
+
+* originating organization publishes and subsequently makes an unused symbol private — allowed;
+* another organization adds the public symbol to a Symbol Set — private transition rejected;
+* another organization uses the symbol through another tracked persistent mechanism — private transition rejected;
+* external Symbol Set membership is subsequently removed — private transition remains rejected because external adoption has already occurred;
+* organization other than the originating owner requests private transition — rejected;
+* concurrent external adoption and private-transition request — cannot result in a private symbol referenced by another organization.
+
 # Appendix A. Draft API surface
 
 | **Method**       | **Route**                                                        | **Purpose**                                                                                         |
