@@ -2,21 +2,21 @@
 
 > For Hermes/Luna: execute one stage per fresh context. Read the controlling specification, accepted decision addendum, this plan's current execution update, and the applicable stage section before acting. Do not begin a later stage until the current stage's completion gate is recorded. Substantial implementation must use the durable, serialized Symgov Kanban/Cody lane unless Chris explicitly authorizes another lane.
 
-**Status:** ACTIVE LOCAL IMPLEMENTATION PLAN — the bounded Stage 1 correction is GREEN, but Stage 1 is not accepted until fresh immutable Contract and Security Reviews approve identical corrected bytes
+**Status:** ACTIVE LOCAL IMPLEMENTATION PLAN — Stages 2A and 2B are complete; Stage 2C remains gated on fresh acceptance and exact-hash review of the post-v0.3 contract correction
 
 **Plan path date:** 2026-08-10
 
-**Latest execution update:** 2026-08-13
+**Latest execution update:** 2026-08-15
 
 **Controlling product source:** `docs/Symbol Set Management Spec v0.3.md`
 
-**Current source SHA-256:** `b2d6cb681a7bb3e6c9495d39963f9114aadec13b936409573305489784db570a`
+**Current proposed source SHA-256:** `f9e7a8979f08308763d4047aae17608c05e449df8725c49a8c451eccbd6de656` (requires fresh Chris acceptance and exact-hash Contract and Security Reviews before implementation resumes)
 
 **Accepted decision addendum:** `docs/plans/2026-08-08-symbol-set-management-decision-addendum.md` (`fa56ee7685e14103423baf1ed347e2277a0b9e50e9efe89fa892f058cb0af071`)
 
 **Historical predecessor plan:** `docs/plans/2026-08-08-symbol-set-management-implementation-plan.md` (`e69682310400c56af8b0633d01e57cbc3fa913b08a37485665ea0d5448dba283`)
 
-**Current local repository checkpoint:** branch `main`; HEAD `274559667e57b01814afb0de12d4d90f9275869c`; intentionally dirty implementation snapshot
+**Current local repository checkpoint:** branch `main`; HEAD and `origin/main` `a8449013cb056e13184acb5b7fe228c0837f242a`; intentionally dirty proposed contract correction
 
 **Restart handoff:** external checksum-verified clean-context prompt created at the next writer-quiescent checkpoint; it is deliberately outside the repository so it cannot alter the reviewed snapshot
 
@@ -35,11 +35,12 @@ The programme is strictly about Symbol Set governance and reference expertise. O
 | F0.5 account-security prerequisite | Completed historical prerequisite | Accepted earlier immutable evidence; adjacent migration/security suite remains part of Stage 1 regression. |
 | F0.6 Hermes runtime prerequisite | Completed historical prerequisite | Hermes is the active runtime; OpenClaw files are legacy compatibility/forensic artifacts, not live authority. |
 | CP0 foundation checkpoint | Historical checkpoint recorded | `docs/plans/2026-08-10-symbol-set-management-cp0-checkpoint.md` is immutable evidence from its creation time. Its statement that Stage 1 had not started is historical and has been superseded by the execution below. |
-| Stage 1 source implementation | Corrected locally; not accepted | Correction `t_c5fe16e0` limits the users statement trigger to eligibility columns and closes the four-store history/runtime-role boundary. Exact correction-focused gate: `9 passed in 6.54s` (`7.723 seconds` wall time). |
-| Stage 1 immutable review history | Latest verdict is literal FAIL; correction is unreviewed | Security Review `t_b7d28fa1` run 368 returned literal `FAIL`: Important advisory-lock amplification on unrelated users updates, and Important missing TRUNCATE/least-privilege protection across four history stores. Earlier review verdicts approve older bytes only. |
-| Contract and Security Reviews of corrected Stage 1 | Fresh reviews required | Freeze corrected bytes, obtain a fresh immutable Contract Review, then a fresh immutable Security Review on identical bytes. Do not reuse prior approvals or claim acceptance from the focused gate. |
-| Final Stage 1 completion gate | Pending | Independent final verification after matching Stage 1 and Stage 2 approvals. No commit, push, deployment, real migration, or service restart is authorized. |
-| Product implementation Stages 2–11 | Not started | Do not begin until Stage 1 has matching immutable approvals and final verification. |
+| Stage 1 foundation | Complete | Organization schema, invariants, bootstrap, settings and reviewed PostgreSQL evidence are committed in the current history. |
+| Product Stage 2A | Complete | Organization-context principal and login issuance are implemented and accepted. |
+| Product Stage 2B | Complete | Organization-selection challenge consumption and lifecycle are implemented, accepted and committed at `55c8bd7`. |
+| Post-v0.3 contract clarification | Correction proposed; fresh acceptance and reviews required | Exact-hash Contract and Security Reviews of commit `a844901` both returned `REQUEST_CHANGES`. The proposed correction reconciles Project selection and current cross-organization Symbol Set reference handling. Do not attach the earlier acceptance or reviews to the changed bytes. |
+| Product Stage 2C | Not started | After the corrected contract is freshly accepted and both exact-hash reviews pass, implement reauthentication, recent session-bound step-up and live organization authorization. |
+| Product Stages 2D–11 | Not started | Continue only after the preceding stage reaches its specified completion gate. No deployment, real migration, service restart, publication or withdrawal is authorized by this plan update. |
 
 ### 0.3 Stage 1 amendments learned through review
 
@@ -53,6 +54,16 @@ The programme is strictly about Symbol Set governance and reference expertise. O
 8. **All four history stores have a symmetric runtime boundary.** Membership, organization-role, capability, and platform-role stores have owner-level `BEFORE TRUNCATE FOR EACH STATEMENT` guards plus least-privilege `symgov_app` grants. Focused evidence proves runtime SELECT/INSERT and role-grant denial of UPDATE/DELETE/TRUNCATE for every store, separately from owner-level trigger defence in depth.
 
 Correction execution reused the preserved run-368/current failures as opening RED. The first combined correction gate exposed two test-fixture defects (an invalid generated organization identity, then missing supporting read/row-lock privilege); after correcting those production-shaped fixture/grant seams, the exact five-node gate passed all 9 collected cases. The broad six-file suite, adjacent three-file suite, final Alembic/whitespace freeze, and immutable reviews remain controller-owned late gates.
+
+### 0.3A Post-v0.3 product clarification controlling later stages
+
+The proposed specification correction at source SHA-256 `f9e7a8979f08308763d4047aae17608c05e449df8725c49a8c451eccbd6de656` resolves two contradictions found by the 2026-08-15 exact-hash reviews. It is not implementation authority until Chris freshly accepts that exact hash and fresh Contract and Security Reviews approve identical bytes.
+
+1. Every active organization user may select every active Project in the bound organization, including a Project with zero available Symbol Sets. Project selection filters the subsequently offered active sets; set availability never filters Project eligibility.
+2. Demotion is blocked only by current Symbol Set membership owned by another organization. Favorites, project selection or use, previews, searches, views, downloads and API reads do not count.
+3. Removing the symbol from every Symbol Set owned by other organizations restores demotion eligibility, subject to all other governance checks.
+4. Set-item creation/removal and public-to-private transitions lock the same governed-symbol serialization boundary and re-check current membership under that lock.
+5. These rules supersede carried-forward Stage 7 text that allowed privatization while leaving a current cross-organization set row hidden or unavailable.
 
 ### 0.4 Latest verified implementation evidence before this plan write
 
@@ -70,11 +81,11 @@ These are pre-plan-write values. They must not be reused as the post-plan frozen
 
 ### 0.5 Next serialized gate
 
-1. Validate this complete file, record its SHA-256, run repository and explicit untracked whitespace checks, and freeze a new ordered manifest that includes it.
-2. Stop at a writer-quiescent clean-context handoff.
-3. In a fresh context, create exactly one immutable read-only Stage 1 review of the corrected implementation plus this successor plan.
-4. If and only if that review returns literal APPROVE with exact closing hashes, create exactly one immutable read-only Stage 2 security/code-quality review of the identical snapshot.
-5. Run independent final verification. Stop before Stage 2 product implementation and before every production side effect.
+1. Validate the proposed specification and this active plan together, record both SHA-256 values, run whitespace checks, and confirm the worktree differs from `a844901` only in those two files.
+2. Obtain Chris's fresh acceptance of the exact proposed specification and plan hashes. Acceptance of earlier bytes does not transfer.
+3. Commission one fresh immutable Contract Review and, only after literal approval on identical bytes, one fresh immutable Security/Code-Quality Review.
+4. If both reviews approve identical closing hashes, freeze a Stage 2C handoff and create one serialized Stage 2C implementation card.
+5. Stop before Stage 2D and before every production migration, deployment, restart, publication, withdrawal or other separately authorized side effect.
 
 ### 0.6 Authority boundary
 
@@ -664,7 +675,7 @@ Do not make `symbol_sets` a child of exactly one project: the specification requ
 ### Services and APIs
 
 - Organization Admin creates/updates/closes projects, creates/copies/activates/supersedes/archives sets, makes sets available to one or more same-organization projects, and nominates project/organization defaults.
-- Organization User lists eligible projects/sets and changes their active set.
+- Organization User lists and selects every active Project in the bound organization, including Projects with no available Symbol Sets; after selection, only active sets made available to that Project are offered, and no active set is a valid resolved context.
 - Enforce project and set belong to the session organization, project-set availability exists, active status, immutable codes, the 50-character project description at all three layers, unique external reference, idempotent/batch item add/remove, and last-selection/default cleanup on close/archive/supersede.
 - Set removal deletes only the membership row; it never deletes a governed symbol.
 - Copying a set creates a new stable set ID and records source lineage while retaining symbol references and item metadata; it does not copy symbol rows.
@@ -686,7 +697,7 @@ Do not make `symbol_sets` a child of exactly one project: the specification requ
 - `frontend/src/projectContext.test.js`
 - `frontend/src/symbolSetAdmin.test.js`
 
-Matrix: cross-org IDs, unavailable project/set pairs, one set shared by several projects, duplicate organization-scoped codes, duplicate/non-null external references, 0/50/51-character descriptions, one project default under races, organization-default fallback, inactive parents, concurrent selection updates, archive/supersede cleanup, set-copy lineage, rolling item current-approved-revision resolution and historical used-revision evidence, item metadata/order, item removal non-deletion, pagination, Organization User/Admin differences, and personal-session rejection.
+Matrix: cross-org IDs, every active Project selectable with zero/one/many available sets, unavailable project/set pairs, one set shared by several projects, duplicate organization-scoped codes, duplicate/non-null external references, 0/50/51-character descriptions, one project default under races, organization-default fallback, inactive parents, concurrent selection updates, archive/supersede cleanup, set-copy lineage, rolling item current-approved-revision resolution and historical used-revision evidence, item metadata/order, item removal non-deletion, pagination, Organization User/Admin differences, and personal-session rejection.
 
 ### Acceptance
 
@@ -794,7 +805,7 @@ Use a fixture matrix with two organizations, one set available to multiple proje
 
 ## 13. Stage 7 — public contribution, promotion, withdrawal, and demotion
 
-**Outcome:** reversible, auditable transitions between organization-private and public governance without bypassing human authority.
+**Outcome:** auditable promotion and eligibility-gated public-to-private transitions without bypassing human authority or breaking another organization's adopted Symbol Set reference.
 
 ### Public-projection migration
 
@@ -811,10 +822,10 @@ Use a fixture matrix with two organizations, one set available to multiple proje
 4. Refactor the current publication handoff for organization contributions to require the exact existing governed-symbol UUID and organization-approved revision UUID. Reject organization/approval/revision mismatches and never resolve or create an organization contribution by mutable/global slug or service-user ownership.
 5. Set `visibility=public` only in the final successful public publication transaction/handoff contract; publication must not create a second governed symbol.
 6. Organization Admin may withdraw a still-pending request without changing current visibility.
-7. Demotion begins as a request and impact preview. Enumerate every revision of the governed-symbol UUID, external-org set references, favourites, packages/pages/entries across all revisions and packs, API identifiers, links, object-delivery exposure, and caches. Fail closed if the Stage 5 visibility floor, complete reader deployment, or private object delivery cannot be proven for the target.
-8. Human Platform Admin in active Symgov context, with recent step-up and reason, executes approved demotion/withdrawal. Ownerless legacy public symbols cannot become private.
-9. Execute demotion in fail-closed order: verify the private delivery/read policy and visibility-floor deployment; lock the symbol, every `published` revision for its governed-symbol UUID, every matching active page/entry projection across all revisions/packs, and each affected package row; transactionally set symbol visibility to `organization_private`, every such published revision to `withdrawn`, and every active target-symbol page/entry projection to `retired`; retire each package only if no active projections remain; then purge/invalidate application/CDN caches and short-link projections. A pre-commit failure leaves every state unchanged. A post-commit purge failure leaves the symbol private, blocks reads through `active_public_symbol_projections`, raises an operational alert, and is retried—it must never roll visibility back to public automatically.
-10. Cross-org set/favourite rows remain historical but become unavailable/hidden according to privacy rules; do not leak the new private owner through public error details. Previously downloaded files are not recalled or rewritten; future direct or signed URLs must expire or be denied under current visibility.
+7. Make every Symbol Set item writer that adds or removes a public symbol lock the governed-symbol row first, then transactionally change the item and write actor/reason audit evidence.
+8. Demotion begins as a request and impact preview. Lock the same governed-symbol row used by set-item writers, then re-query current set items and fail closed if any set owned by another organization still references the symbol, or if the Stage 5 visibility floor, complete reader deployment or private object delivery cannot be proven. Favorites, project use, previews, searches, views, downloads and API reads are reported for impact only and do not affect eligibility.
+9. Human Platform Admin in active Symgov context, with recent step-up and reason, executes an approved eligible demotion/withdrawal. Ownerless legacy public symbols cannot become private.
+10. After eligibility passes under the shared lock, lock every `published` revision for the governed-symbol UUID, every matching active page/entry projection across all revisions/packs, and each affected package row; transactionally set symbol visibility to `organization_private`, every such published revision to `withdrawn`, and every active target-symbol page/entry projection to `retired`; retire each package only if no active projections remain; then purge/invalidate application/CDN caches and short-link projections. A pre-commit failure leaves every state unchanged. A post-commit purge failure leaves the symbol private, blocks reads through `active_public_symbol_projections`, raises an operational alert, and is retried—it must never roll visibility back to public automatically.
 11. Public Catalog attribution displays the contributing organization/company only, never the individual employee.
 
 ### Likely modules/tests
@@ -830,12 +841,14 @@ Use a fixture matrix with two organizations, one set available to multiple proje
 - `tests/test_background_readers_after_demotion.py`
 - existing publication, feedback-without-unpublication, attribution, Catalog identity, search/detail/download regressions
 
-Migration/integration fixtures must prove the current pre-stage (and therefore at/above-floor) publication writer can still insert active pages/entries after upgrade, new writers set explicit state, and flags-off rollback to the exact visibility-floor release works against the additive schema. Add one exact transition fixture in which a governed symbol has two published revisions in different multi-symbol packs: demotion must withdraw both revisions and retire every page/entry for both revisions while unrelated symbols in both packs remain queryable and pack counts remain correct; list/detail/search/facet/count/page/package/download routes, aliases, assets, Favorites, Hannah, and Whitney must all exclude the demoted UUID. Repeat that complete exclusion/count/alias/asset/Hannah/Whitney matrix after switching web/API/background code to the exact visibility-floor rollback release. Re-promotion through a fresh public workflow must publish/activate only a newly approved target revision/projections, with both older revisions still withdrawn and all older projections still retired. A fully retired pack must disappear. Do not run or claim a pre-floor reader rollback after private or demoted data exists.
+Migration/integration fixtures must prove the current pre-stage (and therefore at/above-floor) publication writer can still insert active pages/entries after upgrade, new writers set explicit state, and flags-off rollback to the exact visibility-floor release works against the additive schema. Prove set-item add/remove versus demotion in both transaction orders under the shared governed-symbol lock; a current external set item rejects demotion; removing every external set item restores eligibility; duplicate/replayed item writes are idempotent; and Favorites, project use, previews, searches, views, downloads and API reads do not affect eligibility. Add one exact allowed transition fixture in which an eligible governed symbol has two published revisions in different multi-symbol packs: demotion must withdraw both revisions and retire every page/entry for both revisions while unrelated symbols in both packs remain queryable and pack counts remain correct; list/detail/search/facet/count/page/package/download routes, aliases, assets, Favorites, Hannah, and Whitney must all exclude the demoted UUID. Repeat that complete exclusion/count/alias/asset/Hannah/Whitney matrix after switching web/API/background code to the exact visibility-floor rollback release. Re-promotion through a fresh public workflow must publish/activate only a newly approved target revision/projections, with both older revisions still withdrawn and all older projections still retired. A fully retired pack must disappear. Do not run or claim a pre-floor reader rollback after private or demoted data exists.
 
 ### Acceptance
 
 - No agent or Organization Admin can self-publish.
-- Promotion/demotion is idempotent, actor-attributed, auditable, and reversible where policy permits; multi-symbol packs retain every unrelated active page/entry.
+- Promotion/demotion is idempotent, actor-attributed and auditable; demotion is unavailable while another organization's Symbol Set references the symbol and becomes eligible again after all such references are removed. Multi-symbol packs retain every unrelated active page/entry.
+- Concurrent set-item add/remove and demotion cannot produce a private symbol referenced by another organization's set.
+- Favorites, project use, previews, searches, views, downloads and API reads never affect demotion eligibility.
 - Review requests never unpublish an existing public symbol.
 - Demotion never exposes private metadata to former consumers, including through pages, packages, Hannah/Whitney readers, assets, aliases, Favorites, direct delivery URLs, or stale caches; history remains retained but outside the active public projection.
 

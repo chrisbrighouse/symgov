@@ -359,8 +359,8 @@ The active Symbol Context is calculated at runtime. In personal mode it contains
 | FR-PUB-005 | Acceptance shall change visibility on the same stable symbol record; it shall not create a second public copy.                                           |
 | FR-PUB-006 | Existing Symbol Set references shall continue to point to the same symbol after publication.                                                              |
 | FR-PUB-007 | Public attribution shall display the contributing company/organization only, not an individual user.                                                  |
-| FR-PUB-008 | A Platform Administrator may demote a public contribution to organization-private with an explicit reason and audit trail.                           |
-| FR-PUB-009 | Demotion shall prevent new access by other organizations while preserving owner-organization references and historical audit data.                    |
+| FR-PUB-008 | A Platform Administrator may demote an eligible public contribution to organization-private with an explicit reason and audit trail. A symbol is ineligible while another organization references it from a Symbol Set. |
+| FR-PUB-009 | Demotion shall be rejected while any Symbol Set owned by another organization references the public symbol. Removing all such external set items shall restore eligibility, subject to every other governance check. |
 
 ## 7.7 Runtime access, project selection and switching
 
@@ -519,7 +519,7 @@ Personal users can use the Public Catalog and personal capabilities according to
 
 Any one appointed Organization Reviewer can explicitly approve or reject the organization submission. Approval means “safe and suitable for this organization to use”; it does not automatically make the symbol public.
 
-Public review operates on the same symbol and revision. Acceptance changes the symbol's visibility to public while retaining the same governed symbol ID, revisions and Symbol Set references. A Platform Administrator may demote it back to organization-private status, recording the reason.
+Public review operates on the same symbol and revision. Acceptance changes the symbol's visibility to public while retaining the same governed symbol ID, revisions and Symbol Set references. A Platform Administrator may demote it back to organization-private status, recording the reason, only when no Symbol Set owned by another organization currently references it and the remaining eligibility rules pass.
 
 ## 10.2 Symbol Set lifecycle
 
@@ -532,8 +532,10 @@ The first implementation uses active rolling sets. Administrators control set me
 
 - Publication and demotion change visibility on the same GovernedSymbol record.
 - Existing sets in the owning organization continue to reference the symbol without migration or replacement.
-- When a public symbol is demoted, new access is blocked for organizations other than the owner.
-- Sets owned by other organizations that reference a demoted symbol display an unavailable-item warning and omit it from available symbol lists until resolved.
+- A current reference from a Symbol Set owned by another organization prevents demotion of that governed-symbol identity to organization-private visibility.
+- Favorites, project selection or use, previews, searches, views, downloads and API reads do not affect demotion eligibility.
+- Removing every cross-organization Symbol Set item restores demotion eligibility, subject to all other governance checks.
+- Symbol Set item creation/removal and demotion use the same database serialization boundary for the governed-symbol identity, so no concurrent change can produce a private symbol referenced by another organization's set.
 - Previously downloaded/exported files are not retroactively modified, but future downloads must respect current visibility.
 - Publication and demotion preserve an audit trail including contributing organization and platform decision reason.
 - Public Catalog attribution displays the company name only.
@@ -796,7 +798,7 @@ These targets are initial engineering goals rather than contractual SLAs and sho
 | AC-15  | Any one appointed Organization Reviewer can explicitly approve a submitted symbol; no elapsed time or missing response becomes approval.                                                    |
 | AC-16  | Publishing an organization-private symbol changes visibility on the same governed symbol ID and existing owner-organization sets continue to reference it.                                  |
 | AC-17  | The Public Catalog attributes a published contribution to the organization only.                                                                                                            |
-| AC-18  | A Platform Administrator can demote a public contribution to organization-private with reason and audit history.                                                                             |
+| AC-18  | A Platform Administrator can demote an otherwise eligible public contribution with reason and audit history only when no Symbol Set owned by another organization currently references it; removing all such references restores eligibility. |
 | AC-19  | Supplying a project or Set Code from another organization returns no private data and a safe authorization error.                                                                            |
 | AC-20  | Organization and platform agents can create scoped findings and summaries but cannot directly change roles, approve symbols, publish or demote content.                                    |
 | AC-21  | An agent prompt attempting to override tenant scope or role rules does not change resolved permissions.                                                                                      |
@@ -820,7 +822,7 @@ These targets are initial engineering goals rather than contractual SLAs and sho
 | D8     | Organization admins appoint Organization Reviewers; any one reviewer may explicitly approve a submitted organization symbol.                                                   |
 | D9     | Private and public use the same symbol record; publication changes visibility rather than creating a copy.                                                                       |
 | D10    | Public contributions are shared freely with the Symgov community and attributed publicly to the company only.                                                                   |
-| D11    | A Platform Administrator may demote a public contribution back to organization-private.                                                                                          |
+| D11    | A Platform Administrator may demote a public contribution back to organization-private only while no Symbol Set owned by another organization references it and every other eligibility rule passes. |
 | D12    | A reserved Symgov organization establishes eligibility for Platform Administrator assignment, and at least one Platform Administrator must always exist.                       |
 | D13    | A new organization receives a unique generated temporary icon when no custom icon is supplied.                                                                                  |
 | D14    | Product-specific integration content is removed from this generic product specification.                                                                  |
@@ -853,28 +855,27 @@ Examples include an airport extension, nuclear power station construction progra
 
 Projects are not intended merely as generic discipline groupings or arbitrary user workspaces.
 
-An Organization Admin creates, updates and closes Projects. Organization Users may select from the Projects to which their organization's Symbol Sets have been made available, but do not administer Project definitions.
+An Organization Admin creates, updates and closes Projects. Organization Users may select every active Project in their organization, including a Project with no available Symbol Sets, but do not administer Project definitions. After Project selection, only the active Symbol Sets made available to that Project are offered; having no available set is a valid context.
 
 ### Public-to-private symbol eligibility
 
 An organization-owned private symbol may be promoted to the Public Catalog through the defined public governance and review process while retaining its stable governed-symbol identity.
 
-After publication, the originating organization may request that the symbol be returned to organization-private visibility **only while the symbol remains exclusively used by that originating organization**.
+After publication, the originating organization may request that the symbol be returned to organization-private visibility **only while no Symbol Set owned by another organization references it**.
 
 A public symbol is eligible to become private only when all of the following are true:
 
 * the requesting organization is the organization that originally created and owns the symbol;
-* no other organization has used the symbol;
-* the symbol is not referenced by a Symbol Set belonging to another organization; and
-* there is no other persistent cross-organization dependency that requires continued public availability.
+* no Symbol Set owned by another organization currently references the symbol; and
+* the check is performed under the shared race-safe serialization boundary immediately before the transition.
 
-Once a public symbol has been used or adopted by another organization, it **cannot subsequently be made private**.
+While another organization includes a public symbol in one or more of its Symbol Sets, the symbol **cannot be made private**.
 
-This restriction is permanent for that governed-symbol identity. Removal of the external Symbol Set reference or other later cessation of use does not restore eligibility for private visibility.
+This restriction reflects current governed set membership rather than historical use. Removing the symbol from every Symbol Set owned by other organizations restores eligibility for private visibility, subject to the remaining governance checks. Favorites, project selection or use, previews, searches, views, downloads and API reads do not create this restriction.
 
-The public-to-private workflow must therefore perform a deterministic eligibility check before allowing the governance action. Where external adoption has occurred, the action is unavailable and the UI must explain why, for example:
+The public-to-private workflow must therefore perform a deterministic eligibility check before allowing the governance action. While a current cross-organization Symbol Set reference exists, the action is unavailable and the UI must explain why, for example:
 
-> **This symbol cannot be made private.** It has been used by another organization and must therefore remain available in the Public Catalog.
+> **This symbol cannot be made private.** Another organization has added it to a Symbol Set, so it must remain available in the Public Catalog.
 
 The system must not resolve this situation by removing another organization's Symbol Set membership, breaking an existing reference, cloning the symbol, or creating a new private identity.
 
@@ -882,9 +883,9 @@ The system must not resolve this situation by removing another organization's Sy
 
 **Private → Public:** permitted subject to the defined public review and governance process.
 
-**Public → Private:** permitted only for an organization-owned symbol that remains exclusively used by its originating organization.
+**Public → Private:** permitted only for an organization-owned symbol that is not currently referenced by any Symbol Set owned by another organization.
 
-**External adoption makes public availability irreversible for that symbol identity.**
+**Current membership in another organization's Symbol Set requires continued public availability; removing all such memberships restores demotion eligibility.**
 
 ### Implementation impact
 
@@ -896,20 +897,20 @@ Treat Projects as real customer work/contract/programme contexts. Retain the exi
 
 Replace generic "demotion blast-radius handling" with an explicit public-to-private eligibility service/check.
 
-Before offering or executing public-to-private transition, determine whether the symbol has ever been used by another organization or referenced from another organization's Symbol Set or other persistent organization-specific configuration.
+Before offering or executing public-to-private transition, determine whether any current Symbol Set item owned by another organization references the stable governed-symbol identity.
 
-If external adoption exists, reject the transition.
+If any current cross-organization Symbol Set reference exists, reject the transition.
 
-The check must be server-authoritative, auditable and race-safe so that another organization's adoption cannot occur concurrently with a public-to-private transition.
+Symbol Set item creation/removal and public-to-private transitions must lock the same governed-symbol serialization boundary before checking or changing state. The demotion transaction must re-check current cross-organization set membership under that lock. Add/remove and demotion actions remain actor-attributed and audited, but historical membership does not itself block a later transition after every external set item has been removed.
 
 Tests must include:
 
 * originating organization publishes and subsequently makes an unused symbol private — allowed;
 * another organization adds the public symbol to a Symbol Set — private transition rejected;
-* another organization uses the symbol through another tracked persistent mechanism — private transition rejected;
-* external Symbol Set membership is subsequently removed — private transition remains rejected because external adoption has already occurred;
+* another organization adds the public symbol to Favorites, selects or uses it in a Project, previews, searches, views, downloads or reads it through an API without adding it to a Symbol Set — this alone does not affect private-transition eligibility;
+* the symbol is removed from every Symbol Set owned by other organizations — private transition becomes eligible again, subject to the other checks;
 * organization other than the originating owner requests private transition — rejected;
-* concurrent external adoption and private-transition request — cannot result in a private symbol referenced by another organization.
+* concurrent cross-organization Symbol Set addition and private-transition request — cannot result in a private symbol referenced by another organization.
 
 # Appendix A. Draft API surface
 
