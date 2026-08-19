@@ -40,6 +40,17 @@ async function apiDelete(path) {
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
 }
 
+async function apiDeleteJson(path) {
+  const r = await fetch(`${API_BASE}${path}`, {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  return r.json();
+}
+
 function StatusBadge({ status }) {
   const styles = {
     active: { background: '#d1fae5', color: '#065f46' },
@@ -201,6 +212,161 @@ function OrgDetailSection({ org, isAdmin, onUpdate }) {
               )
             : null
         )
+  );
+}
+
+const ALLOWED_ICON_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
+const MAX_ICON_BYTES = 512 * 1024;
+
+function OrgIconSection({ org, isAdmin, onUpdate }) {
+  const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState('');
+
+  function handleFileChange(e) {
+    const f = e.target.files[0];
+    setError('');
+    setFile(null);
+    setPreviewUrl(null);
+    if (!f) return;
+    if (!ALLOWED_ICON_TYPES.has(f.type)) {
+      setError('Only PNG, JPEG, and WEBP images are supported.');
+      return;
+    }
+    if (f.size > MAX_ICON_BYTES) {
+      setError(`Icon must be under ${MAX_ICON_BYTES / 1024} KB.`);
+      return;
+    }
+    setFile(f);
+    setPreviewUrl(URL.createObjectURL(f));
+  }
+
+  async function handleUpload(e) {
+    e.preventDefault();
+    if (!file) return;
+    setUploading(true);
+    setError('');
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          // readAsDataURL yields "data:<type>;base64,<data>" — take only the data part
+          const comma = reader.result.indexOf(',');
+          resolve(comma >= 0 ? reader.result.slice(comma + 1) : reader.result);
+        };
+        reader.onerror = () => reject(new Error('Could not read the selected file.'));
+        reader.readAsDataURL(file);
+      });
+      const updated = await apiPost('/org/me/icon', { contentType: file.type, contentBase64: base64 });
+      onUpdate(updated);
+      setFile(null);
+      setPreviewUrl(null);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleRemove() {
+    if (!window.confirm('Remove the custom icon and revert to the generated fallback?')) return;
+    setRemoving(true);
+    setError('');
+    try {
+      const updated = await apiDeleteJson('/org/me/icon');
+      onUpdate(updated);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRemoving(false);
+    }
+  }
+
+  const canManage = isAdmin && !org.isProtected;
+
+  return createElement(
+    'section',
+    { 'aria-labelledby': 'org-icon-heading', style: { marginBottom: '32px' } },
+    createElement('h2', { id: 'org-icon-heading', style: { marginBottom: '16px' } }, 'Organization icon'),
+    ErrorMessage({ message: error }),
+    createElement(
+      'div',
+      { style: { display: 'flex', alignItems: 'flex-start', gap: '24px', flexWrap: 'wrap' } },
+      createElement(
+        'div',
+        null,
+        createElement('p', { style: { margin: '0 0 8px', fontSize: '0.875rem', color: '#6b7280' } },
+          org.hasCustomIcon ? 'Custom icon' : 'Generated fallback icon'
+        ),
+        org.hasCustomIcon
+          ? createElement('img', {
+              src: org.iconUrl,
+              alt: `${org.displayName} icon`,
+              width: 64,
+              height: 64,
+              style: { borderRadius: '8px', border: '1px solid #e5e7eb', display: 'block' },
+            })
+          : createElement('div', {
+              style: {
+                width: '64px', height: '64px', borderRadius: '8px',
+                background: '#f3f4f6', border: '1px solid #e5e7eb',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: '0.7rem', color: '#9ca3af', textAlign: 'center',
+              },
+            }, 'Generated'),
+        canManage && org.hasCustomIcon
+          ? createElement(
+              'button',
+              {
+                onClick: handleRemove,
+                disabled: removing,
+                style: { marginTop: '8px', fontSize: '0.8rem', color: '#dc2626', display: 'block' },
+                'aria-label': 'Remove custom icon',
+              },
+              removing ? 'Removing…' : 'Remove icon'
+            )
+          : null
+      ),
+      canManage
+        ? createElement(
+            'form',
+            { onSubmit: handleUpload, style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+            createElement(
+              'label',
+              { htmlFor: 'org-icon-file', style: { fontSize: '0.875rem' } },
+              'Upload new icon',
+              createElement('input', {
+                id: 'org-icon-file',
+                type: 'file',
+                accept: 'image/png,image/jpeg,image/webp',
+                onChange: handleFileChange,
+                style: { display: 'block', marginTop: '4px' },
+              })
+            ),
+            previewUrl
+              ? createElement('img', {
+                  src: previewUrl,
+                  alt: 'Icon preview',
+                  width: 64,
+                  height: 64,
+                  style: { borderRadius: '8px', border: '1px solid #e5e7eb' },
+                })
+              : null,
+            createElement(
+              'button',
+              { type: 'submit', disabled: !file || uploading },
+              uploading ? 'Uploading…' : 'Upload icon'
+            ),
+            createElement(
+              'p',
+              { style: { fontSize: '0.75rem', color: '#9ca3af', margin: 0 } },
+              'PNG, JPEG or WEBP · max 512 KB · 32–1024 px per side'
+            )
+          )
+        : null
+    )
   );
 }
 
@@ -441,6 +607,7 @@ export function OrganizationAdminPage({ auth }) {
     { style: { padding: '24px', maxWidth: '800px' } },
     createElement('h1', { style: { marginBottom: '24px' } }, 'Organization administration'),
     OrgDetailSection({ org, isAdmin, onUpdate: setOrg }),
+    OrgIconSection({ org, isAdmin, onUpdate: setOrg }),
     MemberListSection({ isAdmin })
   );
 }

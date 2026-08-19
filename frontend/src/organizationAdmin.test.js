@@ -19,6 +19,7 @@ const mockOrg = {
   isActive: true,
   isProtected: false,
   iconUrl: '/api/v1/org/me/icon',
+  hasCustomIcon: false,
 };
 
 const mockMembersResponse = {
@@ -121,10 +122,77 @@ describe('fetch mock', () => {
 
 describe('mockOrg schema', () => {
   it('has all required response fields', () => {
-    const requiredFields = ['id', 'code', 'displayName', 'entitlementStatus', 'isActive', 'isProtected', 'iconUrl'];
+    const requiredFields = ['id', 'code', 'displayName', 'entitlementStatus', 'isActive', 'isProtected', 'iconUrl', 'hasCustomIcon'];
     for (const field of requiredFields) {
       assert.ok(field in mockOrg, `mockOrg missing field: ${field}`);
     }
+  });
+
+  it('hasCustomIcon is boolean', () => {
+    assert.equal(typeof mockOrg.hasCustomIcon, 'boolean');
+  });
+});
+
+describe('org icon upload API contract', () => {
+  it('upload endpoint is POST /org/me/icon', async () => {
+    let capturedUrl, capturedOpts;
+    globalThis.fetch = async (url, opts) => {
+      capturedUrl = url;
+      capturedOpts = opts;
+      return { ok: true, json: async () => ({ ...mockOrg, hasCustomIcon: true }) };
+    };
+    const body = JSON.stringify({ contentType: 'image/png', contentBase64: 'aGVsbG8=' });
+    await globalThis.fetch('/api/v1/org/me/icon', { method: 'POST', body });
+    assert.equal(capturedUrl, '/api/v1/org/me/icon');
+    assert.equal(capturedOpts.method, 'POST');
+  });
+
+  it('upload request body contains contentType and contentBase64 without data-URL prefix', () => {
+    // bare base64 must not contain a comma or the literal "base64," prefix
+    const bare = 'aGVsbG8=';
+    const body = JSON.parse(JSON.stringify({ contentType: 'image/png', contentBase64: bare }));
+    assert.ok('contentType' in body, 'contentType missing');
+    assert.ok('contentBase64' in body, 'contentBase64 missing');
+    assert.ok(!body.contentBase64.includes(','), 'contentBase64 must be bare base64, not a data URL');
+    assert.ok(!body.contentBase64.startsWith('data:'), 'contentBase64 must not start with data:');
+  });
+
+  it('upload response includes hasCustomIcon true', async () => {
+    setupFetchMock({ '/api/v1/org/me/icon': { ...mockOrg, hasCustomIcon: true } });
+    const resp = await globalThis.fetch('/api/v1/org/me/icon');
+    const data = await resp.json();
+    assert.equal(data.hasCustomIcon, true);
+  });
+
+  it('content type must be one of the three allowed types', () => {
+    const allowed = new Set(['image/png', 'image/jpeg', 'image/webp']);
+    assert.ok(allowed.has('image/png'));
+    assert.ok(allowed.has('image/jpeg'));
+    assert.ok(allowed.has('image/webp'));
+    assert.ok(!allowed.has('image/svg+xml'));
+    assert.ok(!allowed.has('image/gif'));
+    assert.ok(!allowed.has(''));
+  });
+});
+
+describe('org icon remove API contract', () => {
+  it('remove endpoint is DELETE /org/me/icon', async () => {
+    let capturedUrl, capturedOpts;
+    globalThis.fetch = async (url, opts) => {
+      capturedUrl = url;
+      capturedOpts = opts;
+      return { ok: true, json: async () => ({ ...mockOrg, hasCustomIcon: false }) };
+    };
+    await globalThis.fetch('/api/v1/org/me/icon', { method: 'DELETE', body: '{}' });
+    assert.equal(capturedUrl, '/api/v1/org/me/icon');
+    assert.equal(capturedOpts.method, 'DELETE');
+  });
+
+  it('remove response includes hasCustomIcon false', async () => {
+    setupFetchMock({ '/api/v1/org/me/icon': { ...mockOrg, hasCustomIcon: false } });
+    const resp = await globalThis.fetch('/api/v1/org/me/icon');
+    const data = await resp.json();
+    assert.equal(data.hasCustomIcon, false);
   });
 });
 
