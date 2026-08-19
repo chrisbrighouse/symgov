@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING, NamedTuple, TypedDict
 from sqlalchemy import and_, func, or_, select, text
 
 from symgov_backend.models import (
+    AuditEvent,
     Organization,
+    OrganizationMemberCapability,
     OrganizationMembership,
     OrganizationRoleAssignment,
     PlatformRoleAssignment,
@@ -55,8 +57,33 @@ class BootstrapSummary(TypedDict):
     actions: list[str]
 
 
+VALID_CAPABILITIES = frozenset({"contributor", "symbol_reviewer"})
+
+
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _emit_audit(
+    session: Session,
+    *,
+    entity_type: str,
+    entity_id: uuid.UUID,
+    action: str,
+    actor_id: uuid.UUID | None,
+    payload: dict,
+) -> None:
+    session.add(
+        AuditEvent(
+            id=uuid.uuid4(),
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action=action,
+            actor_id=actor_id,
+            payload_json=payload,
+            created_at=_utc_now(),
+        )
+    )
 
 
 def _normalize_name(value: str, *, field_name: str) -> str:
@@ -602,6 +629,18 @@ def replace_membership_base_role(
     )
     session.add(replacement)
     session.flush()
+    _emit_audit(
+        session,
+        entity_type="organization_role_assignment",
+        entity_id=replacement.id,
+        action="membership.base_role_replaced",
+        actor_id=actor_user_id,
+        payload={
+            "membership_id": str(membership_id),
+            "previous_role": current_role.base_role,
+            "new_role": new_base_role,
+        },
+    )
     return replacement
 
 
@@ -645,6 +684,14 @@ def deactivate_membership(
         UserSession.revoked_at.is_(None),
     ).update({"revoked_at": now}, synchronize_session=False)
     session.flush()
+    _emit_audit(
+        session,
+        entity_type="organization_membership",
+        entity_id=membership.id,
+        action="membership.deactivated",
+        actor_id=actor_user_id,
+        payload={"organization_id": str(membership.organization_id), "user_id": str(membership.user_id)},
+    )
 
 
 def assign_platform_admin(
@@ -676,6 +723,14 @@ def assign_platform_admin(
     )
     session.add(assignment)
     session.flush()
+    _emit_audit(
+        session,
+        entity_type="platform_role_assignment",
+        entity_id=assignment.id,
+        action="platform_admin.assigned",
+        actor_id=actor_user_id,
+        payload={"user_id": str(user_id)},
+    )
     return assignment
 
 
@@ -742,3 +797,329 @@ def revoke_platform_admin(
     assignment.revoked_by_user_id = actor_user_id
     assignment.revoke_reason = "platform_role_revoked"
     session.flush()
+    _emit_audit(
+        session,
+        entity_type="platform_role_assignment",
+        entity_id=assignment.id,
+        action="platform_admin.revoked",
+        actor_id=actor_user_id,
+        payload={"user_id": str(user_id)},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stage 3 — Organization Admin service functions
+# ---------------------------------------------------------------------------
+
+class OrganizationMemberDetail(NamedTuple):
+    membership_id: uuid.UUID
+    user_id: uuid.UUID
+    user_email: str
+    user_display_name: str
+    user_is_active: bool
+    status: str
+    base_role: str
+    capabilities: tuple[tuple[str, datetime], ...]
+    activated_at: datetime | None
+    deactivated_at: datetime | None
+
+
+def get_organization_detail(
+    session: Session,
+    organization_id: uuid.UUID,
+) -> Organization | None:
+    return session.get(Organization, organization_id)
+
+
+def update_organization(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID,
+    display_name: str | None = None,
+    legal_name: str | None = None,
+) -> Organization:
+    _acquire_administration_lock(session)
+    org = session.execute(
+        select(Organization)
+        .where(Organization.id == organization_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if org is None:
+        raise ValueError("Organization not found.")
+    if org.is_protected:
+        raise ValueError("The protected Symgov organization cannot be updated via this endpoint.")
+
+    changed: list[str] = []
+    now = _utc_now()
+    if display_name is not None:
+        display_name_key = _normalize_name(display_name, field_name="display_name")
+        collision = session.execute(
+            select(Organization.id)
+            .where(Organization.name_key == display_name_key, Organization.id != organization_id)
+        ).scalar_one_or_none()
+        if collision is not None:
+            raise ValueError("An organization with that display name already exists.")
+        org.display_name = display_name
+        org.name_key = display_name_key
+        changed.append("display_name")
+    if legal_name is not None:
+        legal_name_key = _normalize_name(legal_name, field_name="legal_name")
+        org.legal_name = legal_name
+        org.legal_name_key = legal_name_key
+        changed.append("legal_name")
+    if changed:
+        org.updated_at = now
+        session.flush()
+        _emit_audit(
+            session,
+            entity_type="organization",
+            entity_id=organization_id,
+            action="organization.updated",
+            actor_id=actor_user_id,
+            payload={"changed_fields": changed},
+        )
+    return org
+
+
+def list_organization_members(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    page: int = 1,
+    page_size: int = 50,
+) -> tuple[list[OrganizationMemberDetail], int]:
+    if not isinstance(page, int) or page < 1:
+        raise ValueError("page must be a positive integer.")
+    if not isinstance(page_size, int) or not 1 <= page_size <= 200:
+        raise ValueError("page_size must be between 1 and 200.")
+
+    base = (
+        select(OrganizationMembership, User, OrganizationRoleAssignment)
+        .join(User, User.id == OrganizationMembership.user_id)
+        .join(
+            OrganizationRoleAssignment,
+            and_(
+                OrganizationRoleAssignment.membership_id == OrganizationMembership.id,
+                OrganizationRoleAssignment.is_active.is_(True),
+            ),
+        )
+        .where(OrganizationMembership.organization_id == organization_id)
+        .order_by(OrganizationMembership.created_at, OrganizationMembership.id)
+    )
+    total = session.execute(
+        select(func.count()).select_from(base.subquery())
+    ).scalar_one()
+    rows = session.execute(
+        base.offset((page - 1) * page_size).limit(page_size)
+    ).all()
+
+    membership_ids = [m.id for m, _u, _r in rows]
+    cap_rows = session.execute(
+        select(OrganizationMemberCapability)
+        .where(
+            OrganizationMemberCapability.membership_id.in_(membership_ids),
+            OrganizationMemberCapability.is_active.is_(True),
+        )
+        .order_by(OrganizationMemberCapability.membership_id, OrganizationMemberCapability.capability)
+    ).scalars().all()
+    caps_by_membership: dict[uuid.UUID, list[tuple[str, datetime]]] = {}
+    for cap in cap_rows:
+        caps_by_membership.setdefault(cap.membership_id, []).append(
+            (cap.capability, cap.granted_at)
+        )
+
+    return [
+        OrganizationMemberDetail(
+            membership_id=membership.id,
+            user_id=user.id,
+            user_email=user.email,
+            user_display_name=user.display_name,
+            user_is_active=bool(user.is_active),
+            status=membership.status,
+            base_role=role.base_role,
+            capabilities=tuple(caps_by_membership.get(membership.id, [])),
+            activated_at=membership.activated_at,
+            deactivated_at=membership.deactivated_at,
+        )
+        for membership, user, role in rows
+    ], total
+
+
+def add_organization_member(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    user_id: uuid.UUID,
+    base_role: str,
+    actor_user_id: uuid.UUID,
+) -> OrganizationMembership:
+    if base_role not in BASE_ROLES:
+        raise ValueError("Base role must be 'admin' or 'user'.")
+    _acquire_administration_lock(session)
+    _locked_active_users(
+        session,
+        {actor_user_id: "Actor", user_id: "New member"},
+    )
+    org = session.execute(
+        select(Organization).where(Organization.id == organization_id).with_for_update()
+    ).scalar_one_or_none()
+    if org is None or not org.is_active or org.entitlement_status != "active":
+        raise ValueError("Organization is not active.")
+
+    existing = session.execute(
+        select(OrganizationMembership)
+        .where(
+            OrganizationMembership.organization_id == organization_id,
+            OrganizationMembership.user_id == user_id,
+        )
+    ).scalar_one_or_none()
+    if existing is not None and existing.status == "active":
+        raise ValueError("User is already an active member of this organization.")
+    if existing is not None:
+        raise ValueError("A membership record already exists for this user; contact platform admin to reactivate.")
+
+    now = _utc_now()
+    membership = OrganizationMembership(
+        id=uuid.uuid4(),
+        organization_id=organization_id,
+        user_id=user_id,
+        status="active",
+        activated_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    role_assignment = OrganizationRoleAssignment(
+        id=uuid.uuid4(),
+        membership_id=membership.id,
+        base_role=base_role,
+        is_active=True,
+        assigned_at=now,
+        assigned_by_user_id=actor_user_id,
+    )
+    session.add_all([membership, role_assignment])
+    session.flush()
+    _emit_audit(
+        session,
+        entity_type="organization_membership",
+        entity_id=membership.id,
+        action="membership.added",
+        actor_id=actor_user_id,
+        payload={
+            "organization_id": str(organization_id),
+            "user_id": str(user_id),
+            "base_role": base_role,
+        },
+    )
+    return membership
+
+
+def grant_member_capability(
+    session: Session,
+    membership_id: uuid.UUID,
+    *,
+    capability: str,
+    actor_user_id: uuid.UUID,
+    organization_id: uuid.UUID,
+) -> OrganizationMemberCapability:
+    if capability not in VALID_CAPABILITIES:
+        raise ValueError(f"Unknown capability '{capability}'. Valid: {sorted(VALID_CAPABILITIES)}.")
+    _acquire_administration_lock(session)
+    membership = session.execute(
+        select(OrganizationMembership)
+        .where(OrganizationMembership.id == membership_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if membership is None:
+        raise ValueError("Membership not found.")
+    if membership.organization_id != organization_id:
+        raise ValueError("Membership does not belong to the current organization.")
+    if membership.status != "active":
+        raise ValueError("Cannot grant capability to an inactive membership.")
+
+    existing = session.execute(
+        select(OrganizationMemberCapability)
+        .where(
+            OrganizationMemberCapability.membership_id == membership_id,
+            OrganizationMemberCapability.capability == capability,
+            OrganizationMemberCapability.is_active.is_(True),
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return existing
+
+    now = _utc_now()
+    cap = OrganizationMemberCapability(
+        id=uuid.uuid4(),
+        membership_id=membership_id,
+        capability=capability,
+        is_active=True,
+        granted_at=now,
+        granted_by_user_id=actor_user_id,
+    )
+    session.add(cap)
+    session.flush()
+    _emit_audit(
+        session,
+        entity_type="organization_member_capability",
+        entity_id=cap.id,
+        action="capability.granted",
+        actor_id=actor_user_id,
+        payload={
+            "membership_id": str(membership_id),
+            "capability": capability,
+        },
+    )
+    return cap
+
+
+def revoke_member_capability(
+    session: Session,
+    membership_id: uuid.UUID,
+    *,
+    capability: str,
+    actor_user_id: uuid.UUID,
+    organization_id: uuid.UUID,
+) -> None:
+    if capability not in VALID_CAPABILITIES:
+        raise ValueError(f"Unknown capability '{capability}'. Valid: {sorted(VALID_CAPABILITIES)}.")
+    _acquire_administration_lock(session)
+    membership = session.execute(
+        select(OrganizationMembership)
+        .where(OrganizationMembership.id == membership_id)
+        .with_for_update()
+    ).scalar_one_or_none()
+    if membership is None:
+        raise ValueError("Membership not found.")
+    if membership.organization_id != organization_id:
+        raise ValueError("Membership does not belong to the current organization.")
+
+    cap = session.execute(
+        select(OrganizationMemberCapability)
+        .where(
+            OrganizationMemberCapability.membership_id == membership_id,
+            OrganizationMemberCapability.capability == capability,
+            OrganizationMemberCapability.is_active.is_(True),
+        )
+        .with_for_update()
+    ).scalar_one_or_none()
+    if cap is None:
+        return
+
+    now = _utc_now()
+    cap.is_active = False
+    cap.revoked_at = now
+    cap.revoked_by_user_id = actor_user_id
+    cap.revoke_reason = "capability_revoked_by_admin"
+    session.flush()
+    _emit_audit(
+        session,
+        entity_type="organization_member_capability",
+        entity_id=cap.id,
+        action="capability.revoked",
+        actor_id=actor_user_id,
+        payload={
+            "membership_id": str(membership_id),
+            "capability": capability,
+        },
+    )

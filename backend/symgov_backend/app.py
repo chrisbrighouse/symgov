@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .routes.admin import legacy_router as legacy_admin_router
 from .routes.admin import router as admin_router
+from .routes.organizations import router as organizations_router
 from .routes.auth import legacy_router as legacy_auth_router
 from .routes.auth import router as auth_router
 from .routes.catalog import router as catalog_router
@@ -82,6 +83,7 @@ def create_app() -> FastAPI:
     session_access = Depends(require_session_access)
     app.include_router(auth_router, prefix=settings.api_prefix, dependencies=[csrf])
     app.include_router(admin_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
+    app.include_router(organizations_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
     app.include_router(catalog_router, prefix=settings.api_prefix, dependencies=[csrf])
     app.include_router(
         catalog_developer_router,

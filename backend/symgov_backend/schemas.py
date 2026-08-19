@@ -920,3 +920,64 @@ class WorkspaceReviewDecisionResponse(BaseModel):
 
 class WorkspaceRightsReviewDecisionResponse(WorkspaceReviewDecisionResponse):
     updatedRights: dict[str, Any] = Field(default_factory=dict)
+
+
+# --- Organization Admin (Slice 3A) ---
+
+class OrgDetailResponse(BaseModel):
+    id: str
+    code: str
+    displayName: str
+    legalName: str | None = None
+    locale: str
+    entitlementStatus: str
+    isActive: bool
+    isProtected: bool
+    iconUrl: str
+
+
+class OrgUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    displayName: str | None = Field(default=None, min_length=1, max_length=200)
+    legalName: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class OrgMemberCapabilityItem(BaseModel):
+    capability: str
+    grantedAt: str
+
+
+class OrgMemberResponse(BaseModel):
+    membershipId: str
+    userId: str
+    email: str
+    displayName: str
+    userIsActive: bool
+    status: str
+    baseRole: str
+    capabilities: list[OrgMemberCapabilityItem]
+    activatedAt: str | None = None
+    deactivatedAt: str | None = None
+
+
+class OrgMemberListResponse(BaseModel):
+    items: list[OrgMemberResponse]
+    page: int
+    pageSize: int
+    total: int
+
+
+class OrgAddMemberRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    userId: str
+    baseRole: str = Field(pattern="^(admin|user)$")
+
+
+class OrgPatchMemberRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    baseRole: str | None = Field(default=None, pattern="^(admin|user)$")
+    grantCapability: str | None = None
+    revokeCapability: str | None = None

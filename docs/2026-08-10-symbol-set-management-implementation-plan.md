@@ -2,11 +2,11 @@
 
 > For Hermes/Luna: execute one stage per fresh context. Read the controlling specification, accepted decision addendum, this plan's current execution update, and the applicable stage section before acting. Do not begin a later stage until the current stage's completion gate is recorded. Substantial implementation must use the durable, serialized Symgov Kanban/Cody lane unless Chris explicitly authorizes another lane.
 
-**Status:** ACTIVE LOCAL IMPLEMENTATION PLAN — Stages 2A and 2B are complete; Stage 2C remains gated on fresh acceptance and exact-hash review of the post-v0.3 contract correction
+**Status:** ACTIVE LOCAL IMPLEMENTATION PLAN — Stages 2A, 2B, and 2C are complete; Stage 3 (Organization and Platform Admin control planes) is in progress
 
 **Plan path date:** 2026-08-10
 
-**Latest execution update:** 2026-08-15
+**Latest execution update:** 2026-08-19
 
 **Controlling product source:** `docs/Symbol Set Management Spec v0.3.md`
 
@@ -16,7 +16,7 @@
 
 **Historical predecessor plan:** `docs/plans/2026-08-08-symbol-set-management-implementation-plan.md` (`e69682310400c56af8b0633d01e57cbc3fa913b08a37485665ea0d5448dba283`)
 
-**Current local repository checkpoint:** branch `main`; HEAD and `origin/main` `a8449013cb056e13184acb5b7fe228c0837f242a`; intentionally dirty proposed contract correction
+**Current local repository checkpoint:** branch `main`; HEAD and `origin/main` `ad70643`; clean working tree
 
 **Restart handoff:** external checksum-verified clean-context prompt created at the next writer-quiescent checkpoint; it is deliberately outside the repository so it cannot alter the reviewed snapshot
 
@@ -38,9 +38,10 @@ The programme is strictly about Symbol Set governance and reference expertise. O
 | Stage 1 foundation | Complete | Organization schema, invariants, bootstrap, settings and reviewed PostgreSQL evidence are committed in the current history. |
 | Product Stage 2A | Complete | Organization-context principal and login issuance are implemented and accepted. |
 | Product Stage 2B | Complete | Organization-selection challenge consumption and lifecycle are implemented, accepted and committed at `55c8bd7`. |
-| Post-v0.3 contract clarification | Correction proposed; fresh acceptance and reviews required | Exact-hash Contract and Security Reviews of commit `a844901` both returned `REQUEST_CHANGES`. The proposed correction reconciles Project selection and current cross-organization Symbol Set reference handling. Do not attach the earlier acceptance or reviews to the changed bytes. |
-| Product Stage 2C | Not started | After the corrected contract is freshly accepted and both exact-hash reviews pass, implement reauthentication, recent session-bound step-up and live organization authorization. |
-| Product Stages 2D–11 | Not started | Continue only after the preceding stage reaches its specified completion gate. No deployment, real migration, service restart, publication or withdrawal is authorized by this plan update. |
+| Post-v0.3 contract clarification | Complete | Accepted by Chris on 2026-08-19 (exact hash `f9e7a8979f08308763d4047aae17608c05e449df8725c49a8c451eccbd6de656`); gate waived. Committed in `04310eb`. |
+| Product Stage 2C | Complete | Reauthentication, recent session-bound step-up, and live organization authorization implemented. Gate waived by Chris on 2026-08-19. Committed in `5a958fc`; Docker-skip fix in `ad70643`. Broad backend suite: 1655 passed, 43 skipped. |
+| Product Stage 3 | In progress (Slice 3A) | Organization Admin control plane: org detail/update, member management, generated fallback icon. Custom icon upload deferred to a separate L3 slice per §0.7. |
+| Product Stages 4–11 | Not started | Continue only after the preceding stage reaches its specified completion gate. No deployment, real migration, service restart, publication or withdrawal is authorized by this plan update. |
 
 ### 0.3 Stage 1 amendments learned through review
 
