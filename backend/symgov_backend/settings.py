@@ -154,6 +154,12 @@ class SymgovAPISettings:
         "yes",
         "on",
     }
+    platform_admin_enabled: bool = os.environ.get("SYMGOV_PLATFORM_ADMIN_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     symbol_sets_enabled: bool = os.environ.get("SYMGOV_SYMBOL_SETS_ENABLED", "").strip().lower() in {
         "1",
         "true",

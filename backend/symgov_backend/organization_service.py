@@ -807,6 +807,56 @@ def revoke_platform_admin(
     )
 
 
+class PlatformAdminDetail(NamedTuple):
+    user_id: uuid.UUID
+    user_email: str
+    user_display_name: str
+    user_is_active: bool
+    granted_at: datetime
+
+
+def list_platform_admins(
+    session: Session,
+    *,
+    page: int = 1,
+    page_size: int = 50,
+) -> tuple[list[PlatformAdminDetail], int]:
+    if not isinstance(page, int) or page < 1:
+        raise ValueError("page must be a positive integer.")
+    if not isinstance(page_size, int) or not 1 <= page_size <= 200:
+        raise ValueError("page_size must be between 1 and 200.")
+
+    base = (
+        select(PlatformRoleAssignment, User)
+        .join(User, User.id == PlatformRoleAssignment.user_id)
+        .where(
+            PlatformRoleAssignment.role == "platform_admin",
+            PlatformRoleAssignment.is_active.is_(True),
+        )
+        .order_by(PlatformRoleAssignment.assigned_at, PlatformRoleAssignment.id)
+    )
+    total = session.execute(
+        select(func.count()).select_from(base.subquery())
+    ).scalar_one()
+    rows = session.execute(
+        base.offset((page - 1) * page_size).limit(page_size)
+    ).all()
+
+    return (
+        [
+            PlatformAdminDetail(
+                user_id=assignment.user_id,
+                user_email=user.email,
+                user_display_name=user.display_name,
+                user_is_active=bool(user.is_active),
+                granted_at=assignment.assigned_at,
+            )
+            for assignment, user in rows
+        ],
+        total,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Stage 3 — Organization Admin service functions
 # ---------------------------------------------------------------------------

@@ -981,3 +981,26 @@ class OrgPatchMemberRequest(BaseModel):
     baseRole: str | None = Field(default=None, pattern="^(admin|user)$")
     grantCapability: str | None = None
     revokeCapability: str | None = None
+
+
+# --- Platform Admin (Slice 3B) ---
+
+class PlatformAdminItem(BaseModel):
+    userId: str
+    email: str
+    displayName: str
+    userIsActive: bool
+    grantedAt: str
+
+
+class PlatformAdminListResponse(BaseModel):
+    items: list[PlatformAdminItem]
+    page: int
+    pageSize: int
+    total: int
+
+
+class GrantPlatformAdminRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    userId: str

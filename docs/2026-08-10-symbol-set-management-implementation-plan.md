@@ -16,7 +16,7 @@
 
 **Historical predecessor plan:** `docs/plans/2026-08-08-symbol-set-management-implementation-plan.md` (`e69682310400c56af8b0633d01e57cbc3fa913b08a37485665ea0d5448dba283`)
 
-**Current local repository checkpoint:** branch `main`; HEAD and `origin/main` `ad70643`; clean working tree
+**Current local repository checkpoint:** branch `main`; HEAD `5b909c4` (Slice 3A committed); `origin/main` `ad70643` (not yet pushed); working tree carries Slice 3B (Platform Admin control plane), staged for commit
 
 **Restart handoff:** external checksum-verified clean-context prompt created at the next writer-quiescent checkpoint; it is deliberately outside the repository so it cannot alter the reviewed snapshot
 
@@ -40,7 +40,7 @@ The programme is strictly about Symbol Set governance and reference expertise. O
 | Product Stage 2B | Complete | Organization-selection challenge consumption and lifecycle are implemented, accepted and committed at `55c8bd7`. |
 | Post-v0.3 contract clarification | Complete | Accepted by Chris on 2026-08-19 (exact hash `f9e7a8979f08308763d4047aae17608c05e449df8725c49a8c451eccbd6de656`); gate waived. Committed in `04310eb`. |
 | Product Stage 2C | Complete | Reauthentication, recent session-bound step-up, and live organization authorization implemented. Gate waived by Chris on 2026-08-19. Committed in `5a958fc`; Docker-skip fix in `ad70643`. Broad backend suite: 1655 passed, 43 skipped. |
-| Product Stage 3 | In progress (Slice 3A) | Organization Admin control plane: org detail/update, member management, generated fallback icon. Custom icon upload deferred to a separate L3 slice per §0.7. |
+| Product Stage 3 | In progress (Slice 3A and 3B complete) | Slice 3A: org detail/update, member management, generated fallback icon committed in `5b909c4`. 31 backend tests + 8 frontend tests pass. Custom icon upload deferred per §0.7. Slice 3B: Platform Admin control plane (`GET/POST/DELETE /platform/admins`, feature-flagged behind `SYMGOV_PLATFORM_ADMIN_ENABLED`, grant/revoke requiring recent step-up) implemented; 12 backend tests + 7 frontend tests pass; batch regression of 244 backend tests (Slice 3B, 3A, organization service/authorization/auth-context, route-auth enforcement, Stage 2C) and 32 frontend tests (platform admin, organization admin, organization session, organization selection) pass. Not yet committed. |
 | Product Stages 4–11 | Not started | Continue only after the preceding stage reaches its specified completion gate. No deployment, real migration, service restart, publication or withdrawal is authorized by this plan update. |
 
 ### 0.3 Stage 1 amendments learned through review
