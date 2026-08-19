@@ -540,6 +540,29 @@ def create_organization_with_initial_admin(
         ]
     )
     session.flush()
+    _emit_audit(
+        session,
+        entity_type="organization",
+        entity_id=organization_id,
+        action="organization.created",
+        actor_id=actor_user_id,
+        payload={
+            "normalized_code": normalized_code,
+            "initial_admin_user_id": str(initial_admin_user_id),
+        },
+    )
+    _emit_audit(
+        session,
+        entity_type="organization_membership",
+        entity_id=membership.id,
+        action="membership.added",
+        actor_id=actor_user_id,
+        payload={
+            "organization_id": str(organization_id),
+            "user_id": str(initial_admin_user_id),
+            "base_role": "admin",
+        },
+    )
     return OrganizationCreationResult(
         organization=organization,
         membership=membership,
@@ -855,6 +878,127 @@ def list_platform_admins(
         ],
         total,
     )
+
+
+def get_platform_admin_detail(
+    session: Session,
+    user_id: uuid.UUID,
+) -> PlatformAdminDetail | None:
+    row = session.execute(
+        select(PlatformRoleAssignment, User)
+        .join(User, User.id == PlatformRoleAssignment.user_id)
+        .where(
+            PlatformRoleAssignment.role == "platform_admin",
+            PlatformRoleAssignment.is_active.is_(True),
+            PlatformRoleAssignment.user_id == user_id,
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    assignment, user = row
+    return PlatformAdminDetail(
+        user_id=assignment.user_id,
+        user_email=user.email,
+        user_display_name=user.display_name,
+        user_is_active=bool(user.is_active),
+        granted_at=assignment.assigned_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stage 3, Slice 3C — Platform Admin organization directory
+# ---------------------------------------------------------------------------
+
+
+def list_organizations(
+    session: Session,
+    *,
+    actor_user_id: uuid.UUID,
+    page: int = 1,
+    page_size: int = 50,
+) -> tuple[list[Organization], int]:
+    if not isinstance(page, int) or page < 1:
+        raise ValueError("page must be a positive integer.")
+    if not isinstance(page_size, int) or not 1 <= page_size <= 200:
+        raise ValueError("page_size must be between 1 and 200.")
+    _require_effective_platform_admin(session, actor_user_id)
+
+    base = select(Organization).order_by(Organization.normalized_code, Organization.id)
+    total = session.execute(select(func.count()).select_from(base.subquery())).scalar_one()
+    rows = session.execute(base.offset((page - 1) * page_size).limit(page_size)).scalars().all()
+    return list(rows), total
+
+
+def suspend_organization(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID,
+) -> Organization:
+    """Suspend an organization's entitlement and revoke its bound sessions."""
+    _acquire_administration_lock(session)
+    _locked_active_users(session, {actor_user_id: "Actor"})
+    _require_effective_platform_admin(session, actor_user_id, user_locked=True)
+    org = session.execute(
+        select(Organization).where(Organization.id == organization_id).with_for_update()
+    ).scalar_one_or_none()
+    if org is None:
+        raise ValueError("Organization not found.")
+    if org.is_protected:
+        raise ValueError("The protected Symgov organization cannot be suspended.")
+    if org.entitlement_status == "suspended":
+        return org
+
+    now = _utc_now()
+    org.entitlement_status = "suspended"
+    org.updated_at = now
+    session.query(UserSession).filter(
+        UserSession.active_organization_id == organization_id,
+        UserSession.revoked_at.is_(None),
+    ).update({"revoked_at": now}, synchronize_session=False)
+    session.flush()
+    _emit_audit(
+        session,
+        entity_type="organization",
+        entity_id=organization_id,
+        action="organization.suspended",
+        actor_id=actor_user_id,
+        payload={},
+    )
+    return org
+
+
+def reactivate_organization(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID,
+) -> Organization:
+    """Restore an organization's entitlement to active."""
+    _acquire_administration_lock(session)
+    _locked_active_users(session, {actor_user_id: "Actor"})
+    _require_effective_platform_admin(session, actor_user_id, user_locked=True)
+    org = session.execute(
+        select(Organization).where(Organization.id == organization_id).with_for_update()
+    ).scalar_one_or_none()
+    if org is None:
+        raise ValueError("Organization not found.")
+    if org.entitlement_status == "active":
+        return org
+
+    now = _utc_now()
+    org.entitlement_status = "active"
+    org.updated_at = now
+    session.flush()
+    _emit_audit(
+        session,
+        entity_type="organization",
+        entity_id=organization_id,
+        action="organization.reactivated",
+        actor_id=actor_user_id,
+        payload={},
+    )
+    return org
 
 
 # ---------------------------------------------------------------------------

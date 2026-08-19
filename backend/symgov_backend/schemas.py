@@ -1004,3 +1004,32 @@ class GrantPlatformAdminRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     userId: str
+
+
+# --- Platform Admin organization directory (Slice 3C) ---
+
+class PlatformOrganizationItem(BaseModel):
+    id: str
+    code: str
+    displayName: str
+    legalName: str | None
+    entitlementStatus: str
+    isActive: bool
+    isProtected: bool
+
+
+class PlatformOrganizationListResponse(BaseModel):
+    items: list[PlatformOrganizationItem]
+    page: int
+    pageSize: int
+    total: int
+
+
+class CreateOrganizationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    displayName: str = Field(min_length=1, max_length=200)
+    legalName: str | None = Field(default=None, min_length=1, max_length=200)
+    locale: str = "en-US"
+    initialAdminUserId: str

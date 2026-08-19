@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import patch
 import uuid
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -10,9 +12,14 @@ from symgov_backend.organization_service import (
     assign_platform_admin,
     create_organization_with_initial_admin,
     deactivate_membership,
+    get_platform_admin_detail,
     list_memberships_for_login_choice,
+    list_organizations,
+    list_platform_admins,
+    reactivate_organization,
     revoke_platform_admin,
     replace_membership_base_role,
+    suspend_organization,
 )
 from symgov_backend.models import (
     Organization,
@@ -21,7 +28,16 @@ from symgov_backend.models import (
     PlatformRoleAssignment,
     User,
     UserRole,
+    UserSession,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_emit_audit():
+    """AuditEvent uses JSONB (PostgreSQL-only); the sqlite fixtures here don't create
+    that table. Stub _emit_audit by default, matching the API-level test convention."""
+    with patch("symgov_backend.organization_service._emit_audit"):
+        yield
 
 
 def _session_factory():
@@ -36,6 +52,7 @@ def _session_factory():
         OrganizationMembership.__table__,
         OrganizationRoleAssignment.__table__,
         PlatformRoleAssignment.__table__,
+        UserSession.__table__,
     ):
         original_constraints = table.constraints
         try:
@@ -411,3 +428,211 @@ def test_symgov_admin_with_active_platform_role_cannot_be_demoted_or_deactivated
                 assert "platform administrator" in str(exc).lower()
             else:
                 raise AssertionError("Expected active Platform Admin eligibility protection.")
+
+
+def _seed_commercial_org(session, *, code: str, entitlement_status: str = "active") -> Organization:
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    org = Organization(
+        id=uuid.uuid4(),
+        code=code,
+        normalized_code=code.lower(),
+        display_name=f"{code} Inc",
+        name_key=f"{code.lower()} inc",
+        entitlement_status=entitlement_status,
+        is_active=True,
+        is_protected=False,
+        fallback_icon_svg="<svg/>",
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(org)
+    session.flush()
+    return org
+
+
+def test_list_organizations_paginates_and_orders_by_normalized_code():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        _seed_commercial_org(session, code="ZEBRA")
+        _seed_commercial_org(session, code="ACME")
+        session.commit()
+
+        page1, total = list_organizations(session, actor_user_id=actor.id, page=1, page_size=2)
+        assert total == 3
+        assert [o.code for o in page1] == ["ACME", "symgov"]
+
+        page2, total = list_organizations(session, actor_user_id=actor.id, page=2, page_size=2)
+        assert total == 3
+        assert [o.code for o in page2] == ["ZEBRA"]
+
+
+def test_list_organizations_requires_effective_platform_admin():
+    Session = _session_factory()
+    with Session() as session:
+        _seed_platform_admin_actor(session)
+        non_admin = _seed_user(session, email="not-admin@example.test")
+        session.commit()
+
+        try:
+            list_organizations(session, actor_user_id=non_admin.id)
+        except ValueError as exc:
+            assert "platform administrator" in str(exc).lower()
+        else:
+            raise AssertionError("Expected effective Platform Admin requirement.")
+
+
+def test_suspend_organization_sets_status_revokes_sessions_and_is_idempotent():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        member = _seed_user(session, email="member@example.test")
+        org = _seed_commercial_org(session, code="ACME")
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        session.add(
+            UserSession(
+                id=uuid.uuid4(),
+                auth_user_id=member.id,
+                token_hash="hash-1",
+                created_at=now,
+                expires_at=now,
+                session_mode="organization",
+                active_organization_id=org.id,
+            )
+        )
+        session.commit()
+
+        result = suspend_organization(session, org.id, actor_user_id=actor.id)
+        assert result.entitlement_status == "suspended"
+
+        remaining_active = (
+            session.query(UserSession)
+            .filter(UserSession.active_organization_id == org.id, UserSession.revoked_at.is_(None))
+            .count()
+        )
+        assert remaining_active == 0
+
+        # Idempotent: suspending an already-suspended organization is a no-op.
+        again = suspend_organization(session, org.id, actor_user_id=actor.id)
+        assert again.entitlement_status == "suspended"
+
+
+def test_suspend_protected_symgov_organization_is_rejected():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        symgov_org = session.query(Organization).filter(Organization.normalized_code == "symgov").one()
+
+        try:
+            suspend_organization(session, symgov_org.id, actor_user_id=actor.id)
+        except ValueError as exc:
+            assert "protected" in str(exc).lower()
+        else:
+            raise AssertionError("Expected protected-organization suspension rejection.")
+
+
+def test_suspend_unknown_organization_raises():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+
+        try:
+            suspend_organization(session, uuid.uuid4(), actor_user_id=actor.id)
+        except ValueError as exc:
+            assert "not found" in str(exc).lower()
+        else:
+            raise AssertionError("Expected not-found error for unknown organization.")
+
+
+def test_reactivate_organization_restores_active_status_and_is_idempotent():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        org = _seed_commercial_org(session, code="ACME", entitlement_status="suspended")
+        session.commit()
+
+        result = reactivate_organization(session, org.id, actor_user_id=actor.id)
+        assert result.entitlement_status == "active"
+
+        again = reactivate_organization(session, org.id, actor_user_id=actor.id)
+        assert again.entitlement_status == "active"
+
+
+def _seed_symgov_admin_candidate(session, symgov_org_id, *, email):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    user = _seed_user(session, email=email)
+    membership = OrganizationMembership(
+        id=uuid.uuid4(),
+        organization_id=symgov_org_id,
+        user_id=user.id,
+        status="active",
+        activated_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add(membership)
+    session.flush()
+    session.add(
+        OrganizationRoleAssignment(
+            id=uuid.uuid4(),
+            membership_id=membership.id,
+            base_role="admin",
+            is_active=True,
+            assigned_at=now,
+        )
+    )
+    session.flush()
+    return user
+
+
+def test_get_platform_admin_detail_finds_the_most_recently_granted_admin_directly():
+    """Regression: grant_admin previously re-fetched via list_platform_admins(page=1,
+    page_size=200) ordered by assigned_at ascending and linear-scanned for the user,
+    which would miss the just-granted admin once an org has >=200 active admins.
+    get_platform_admin_detail must find the exact row without relying on page position."""
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        symgov_org_id = session.query(Organization).filter(
+            Organization.normalized_code == "symgov"
+        ).one().id
+
+        candidates = [
+            _seed_symgov_admin_candidate(session, symgov_org_id, email=f"candidate-{i}@example.test")
+            for i in range(3)
+        ]
+        for candidate in candidates:
+            assign_platform_admin(session, user_id=candidate.id, actor_user_id=actor.id)
+        session.commit()
+
+        most_recent = candidates[-1]
+
+        # Simulate the old bug's premise: the most recently granted admin is not on
+        # a small first page ordered by assigned_at ascending.
+        first_page, _total = list_platform_admins(session, page=1, page_size=1)
+        assert most_recent.id not in {a.user_id for a in first_page}
+
+        detail = get_platform_admin_detail(session, most_recent.id)
+        assert detail is not None
+        assert detail.user_id == most_recent.id
+        assert detail.user_email == most_recent.email
+
+
+def test_suspend_and_reactivate_require_effective_platform_admin():
+    Session = _session_factory()
+    with Session() as session:
+        _seed_platform_admin_actor(session)
+        non_admin = _seed_user(session, email="not-admin@example.test")
+        org = _seed_commercial_org(session, code="ACME")
+        session.commit()
+
+        for operation in (
+            lambda: suspend_organization(session, org.id, actor_user_id=non_admin.id),
+            lambda: reactivate_organization(session, org.id, actor_user_id=non_admin.id),
+        ):
+            try:
+                operation()
+            except ValueError as exc:
+                assert "platform administrator" in str(exc).lower()
+            else:
+                raise AssertionError("Expected effective Platform Admin requirement.")
