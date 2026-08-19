@@ -47,9 +47,17 @@ import {
   updateScottSourceSiteAuth,
   updateWorkspaceReviewSymbolProperties
 } from './api.js';
+import {
+  authStateAfterLogout,
+  authStateFromResponse,
+  normalizeSessionResponse,
+  selectOrganization as apiSelectOrganization
+} from './organizationSession.js';
 import { appConfig } from './config.js';
 import CatalogDeveloperHub from './CatalogDeveloperHub.jsx';
 import ProfilePage from './ProfilePage.jsx';
+import OrganizationSelectionPage from './OrganizationSelectionPage.js';
+import { Header } from './Header.js';
 import FavouriteButton from './FavouriteButton.js';
 import FavouriteFilter from './FavouriteFilter.js';
 import {
@@ -307,7 +315,7 @@ const WORKSPACE_MONITOR_SCREENS = {
   intelligence: ['publication', 'curation', 'control_audit', 'market_intelligence', 'ux_feedback']
 };
 const WORKSPACE_MONITOR_SCREEN_SEQUENCE = ['pipeline', 'intelligence'];
-const AuthContext = createContext(null);
+export const AuthContext = createContext(null);
 
 function roleList(user) {
   return Array.isArray(user?.roles) ? user.roles : [];
@@ -323,13 +331,19 @@ function defaultPathForUser() {
 }
 
 function AuthProvider({ children }) {
-  const [authState, setAuthState] = useState({ loading: true, user: null, message: '' });
+  const [authState, setAuthState] = useState({ loading: true, user: null, challenge: null, type: null, message: '' });
+
+  const updateFromResponse = (result, options) => {
+    const session = normalizeSessionResponse(result.payload);
+    setAuthState((current) => authStateFromResponse(current, result, options));
+    return { ...result, session };
+  };
 
   useEffect(() => {
     let cancelled = false;
     fetchCurrentUser().then((result) => {
       if (!cancelled) {
-        setAuthState({ loading: false, user: result.user || null, message: result.ok ? '' : result.message });
+        updateFromResponse(result);
       }
     });
     return () => {
@@ -341,25 +355,29 @@ function AuthProvider({ children }) {
     ...authState,
     refresh: async () => {
       const result = await fetchCurrentUser();
-      setAuthState({ loading: false, user: result.user || null, message: result.ok ? '' : result.message });
-      return result;
+      return updateFromResponse(result);
     },
     login: async ({ email, pin }) => {
-      setAuthState((current) => ({ ...current, loading: true, message: '' }));
+      setAuthState((current) => ({ ...current, loading: true, challenge: null, message: '' }));
       const result = await loginUser({ email, pin });
-      setAuthState({ loading: false, user: result.user || null, message: result.ok ? '' : result.message });
-      return result;
+      return updateFromResponse(result);
+    },
+    selectOrganization: async (params) => {
+      setAuthState((current) => ({ ...current, loading: true, message: '' }));
+      const result = await apiSelectOrganization(params);
+      return updateFromResponse(result, { preserveRetryableChallenge: true });
     },
     changePin: async ({ currentPin, newPin }) => {
       const result = await changeCurrentUserPin({ currentPin, newPin });
       if (result.ok) {
-        setAuthState({ loading: false, user: result.payload?.user || null, message: '' });
+        updateFromResponse(result);
       }
       return result;
     },
     logout: async () => {
-      await logoutUser();
-      setAuthState({ loading: false, user: null, message: '' });
+      const result = await logoutUser();
+      setAuthState((current) => authStateAfterLogout(current, result));
+      return result;
     }
   }), [authState]);
 
@@ -383,6 +401,9 @@ function RequireAuth({ children }) {
   }
 
   if (!auth.user) {
+    if (auth.challenge) {
+      return <Navigate to="/select-organization" replace state={{ from: location }} />;
+    }
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
@@ -439,12 +460,13 @@ function AppContent() {
   return (
     <div className={`app-shell ${isStandardsRoute ? 'mode-standards' : 'mode-workspace'} ${showRail ? 'has-side-rail' : ''}`}>
       <AmbientBackdrop />
-      <Header />
+      <Header auth={auth} />
       {showRail ? <SideRail /> : null}
       <main className="page-frame">
         <Routes>
           <Route path="/" element={<HomeRedirect />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/select-organization" element={<OrganizationSelectionPage auth={auth} />} />
           <Route path="/change-pin" element={<RequireAuth><ChangePinPage /></RequireAuth>} />
           <Route path="/profile" element={<RequireAuth><ProfilePage auth={auth} /></RequireAuth>} />
           <Route path="/workspace" element={<RequireAnyRole roles={['admin']}><WorkspacePage /></RequireAnyRole>} />
@@ -498,8 +520,10 @@ function LoginPage() {
       const fromPath = location.state?.from?.pathname;
       const targetPath = auth.user.mustChangePin ? '/change-pin' : (fromPath && fromPath !== '/login' ? fromPath : defaultPathForUser(auth.user));
       navigate(targetPath, { replace: true });
+    } else if (auth.challenge) {
+      navigate('/select-organization', { replace: true });
     }
-  }, [auth.user, location.state, navigate]);
+  }, [auth.user, auth.challenge, navigate, location.state]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -657,40 +681,6 @@ function ChangePinPage() {
   );
 }
 
-function Header() {
-  const auth = useAuth();
-  const navigate = useNavigate();
-  const user = auth.user;
-
-  const handleLogout = async () => {
-    await auth.logout();
-    navigate('/login', { replace: true });
-  };
-
-  return (
-    <header className="glass-header">
-      <div className="brand-block">
-        <div className="brand-mark" aria-hidden="true">
-          <EngineeringSymbolLogo />
-        </div>
-        <div>
-          <p className="eyebrow">Symbol governance system</p>
-          <h1>symgov</h1>
-        </div>
-      </div>
-      <div className="header-actions">
-        {user ? <NavLink to="/profile" className="build-chip user-identity-chip user-identity-link" aria-label="Open your profile">{user.displayName || user.email}{user.subscription?.isActive ? <span className="plus-subscription-badge">Plus</span> : null}</NavLink> : null}
-        <div className="build-chip">{appConfig.build || 'local'}</div>
-        {user ? (
-          <button type="button" className="ghost-button" onClick={handleLogout}>Sign out</button>
-        ) : (
-          <button type="button" className="ghost-button" onClick={() => navigate('/login')}>Sign in</button>
-        )}
-      </div>
-    </header>
-  );
-}
-
 function SideRail() {
   const auth = useAuth();
   const user = auth.user;
@@ -791,18 +781,6 @@ function NavIcon({ name }) {
   }
 }
 
-function EngineeringSymbolLogo() {
-  return (
-    <svg viewBox="0 0 64 64" role="img" aria-label="Engineering valve symbol">
-      <title>Engineering valve symbol</title>
-      <line x1="8" y1="32" x2="56" y2="32" />
-      <polygon points="20,18 32,32 20,46" />
-      <polygon points="44,18 32,32 44,46" />
-      <circle cx="32" cy="14" r="7" />
-      <line x1="32" y1="21" x2="32" y2="32" />
-    </svg>
-  );
-}
 
 function CameraIconMini() {
   return (

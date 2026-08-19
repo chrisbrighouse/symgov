@@ -4,14 +4,16 @@ ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "frontend" / "src" / "App.jsx"
 PROFILE = ROOT / "frontend" / "src" / "ProfilePage.jsx"
 API = ROOT / "frontend" / "src" / "api.js"
+HEADER = ROOT / "frontend" / "src" / "Header.js"
 STYLES = ROOT / "frontend" / "src" / "styles.css"
 
 
 def test_profile_route_and_accessible_banner_link_exist():
     app = APP.read_text(encoding="utf-8")
+    header = HEADER.read_text(encoding="utf-8")
     assert 'path="/profile"' in app
-    assert 'to="/profile"' in app
-    assert "user-identity-link" in app
+    assert "to: '/profile'" in header
+    assert "user-identity-link" in header
     assert "<ProfilePage" in app
 
 

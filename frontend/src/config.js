@@ -1,4 +1,8 @@
 function inferApiRoot() {
+  if (typeof window === 'undefined') {
+    return 'http://127.0.0.1:8010/api/v1';
+  }
+
   const metaRoot = document.querySelector('meta[name="symgov-api-root"]')?.content?.trim();
   const metaBase = document.querySelector('meta[name="symgov-api-base-url"]')?.content?.trim();
   const windowConfig = window.SYMGOV_CONFIG || {};
@@ -28,6 +32,6 @@ function inferApiRoot() {
 }
 
 export const appConfig = {
-  build: window.SYMGOV_CONFIG?.build || '',
+  build: (typeof window !== 'undefined' ? window.SYMGOV_CONFIG?.build : '') || '',
   apiRoot: inferApiRoot()
 };

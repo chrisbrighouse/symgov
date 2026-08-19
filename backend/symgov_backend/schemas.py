@@ -75,6 +75,7 @@ class AuthUserResponse(BaseModel):
     organization: dict[str, Any] | None
     isPlatformAdmin: bool
     capabilities: dict[str, bool]
+    recentStepUpAt: str | None = None
 
 
 class AuthSelectionChallengeResponse(BaseModel):
@@ -148,6 +149,10 @@ class AuthChangePinRequest(BaseModel):
 class AuthChangePinResponse(BaseModel):
     user: AuthUserResponse | None
     selectionChallenge: AuthSelectionChallengeResponse | None = None
+
+
+class AuthReauthenticateRequest(BaseModel):
+    pin: str = Field(min_length=4, max_length=4)
 
 
 class AdminUserResponse(BaseModel):

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import AuthenticatedUser, hash_pin, normalize_display_name, normalize_email, normalize_roles, revoke_all_user_sessions, user_roles, utc_now, validate_pin, verify_pin
 from ..auth_security import login_throttle_policy, recover_throttle_bucket
-from ..dependencies import get_db_session, require_any_role
+from ..dependencies import get_db_session, require_any_role, require_i25_protected_mutation, require_platform_admin
 from ..models import User, UserRole, UserSession, UserSubscription
 from ..schemas import (
     APIHealthResponse,
@@ -93,6 +93,7 @@ async def recover_login_throttle(
     http_request: Request,
     session: Session = Depends(get_db_session),
     current: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    _: AuthenticatedUser = Depends(require_i25_protected_mutation),
     settings: SymgovAPISettings = Depends(get_settings),
 ) -> dict[str, bool | int]:
     payload = _parse_payload(AdminAuthThrottleRecoveryRequest, await http_request.json())
@@ -185,6 +186,7 @@ async def create_user(
     http_request: Request,
     session: Session = Depends(get_db_session),
     _: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    __: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     payload = _parse_payload(AdminUserCreateRequest, await http_request.json())
     now = utc_now()
@@ -223,6 +225,7 @@ async def update_user(
     http_request: Request,
     session: Session = Depends(get_db_session),
     _: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    __: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     payload = _parse_payload(AdminUserUpdateRequest, await http_request.json())
     user = _get_user(session, user_id)
@@ -269,6 +272,7 @@ async def _months_request(http_request: Request) -> AdminSubscriptionMonthsReque
 async def upgrade_subscription(
     user_id: str, http_request: Request, session: Session = Depends(get_db_session),
     current: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    _: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     payload = await _months_request(http_request)
     if payload.months < 1:
@@ -287,6 +291,7 @@ async def upgrade_subscription(
 async def adjust_subscription(
     user_id: str, http_request: Request, session: Session = Depends(get_db_session),
     current: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    _: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     payload = await _months_request(http_request)
     user = _get_user(session, user_id)
@@ -303,6 +308,7 @@ async def adjust_subscription(
 def cancel_subscription(
     user_id: str, session: Session = Depends(get_db_session),
     current: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    _: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     user = _get_user(session, user_id)
     try:
@@ -318,6 +324,7 @@ def cancel_subscription(
 def delete_user(
     user_id: str, session: Session = Depends(get_db_session),
     current: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    _: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     user = _get_user(session, user_id)
     subscription = ensure_subscription(session, user)
@@ -338,6 +345,7 @@ def delete_user(
 async def reset_user_pin(
     user_id: str, http_request: Request, session: Session = Depends(get_db_session),
     _: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    __: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     payload = _parse_payload(AdminUserResetPinRequest, await http_request.json())
     user = _get_user(session, user_id)

@@ -20,7 +20,7 @@ function workspaceUrl(path) {
   return `${appConfig.apiRoot}${path}${separator}refresh=${Date.now()}`;
 }
 
-async function requestJson(path, options = {}) {
+export async function requestJson(path, options = {}) {
   if (!appConfig.apiRoot) {
     return {
       ok: false,

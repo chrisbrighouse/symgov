@@ -426,6 +426,8 @@ FORCED_PIN_ALLOWED_OPERATIONS = frozenset(
         ("POST", "/api/v1/auth/logout"),
         ("POST", "/api/auth/logout"),
         ("GET", "/api/v1/profile"),
+        ("POST", "/api/v1/auth/reauthenticate"),
+        ("POST", "/api/auth/reauthenticate"),
     }
 )
 
@@ -539,4 +541,119 @@ def require_authoritative_external_submission_user(
     )
     if not {"admin", "submitter"}.intersection(current_user.roles):
         raise HTTPException(status_code=403, detail="Insufficient role for this operation.")
+    return current_user
+
+def require_organization_session(
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> AuthenticatedUser:
+    if current_user.session_mode != "organization" or current_user.active_organization_id is None:
+        raise HTTPException(status_code=403, detail="An organization-bound session is required.")
+    return current_user
+
+
+def require_organization_admin(
+    current_user: AuthenticatedUser = Depends(require_organization_session),
+) -> AuthenticatedUser:
+    if current_user.organization_base_role != "admin":
+        raise HTTPException(status_code=403, detail="Organization Admin privileges are required.")
+    return current_user
+
+
+def require_platform_admin(
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> AuthenticatedUser:
+    if not current_user.is_platform_admin:
+        raise HTTPException(status_code=403, detail="Platform Admin privileges are required.")
+    return current_user
+
+
+def require_capability(capability: str) -> Callable[[AuthenticatedUser], AuthenticatedUser]:
+    def dependency(current_user: AuthenticatedUser = Depends(require_organization_session)) -> AuthenticatedUser:
+        if capability not in current_user.organization_capabilities:
+            raise HTTPException(status_code=403, detail=f"Capability '{capability}' is required.")
+        return current_user
+
+    return dependency
+
+
+def require_recent_step_up(
+    request: Request,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> AuthenticatedUser:
+    from .auth import _as_aware_utc, hash_session_token, utc_now
+    from .models import UserSession
+
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+
+    token_hash = hash_session_token(token)
+    session_row = session.query(UserSession).filter(
+        UserSession.token_hash == token_hash,
+        UserSession.revoked_at.is_(None),
+    ).one_or_none()
+
+    if session_row is None or session_row.recent_step_up_at is None:
+        raise HTTPException(status_code=403, detail="Step-up reauthentication is required.")
+
+    now = utc_now()
+    # Enforce recent-step-up validity at elapsed 599 seconds and expiry at exactly 600 seconds.
+    # We'll use > 600 for expiry and >= 600 for fail-closed.
+    elapsed = (_as_aware_utc(now) - _as_aware_utc(session_row.recent_step_up_at)).total_seconds()
+    if elapsed >= 600:
+        raise HTTPException(status_code=403, detail="Step-up reauthentication has expired.")
+
+    return current_user
+
+
+def require_authoritative_user(
+    request: Request,
+    session: Session = Depends(get_db_session),
+) -> AuthenticatedUser:
+    from .auth import authoritative_user_from_token
+
+    token = request.cookies.get(SESSION_COOKIE_NAME, "")
+    current_user = authoritative_user_from_token(session, token)
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    enforce_session_access_state(
+        current_user.must_change_pin,
+        current_user.session_purpose,
+        request.method,
+        matched_route_template(request),
+    )
+    return current_user
+
+
+I25_PROTECTED_OPERATIONS = frozenset(
+    {
+        ("POST", "/api/v1/admin/auth/throttles/recover"),
+        ("POST", "/api/admin/auth/throttles/recover"),
+        ("POST", "/api/v1/admin/users"),
+        ("POST", "/api/admin/users"),
+        ("PATCH", "/api/v1/admin/users/{user_id}"),
+        ("PATCH", "/api/admin/users/{user_id}"),
+        ("POST", "/api/v1/admin/users/{user_id}/subscription/upgrade"),
+        ("POST", "/api/admin/users/{user_id}/subscription/upgrade"),
+        ("POST", "/api/v1/admin/users/{user_id}/subscription/adjust"),
+        ("POST", "/api/admin/users/{user_id}/subscription/adjust"),
+        ("POST", "/api/v1/admin/users/{user_id}/subscription/cancel"),
+        ("POST", "/api/admin/users/{user_id}/subscription/cancel"),
+        ("DELETE", "/api/v1/admin/users/{user_id}"),
+        ("DELETE", "/api/admin/users/{user_id}"),
+        ("POST", "/api/v1/admin/users/{user_id}/reset-pin"),
+        ("POST", "/api/admin/users/{user_id}/reset-pin"),
+    }
+)
+
+
+def require_i25_protected_mutation(
+    request: Request,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_authoritative_user),
+) -> AuthenticatedUser:
+    operation = (request.method.upper(), matched_route_template(request))
+    if operation in I25_PROTECTED_OPERATIONS:
+        require_recent_step_up(request, session, current_user)
     return current_user

@@ -38,6 +38,8 @@ def build_client_with_users():
 def login_admin(client):
     response = client.post("/api/v1/auth/login", json={"email": OWNER_EMAIL, "pin": "4590"})
     assert response.status_code == 200
+    response = client.post("/api/v1/auth/reauthenticate", json={"pin": "4590"})
+    assert response.status_code == 200
 
 
 def create_free_user(client, *, email="new@example.com", display_name="New User"):
@@ -177,3 +179,23 @@ def test_duplicate_email_or_name_is_rejected():
     login_admin(client)
     assert client.post("/api/v1/admin/users", json={"email": OWNER_EMAIL.upper(), "displayName": "Other", "roles": [], "pin": "4590"}).status_code == 409
     assert client.post("/api/v1/admin/users", json={"email": "fresh@example.com", "displayName": "chris", "roles": [], "pin": "4590"}).status_code == 409
+
+
+import pytest
+
+
+@pytest.mark.parametrize("path,body", [
+    ("/api/v1/admin/users", {"email": "x@test.com", "displayName": "X", "roles": [], "pin": "4590", "isActive": True}),
+    ("/api/admin/users", {"email": "y@test.com", "displayName": "Y", "roles": [], "pin": "4590", "isActive": True}),
+    ("/api/v1/admin/auth/throttles/recover", {"email": "x@test.com"}),
+    ("/api/admin/auth/throttles/recover", {"email": "x@test.com"}),
+])
+def test_i25_protected_operations_reject_without_step_up(path, body):
+    client, _ = build_client_with_users()
+    resp = client.post("/api/v1/auth/login", json={"email": OWNER_EMAIL, "pin": "4590"})
+    assert resp.status_code == 200
+
+    resp = client.post(path, json=body)
+
+    assert resp.status_code == 403
+    assert "step-up" in resp.json()["detail"].lower()

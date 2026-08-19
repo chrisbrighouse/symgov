@@ -41,6 +41,7 @@ class AuthenticatedUser:
     organization_base_role: str | None = None
     organization_capabilities: tuple[str, ...] = ()
     is_platform_admin: bool = False
+    recent_step_up_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -218,6 +219,7 @@ def create_user_session(
     purpose: str | None = None,
     session_mode: str = "personal",
     active_organization_id: uuid.UUID | None = None,
+    recent_step_up_at: datetime | None = None,
 ) -> str:
     session.flush()
     locked_user = (
@@ -248,6 +250,7 @@ def create_user_session(
             purpose=resolved_purpose,
             session_mode=session_mode,
             active_organization_id=active_organization_id,
+            recent_step_up_at=recent_step_up_at,
         )
     )
     session.flush()
@@ -302,6 +305,7 @@ def complete_credential_change(
     user.pin_set_at = now
     user.must_change_pin = False
     user.updated_at = now
+    session_row.recent_step_up_at = None
     revoke_outstanding_selection_challenges(session, user.id, now=now)
     session.flush()
     if session_row.purpose == "credential_change":
@@ -364,6 +368,7 @@ def current_user_from_token(
         organization_base_role=organization_context.base_role if organization_context else None,
         organization_capabilities=organization_context.capabilities if organization_context else (),
         is_platform_admin=organization_context.is_platform_admin if organization_context else False,
+        recent_step_up_at=_as_aware_utc(session_row.recent_step_up_at) if session_row.recent_step_up_at else None,
     )
 
 
@@ -441,6 +446,7 @@ def authoritative_user_from_token(
         organization_base_role=organization_context.base_role if organization_context else None,
         organization_capabilities=organization_context.capabilities if organization_context else (),
         is_platform_admin=organization_context.is_platform_admin if organization_context else False,
+        recent_step_up_at=_as_aware_utc(session_row.recent_step_up_at) if session_row.recent_step_up_at else None,
     )
 
 

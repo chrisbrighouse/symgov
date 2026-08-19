@@ -14,6 +14,7 @@ from symgov_backend.models import (
     OrganizationRoleAssignment,
     PlatformRoleAssignment,
     User,
+    UserSession,
 )
 from symgov_backend.organization_icons import generate_organization_fallback_icon
 from symgov_backend.subscriptions import PROTECTED_OWNER_EMAIL
@@ -638,6 +639,11 @@ def deactivate_membership(
     membership.status = "inactive"
     membership.deactivated_at = now
     membership.updated_at = now
+    session.query(UserSession).filter(
+        UserSession.auth_user_id == membership.user_id,
+        UserSession.active_organization_id == membership.organization_id,
+        UserSession.revoked_at.is_(None),
+    ).update({"revoked_at": now}, synchronize_session=False)
     session.flush()
 
 

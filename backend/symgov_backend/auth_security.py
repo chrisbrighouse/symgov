@@ -13,8 +13,8 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .auth import normalize_email, utc_now, verify_pin
-from .models import AuthLoginAttemptEvent, AuthLoginThrottleBucket, AuthThrottleRecoveryEvent, User
+from .auth import hash_session_token, normalize_email, utc_now, verify_pin
+from .models import AuthLoginAttemptEvent, AuthLoginThrottleBucket, AuthThrottleRecoveryEvent, User, UserSession
 from .settings import SymgovAPISettings
 
 
@@ -288,3 +288,42 @@ def recover_throttle_bucket(
         )
     )
     return cleared
+
+def reauthenticate_session(
+    session: Session,
+    *,
+    email: str,
+    token: str,
+    pin: str,
+    client_ip: str | None,
+    policy: LoginThrottlePolicy,
+    now: datetime | None = None,
+) -> LoginAuthenticationResult:
+    resolved_now = now or utc_now()
+    result = authenticate_login(
+        session,
+        email=email,
+        pin=pin,
+        client_ip=client_ip,
+        policy=policy,
+        now=resolved_now,
+    )
+    if result.user is None:
+        return result
+
+    token_hash = hash_session_token(token)
+    session_row = (
+        session.query(UserSession)
+        .filter(
+            UserSession.token_hash == token_hash,
+            UserSession.auth_user_id == result.user.id,
+            UserSession.revoked_at.is_(None),
+        )
+        .with_for_update()
+        .one_or_none()
+    )
+    if session_row is not None:
+        session_row.recent_step_up_at = resolved_now
+        return result
+
+    return LoginAuthenticationResult(None)

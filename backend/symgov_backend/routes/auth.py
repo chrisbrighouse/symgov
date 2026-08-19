@@ -18,11 +18,28 @@ from ..auth import (
     revoke_session,
     utc_now,
 )
-from ..auth_security import authenticate_login, login_throttle_policy
-from ..dependencies import get_db_session, resolve_client_ip
+from ..auth_security import authenticate_login, login_throttle_policy, reauthenticate_session
+from ..dependencies import (
+    get_db_session,
+    require_i25_protected_mutation,
+    require_recent_step_up,
+    require_user,
+    resolve_client_ip,
+)
 from ..models import AuthOrganizationSelectionChallenge, User
 from ..organization_authorization import resolve_eligible_organization_memberships
-from ..schemas import AuthChangePinRequest, AuthChangePinResponse, AuthLoginRequest, AuthLoginResponse, AuthMeResponse, AuthSelectionChallengeResponse, AuthSelectOrganizationRequest, AuthUserResponse, SubscriptionResponse
+from ..schemas import (
+    AuthChangePinRequest,
+    AuthChangePinResponse,
+    AuthLoginRequest,
+    AuthLoginResponse,
+    AuthMeResponse,
+    AuthReauthenticateRequest,
+    AuthSelectionChallengeResponse,
+    AuthSelectOrganizationRequest,
+    AuthUserResponse,
+    SubscriptionResponse,
+)
 from ..settings import SymgovAPISettings, get_settings
 
 
@@ -62,6 +79,7 @@ def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | No
             "organizationSymbolsEnabled": effective.organizations_enabled and effective.organization_symbols_enabled,
             "organizationAgentsEnabled": effective.organizations_enabled and effective.organization_agents_enabled,
         },
+        recentStepUpAt=user.recent_step_up_at.isoformat() if user.recent_step_up_at else None,
     )
 
 
@@ -171,6 +189,7 @@ def issue_application_context(
             purpose="application",
             session_mode="organization" if selected else "personal",
             active_organization_id=selected.organization_id if selected else None,
+            recent_step_up_at=None,
         ),
         None,
     )
@@ -256,6 +275,7 @@ async def select_organization(
         purpose="application",
         session_mode="organization",
         active_organization_id=selected.organization_id,
+        recent_step_up_at=None,
     )
     current = current_user_from_token(session, token)
     if current is None:
@@ -307,8 +327,9 @@ async def login(
         session.commit()
         raise HTTPException(status_code=401, detail="Invalid email or PIN.")
     revoke_outstanding_selection_challenges(session, user.id)
+    now = utc_now()
     if user.must_change_pin:
-        token = create_user_session(session, user=user, ttl_hours=0.5, purpose="credential_change")
+        token = create_user_session(session, user=user, ttl_hours=0.5, purpose="credential_change", recent_step_up_at=None)
     else:
         token, selection_challenge = issue_application_context(session, user=user, settings=settings)
         if selection_challenge is not None:
@@ -330,6 +351,46 @@ async def login(
         max_age=14 * 24 * 60 * 60,
     )
     return AuthLoginResponse(user=auth_user_response(current, settings))
+
+
+@router.post("/reauthenticate")
+async def reauthenticate(
+    http_request: Request,
+    session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> dict[str, bool]:
+    token = http_request.cookies.get(SESSION_COOKIE_NAME, "")
+    payload = await http_request.json()
+    auth_request = AuthReauthenticateRequest.model_validate(payload.get("payload") or payload)
+
+    result = reauthenticate_session(
+        session,
+        email=current_user.email,
+        token=token,
+        pin=auth_request.pin,
+        client_ip=resolve_client_ip(
+            http_request.client.host if http_request.client else None,
+            http_request.headers.get("x-forwarded-for"),
+            settings,
+        ),
+        policy=login_throttle_policy(settings),
+    )
+
+    if result.throttled_scope is not None:
+        session.commit()
+        raise HTTPException(
+            status_code=429,
+            detail="Too many attempts. Try again later.",
+            headers={"Retry-After": str(result.retry_after_seconds or 1)},
+        )
+
+    if result.user is None:
+        session.commit()
+        raise HTTPException(status_code=401, detail="Invalid PIN.")
+
+    session.commit()
+    return {"ok": True}
 
 
 @router.get("/me", response_model=AuthMeResponse)
@@ -360,6 +421,7 @@ async def change_pin(
     response: Response,
     session: Session = Depends(get_db_session),
     settings: SymgovAPISettings = Depends(get_settings),
+    _: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AuthChangePinResponse:
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
     payload = await request.json()

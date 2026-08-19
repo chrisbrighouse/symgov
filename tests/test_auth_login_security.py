@@ -431,6 +431,8 @@ def test_recovery_route_is_admin_only_bounded_and_audited():
         client.post("/api/v1/auth/login", json={"email": "target@example.test", "pin": "9999"})
     assert client.post("/api/v1/auth/login", json={"email": "admin@example.test", "pin": "1234"}).status_code == 200
 
+    client.post("/api/v1/auth/reauthenticate", json={"pin": "1234"})
+
     response = client.post(
         "/api/v1/admin/auth/throttles/recover",
         json={"scope": "account", "key": "target@example.test", "reason": "Verified account owner request"},

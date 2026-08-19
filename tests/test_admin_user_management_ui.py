@@ -3,6 +3,7 @@ from pathlib import Path
 
 APP_JSX = Path(__file__).resolve().parents[1] / "frontend" / "src" / "App.jsx"
 API_JS = Path(__file__).resolve().parents[1] / "frontend" / "src" / "api.js"
+HEADER_JS = Path(__file__).resolve().parents[1] / "frontend" / "src" / "Header.js"
 
 
 def test_admin_user_management_page_and_navigation_exist():
@@ -75,7 +76,7 @@ def test_admin_user_management_shows_subscription_dates_controls_and_pagination(
 
 
 def test_header_shows_active_plus_badge():
-    source = APP_JSX.read_text(encoding="utf-8")
+    source = HEADER_JS.read_text(encoding="utf-8")
     assert "plus-subscription-badge" in source
     assert "user.subscription?.isActive" in source
 

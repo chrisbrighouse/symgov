@@ -109,6 +109,7 @@ def login(client, email=OWNER_EMAIL, pin="4590", *, legacy=False):
 
 def login_admin_application_session(client):
     assert login(client).status_code == 200
+    assert client.post("/api/v1/auth/reauthenticate", json={"pin": "4590"}).status_code == 200
     changed = client.post("/api/v1/auth/change-pin", json={"currentPin": "4590", "newPin": "6781"})
     assert changed.status_code == 200
 
@@ -418,9 +419,10 @@ def test_admin_reset_rejects_hash_equivalent_pin_and_preserves_sessions():
         session.commit()
         before_hash = ordinary.pin_hash
 
-    response = client.post(f"/api/v1/admin/users/{ordinary_id}/reset-pin", json={"pin": "1234"})
+        client.post("/api/v1/auth/reauthenticate", json={"pin": "6781"})
+        response = client.post(f"/api/v1/admin/users/{ordinary_id}/reset-pin", json={"pin": "1234"})
 
-    assert response.status_code == 400
+        assert response.status_code == 400
     assert response.json()["detail"] == RESET_SAME_PIN_DETAIL
     with Session() as session:
         assert session.get(User, ordinary_id).pin_hash == before_hash
@@ -438,8 +440,9 @@ def test_admin_reset_and_deactivation_revoke_sessions_while_reactivation_does_no
         create_user_session(session, user=ordinary)
         session.commit()
 
-    reset = client.post(f"/api/v1/admin/users/{ordinary_id}/reset-pin", json={"pin": "5678"})
-    assert reset.status_code == 200
+        client.post("/api/v1/auth/reauthenticate", json={"pin": "6781"})
+        reset = client.post(f"/api/v1/admin/users/{ordinary_id}/reset-pin", json={"pin": "5678"})
+        assert reset.status_code == 200
     with Session() as session:
         assert session.query(UserSession).filter(UserSession.auth_user_id == ordinary_id, UserSession.revoked_at.is_(None)).count() == 0
         ordinary = session.get(User, ordinary_id)

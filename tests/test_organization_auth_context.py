@@ -540,6 +540,7 @@ def test_login_aliases_have_exact_response_and_cookie_parity(path, outcome):
         "organization",
         "isPlatformAdmin",
         "capabilities",
+        "recentStepUpAt",
     }
     assert {
         key: user[key]
@@ -639,6 +640,7 @@ def test_successful_mandatory_pin_change_with_no_eligible_organization_issues_pe
             "organizationSymbolsEnabled": True,
             "organizationAgentsEnabled": True,
         },
+        "recentStepUpAt": None,
     }
     application_token = response.cookies.get("symgov_session")
     assert application_token and application_token != limited_token
