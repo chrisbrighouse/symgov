@@ -18,7 +18,10 @@ from symgov_backend.models import (
     User,
     UserSession,
 )
-from symgov_backend.organization_icons import generate_organization_fallback_icon
+from symgov_backend.organization_icons import (
+    ICON_UPLOAD_MIN_INTERVAL_SECONDS,
+    generate_organization_fallback_icon,
+)
 from symgov_backend.subscriptions import PROTECTED_OWNER_EMAIL
 
 if TYPE_CHECKING:
@@ -1073,6 +1076,98 @@ def update_organization(
             actor_id=actor_user_id,
             payload={"changed_fields": changed},
         )
+    return org
+
+
+def enforce_icon_upload_rate_limit(org: Organization) -> None:
+    """Reject an icon upload attempt that arrives too soon after the last one.
+
+    A simple per-organization cooldown, checked both before the expensive
+    validate/store work (read-only) and again under the row lock in
+    ``finalize_organization_icon_upload`` (authoritative), bounds repeated
+    upload abuse without a dedicated throttle table/migration.
+    """
+    if org.uploaded_icon_uploaded_at is None:
+        return
+    ts = org.uploaded_icon_uploaded_at
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    elapsed = (_utc_now() - ts).total_seconds()
+    if elapsed < ICON_UPLOAD_MIN_INTERVAL_SECONDS:
+        raise ValueError("Icon uploads are rate-limited; wait a few seconds before trying again.")
+
+
+def finalize_organization_icon_upload(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID,
+    storage_key: str,
+    content_type: str,
+) -> Organization:
+    """Activate an already-uploaded, already-verified icon object transactionally.
+
+    The caller must upload and verify the immutable object first; this only
+    switches the active database reference. A failure here leaves whichever
+    icon (custom or generated fallback) was previously active untouched.
+    """
+    org = session.execute(
+        select(Organization).where(Organization.id == organization_id).with_for_update()
+    ).scalar_one_or_none()
+    if org is None:
+        raise ValueError("Organization not found.")
+    if org.is_protected:
+        raise ValueError("The protected Symgov organization cannot be updated via this endpoint.")
+    enforce_icon_upload_rate_limit(org)
+
+    now = _utc_now()
+    org.uploaded_icon_storage_key = storage_key
+    org.uploaded_icon_content_type = content_type
+    org.uploaded_icon_uploaded_at = now
+    org.updated_at = now
+    session.flush()
+    _emit_audit(
+        session,
+        entity_type="organization",
+        entity_id=organization_id,
+        action="organization.icon_uploaded",
+        actor_id=actor_user_id,
+        payload={"content_type": content_type},
+    )
+    return org
+
+
+def remove_organization_icon(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID,
+) -> Organization:
+    org = session.execute(
+        select(Organization).where(Organization.id == organization_id).with_for_update()
+    ).scalar_one_or_none()
+    if org is None:
+        raise ValueError("Organization not found.")
+    if org.is_protected:
+        raise ValueError("The protected Symgov organization cannot be updated via this endpoint.")
+    if org.uploaded_icon_storage_key is None:
+        raise ValueError("This organization has no custom icon to remove.")
+
+    now = _utc_now()
+    removed_storage_key = org.uploaded_icon_storage_key
+    org.uploaded_icon_storage_key = None
+    org.uploaded_icon_content_type = None
+    org.uploaded_icon_uploaded_at = None
+    org.updated_at = now
+    session.flush()
+    _emit_audit(
+        session,
+        entity_type="organization",
+        entity_id=organization_id,
+        action="organization.icon_removed",
+        actor_id=actor_user_id,
+        payload={"removed_storage_key": removed_storage_key},
+    )
     return org
 
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,19 +15,31 @@ from ..dependencies import (
     require_organization_session,
     require_recent_step_up,
 )
+from ..organization_icons import (
+    MAX_ICON_UPLOAD_BASE64_CHARS,
+    NORMALIZED_ICON_CONTENT_TYPE,
+    IconUploadError,
+    build_organization_icon_object_key,
+    validate_and_normalize_icon_upload,
+)
 from ..organization_service import (
     add_organization_member,
     deactivate_membership,
+    enforce_icon_upload_rate_limit,
+    finalize_organization_icon_upload,
     get_organization_detail,
     grant_member_capability,
     list_organization_members,
+    remove_organization_icon,
     replace_membership_base_role,
     revoke_member_capability,
     update_organization,
 )
+from ..runtime import RuntimePersistenceBridge, download_object_bytes
 from ..schemas import (
     OrgAddMemberRequest,
     OrgDetailResponse,
+    OrgIconUploadRequest,
     OrgMemberCapabilityItem,
     OrgMemberListResponse,
     OrgMemberResponse,
@@ -44,6 +58,20 @@ def _require_org_admin_enabled(settings: SymgovAPISettings = Depends(get_setting
         raise HTTPException(status_code=404, detail="Not found.")
 
 
+def get_icon_storage_bridge(settings: SymgovAPISettings = Depends(get_settings)) -> RuntimePersistenceBridge:
+    """Storage-only bridge dependency for icon upload/download.
+
+    Deliberately distinct from the shared ``get_runtime_bridge`` dependency:
+    that dependency's own ``settings`` parameter is a bare (non-``Depends``)
+    default, which FastAPI's body-field inference treats as an implicit,
+    embeddable body field. Combined with this route's own JSON body model,
+    that silently forces both into a `{"body": ..., "settings": ...}`
+    envelope instead of the plain request body clients send. Depending on
+    ``get_settings`` explicitly here avoids that pitfall.
+    """
+    return RuntimePersistenceBridge(env_file=str(settings.db_env_file))
+
+
 def _active_org_id(current_user: AuthenticatedUser) -> uuid.UUID:
     if current_user.active_organization_id is None:
         raise HTTPException(status_code=403, detail="An organization-bound session is required.")
@@ -58,6 +86,21 @@ def _parse_membership_id(membership_id: str) -> uuid.UUID:
         return uuid.UUID(membership_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail="Membership not found.") from exc
+
+
+def _org_detail_response(org) -> OrgDetailResponse:
+    return OrgDetailResponse(
+        id=str(org.id),
+        code=org.code,
+        displayName=org.display_name,
+        legalName=org.legal_name,
+        locale=org.locale,
+        entitlementStatus=org.entitlement_status,
+        isActive=bool(org.is_active),
+        isProtected=bool(org.is_protected),
+        iconUrl=f"/api/v1{ORG_ICON_PATH}",
+        hasCustomIcon=org.uploaded_icon_storage_key is not None,
+    )
 
 
 def _member_response(detail) -> OrgMemberResponse:
@@ -91,17 +134,7 @@ def get_org_detail(
     org = get_organization_detail(session, org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="Organization not found.")
-    return OrgDetailResponse(
-        id=str(org.id),
-        code=org.code,
-        displayName=org.display_name,
-        legalName=org.legal_name,
-        locale=org.locale,
-        entitlementStatus=org.entitlement_status,
-        isActive=bool(org.is_active),
-        isProtected=bool(org.is_protected),
-        iconUrl=f"/api/v1{ORG_ICON_PATH}",
-    )
+    return _org_detail_response(org)
 
 
 @router.patch(
@@ -127,17 +160,7 @@ def patch_org(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
-    return OrgDetailResponse(
-        id=str(org.id),
-        code=org.code,
-        displayName=org.display_name,
-        legalName=org.legal_name,
-        locale=org.locale,
-        entitlementStatus=org.entitlement_status,
-        isActive=bool(org.is_active),
-        isProtected=bool(org.is_protected),
-        iconUrl=f"/api/v1{ORG_ICON_PATH}",
-    )
+    return _org_detail_response(org)
 
 
 @router.get(
@@ -344,13 +367,112 @@ def remove_member(
 def get_org_icon(
     session: Session = Depends(get_db_session),
     current_user: AuthenticatedUser = Depends(require_organization_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> Response:
     org_id = _active_org_id(current_user)
     org = get_organization_detail(session, org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="Organization not found.")
+    if org.uploaded_icon_storage_key:
+        try:
+            downloaded = download_object_bytes(
+                object_key=org.uploaded_icon_storage_key,
+                env_file=settings.storage_env_file,
+            )
+        except Exception:
+            downloaded = None
+        if downloaded is not None:
+            return Response(
+                content=downloaded["payload"],
+                media_type=org.uploaded_icon_content_type or NORMALIZED_ICON_CONTENT_TYPE,
+                headers={"Cache-Control": "private, max-age=300"},
+            )
     return Response(
         content=org.fallback_icon_svg,
         media_type="image/svg+xml",
         headers={"Cache-Control": "private, max-age=300"},
     )
+
+
+@router.post(
+    ORG_ICON_PATH,
+    response_model=OrgDetailResponse,
+    dependencies=[Depends(_require_org_admin_enabled)],
+)
+def upload_org_icon(
+    body: OrgIconUploadRequest,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_admin),
+    settings: SymgovAPISettings = Depends(get_settings),
+    bridge: RuntimePersistenceBridge = Depends(get_icon_storage_bridge),
+) -> OrgDetailResponse:
+    org_id = _active_org_id(current_user)
+    actor_id = uuid.UUID(current_user.id)
+
+    # Bound the encoded text before decoding; base64 expands payload size ~4/3.
+    if len(body.contentBase64) > MAX_ICON_UPLOAD_BASE64_CHARS:
+        raise HTTPException(status_code=413, detail="Icon upload is too large.")
+    try:
+        payload = base64.b64decode(body.contentBase64, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise HTTPException(status_code=400, detail="Icon upload is not valid base64.") from exc
+
+    org = get_organization_detail(session, org_id)
+    if org is None:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    if org.is_protected:
+        raise HTTPException(
+            status_code=400,
+            detail="The protected Symgov organization cannot be updated via this endpoint.",
+        )
+    try:
+        enforce_icon_upload_rate_limit(org)
+    except ValueError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+    try:
+        normalized = validate_and_normalize_icon_upload(payload, body.contentType)
+    except IconUploadError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    object_key = build_organization_icon_object_key(org_id, normalized.checksum_sha256)
+    try:
+        bridge.upload_object_bytes(
+            object_key=object_key,
+            payload=normalized.png_bytes,
+            content_type=NORMALIZED_ICON_CONTENT_TYPE,
+            env_file=settings.storage_env_file,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Icon storage is unavailable.") from exc
+
+    try:
+        org = finalize_organization_icon_upload(
+            session,
+            org_id,
+            actor_user_id=actor_id,
+            storage_key=object_key,
+            content_type=NORMALIZED_ICON_CONTENT_TYPE,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.commit()
+    return _org_detail_response(org)
+
+
+@router.delete(
+    ORG_ICON_PATH,
+    response_model=OrgDetailResponse,
+    dependencies=[Depends(_require_org_admin_enabled)],
+)
+def remove_org_icon(
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_admin),
+) -> OrgDetailResponse:
+    org_id = _active_org_id(current_user)
+    try:
+        org = remove_organization_icon(session, org_id, actor_user_id=uuid.UUID(current_user.id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.commit()
+    return _org_detail_response(org)

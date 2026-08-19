@@ -934,6 +934,14 @@ class OrgDetailResponse(BaseModel):
     isActive: bool
     isProtected: bool
     iconUrl: str
+    hasCustomIcon: bool
+
+
+class OrgIconUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    contentType: str = Field(min_length=1, max_length=100)
+    contentBase64: str = Field(min_length=1)
 
 
 class OrgUpdateRequest(BaseModel):
