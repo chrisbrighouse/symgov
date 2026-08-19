@@ -51,6 +51,8 @@ def _alembic(url: str, *args: str) -> None:
 def postgres_url() -> Generator[str, None, None]:
     if shutil.which("docker") is None:
         pytest.skip("Docker is required")
+    if subprocess.run(["docker", "info"], capture_output=True).returncode != 0:
+        pytest.skip("Docker daemon is not accessible")
     name = f"symgov-2c-{uuid.uuid4().hex[:12]}"
     password = "test-password"
     subprocess.run(
