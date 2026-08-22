@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from .models import AuthOrganizationSelectionChallenge, User, UserRole, UserSession, UserSubscription
 from .subscriptions import PROTECTED_OWNER_EMAIL, ensure_subscription
+from .settings import SymgovAPISettings, get_settings
 
 PIN_HASH_ALGORITHM = "pbkdf2_sha256"
 PIN_HASH_ITERATIONS = 260_000
@@ -323,9 +324,10 @@ def _as_aware_utc(value: datetime) -> datetime:
 
 def current_user_from_token(
     session: Session,
-    token: str,
+    token: str | None,
     *,
     now: datetime | None = None,
+    settings: SymgovAPISettings | None = None,
     before_maintenance: Callable[[bool, str], None] | None = None,
 ) -> AuthenticatedUser | None:
     if not token:
@@ -341,13 +343,14 @@ def current_user_from_token(
         return None
     if before_maintenance is not None:
         before_maintenance(bool(user.must_change_pin), session_row.purpose)
+    resolved_settings = settings or get_settings()
     subscription = ensure_subscription(session, user, as_of=_as_aware_utc(resolved_now).date())
     session_row.last_seen_at = _as_aware_utc(resolved_now)
     organization_context = None
     if session_row.session_mode == "organization" and session_row.active_organization_id is not None:
         from .organization_authorization import resolve_bound_organization_context
 
-        organization_context = resolve_bound_organization_context(session, user, session_row.active_organization_id)
+        organization_context = resolve_bound_organization_context(session, user, session_row.active_organization_id, resolved_settings)
         if organization_context is None:
             return None
     return AuthenticatedUser(
@@ -374,9 +377,10 @@ def current_user_from_token(
 
 def authoritative_user_from_token(
     session: Session,
-    token: str,
+    token: str | None,
     *,
     now: datetime | None = None,
+    settings: SymgovAPISettings | None = None,
 ) -> AuthenticatedUser | None:
     """Revalidate a session while retaining the user lock through caller side effects."""
     if not token:
@@ -420,12 +424,13 @@ def authoritative_user_from_token(
     cached_subscription = session.get(UserSubscription, user.id)
     if cached_subscription is not None:
         session.refresh(cached_subscription)
+    resolved_settings = settings or get_settings()
     subscription = ensure_subscription(session, user, as_of=_as_aware_utc(resolved_now).date())
     organization_context = None
     if session_row.session_mode == "organization" and session_row.active_organization_id is not None:
         from .organization_authorization import resolve_bound_organization_context
 
-        organization_context = resolve_bound_organization_context(session, user, session_row.active_organization_id)
+        organization_context = resolve_bound_organization_context(session, user, session_row.active_organization_id, resolved_settings)
         if organization_context is None:
             return None
     return AuthenticatedUser(

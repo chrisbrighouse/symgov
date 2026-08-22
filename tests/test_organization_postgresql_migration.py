@@ -20,9 +20,11 @@ from sqlalchemy.orm import sessionmaker
 
 from symgov_backend.models import OrganizationMembership, OrganizationRoleAssignment, User
 from symgov_backend.organization_service import (
+    add_organization_member,
     create_organization_with_initial_admin,
     deactivate_membership,
     reconcile_symgov_organization_bootstrap,
+    replace_protected_membership_base_role,
     replace_membership_base_role,
 )
 
@@ -30,6 +32,9 @@ psycopg = pytest.importorskip("psycopg")
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
+AUDIT_IMMUTABILITY_MIGRATION = (
+    BACKEND / "alembic" / "versions" / "20260821_0029_audit_event_immutability.py"
+)
 LEGACY_SESSION_ID: uuid.UUID | None = None
 
 
@@ -125,7 +130,7 @@ def organization_database() -> Generator[Engine, None, None]:
             )
         engine.dispose()
 
-        _alembic(url, "upgrade", "20260810_0028")
+        _alembic(url, "upgrade", "20260821_0029")
         engine = create_engine(url)
         LEGACY_SESSION_ID = legacy_session_id
         yield engine
@@ -148,6 +153,108 @@ def _insert_user(engine: Engine, email: str) -> uuid.UUID:
             {"id": user_id, "email": email, "now": now},
         )
     return user_id
+
+
+def test_audit_immutability_migration_source_is_append_only_and_reversible():
+    source = AUDIT_IMMUTABILITY_MIGRATION.read_text(encoding="utf-8")
+
+    assert 'revision = "20260821_0029"' in source
+    assert 'down_revision = "20260810_0028"' in source
+    assert "BEFORE UPDATE OR DELETE ON audit_events" in source
+    assert "BEFORE TRUNCATE ON audit_events" in source
+    assert "GRANT SELECT, INSERT ON audit_events TO symgov_app" in source
+    assert "REVOKE UPDATE, DELETE, TRUNCATE ON audit_events FROM symgov_app" in source
+    assert "DROP TRIGGER IF EXISTS trg_audit_events_append_only" in source
+    assert "DROP FUNCTION IF EXISTS protect_audit_events_append_only()" in source
+
+
+def test_audit_events_are_append_only_for_owner_and_least_privilege_role(
+    organization_database: Engine,
+):
+    owner_event_id = uuid.uuid4()
+    app_event_id = uuid.uuid4()
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    with organization_database.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO audit_events "
+                "(id,entity_type,entity_id,action,payload_json,created_at) "
+                "VALUES (:id,'security_test',:entity_id,'created','{}'::jsonb,:now)"
+            ),
+            {"id": owner_event_id, "entity_id": uuid.uuid4(), "now": now},
+        )
+        connection.execute(text("SET LOCAL ROLE symgov_app"))
+        assert connection.execute(text("SELECT current_user")).scalar_one() == "symgov_app"
+        assert connection.execute(
+            text("SELECT has_table_privilege(current_user, 'audit_events', 'SELECT, INSERT')")
+        ).scalar_one() is True
+        assert connection.execute(
+            text(
+                "SELECT has_table_privilege("
+                "current_user, 'audit_events', 'UPDATE, DELETE, TRUNCATE')"
+            )
+        ).scalar_one() is False
+        connection.execute(
+            text(
+                "INSERT INTO audit_events "
+                "(id,entity_type,entity_id,action,payload_json,created_at) "
+                "VALUES (:id,'security_test',:entity_id,'app_insert','{}'::jsonb,:now)"
+            ),
+            {"id": app_event_id, "entity_id": uuid.uuid4(), "now": now},
+        )
+        assert connection.execute(
+            text("SELECT count(*) FROM audit_events WHERE id=:id"), {"id": app_event_id}
+        ).scalar_one() == 1
+
+    for statement in (
+        "UPDATE audit_events SET action='tampered' WHERE id=:id",
+        "DELETE FROM audit_events WHERE id=:id",
+        "TRUNCATE TABLE audit_events",
+    ):
+        with pytest.raises(DBAPIError, match="permission denied"):
+            with organization_database.begin() as connection:
+                connection.execute(text("SET LOCAL ROLE symgov_app"))
+                connection.execute(text(statement), {"id": app_event_id})
+
+    for statement in (
+        "UPDATE audit_events SET action='tampered' WHERE id=:id",
+        "DELETE FROM audit_events WHERE id=:id",
+        "TRUNCATE TABLE audit_events",
+    ):
+        with pytest.raises(DBAPIError, match="audit events are append-only"):
+            with organization_database.begin() as connection:
+                connection.execute(text(statement), {"id": owner_event_id})
+
+
+def test_audit_immutability_migration_downgrades_safely_and_reupgrades(
+    organization_database: Engine,
+):
+    url = organization_database.url.render_as_string(hide_password=False)
+    _alembic(url, "downgrade", "20260810_0028")
+    try:
+        with organization_database.connect() as connection:
+            assert connection.execute(
+                text(
+                    "SELECT count(*) FROM pg_trigger "
+                    "WHERE tgrelid='audit_events'::regclass AND NOT tgisinternal"
+                )
+            ).scalar_one() == 0
+            assert connection.execute(
+                text(
+                    "SELECT has_table_privilege("
+                    "'symgov_app', 'audit_events', 'SELECT, INSERT')"
+                )
+            ).scalar_one() is False
+    finally:
+        _alembic(url, "upgrade", "20260821_0029")
+
+    with organization_database.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT count(*) FROM pg_trigger "
+                "WHERE tgrelid='audit_events'::regclass AND NOT tgisinternal"
+            )
+        ).scalar_one() == 2
 
 
 def _insert_organization(
@@ -735,9 +842,9 @@ def test_duplicate_membership_is_rejected_for_same_organization_and_user(
 def test_concurrent_admin_demotions_serialize_and_preserve_one_active_admin(
     organization_database: Engine,
 ):
-    actor_id = _insert_user(organization_database, "role-actor@example.test")
     user_one_id = _insert_user(organization_database, "role-one@example.test")
     user_two_id = _insert_user(organization_database, "role-two@example.test")
+    actor_id = user_one_id
     organization_id = _insert_organization(
         organization_database,
         code="CONCURRENT-ROLE",
@@ -1271,11 +1378,12 @@ def test_symgov_membership_and_platform_admin_service_use_one_canonical_lock(
     code = f"MIXED-MP-{uuid.uuid4().hex[:8].upper()}"
 
     def symgov_membership(session) -> None:
-        replace_membership_base_role(
+        replace_protected_membership_base_role(
             session,
             membership_id=membership_id,
             new_base_role="user",
             actor_user_id=actor_id,
+            reason="Verify canonical administration locking",
         )
 
     def platform_service(session) -> None:
@@ -1307,6 +1415,80 @@ def test_symgov_membership_and_platform_admin_service_use_one_canonical_lock(
             ),
             {"user_id": member_id},
         ).scalar_one() == 1
+
+
+@pytest.mark.parametrize("authority_mutation", ("demote", "deactivate"))
+@pytest.mark.parametrize("first_path", ("authority", "privileged"))
+def test_privileged_mutation_revalidates_concurrently_changed_admin_authority(
+    organization_database: Engine,
+    authority_mutation: str,
+    first_path: str,
+):
+    suffix = uuid.uuid4().hex[:8]
+    organization_id = _insert_organization(
+        organization_database,
+        code=f"RACE-{suffix.upper()}",
+        normalized_code=f"race-{suffix}",
+    )
+    actor_id = _insert_user(organization_database, f"race-actor-{suffix}@example.test")
+    authority_id = _insert_user(organization_database, f"race-authority-{suffix}@example.test")
+    target_id = _insert_user(organization_database, f"race-target-{suffix}@example.test")
+    actor_membership_id = _insert_membership_with_role(
+        organization_database, organization_id=organization_id, user_id=actor_id,
+    )
+    _insert_membership_with_role(
+        organization_database, organization_id=organization_id, user_id=authority_id,
+    )
+
+    def change_authority(session) -> None:
+        if authority_mutation == "demote":
+            replace_membership_base_role(
+                session,
+                membership_id=actor_membership_id,
+                new_base_role="user",
+                actor_user_id=authority_id,
+            )
+        else:
+            deactivate_membership(
+                session,
+                membership_id=actor_membership_id,
+                actor_user_id=authority_id,
+                reason="Concurrent administrator deactivation",
+            )
+
+    def privileged_mutation(session) -> None:
+        add_organization_member(
+            session,
+            organization_id,
+            user_id=target_id,
+            base_role="user",
+            actor_user_id=actor_id,
+        )
+
+    operations = {"authority": change_authority, "privileged": privileged_mutation}
+    second_path = "privileged" if first_path == "authority" else "authority"
+    errors = _run_mixed_administration_pair(
+        organization_database,
+        operations[first_path],
+        operations[second_path],
+    )
+
+    with organization_database.connect() as connection:
+        target_memberships = connection.execute(
+            text(
+                "SELECT count(*) FROM organization_memberships "
+                "WHERE organization_id=:organization_id AND user_id=:target_id AND status='active'"
+            ),
+            {"organization_id": organization_id, "target_id": target_id},
+        ).scalar_one()
+    if first_path == "authority":
+        assert target_memberships == 0
+        assert len(errors) == 1
+        assert isinstance(errors[0], ValueError)
+        assert "active administrator" in str(errors[0]).lower()
+    else:
+        assert target_memberships == 1
+        assert errors == []
 
 
 def test_challenge_hashes_and_attempt_bounds_are_database_enforced(
@@ -1642,6 +1824,11 @@ def test_membership_identity_and_lifecycle_history_are_preserved(
         code="MEMBERSHIP-HISTORY-ALT",
         normalized_code="membership-history-alt",
     )
+    _insert_membership_with_role(
+        organization_database,
+        organization_id=organization_id,
+        user_id=alternate_user_id,
+    )
     membership_id = uuid.uuid4()
     created_at = datetime.now(timezone.utc).replace(microsecond=0)
     invited_at = created_at - timedelta(minutes=1)
@@ -1719,7 +1906,7 @@ def test_membership_identity_and_lifecycle_history_are_preserved(
         deactivate_membership(
             session,
             membership_id=membership_id,
-            actor_user_id=member_id,
+            actor_user_id=alternate_user_id,
         )
         session.commit()
 

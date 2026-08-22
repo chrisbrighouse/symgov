@@ -70,10 +70,6 @@ def resolve_eligible_organization_memberships(
 
 
 def resolve_bound_organization_context(
-    session: Session, user: User, organization_id: uuid.UUID
+    session: Session, user: User, organization_id: uuid.UUID, settings: SymgovAPISettings
 ) -> EligibleOrganizationMembership | None:
-    organization = session.get(Organization, organization_id)
-    if organization is None:
-        return None
-    settings = SymgovAPISettings(organizations_enabled=True, organization_pilot_codes=(organization.normalized_code,))
     return next((item for item in resolve_eligible_organization_memberships(session, user, settings) if item.organization_id == organization_id), None)

@@ -935,6 +935,7 @@ class OrgDetailResponse(BaseModel):
     isProtected: bool
     iconUrl: str
     hasCustomIcon: bool
+    customIconEnabled: bool = False
 
 
 class OrgIconUploadRequest(BaseModel):
@@ -1041,3 +1042,28 @@ class CreateOrganizationRequest(BaseModel):
     legalName: str | None = Field(default=None, min_length=1, max_length=200)
     locale: str = "en-US"
     initialAdminUserId: str
+
+
+# --- Platform Admin protected Symgov member management (Slice 3F) ---
+
+class PlatformAddSymgovMemberRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    userId: str
+    baseRole: str = Field(pattern="^(admin|user)$")
+    reason: str = Field(min_length=10, max_length=1000)
+
+
+class PlatformPatchSymgovMemberRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    baseRole: str = Field(pattern="^(admin|user)$")
+    reason: str = Field(min_length=10, max_length=1000)
+
+class PlatformDeactivateSymgovMemberRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=10, max_length=1000)
+
+class PlatformReactivateMemberRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=10, max_length=1000)

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   createAdminUser,
@@ -17,6 +17,7 @@ import {
   fetchCurrentUser,
   loginUser,
   logoutUser,
+  reauthenticateCurrentSession,
   fetchPublishedSymbolComments,
   fetchPublishedSymbols,
   fetchWorkspaceDaisyReports,
@@ -57,6 +58,8 @@ import { appConfig } from './config.js';
 import CatalogDeveloperHub from './CatalogDeveloperHub.jsx';
 import ProfilePage from './ProfilePage.jsx';
 import OrganizationSelectionPage from './OrganizationSelectionPage.js';
+import { adminRouteElements } from './adminRoutes.js';
+import { canAccessOrganizationAdmin, canAccessPlatformAdmin } from './adminJourneys.js';
 import { Header } from './Header.js';
 import FavouriteButton from './FavouriteButton.js';
 import FavouriteFilter from './FavouriteFilter.js';
@@ -374,6 +377,15 @@ function AuthProvider({ children }) {
       }
       return result;
     },
+    reauthenticate: async ({ pin }) => {
+      const result = await reauthenticateCurrentSession({ pin });
+      if (!result.ok) {
+        const error = new Error(result.message);
+        error.status = result.status;
+        throw error;
+      }
+      return result.payload;
+    },
     logout: async () => {
       const result = await logoutUser();
       setAuthState((current) => authStateAfterLogout(current, result));
@@ -472,6 +484,7 @@ function AppContent() {
           <Route path="/workspace" element={<RequireAnyRole roles={['admin']}><WorkspacePage /></RequireAnyRole>} />
           <Route path="/workspace/users" element={<RequireAnyRole roles={['admin']}><AdminUsersPage /></RequireAnyRole>} />
           <Route path="/workspace/llm" element={<RequireAnyRole roles={['admin']}><AdminLlmPage /></RequireAnyRole>} />
+          {adminRouteElements(auth, RequireAuth)}
           <Route path="/reviews" element={<RequireAnyRole roles={['admin', 'reviewer']}><ReviewsPage /></RequireAnyRole>} />
           {/* Route path="/rights" element={<RightsReviewPage />} protected by reviewer/admin auth. */}
           <Route path="/rights" element={<RequireAnyRole roles={['admin', 'reviewer']}><RightsReviewPage /></RequireAnyRole>} />
@@ -688,6 +701,8 @@ function SideRail() {
   const canReview = hasAnyRole(user, ['admin', 'reviewer']);
   const canIntegrate = hasAnyRole(user, ['admin', 'integrator']);
   const canAdmin = hasAnyRole(user, ['admin']);
+  const canAdminOrganization = canAccessOrganizationAdmin(user);
+  const canAdminPlatform = canAccessPlatformAdmin(user);
 
   return (
     <aside className="side-rail" aria-label="Primary navigation">
@@ -702,6 +717,12 @@ function SideRail() {
       {canAdmin ? (
         <nav className="rail-nav rail-nav-admin" aria-label="Administration">
           <RailNavLink to="/workspace" label="Admin" icon="admin" />
+        </nav>
+      ) : null}
+      {canAdminOrganization || canAdminPlatform ? (
+        <nav className="rail-nav rail-nav-admin" aria-label="Organization administration">
+          {canAdminOrganization ? <RailNavLink to="/organization/admin" label="Organization" icon="admin" /> : null}
+          {canAdminPlatform ? <RailNavLink to="/platform/admin" label="Platform" icon="admin" /> : null}
         </nav>
       ) : null}
     </aside>

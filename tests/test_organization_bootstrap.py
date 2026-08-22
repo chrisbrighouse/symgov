@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import uuid
+from unittest.mock import patch
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -43,6 +45,12 @@ def _session_factory():
             table.constraints = original_constraints
     return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
+
+@pytest.fixture(autouse=True)
+def _stub_postgresql_audit_sink_for_sqlite():
+    with patch("symgov_backend.organization_service._emit_audit"):
+        yield
+
 def _seed_protected_owner(session) -> User:
     now = datetime.now(timezone.utc).replace(microsecond=0)
     user = User(
@@ -64,6 +72,7 @@ def _seed_protected_owner(session) -> User:
 def test_stage1_flags_default_off_and_pilot_codes_are_normalized(monkeypatch):
     monkeypatch.delenv("SYMGOV_ORGANIZATIONS_ENABLED", raising=False)
     monkeypatch.delenv("SYMGOV_ORGANIZATION_ADMIN_ENABLED", raising=False)
+    monkeypatch.delenv("SYMGOV_ORGANIZATION_ICON_UPLOAD_ENABLED", raising=False)
     monkeypatch.delenv("SYMGOV_SYMBOL_SETS_ENABLED", raising=False)
     monkeypatch.delenv("SYMGOV_ORGANIZATION_SYMBOLS_ENABLED", raising=False)
     monkeypatch.delenv("SYMGOV_ORGANIZATION_AGENTS_ENABLED", raising=False)
@@ -73,6 +82,7 @@ def test_stage1_flags_default_off_and_pilot_codes_are_normalized(monkeypatch):
 
     assert settings.organizations_enabled is False
     assert settings.organization_admin_enabled is False
+    assert settings.organization_icon_upload_enabled is False
     assert settings.symbol_sets_enabled is False
     assert settings.organization_symbols_enabled is False
     assert settings.organization_agents_enabled is False

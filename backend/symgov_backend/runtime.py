@@ -1613,6 +1613,83 @@ class RuntimePersistenceBridge:
             env_file=env_file,
         )
 
+    def delete_object(
+        self,
+        *,
+        object_key: str,
+        env_file: str | os.PathLike[str] | None = None,
+    ) -> dict[str, Any]:
+        """Delete exactly one S3-compatible object using an AWS v4 signed request."""
+        resolved_env_path, env = read_storage_env_file(env_file)
+        settings = _storage_connection_settings(env)
+        endpoint = settings["endpoint"]
+        bucket = settings["bucket"]
+        region = settings["region"]
+        access_key_id = settings["access_key_id"]
+        secret_access_key = settings["secret_access_key"]
+
+        parsed = urllib.parse.urlparse(endpoint)
+        host = parsed.netloc
+        canonical_uri = _canonical_object_path(endpoint, bucket, object_key)
+        payload_hash = hashlib.sha256(b"").hexdigest()
+        request_time = datetime.now(timezone.utc)
+        amz_date = request_time.strftime("%Y%m%dT%H%M%SZ")
+        date_stamp = request_time.strftime("%Y%m%d")
+        canonical_headers = (
+            f"host:{host}\n"
+            f"x-amz-content-sha256:{payload_hash}\n"
+            f"x-amz-date:{amz_date}\n"
+        )
+        signed_headers = "host;x-amz-content-sha256;x-amz-date"
+        canonical_request = "\n".join(
+            ["DELETE", canonical_uri, "", canonical_headers, signed_headers, payload_hash]
+        )
+        credential_scope = f"{date_stamp}/{region}/s3/aws4_request"
+        string_to_sign = "\n".join(
+            [
+                "AWS4-HMAC-SHA256",
+                amz_date,
+                credential_scope,
+                hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+            ]
+        )
+        signing_key = _aws_v4_signing_key(secret_access_key, date_stamp, region)
+        signature = hmac.new(
+            signing_key, string_to_sign.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
+        authorization = (
+            "AWS4-HMAC-SHA256 "
+            f"Credential={access_key_id}/{credential_scope}, "
+            f"SignedHeaders={signed_headers}, "
+            f"Signature={signature}"
+        )
+        request_url = urllib.parse.urlunparse(
+            (parsed.scheme, parsed.netloc, canonical_uri, "", "", "")
+        )
+        request = urllib.request.Request(
+            request_url,
+            method="DELETE",
+            headers={
+                "Authorization": authorization,
+                "Host": host,
+                "x-amz-content-sha256": payload_hash,
+                "x-amz-date": amz_date,
+            },
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            if not (200 <= response.status < 300):
+                raise RuntimeError(
+                    f"Storage delete failed with HTTP {response.status} for {object_key}"
+                )
+
+        return {
+            "bucket": bucket,
+            "endpoint": endpoint,
+            "env_path": str(resolved_env_path),
+            "object_key": object_key,
+            "status_code": response.status,
+        }
+
     def create_audit_event(
         self,
         *,

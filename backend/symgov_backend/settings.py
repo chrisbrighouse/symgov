@@ -154,6 +154,12 @@ class SymgovAPISettings:
         "yes",
         "on",
     }
+    organization_custom_icons_enabled: bool = os.environ.get(
+        "SYMGOV_ORGANIZATION_CUSTOM_ICONS_ENABLED", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    organization_icon_upload_enabled: bool = os.environ.get(
+        "SYMGOV_ORGANIZATION_ICON_UPLOAD_ENABLED", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
     platform_admin_enabled: bool = os.environ.get("SYMGOV_PLATFORM_ADMIN_ENABLED", "").strip().lower() in {
         "1",
         "true",

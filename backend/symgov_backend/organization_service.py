@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, NamedTuple, TypedDict
 
 from sqlalchemy import and_, func, or_, select, text
+from sqlalchemy.orm import aliased
 
 from symgov_backend.models import (
     AuditEvent,
@@ -61,6 +62,8 @@ class BootstrapSummary(TypedDict):
 
 
 VALID_CAPABILITIES = frozenset({"contributor", "symbol_reviewer"})
+PROTECTED_MUTATION_REASON_MIN_LENGTH = 10
+PROTECTED_MUTATION_REASON_MAX_LENGTH = 1000
 
 
 def _utc_now() -> datetime:
@@ -89,12 +92,48 @@ def _emit_audit(
     )
 
 
+def _mutation_audit_payload(
+    *,
+    organization_id: uuid.UUID | None,
+    effective_authority: str,
+    before: dict[str, object],
+    after: dict[str, object],
+    source: str = "organization_service",
+    reason: str | None = None,
+    details: dict[str, object] | None = None,
+    recent_step_up_at: datetime | None = None,
+) -> dict[str, object]:
+    """Build the bounded, allowlisted context shared by Stage 3 mutations."""
+    payload: dict[str, object] = {
+        "effective_authority": effective_authority,
+        "before": before,
+        "after": after,
+        "source": source,
+    }
+    if organization_id is not None:
+        payload["organization_id"] = str(organization_id)
+    if reason is not None:
+        payload["reason"] = reason
+    if recent_step_up_at is not None:
+        payload["recent_step_up_at"] = recent_step_up_at.isoformat()
+    if details:
+        payload.update(details)
+    return payload
+
+
 def _normalize_name(value: str, *, field_name: str) -> str:
     if not isinstance(value, str):
         raise ValueError(f"{field_name} must be text.")
     normalized = " ".join(unicodedata.normalize("NFKC", value).split()).casefold()
     if not normalized:
         raise ValueError(f"{field_name} must not be empty.")
+    return normalized
+
+
+def _bounded_protected_reason(reason: str) -> str:
+    normalized = " ".join(reason.split()) if isinstance(reason, str) else ""
+    if not PROTECTED_MUTATION_REASON_MIN_LENGTH <= len(normalized) <= PROTECTED_MUTATION_REASON_MAX_LENGTH:
+        raise ValueError("Reason must be between 10 and 1000 characters.")
     return normalized
 
 
@@ -341,6 +380,22 @@ def reconcile_symgov_organization_bootstrap(
             )
             session.add(symgov_org)
             session.flush()
+            _emit_audit(
+                session,
+                entity_type="organization",
+                entity_id=organization_id,
+                action="organization.created",
+                actor_id=None,
+                payload=_mutation_audit_payload(
+                    organization_id=organization_id,
+                    effective_authority="system_bootstrap",
+                    before={"exists": False},
+                    after={"exists": True, "is_protected": True},
+                    source="management.bootstrap_symgov_organization",
+                    reason="bootstrap_reconciliation",
+                    details={"code": "symgov"},
+                ),
+            )
             summary["created"] = True
 
     if symgov_org is None:  # Defensive: apply=False returned no row but did not create one.
@@ -351,12 +406,43 @@ def reconcile_symgov_organization_bootstrap(
         if apply:
             symgov_org.is_active = True
             symgov_org.updated_at = now
+            _emit_audit(
+                session,
+                entity_type="organization",
+                entity_id=symgov_org.id,
+                action="organization.reactivated",
+                actor_id=None,
+                payload=_mutation_audit_payload(
+                    organization_id=symgov_org.id,
+                    effective_authority="system_bootstrap",
+                    before={"is_active": False},
+                    after={"is_active": True},
+                    source="management.bootstrap_symgov_organization",
+                    reason="bootstrap_reconciliation",
+                ),
+            )
             summary["changed"] = True
     if symgov_org.entitlement_status != "active":
         summary["actions"].append("restore protected Symgov organization entitlement")
         if apply:
+            previous_entitlement_status = symgov_org.entitlement_status
             symgov_org.entitlement_status = "active"
             symgov_org.updated_at = now
+            _emit_audit(
+                session,
+                entity_type="organization",
+                entity_id=symgov_org.id,
+                action="organization.entitlement_restored",
+                actor_id=None,
+                payload=_mutation_audit_payload(
+                    organization_id=symgov_org.id,
+                    effective_authority="system_bootstrap",
+                    before={"entitlement_status": previous_entitlement_status},
+                    after={"entitlement_status": "active"},
+                    source="management.bootstrap_symgov_organization",
+                    reason="bootstrap_reconciliation",
+                ),
+            )
             summary["changed"] = True
     if apply:
         session.flush()
@@ -371,8 +457,9 @@ def reconcile_symgov_organization_bootstrap(
     if membership is None:
         summary["actions"].append("activate protected owner Symgov membership")
         if apply:
+            membership_id = uuid.uuid4()
             membership = OrganizationMembership(
-                id=uuid.uuid4(),
+                id=membership_id,
                 organization_id=symgov_org.id,
                 user_id=owner.id,
                 status="active",
@@ -382,14 +469,47 @@ def reconcile_symgov_organization_bootstrap(
             )
             session.add(membership)
             session.flush()
+            _emit_audit(
+                session,
+                entity_type="organization_membership",
+                entity_id=membership_id,
+                action="membership.added",
+                actor_id=None,
+                payload=_mutation_audit_payload(
+                    organization_id=symgov_org.id,
+                    effective_authority="system_bootstrap",
+                    before={"status": None},
+                    after={"status": "active"},
+                    source="management.bootstrap_symgov_organization",
+                    reason="bootstrap_reconciliation",
+                    details={"user_id": str(owner.id)},
+                ),
+            )
             summary["changed"] = True
     elif membership.status != "active":
         summary["actions"].append("reactivate protected owner Symgov membership")
         if apply:
+            previous_membership_status = membership.status
             membership.status = "active"
             if membership.activated_at is None:
                 membership.activated_at = now
             membership.updated_at = now
+            _emit_audit(
+                session,
+                entity_type="organization_membership",
+                entity_id=membership.id,
+                action="membership.reactivated",
+                actor_id=None,
+                payload=_mutation_audit_payload(
+                    organization_id=symgov_org.id,
+                    effective_authority="system_bootstrap",
+                    before={"status": previous_membership_status},
+                    after={"status": "active"},
+                    source="management.bootstrap_symgov_organization",
+                    reason="bootstrap_reconciliation",
+                    details={"user_id": str(owner.id)},
+                ),
+            )
             summary["changed"] = True
 
     if membership is not None:
@@ -397,13 +517,16 @@ def reconcile_symgov_organization_bootstrap(
         if active_role is None or active_role.base_role != "admin":
             summary["actions"].append("assign protected owner Symgov admin role")
             if apply:
+                previous_base_role = active_role.base_role if active_role is not None else None
+                previous_role_active = bool(active_role and active_role.is_active)
                 if active_role is not None:
                     active_role.is_active = False
                     active_role.revoked_at = now
                     active_role.revoke_reason = "bootstrap_reconciliation"
+                role_id = uuid.uuid4()
                 session.add(
                     OrganizationRoleAssignment(
-                        id=uuid.uuid4(),
+                        id=role_id,
                         membership_id=membership.id,
                         base_role="admin",
                         is_active=True,
@@ -412,15 +535,35 @@ def reconcile_symgov_organization_bootstrap(
                     )
                 )
                 session.flush()
+                _emit_audit(
+                    session,
+                    entity_type="organization_role_assignment",
+                    entity_id=role_id,
+                    action="membership.base_role_assigned",
+                    actor_id=None,
+                    payload=_mutation_audit_payload(
+                        organization_id=symgov_org.id,
+                        effective_authority="system_bootstrap",
+                        before={
+                            "base_role": previous_base_role,
+                            "is_active": previous_role_active,
+                        },
+                        after={"base_role": "admin", "is_active": True},
+                        source="management.bootstrap_symgov_organization",
+                        reason="bootstrap_reconciliation",
+                        details={"membership_id": str(membership.id)},
+                    ),
+                )
                 summary["changed"] = True
 
     platform_role = _active_platform_assignment(session, owner.id, lock=apply)
     if platform_role is None:
         summary["actions"].append("assign protected owner platform admin role")
         if apply:
+            assignment_id = uuid.uuid4()
             session.add(
                 PlatformRoleAssignment(
-                    id=uuid.uuid4(),
+                    id=assignment_id,
                     user_id=owner.id,
                     role="platform_admin",
                     is_active=True,
@@ -429,6 +572,22 @@ def reconcile_symgov_organization_bootstrap(
                 )
             )
             session.flush()
+            _emit_audit(
+                session,
+                entity_type="platform_role_assignment",
+                entity_id=assignment_id,
+                action="platform_admin.assigned",
+                actor_id=None,
+                payload=_mutation_audit_payload(
+                    organization_id=symgov_org.id,
+                    effective_authority="system_bootstrap",
+                    before={"role": None, "is_active": False},
+                    after={"role": "platform_admin", "is_active": True},
+                    source="management.bootstrap_symgov_organization",
+                    reason="bootstrap_reconciliation",
+                    details={"user_id": str(owner.id)},
+                ),
+            )
             summary["changed"] = True
 
     return summary
@@ -443,6 +602,8 @@ def create_organization_with_initial_admin(
     locale: str = "en-US",
     initial_admin_user_id: uuid.UUID,
     actor_user_id: uuid.UUID,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> OrganizationCreationResult:
     """Add an organization, membership, and first admin role in one transaction."""
     normalized_code = normalize_organization_code(code)
@@ -528,18 +689,19 @@ def create_organization_with_initial_admin(
         created_at=now,
         updated_at=now,
     )
+    role_assignment = OrganizationRoleAssignment(
+        id=uuid.uuid4(),
+        membership_id=membership.id,
+        base_role="admin",
+        is_active=True,
+        assigned_at=now,
+        assigned_by_user_id=actor_user_id,
+    )
     session.add_all(
         [
             organization,
             membership,
-            OrganizationRoleAssignment(
-                id=uuid.uuid4(),
-                membership_id=membership.id,
-                base_role="admin",
-                is_active=True,
-                assigned_at=now,
-                assigned_by_user_id=actor_user_id,
-            ),
+            role_assignment,
         ]
     )
     session.flush()
@@ -549,10 +711,18 @@ def create_organization_with_initial_admin(
         entity_id=organization_id,
         action="organization.created",
         actor_id=actor_user_id,
-        payload={
-            "normalized_code": normalized_code,
-            "initial_admin_user_id": str(initial_admin_user_id),
-        },
+        payload=_mutation_audit_payload(
+            organization_id=organization_id,
+            effective_authority="platform_admin",
+            before={"exists": False},
+            after={"exists": True, "entitlement_status": "active"},
+            source=audit_source,
+            recent_step_up_at=recent_step_up_at,
+            details={
+                "normalized_code": normalized_code,
+                "initial_admin_user_id": str(initial_admin_user_id),
+            },
+        ),
     )
     _emit_audit(
         session,
@@ -560,11 +730,31 @@ def create_organization_with_initial_admin(
         entity_id=membership.id,
         action="membership.added",
         actor_id=actor_user_id,
-        payload={
-            "organization_id": str(organization_id),
-            "user_id": str(initial_admin_user_id),
-            "base_role": "admin",
-        },
+        payload=_mutation_audit_payload(
+            organization_id=organization_id,
+            effective_authority="platform_admin",
+            before={"status": None},
+            after={"status": "active"},
+            source=audit_source,
+            recent_step_up_at=recent_step_up_at,
+            details={"user_id": str(initial_admin_user_id), "base_role": "admin"},
+        ),
+    )
+    _emit_audit(
+        session,
+        entity_type="organization_role_assignment",
+        entity_id=role_assignment.id,
+        action="membership.base_role_assigned",
+        actor_id=actor_user_id,
+        payload=_mutation_audit_payload(
+            organization_id=organization_id,
+            effective_authority="platform_admin",
+            before={"base_role": None, "is_active": False},
+            after={"base_role": "admin", "is_active": True},
+            source=audit_source,
+            recent_step_up_at=recent_step_up_at,
+            details={"membership_id": str(membership.id)},
+        ),
     )
     return OrganizationCreationResult(
         organization=organization,
@@ -614,6 +804,10 @@ def replace_membership_base_role(
     membership_id: uuid.UUID,
     new_base_role: str,
     actor_user_id: uuid.UUID,
+    _bypass_admin_check: bool = False,
+    reason: str | None = None,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> OrganizationRoleAssignment | None:
     """Replace one active membership role under lock without committing."""
     if new_base_role not in BASE_ROLES:
@@ -622,6 +816,10 @@ def replace_membership_base_role(
     membership_probe = session.get(OrganizationMembership, membership_id)
     if membership_probe is None:
         raise ValueError("Membership not found.")
+
+    if not _bypass_admin_check:
+        _require_active_organization_admin(session, membership_probe.organization_id, actor_user_id)
+
     _locked_active_users(
         session,
         {actor_user_id: "Actor", membership_probe.user_id: "Membership user"},
@@ -661,11 +859,18 @@ def replace_membership_base_role(
         entity_id=replacement.id,
         action="membership.base_role_replaced",
         actor_id=actor_user_id,
-        payload={
-            "membership_id": str(membership_id),
-            "previous_role": current_role.base_role,
-            "new_role": new_base_role,
-        },
+        payload=_mutation_audit_payload(
+            organization_id=membership.organization_id,
+            effective_authority=(
+                "platform_admin" if _bypass_admin_check else "organization_admin"
+            ),
+            before={"base_role": current_role.base_role, "is_active": True},
+            after={"base_role": new_base_role, "is_active": True},
+            source=audit_source,
+            reason=reason,
+            recent_step_up_at=recent_step_up_at,
+            details={"membership_id": str(membership_id)},
+        ),
     )
     return replacement
 
@@ -675,12 +880,20 @@ def deactivate_membership(
     *,
     membership_id: uuid.UUID,
     actor_user_id: uuid.UUID,
+    _bypass_admin_check: bool = False,
+    reason: str | None = None,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> None:
     """Deactivate a membership and revoke its base role while preserving history."""
     _acquire_administration_lock(session)
     membership_probe = session.get(OrganizationMembership, membership_id)
     if membership_probe is None:
         raise ValueError("Membership not found.")
+
+    if not _bypass_admin_check:
+        _require_active_organization_admin(session, membership_probe.organization_id, actor_user_id)
+
     _locked_active_users(
         session,
         {actor_user_id: "Actor", membership_probe.user_id: "Membership user"},
@@ -700,7 +913,7 @@ def deactivate_membership(
     active_role.is_active = False
     active_role.revoked_at = now
     active_role.revoked_by_user_id = actor_user_id
-    active_role.revoke_reason = "membership_deactivated"
+    active_role.revoke_reason = reason or "membership_deactivated"
     membership.status = "inactive"
     membership.deactivated_at = now
     membership.updated_at = now
@@ -716,7 +929,37 @@ def deactivate_membership(
         entity_id=membership.id,
         action="membership.deactivated",
         actor_id=actor_user_id,
-        payload={"organization_id": str(membership.organization_id), "user_id": str(membership.user_id)},
+        payload=_mutation_audit_payload(
+            organization_id=membership.organization_id,
+            effective_authority=(
+                "platform_admin" if _bypass_admin_check else "organization_admin"
+            ),
+            before={"status": "active"},
+            after={"status": "inactive"},
+            source=audit_source,
+            reason=reason,
+            recent_step_up_at=recent_step_up_at,
+            details={"user_id": str(membership.user_id)},
+        ),
+    )
+    _emit_audit(
+        session,
+        entity_type="organization_role_assignment",
+        entity_id=active_role.id,
+        action="membership.base_role_revoked",
+        actor_id=actor_user_id,
+        payload=_mutation_audit_payload(
+            organization_id=membership.organization_id,
+            effective_authority=(
+                "platform_admin" if _bypass_admin_check else "organization_admin"
+            ),
+            before={"base_role": active_role.base_role, "is_active": True},
+            after={"base_role": active_role.base_role, "is_active": False},
+            source=audit_source,
+            reason=reason,
+            recent_step_up_at=recent_step_up_at,
+            details={"membership_id": str(membership.id)},
+        ),
     )
 
 
@@ -725,6 +968,8 @@ def assign_platform_admin(
     *,
     user_id: uuid.UUID,
     actor_user_id: uuid.UUID,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> PlatformRoleAssignment:
     """Assign Platform Admin only to an active Symgov Organization Admin."""
     _acquire_administration_lock(session)
@@ -733,7 +978,8 @@ def assign_platform_admin(
         {actor_user_id: "Actor", user_id: "Platform administrator candidate"},
     )
     _require_effective_platform_admin(session, actor_user_id, user_locked=True)
-    if _symgov_admin_membership(session, user_id, lock=True) is None:
+    candidate_membership = _symgov_admin_membership(session, user_id, lock=True)
+    if candidate_membership is None:
         raise ValueError("Platform administrator candidate must be an active Symgov Organization Admin.")
     existing = _active_platform_assignment(session, user_id, lock=True)
     if existing is not None:
@@ -755,7 +1001,15 @@ def assign_platform_admin(
         entity_id=assignment.id,
         action="platform_admin.assigned",
         actor_id=actor_user_id,
-        payload={"user_id": str(user_id)},
+        payload=_mutation_audit_payload(
+            organization_id=candidate_membership.organization_id,
+            effective_authority="platform_admin",
+            before={"role": None, "is_active": False},
+            after={"role": "platform_admin", "is_active": True},
+            source=audit_source,
+            recent_step_up_at=recent_step_up_at,
+            details={"user_id": str(user_id)},
+        ),
     )
     return assignment
 
@@ -765,6 +1019,8 @@ def revoke_platform_admin(
     *,
     user_id: uuid.UUID,
     actor_user_id: uuid.UUID,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> None:
     """Revoke Platform Admin while retaining at least one other eligible assignee."""
     _acquire_administration_lock(session)
@@ -776,6 +1032,9 @@ def revoke_platform_admin(
     assignment = _active_platform_assignment(session, user_id, lock=True)
     if assignment is None:
         return
+    symgov_organization_id = session.execute(
+        select(Organization.id).where(Organization.normalized_code == "symgov")
+    ).scalar_one()
 
     session.execute(
         select(PlatformRoleAssignment.id)
@@ -829,7 +1088,16 @@ def revoke_platform_admin(
         entity_id=assignment.id,
         action="platform_admin.revoked",
         actor_id=actor_user_id,
-        payload={"user_id": str(user_id)},
+        payload=_mutation_audit_payload(
+            organization_id=symgov_organization_id,
+            effective_authority="platform_admin",
+            before={"role": "platform_admin", "is_active": True},
+            after={"role": "platform_admin", "is_active": False},
+            source=audit_source,
+            reason="platform_role_revoked",
+            recent_step_up_at=recent_step_up_at,
+            details={"user_id": str(user_id)},
+        ),
     )
 
 
@@ -937,6 +1205,8 @@ def suspend_organization(
     organization_id: uuid.UUID,
     *,
     actor_user_id: uuid.UUID,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> Organization:
     """Suspend an organization's entitlement and revoke its bound sessions."""
     _acquire_administration_lock(session)
@@ -952,6 +1222,7 @@ def suspend_organization(
     if org.entitlement_status == "suspended":
         return org
 
+    previous_entitlement_status = org.entitlement_status
     now = _utc_now()
     org.entitlement_status = "suspended"
     org.updated_at = now
@@ -966,7 +1237,15 @@ def suspend_organization(
         entity_id=organization_id,
         action="organization.suspended",
         actor_id=actor_user_id,
-        payload={},
+        payload=_mutation_audit_payload(
+            organization_id=organization_id,
+            effective_authority="platform_admin",
+            before={"entitlement_status": previous_entitlement_status},
+            after={"entitlement_status": "suspended"},
+            source=audit_source,
+            reason="platform_entitlement_suspended",
+            recent_step_up_at=recent_step_up_at,
+        ),
     )
     return org
 
@@ -976,6 +1255,8 @@ def reactivate_organization(
     organization_id: uuid.UUID,
     *,
     actor_user_id: uuid.UUID,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> Organization:
     """Restore an organization's entitlement to active."""
     _acquire_administration_lock(session)
@@ -989,6 +1270,7 @@ def reactivate_organization(
     if org.entitlement_status == "active":
         return org
 
+    previous_entitlement_status = org.entitlement_status
     now = _utc_now()
     org.entitlement_status = "active"
     org.updated_at = now
@@ -999,7 +1281,15 @@ def reactivate_organization(
         entity_id=organization_id,
         action="organization.reactivated",
         actor_id=actor_user_id,
-        payload={},
+        payload=_mutation_audit_payload(
+            organization_id=organization_id,
+            effective_authority="platform_admin",
+            before={"entitlement_status": previous_entitlement_status},
+            after={"entitlement_status": "active"},
+            source=audit_source,
+            reason="platform_entitlement_reactivated",
+            recent_step_up_at=recent_step_up_at,
+        ),
     )
     return org
 
@@ -1035,8 +1325,14 @@ def update_organization(
     actor_user_id: uuid.UUID,
     display_name: str | None = None,
     legal_name: str | None = None,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> Organization:
     _acquire_administration_lock(session)
+    _locked_active_user(session, actor_user_id, label="Actor")
+    _require_active_organization_admin(
+        session, organization_id, actor_user_id, user_locked=True
+    )
     org = session.execute(
         select(Organization)
         .where(Organization.id == organization_id)
@@ -1047,6 +1343,7 @@ def update_organization(
     if org.is_protected:
         raise ValueError("The protected Symgov organization cannot be updated via this endpoint.")
 
+    before = {"display_name": org.display_name, "legal_name": org.legal_name}
     changed: list[str] = []
     now = _utc_now()
     if display_name is not None:
@@ -1074,7 +1371,15 @@ def update_organization(
             entity_id=organization_id,
             action="organization.updated",
             actor_id=actor_user_id,
-            payload={"changed_fields": changed},
+            payload=_mutation_audit_payload(
+                organization_id=organization_id,
+                effective_authority="organization_admin",
+                before={field: before[field] for field in changed},
+                after={field: getattr(org, field) for field in changed},
+                source=audit_source,
+                recent_step_up_at=recent_step_up_at,
+                details={"changed_fields": changed},
+            ),
         )
     return org
 
@@ -1097,6 +1402,27 @@ def enforce_icon_upload_rate_limit(org: Organization) -> None:
         raise ValueError("Icon uploads are rate-limited; wait a few seconds before trying again.")
 
 
+def preflight_organization_icon_upload(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID,
+) -> Organization:
+    """Lock and revalidate live upload authority before object storage is touched."""
+    _acquire_administration_lock(session)
+    _locked_active_user(session, actor_user_id, label="Actor")
+    _require_active_organization_admin(
+        session, organization_id, actor_user_id, user_locked=True
+    )
+    org = session.execute(
+        select(Organization).where(Organization.id == organization_id).with_for_update()
+    ).scalar_one_or_none()
+    if org is None:
+        raise ValueError("Organization not found.")
+    enforce_icon_upload_rate_limit(org)
+    return org
+
+
 def finalize_organization_icon_upload(
     session: Session,
     organization_id: uuid.UUID,
@@ -1104,6 +1430,8 @@ def finalize_organization_icon_upload(
     actor_user_id: uuid.UUID,
     storage_key: str,
     content_type: str,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> Organization:
     """Activate an already-uploaded, already-verified icon object transactionally.
 
@@ -1111,6 +1439,11 @@ def finalize_organization_icon_upload(
     switches the active database reference. A failure here leaves whichever
     icon (custom or generated fallback) was previously active untouched.
     """
+    _acquire_administration_lock(session)
+    _locked_active_user(session, actor_user_id, label="Actor")
+    _require_active_organization_admin(
+        session, organization_id, actor_user_id, user_locked=True
+    )
     org = session.execute(
         select(Organization).where(Organization.id == organization_id).with_for_update()
     ).scalar_one_or_none()
@@ -1120,6 +1453,8 @@ def finalize_organization_icon_upload(
         raise ValueError("The protected Symgov organization cannot be updated via this endpoint.")
     enforce_icon_upload_rate_limit(org)
 
+    had_custom_icon = org.uploaded_icon_storage_key is not None
+    previous_content_type = org.uploaded_icon_content_type
     now = _utc_now()
     org.uploaded_icon_storage_key = storage_key
     org.uploaded_icon_content_type = content_type
@@ -1132,7 +1467,18 @@ def finalize_organization_icon_upload(
         entity_id=organization_id,
         action="organization.icon_uploaded",
         actor_id=actor_user_id,
-        payload={"content_type": content_type},
+        payload=_mutation_audit_payload(
+            organization_id=organization_id,
+            effective_authority="organization_admin",
+            before={
+                "has_custom_icon": had_custom_icon,
+                "content_type": previous_content_type,
+            },
+            after={"has_custom_icon": True, "content_type": content_type},
+            source=audit_source,
+            recent_step_up_at=recent_step_up_at,
+            details={"content_type": content_type},
+        ),
     )
     return org
 
@@ -1142,7 +1488,14 @@ def remove_organization_icon(
     organization_id: uuid.UUID,
     *,
     actor_user_id: uuid.UUID,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> Organization:
+    _acquire_administration_lock(session)
+    _locked_active_user(session, actor_user_id, label="Actor")
+    _require_active_organization_admin(
+        session, organization_id, actor_user_id, user_locked=True
+    )
     org = session.execute(
         select(Organization).where(Organization.id == organization_id).with_for_update()
     ).scalar_one_or_none()
@@ -1154,7 +1507,7 @@ def remove_organization_icon(
         raise ValueError("This organization has no custom icon to remove.")
 
     now = _utc_now()
-    removed_storage_key = org.uploaded_icon_storage_key
+    removed_content_type = org.uploaded_icon_content_type
     org.uploaded_icon_storage_key = None
     org.uploaded_icon_content_type = None
     org.uploaded_icon_uploaded_at = None
@@ -1166,7 +1519,14 @@ def remove_organization_icon(
         entity_id=organization_id,
         action="organization.icon_removed",
         actor_id=actor_user_id,
-        payload={"removed_storage_key": removed_storage_key},
+        payload=_mutation_audit_payload(
+            organization_id=organization_id,
+            effective_authority="organization_admin",
+            before={"has_custom_icon": True, "content_type": removed_content_type},
+            after={"has_custom_icon": False, "content_type": None},
+            source=audit_source,
+            recent_step_up_at=recent_step_up_at,
+        ),
     )
     return org
 
@@ -1183,14 +1543,34 @@ def list_organization_members(
     if not isinstance(page_size, int) or not 1 <= page_size <= 200:
         raise ValueError("page_size must be between 1 and 200.")
 
-    base = (
-        select(OrganizationMembership, User, OrganizationRoleAssignment)
-        .join(User, User.id == OrganizationMembership.user_id)
-        .join(
+    # Subquery to pick the 'current' role assignment for each membership.
+    # We prefer the active one, then the most recently revoked one.
+    role_rn_sub = (
+        select(
             OrganizationRoleAssignment,
+            func.row_number()
+            .over(
+                partition_by=OrganizationRoleAssignment.membership_id,
+                order_by=[
+                    OrganizationRoleAssignment.is_active.desc(),
+                    OrganizationRoleAssignment.assigned_at.desc(),
+                    OrganizationRoleAssignment.id.desc(),
+                ],
+            )
+            .label("rn"),
+        )
+        .subquery()
+    )
+    current_role = aliased(OrganizationRoleAssignment, role_rn_sub)
+
+    base = (
+        select(OrganizationMembership, User, current_role)
+        .join(User, User.id == OrganizationMembership.user_id)
+        .outerjoin(
+            current_role,
             and_(
-                OrganizationRoleAssignment.membership_id == OrganizationMembership.id,
-                OrganizationRoleAssignment.is_active.is_(True),
+                current_role.membership_id == OrganizationMembership.id,
+                role_rn_sub.c.rn == 1,
             ),
         )
         .where(OrganizationMembership.organization_id == organization_id)
@@ -1226,7 +1606,7 @@ def list_organization_members(
             user_display_name=user.display_name,
             user_is_active=bool(user.is_active),
             status=membership.status,
-            base_role=role.base_role,
+            base_role=role.base_role if role else "user",
             capabilities=tuple(caps_by_membership.get(membership.id, [])),
             activated_at=membership.activated_at,
             deactivated_at=membership.deactivated_at,
@@ -1242,10 +1622,18 @@ def add_organization_member(
     user_id: uuid.UUID,
     base_role: str,
     actor_user_id: uuid.UUID,
+    _bypass_admin_check: bool = False,
+    reason: str | None = None,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> OrganizationMembership:
     if base_role not in BASE_ROLES:
         raise ValueError("Base role must be 'admin' or 'user'.")
     _acquire_administration_lock(session)
+
+    if not _bypass_admin_check:
+        _require_active_organization_admin(session, organization_id, actor_user_id)
+
     _locked_active_users(
         session,
         {actor_user_id: "Actor", user_id: "New member"},
@@ -1294,11 +1682,37 @@ def add_organization_member(
         entity_id=membership.id,
         action="membership.added",
         actor_id=actor_user_id,
-        payload={
-            "organization_id": str(organization_id),
-            "user_id": str(user_id),
-            "base_role": base_role,
-        },
+        payload=_mutation_audit_payload(
+            organization_id=organization_id,
+            effective_authority=(
+                "platform_admin" if _bypass_admin_check else "organization_admin"
+            ),
+            before={"status": None},
+            after={"status": "active"},
+            source=audit_source,
+            reason=reason,
+            recent_step_up_at=recent_step_up_at,
+            details={"user_id": str(user_id), "base_role": base_role},
+        ),
+    )
+    _emit_audit(
+        session,
+        entity_type="organization_role_assignment",
+        entity_id=role_assignment.id,
+        action="membership.base_role_assigned",
+        actor_id=actor_user_id,
+        payload=_mutation_audit_payload(
+            organization_id=organization_id,
+            effective_authority=(
+                "platform_admin" if _bypass_admin_check else "organization_admin"
+            ),
+            before={"base_role": None, "is_active": False},
+            after={"base_role": base_role, "is_active": True},
+            source=audit_source,
+            reason=reason,
+            recent_step_up_at=recent_step_up_at,
+            details={"membership_id": str(membership.id)},
+        ),
     )
     return membership
 
@@ -1310,10 +1724,22 @@ def grant_member_capability(
     capability: str,
     actor_user_id: uuid.UUID,
     organization_id: uuid.UUID,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> OrganizationMemberCapability:
     if capability not in VALID_CAPABILITIES:
         raise ValueError(f"Unknown capability '{capability}'. Valid: {sorted(VALID_CAPABILITIES)}.")
     _acquire_administration_lock(session)
+    membership_probe = session.get(OrganizationMembership, membership_id)
+    if membership_probe is None:
+        raise ValueError("Membership not found.")
+    _locked_active_users(
+        session,
+        {actor_user_id: "Actor", membership_probe.user_id: "Membership user"},
+    )
+    _require_active_organization_admin(
+        session, organization_id, actor_user_id, user_locked=True
+    )
     membership = session.execute(
         select(OrganizationMembership)
         .where(OrganizationMembership.id == membership_id)
@@ -1354,10 +1780,15 @@ def grant_member_capability(
         entity_id=cap.id,
         action="capability.granted",
         actor_id=actor_user_id,
-        payload={
-            "membership_id": str(membership_id),
-            "capability": capability,
-        },
+        payload=_mutation_audit_payload(
+            organization_id=organization_id,
+            effective_authority="organization_admin",
+            before={"capability": capability, "is_active": False},
+            after={"capability": capability, "is_active": True},
+            source=audit_source,
+            recent_step_up_at=recent_step_up_at,
+            details={"membership_id": str(membership_id)},
+        ),
     )
     return cap
 
@@ -1369,10 +1800,22 @@ def revoke_member_capability(
     capability: str,
     actor_user_id: uuid.UUID,
     organization_id: uuid.UUID,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
 ) -> None:
     if capability not in VALID_CAPABILITIES:
         raise ValueError(f"Unknown capability '{capability}'. Valid: {sorted(VALID_CAPABILITIES)}.")
     _acquire_administration_lock(session)
+    membership_probe = session.get(OrganizationMembership, membership_id)
+    if membership_probe is None:
+        raise ValueError("Membership not found.")
+    _locked_active_users(
+        session,
+        {actor_user_id: "Actor", membership_probe.user_id: "Membership user"},
+    )
+    _require_active_organization_admin(
+        session, organization_id, actor_user_id, user_locked=True
+    )
     membership = session.execute(
         select(OrganizationMembership)
         .where(OrganizationMembership.id == membership_id)
@@ -1407,8 +1850,259 @@ def revoke_member_capability(
         entity_id=cap.id,
         action="capability.revoked",
         actor_id=actor_user_id,
-        payload={
-            "membership_id": str(membership_id),
-            "capability": capability,
-        },
+        payload=_mutation_audit_payload(
+            organization_id=organization_id,
+            effective_authority="organization_admin",
+            before={"capability": capability, "is_active": True},
+            after={"capability": capability, "is_active": False},
+            source=audit_source,
+            reason="capability_revoked_by_admin",
+            recent_step_up_at=recent_step_up_at,
+            details={"membership_id": str(membership_id)},
+        ),
     )
+
+def _require_active_organization_admin(
+    session: Session,
+    organization_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    *,
+    user_locked: bool = False,
+) -> None:
+    """Revalidate that the actor remains an active administrator of the organization."""
+    if not user_locked:
+        _locked_active_user(session, actor_user_id, label="Actor")
+    org = session.execute(
+        select(Organization).where(Organization.id == organization_id).with_for_update()
+    ).scalar_one_or_none()
+    if org is None:
+        raise ValueError("Organization not found.")
+
+    if org.is_protected:
+        # Ordinary Organization Admin paths must fail closed for protected Symgov governance.
+        # Exceptional administration must use dedicated Platform Admin services.
+        raise ValueError("The protected Symgov organization cannot be managed through ordinary services.")
+
+    membership = session.execute(
+        select(OrganizationMembership)
+        .join(
+            OrganizationRoleAssignment,
+            OrganizationRoleAssignment.membership_id == OrganizationMembership.id,
+        )
+        .where(
+            OrganizationMembership.organization_id == organization_id,
+            OrganizationMembership.user_id == actor_user_id,
+            OrganizationMembership.status == "active",
+            OrganizationRoleAssignment.base_role == "admin",
+            OrganizationRoleAssignment.is_active.is_(True),
+        )
+        .with_for_update(of=OrganizationMembership)
+    ).scalar_one_or_none()
+
+    if membership is None:
+        raise ValueError("Actor must be an active administrator of the organization.")
+
+def add_protected_organization_member(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    user_id: uuid.UUID,
+    base_role: str,
+    actor_user_id: uuid.UUID,
+    reason: str,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
+) -> OrganizationMembership:
+    """Exceptional Platform Admin path to add a member to the protected Symgov organization."""
+    reason = _bounded_protected_reason(reason)
+    _acquire_administration_lock(session)
+    _require_effective_platform_admin(session, actor_user_id)
+    org = session.execute(
+        select(Organization).where(Organization.id == organization_id).with_for_update()
+    ).scalar_one_or_none()
+    if org is None:
+        raise ValueError("Organization not found.")
+    if not org.is_protected:
+        raise ValueError("Use ordinary services for non-protected organizations.")
+
+    return add_organization_member(
+        session,
+        organization_id,
+        user_id=user_id,
+        base_role=base_role,
+        actor_user_id=actor_user_id,
+        _bypass_admin_check=True,
+        reason=reason,
+        audit_source=audit_source,
+        recent_step_up_at=recent_step_up_at,
+    )
+
+
+def deactivate_protected_membership(
+    session: Session,
+    *,
+    membership_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    reason: str,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
+) -> None:
+    """Exceptional Platform Admin path to deactivate a member in the protected Symgov organization."""
+    reason = _bounded_protected_reason(reason)
+    _acquire_administration_lock(session)
+    _require_effective_platform_admin(session, actor_user_id)
+    membership = _locked_membership(session, membership_id)
+    org = session.get(Organization, membership.organization_id)
+    if org is None or not org.is_protected:
+        raise ValueError("Use ordinary services for non-protected organizations.")
+
+    return deactivate_membership(
+        session,
+        membership_id=membership_id,
+        actor_user_id=actor_user_id,
+        _bypass_admin_check=True,
+        reason=reason,
+        audit_source=audit_source,
+        recent_step_up_at=recent_step_up_at,
+    )
+
+
+def replace_protected_membership_base_role(
+    session: Session,
+    *,
+    membership_id: uuid.UUID,
+    new_base_role: str,
+    actor_user_id: uuid.UUID,
+    reason: str,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
+) -> OrganizationRoleAssignment | None:
+    """Exceptional Platform Admin path to replace a role in the protected Symgov organization."""
+    reason = _bounded_protected_reason(reason)
+    _acquire_administration_lock(session)
+    _require_effective_platform_admin(session, actor_user_id)
+    membership = _locked_membership(session, membership_id)
+    org = session.get(Organization, membership.organization_id)
+    if org is None or not org.is_protected:
+        raise ValueError("Use ordinary services for non-protected organizations.")
+
+    return replace_membership_base_role(
+        session,
+        membership_id=membership_id,
+        new_base_role=new_base_role,
+        actor_user_id=actor_user_id,
+        _bypass_admin_check=True,
+        reason=reason,
+        audit_source=audit_source,
+        recent_step_up_at=recent_step_up_at,
+    )
+
+def reactivate_membership(
+    session: Session,
+    *,
+    membership_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    reason: str,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
+) -> OrganizationMembership:
+    """Reactivate an inactive membership and assign a default 'user' role."""
+    reason = _bounded_protected_reason(reason)
+    _acquire_administration_lock(session)
+    _locked_active_users(session, {actor_user_id: "Actor"})
+    _require_effective_platform_admin(session, actor_user_id, user_locked=True)
+
+    membership = _locked_membership(session, membership_id)
+    if membership.status == "active":
+        return membership
+
+    org = session.execute(
+        select(Organization).where(Organization.id == membership.organization_id).with_for_update()
+    ).scalar_one_or_none()
+    if org is None:
+        raise ValueError("Membership organization not found.")
+    if not org.is_active or org.entitlement_status != "active":
+        raise ValueError("Membership organization must be active and entitled.")
+
+    # Ensure the user being reactivated is still active and not deleted
+    target_user = _locked_active_user(session, membership.user_id, label="Target user")
+
+    # Duplicate protection: check if there's already an active membership for this user/org
+    # (Though the unique constraint should handle this, we check explicitly for a better error)
+    existing_active = session.execute(
+        select(OrganizationMembership)
+        .where(
+            OrganizationMembership.organization_id == membership.organization_id,
+            OrganizationMembership.user_id == membership.user_id,
+            OrganizationMembership.status == "active",
+            OrganizationMembership.id != membership_id
+        )
+    ).scalar_one_or_none()
+    if existing_active:
+        raise ValueError("User already has an active membership in this organization.")
+
+    now = _utc_now()
+    membership.status = "active"
+    membership.updated_at = now
+
+    # Assign default 'user' role
+    role = OrganizationRoleAssignment(
+        id=uuid.uuid4(),
+        membership_id=membership.id,
+        base_role="user",
+        is_active=True,
+        assigned_at=now,
+        assigned_by_user_id=actor_user_id,
+    )
+    session.add(role)
+    session.flush()
+
+    _emit_audit(
+        session,
+        entity_type="organization_membership",
+        entity_id=membership.id,
+        action="membership.reactivated",
+        actor_id=actor_user_id,
+        payload=_mutation_audit_payload(
+            organization_id=membership.organization_id,
+            effective_authority="platform_admin",
+            before={"status": "inactive"},
+            after={"status": "active"},
+            source=audit_source,
+            reason=reason,
+            recent_step_up_at=recent_step_up_at,
+            details={"user_id": str(membership.user_id)},
+        ),
+    )
+    _emit_audit(
+        session,
+        entity_type="organization_role_assignment",
+        entity_id=role.id,
+        action="membership.base_role_assigned",
+        actor_id=actor_user_id,
+        payload=_mutation_audit_payload(
+            organization_id=membership.organization_id,
+            effective_authority="platform_admin",
+            before={"base_role": None, "is_active": False},
+            after={"base_role": "user", "is_active": True},
+            source=audit_source,
+            reason=reason,
+            recent_step_up_at=recent_step_up_at,
+            details={"membership_id": str(membership.id)},
+        ),
+    )
+    return membership
+
+
+def list_organization_member_diagnostics(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID,
+    page: int = 1,
+    page_size: int = 50,
+) -> tuple[list[OrganizationMemberDetail], int]:
+    """Platform Admin view of all memberships (active and inactive) for an organization."""
+    _require_effective_platform_admin(session, actor_user_id)
+    # This is similar to list_organization_members but for Platform Admins and shows everything
+    return list_organization_members(session, organization_id, page=page, page_size=page_size)

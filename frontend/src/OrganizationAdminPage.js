@@ -1,54 +1,51 @@
-import { createElement, useCallback, useEffect, useReducer, useState } from 'react';
+import { createElement, useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { runWithStepUp } from './adminJourneys.js';
+import { requestJson } from './api.js';
 
-const API_BASE = '/api/v1';
+function resultValue(result) {
+  if (!result.ok) {
+    const error = new Error(result.message);
+    error.status = result.status;
+    throw error;
+  }
+  return result.payload;
+}
 
 async function apiGet(path) {
-  const r = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-  return r.json();
+  return resultValue(await requestJson(path, { cache: 'no-store' }));
 }
 
 async function apiPatch(path, body) {
-  const r = await fetch(`${API_BASE}${path}`, {
-    method: 'PATCH',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+  return resultValue(await requestJson(path, {
+    method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-  return r.json();
+  }));
 }
 
 async function apiPost(path, body) {
-  const r = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+  return resultValue(await requestJson(path, {
+    method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-  return r.json();
+  }));
 }
 
 async function apiDelete(path) {
-  const r = await fetch(`${API_BASE}${path}`, {
-    method: 'DELETE',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+  resultValue(await requestJson(path, {
+    method: 'DELETE', credentials: 'include', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
-  });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  }));
 }
 
 async function apiDeleteJson(path) {
-  const r = await fetch(`${API_BASE}${path}`, {
-    method: 'DELETE',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+  return resultValue(await requestJson(path, {
+    method: 'DELETE', credentials: 'include', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
-  });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-  return r.json();
+  }));
+}
+
+
+export function addExistingOrganizationMember({ userId, baseRole, protect }) {
+  return protect(() => apiPost('/org/me/members', { userId, baseRole }));
 }
 
 function StatusBadge({ status }) {
@@ -113,7 +110,7 @@ function ErrorMessage({ message }) {
   );
 }
 
-function OrgDetailSection({ org, isAdmin, onUpdate }) {
+function OrgDetailSection({ org, isAdmin, onUpdate, protect }) {
   const [editing, setEditing] = useState(false);
   const [displayName, setDisplayName] = useState(org.displayName);
   const [legalName, setLegalName] = useState(org.legalName || '');
@@ -125,10 +122,10 @@ function OrgDetailSection({ org, isAdmin, onUpdate }) {
     setSaving(true);
     setError('');
     try {
-      const updated = await apiPatch('/org/me', {
+      const updated = await protect(() => apiPatch('/org/me', {
         displayName: displayName || undefined,
         legalName: legalName || undefined,
-      });
+      }));
       onUpdate(updated);
       setEditing(false);
     } catch (err) {
@@ -218,12 +215,16 @@ function OrgDetailSection({ org, isAdmin, onUpdate }) {
 const ALLOWED_ICON_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const MAX_ICON_BYTES = 512 * 1024;
 
-function OrgIconSection({ org, isAdmin, onUpdate }) {
+function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) {
   const [file, setFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
 
   function handleFileChange(e) {
     const f = e.target.files[0];
@@ -259,7 +260,7 @@ function OrgIconSection({ org, isAdmin, onUpdate }) {
         reader.onerror = () => reject(new Error('Could not read the selected file.'));
         reader.readAsDataURL(file);
       });
-      const updated = await apiPost('/org/me/icon', { contentType: file.type, contentBase64: base64 });
+      const updated = await protect(() => apiPost('/org/me/icon', { contentType: file.type, contentBase64: base64 }));
       onUpdate(updated);
       setFile(null);
       setPreviewUrl(null);
@@ -275,7 +276,7 @@ function OrgIconSection({ org, isAdmin, onUpdate }) {
     setRemoving(true);
     setError('');
     try {
-      const updated = await apiDeleteJson('/org/me/icon');
+      const updated = await protect(() => apiDeleteJson('/org/me/icon'));
       onUpdate(updated);
     } catch (err) {
       setError(err.message);
@@ -284,7 +285,7 @@ function OrgIconSection({ org, isAdmin, onUpdate }) {
     }
   }
 
-  const canManage = isAdmin && !org.isProtected;
+  const canManage = isAdmin && !org.isProtected && iconUploadEnabled;
 
   return createElement(
     'section',
@@ -300,7 +301,7 @@ function OrgIconSection({ org, isAdmin, onUpdate }) {
         createElement('p', { style: { margin: '0 0 8px', fontSize: '0.875rem', color: '#6b7280' } },
           org.hasCustomIcon ? 'Custom icon' : 'Generated fallback icon'
         ),
-        org.hasCustomIcon
+        org.iconUrl
           ? createElement('img', {
               src: org.iconUrl,
               alt: `${org.displayName} icon`,
@@ -487,7 +488,57 @@ function MemberRow({ member, isAdmin, onRoleChange, onCapabilityChange, onDeacti
   );
 }
 
-function MemberListSection({ isAdmin }) {
+export function OrganizationMemberAddForm({ onAdd }) {
+  const [userId, setUserId] = useState('');
+  const [baseRole, setBaseRole] = useState('user');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const userIdInputRef = useRef(null);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await onAdd({ userId, baseRole });
+      setUserId('');
+      setBaseRole('user');
+    } catch (err) {
+      setError(err.message);
+      queueMicrotask(() => userIdInputRef.current?.focus());
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return createElement(
+    'form',
+    { onSubmit: handleSubmit, style: { display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '16px' } },
+    createElement('label', { htmlFor: 'organization-member-user-id' },
+      'Existing user ID',
+      createElement('input', {
+        id: 'organization-member-user-id', type: 'text', value: userId, required: true,
+        ref: userIdInputRef,
+        onChange: (event) => setUserId(event.target.value),
+        style: { display: 'block', marginTop: '4px' },
+      })
+    ),
+    createElement('label', { htmlFor: 'organization-member-base-role' },
+      'Base role',
+      createElement('select', {
+        id: 'organization-member-base-role', value: baseRole,
+        onChange: (event) => setBaseRole(event.target.value),
+        style: { display: 'block', marginTop: '4px' },
+      },
+      createElement('option', { value: 'user' }, 'User'),
+      createElement('option', { value: 'admin' }, 'Admin'))
+    ),
+    createElement('button', { type: 'submit', disabled: saving || !userId }, saving ? 'Adding…' : 'Add member'),
+    error ? createElement(ErrorMessage, { message: error }) : null
+  );
+}
+
+function MemberListSection({ isAdmin, protect }) {
   const [members, setMembers] = useState(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -513,19 +564,24 @@ function MemberListSection({ isAdmin }) {
   useEffect(() => { load(1); }, [load]);
 
   async function handleRoleChange(membershipId, newRole) {
-    const updated = await apiPatch(`/org/me/members/${membershipId}`, { baseRole: newRole });
+    const updated = await protect(() => apiPatch(`/org/me/members/${membershipId}`, { baseRole: newRole }));
     setMembers((prev) => prev.map((m) => (m.membershipId === membershipId ? updated : m)));
   }
 
   async function handleCapabilityChange(membershipId, action, capability) {
     const body = action === 'grant' ? { grantCapability: capability } : { revokeCapability: capability };
-    const updated = await apiPatch(`/org/me/members/${membershipId}`, body);
+    const updated = await protect(() => apiPatch(`/org/me/members/${membershipId}`, body));
     setMembers((prev) => prev.map((m) => (m.membershipId === membershipId ? updated : m)));
   }
 
   async function handleDeactivate(membershipId) {
-    await apiDelete(`/org/me/members/${membershipId}`);
+    await protect(() => apiDelete(`/org/me/members/${membershipId}`));
     await load(page);
+  }
+
+  async function handleAdd({ userId, baseRole }) {
+    await addExistingOrganizationMember({ userId, baseRole, protect });
+    await load(1);
   }
 
   if (error) return createElement(ErrorMessage, { message: error });
@@ -541,6 +597,7 @@ function MemberListSection({ isAdmin }) {
       { id: 'members-heading', style: { marginBottom: '16px' } },
       `Members (${total})`
     ),
+    isAdmin ? createElement(OrganizationMemberAddForm, { onAdd: handleAdd }) : null,
     loading && createElement('p', null, 'Loading…'),
     createElement(
       'ul',
@@ -580,6 +637,7 @@ function MemberListSection({ isAdmin }) {
 export function OrganizationAdminPage({ auth }) {
   const [org, setOrg] = useState(null);
   const [error, setError] = useState('');
+  const [stepUpPin, setStepUpPin] = useState('');
 
   useEffect(() => {
     apiGet('/org/me')
@@ -588,10 +646,16 @@ export function OrganizationAdminPage({ auth }) {
   }, []);
 
   const isAdmin = auth?.user?.organization?.baseRole === 'admin';
+  const protect = useCallback((operation) => runWithStepUp({
+    pin: stepUpPin,
+    operation,
+    reauthenticate: (pin) => auth.reauthenticate({ pin }),
+    clearPin: () => setStepUpPin(''),
+  }), [auth, stepUpPin]);
 
   if (error) {
     return createElement(
-      'main',
+      'section',
       { style: { padding: '24px' } },
       createElement('h1', null, 'Organization'),
       ErrorMessage({ message: error })
@@ -599,15 +663,29 @@ export function OrganizationAdminPage({ auth }) {
   }
 
   if (!org) {
-    return createElement('main', { style: { padding: '24px' } }, createElement('p', null, 'Loading…'));
+    return createElement('section', { style: { padding: '24px' } }, createElement('p', { role: 'status' }, 'Loading…'));
   }
 
   return createElement(
-    'main',
+    'section',
     { style: { padding: '24px', maxWidth: '800px' } },
     createElement('h1', { style: { marginBottom: '24px' } }, 'Organization administration'),
-    OrgDetailSection({ org, isAdmin, onUpdate: setOrg }),
-    OrgIconSection({ org, isAdmin, onUpdate: setOrg }),
-    MemberListSection({ isAdmin })
+    isAdmin ? createElement('label', { htmlFor: 'organization-step-up-pin' },
+      'PIN for protected changes',
+      createElement('input', {
+        id: 'organization-step-up-pin', type: 'password', inputMode: 'numeric',
+        autoComplete: 'off', value: stepUpPin, maxLength: 4,
+        onChange: (event) => setStepUpPin(event.target.value),
+      })
+    ) : null,
+    createElement(OrgDetailSection, { org, isAdmin, onUpdate: setOrg, protect }),
+    createElement(OrgIconSection, {
+      org,
+      isAdmin,
+      iconUploadEnabled: auth?.user?.capabilities?.organizationIconUploadEnabled === true,
+      onUpdate: setOrg,
+      protect,
+    }),
+    createElement(MemberListSection, { isAdmin, protect })
   );
 }

@@ -13,12 +13,13 @@
     "build:publish": "npm run build && ./scripts/publish-static.sh"
   },
   "dependencies": {
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "react-router-dom": "^7.6.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.5.2",
+    "react-test-renderer": "19.2.5",
     "vite": "^7.0.0"
   }
 }

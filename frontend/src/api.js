@@ -2,7 +2,9 @@ import { appConfig } from './config.js';
 import { buildPublishedFeedbackRequest } from './publishedFeedbackLifecycle.js';
 
 async function parseJson(response) {
-  const text = await response.text();
+  const text = typeof response.text === 'function'
+    ? await response.text()
+    : JSON.stringify(await response.json());
 
   if (!text) {
     return null;
@@ -238,6 +240,13 @@ export async function downgradeCurrentSubscription(payload) {
 
 export async function logoutUser() {
   return requestJson('/auth/logout', { method: 'POST' });
+}
+
+export async function reauthenticateCurrentSession({ pin }) {
+  return requestJson('/auth/reauthenticate', {
+    method: 'POST',
+    body: JSON.stringify({ pin })
+  });
 }
 
 export async function changeCurrentUserPin({ currentPin, newPin }) {

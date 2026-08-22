@@ -25,11 +25,11 @@ from ..organization_icons import (
 from ..organization_service import (
     add_organization_member,
     deactivate_membership,
-    enforce_icon_upload_rate_limit,
     finalize_organization_icon_upload,
     get_organization_detail,
     grant_member_capability,
     list_organization_members,
+    preflight_organization_icon_upload,
     remove_organization_icon,
     replace_membership_base_role,
     revoke_member_capability,
@@ -55,6 +55,14 @@ ORG_ICON_PATH = "/org/me/icon"
 
 def _require_org_admin_enabled(settings: SymgovAPISettings = Depends(get_settings)) -> None:
     if not settings.organization_admin_enabled:
+        raise HTTPException(status_code=404, detail="Not found.")
+
+
+def _require_icon_upload_enabled(settings: SymgovAPISettings = Depends(get_settings)) -> None:
+    if not (
+        settings.organization_custom_icons_enabled
+        and settings.organization_icon_upload_enabled
+    ):
         raise HTTPException(status_code=404, detail="Not found.")
 
 
@@ -88,7 +96,7 @@ def _parse_membership_id(membership_id: str) -> uuid.UUID:
         raise HTTPException(status_code=404, detail="Membership not found.") from exc
 
 
-def _org_detail_response(org) -> OrgDetailResponse:
+def _org_detail_response(org, *, custom_icon_enabled: bool = False) -> OrgDetailResponse:
     return OrgDetailResponse(
         id=str(org.id),
         code=org.code,
@@ -100,6 +108,7 @@ def _org_detail_response(org) -> OrgDetailResponse:
         isProtected=bool(org.is_protected),
         iconUrl=f"/api/v1{ORG_ICON_PATH}",
         hasCustomIcon=org.uploaded_icon_storage_key is not None,
+        customIconEnabled=custom_icon_enabled,
     )
 
 
@@ -129,12 +138,19 @@ def _member_response(detail) -> OrgMemberResponse:
 def get_org_detail(
     session: Session = Depends(get_db_session),
     current_user: AuthenticatedUser = Depends(require_organization_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> OrgDetailResponse:
     org_id = _active_org_id(current_user)
     org = get_organization_detail(session, org_id)
     if org is None:
         raise HTTPException(status_code=404, detail="Organization not found.")
-    return _org_detail_response(org)
+    return _org_detail_response(
+        org,
+        custom_icon_enabled=(
+            settings.organization_custom_icons_enabled
+            and settings.organization_icon_upload_enabled
+        ),
+    )
 
 
 @router.patch(
@@ -156,6 +172,8 @@ def patch_org(
             actor_user_id=uuid.UUID(current_user.id),
             display_name=body.displayName,
             legal_name=body.legalName,
+            audit_source="api.patch_org",
+            recent_step_up_at=current_user.recent_step_up_at,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -172,7 +190,7 @@ def list_members(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, alias="pageSize", ge=1, le=200),
     session: Session = Depends(get_db_session),
-    current_user: AuthenticatedUser = Depends(require_organization_session),
+    current_user: AuthenticatedUser = Depends(require_organization_admin),
 ) -> OrgMemberListResponse:
     org_id = _active_org_id(current_user)
     members, total = list_organization_members(session, org_id, page=page, page_size=page_size)
@@ -209,6 +227,8 @@ def add_member(
             user_id=user_id,
             base_role=body.baseRole,
             actor_user_id=actor_id,
+            audit_source="api.add_organization_member",
+            recent_step_up_at=current_user.recent_step_up_at,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -275,6 +295,8 @@ def patch_member(
                 membership_id=mid,
                 new_base_role=body.baseRole,
                 actor_user_id=actor_id,
+                audit_source="api.patch_organization_member",
+                recent_step_up_at=current_user.recent_step_up_at,
             )
         if body.grantCapability is not None:
             grant_member_capability(
@@ -283,6 +305,8 @@ def patch_member(
                 capability=body.grantCapability,
                 actor_user_id=actor_id,
                 organization_id=org_id,
+                audit_source="api.patch_organization_member",
+                recent_step_up_at=current_user.recent_step_up_at,
             )
         if body.revokeCapability is not None:
             revoke_member_capability(
@@ -291,6 +315,8 @@ def patch_member(
                 capability=body.revokeCapability,
                 actor_user_id=actor_id,
                 organization_id=org_id,
+                audit_source="api.patch_organization_member",
+                recent_step_up_at=current_user.recent_step_up_at,
             )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -354,7 +380,14 @@ def remove_member(
         raise HTTPException(status_code=404, detail="Membership not found.")
 
     try:
-        deactivate_membership(session, membership_id=mid, actor_user_id=actor_id)
+        deactivate_membership(
+            session,
+            membership_id=mid,
+            actor_user_id=actor_id,
+            reason="member_removed_by_organization_admin",
+            audit_source="api.remove_organization_member",
+            recent_step_up_at=current_user.recent_step_up_at,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
@@ -397,12 +430,13 @@ def get_org_icon(
 @router.post(
     ORG_ICON_PATH,
     response_model=OrgDetailResponse,
-    dependencies=[Depends(_require_org_admin_enabled)],
+    dependencies=[Depends(_require_org_admin_enabled), Depends(_require_icon_upload_enabled)],
 )
 def upload_org_icon(
     body: OrgIconUploadRequest,
     session: Session = Depends(get_db_session),
     current_user: AuthenticatedUser = Depends(require_organization_admin),
+    _step_up: AuthenticatedUser = Depends(require_recent_step_up),
     settings: SymgovAPISettings = Depends(get_settings),
     bridge: RuntimePersistenceBridge = Depends(get_icon_storage_bridge),
 ) -> OrgDetailResponse:
@@ -417,34 +451,47 @@ def upload_org_icon(
     except (ValueError, binascii.Error) as exc:
         raise HTTPException(status_code=400, detail="Icon upload is not valid base64.") from exc
 
-    org = get_organization_detail(session, org_id)
-    if org is None:
-        raise HTTPException(status_code=404, detail="Organization not found.")
-    if org.is_protected:
-        raise HTTPException(
-            status_code=400,
-            detail="The protected Symgov organization cannot be updated via this endpoint.",
-        )
-    try:
-        enforce_icon_upload_rate_limit(org)
-    except ValueError as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
-
     try:
         normalized = validate_and_normalize_icon_upload(payload, body.contentType)
     except IconUploadError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    object_key = build_organization_icon_object_key(org_id, normalized.checksum_sha256)
     try:
-        bridge.upload_object_bytes(
-            object_key=object_key,
-            payload=normalized.png_bytes,
-            content_type=NORMALIZED_ICON_CONTENT_TYPE,
-            env_file=settings.storage_env_file,
+        org = preflight_organization_icon_upload(
+            session, org_id, actor_user_id=actor_id
         )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail="Icon storage is unavailable.") from exc
+    except ValueError as exc:
+        status_code = 429 if "rate-limited" in str(exc) else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+    object_key = build_organization_icon_object_key(org_id, normalized.checksum_sha256)
+    write_attempted = org.uploaded_icon_storage_key != object_key
+
+    def cleanup_written_object() -> None:
+        if not write_attempted:
+            return
+        try:
+            bridge.delete_object(
+                object_key=object_key,
+                env_file=settings.storage_env_file,
+            )
+        except Exception:
+            # Preserve the original failure contract. Storage cleanup is bounded
+            # to this request's generated key and may be retried operationally.
+            pass
+
+    if write_attempted:
+        try:
+            bridge.upload_object_bytes(
+                object_key=object_key,
+                payload=normalized.png_bytes,
+                content_type=NORMALIZED_ICON_CONTENT_TYPE,
+                env_file=settings.storage_env_file,
+            )
+        except Exception as exc:
+            session.rollback()
+            cleanup_written_object()
+            raise HTTPException(status_code=502, detail="Icon storage is unavailable.") from exc
 
     try:
         org = finalize_organization_icon_upload(
@@ -453,26 +500,41 @@ def upload_org_icon(
             actor_user_id=actor_id,
             storage_key=object_key,
             content_type=NORMALIZED_ICON_CONTENT_TYPE,
+            audit_source="api.upload_organization_icon",
+            recent_step_up_at=current_user.recent_step_up_at,
         )
+        session.commit()
     except ValueError as exc:
+        session.rollback()
+        cleanup_written_object()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    session.commit()
-    return _org_detail_response(org)
+    except Exception:
+        session.rollback()
+        cleanup_written_object()
+        raise
+    return _org_detail_response(org, custom_icon_enabled=True)
 
 
 @router.delete(
     ORG_ICON_PATH,
     response_model=OrgDetailResponse,
-    dependencies=[Depends(_require_org_admin_enabled)],
+    dependencies=[Depends(_require_org_admin_enabled), Depends(_require_icon_upload_enabled)],
 )
 def remove_org_icon(
     session: Session = Depends(get_db_session),
     current_user: AuthenticatedUser = Depends(require_organization_admin),
+    _step_up: AuthenticatedUser = Depends(require_recent_step_up),
 ) -> OrgDetailResponse:
     org_id = _active_org_id(current_user)
     try:
-        org = remove_organization_icon(session, org_id, actor_user_id=uuid.UUID(current_user.id))
+        org = remove_organization_icon(
+            session,
+            org_id,
+            actor_user_id=uuid.UUID(current_user.id),
+            audit_source="api.remove_organization_icon",
+            recent_step_up_at=current_user.recent_step_up_at,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
-    return _org_detail_response(org)
+    return _org_detail_response(org, custom_icon_enabled=True)

@@ -1,32 +1,44 @@
-import { createElement, useCallback, useEffect, useState } from 'react';
+import { createElement, useCallback, useEffect, useRef, useState } from 'react';
+import { runWithStepUp } from './adminJourneys.js';
+import { requestJson } from './api.js';
 
-const API_BASE = '/api/v1';
+function resultValue(result) {
+  if (!result.ok) {
+    const error = new Error(result.message);
+    error.status = result.status;
+    throw error;
+  }
+  return result.payload;
+}
 
 async function apiGet(path) {
-  const r = await fetch(`${API_BASE}${path}`, { credentials: 'include' });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-  return r.json();
+  return resultValue(await requestJson(path, { cache: 'no-store' }));
 }
 
 async function apiPost(path, body) {
-  const r = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+  return resultValue(await requestJson(path, {
+    method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
-  return r.json();
+  }));
+}
+
+async function apiPatch(path, body) {
+  return resultValue(await requestJson(path, {
+    method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }));
 }
 
 async function apiDelete(path) {
-  const r = await fetch(`${API_BASE}${path}`, {
-    method: 'DELETE',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+  resultValue(await requestJson(path, {
+    method: 'DELETE', credentials: 'include', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
-  });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  }));
+}
+
+
+export function grantExistingPlatformAdmin({ userId, protect }) {
+  return protect(() => apiPost('/platform/admins', { userId }));
 }
 
 function ErrorMessage({ message }) {
@@ -106,7 +118,7 @@ function AdminRow({ admin, onRevoke }) {
   );
 }
 
-function OrganizationRow({ organization, onSuspend, onReactivate }) {
+function OrganizationRow({ organization, onSuspend, onReactivate, onViewMembers }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const suspended = organization.entitlementStatus === 'suspended';
@@ -177,11 +189,132 @@ function OrganizationRow({ organization, onSuspend, onReactivate }) {
             'aria-label': `${suspended ? 'Reactivate' : 'Suspend'} organization ${organization.displayName}`,
           },
           suspended ? 'Reactivate' : 'Suspend'
-        )
+        ),
+    createElement('button', {
+      type: 'button',
+      onClick: () => onViewMembers(organization),
+      'aria-label': `View members for ${organization.displayName}`,
+    }, 'View members')
   );
 }
 
-function CreateOrganizationForm({ onCreate }) {
+function MemberDiagnostics({ organization, members, loading, error, onReactivate }) {
+  if (!organization) return null;
+  return createElement('section', { 'aria-labelledby': 'member-diagnostics-heading' },
+    createElement('h3', { id: 'member-diagnostics-heading' }, `Member diagnostics: ${organization.displayName}`),
+    error ? createElement(ErrorMessage, { message: error }) : null,
+    loading ? createElement('p', { role: 'status' }, 'Loading member diagnostics…') : null,
+    members && members.length === 0 ? createElement('p', null, 'No memberships found.') : null,
+    members ? createElement('ul', { style: { listStyle: 'none', padding: 0 } },
+      members.map((member) => createElement(DiagnosticMemberRow, {
+        key: member.membershipId,
+        member,
+        onReactivate,
+      }))) : null
+  );
+}
+
+function DiagnosticMemberRow({ member, onReactivate }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await onReactivate(member.membershipId, reason);
+      setReason('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return createElement('li', null,
+    createElement('strong', null, member.displayName),
+    createElement('span', null, ` — ${member.email} — ${member.status} — ${member.baseRole}`),
+    member.status === 'inactive' ? createElement('form', { onSubmit: handleSubmit },
+      createElement('label', { htmlFor: `reactivation-reason-${member.membershipId}` },
+        'Reactivation reason',
+        createElement('input', {
+          id: `reactivation-reason-${member.membershipId}`,
+          value: reason,
+          minLength: 10,
+          maxLength: 1000,
+          required: true,
+          onChange: (event) => setReason(event.target.value),
+        })),
+      createElement('button', { type: 'submit', disabled: busy || reason.trim().length < 10 }, busy ? 'Reactivating…' : 'Reactivate membership'),
+      error ? createElement(ErrorMessage, { message: error }) : null
+    ) : null
+  );
+}
+
+function ProtectedMemberAddForm({ onAdd }) {
+  const [userId, setUserId] = useState('');
+  const [baseRole, setBaseRole] = useState('user');
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const validReason = reason.trim().length >= 10 && reason.trim().length <= 1000;
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await onAdd({ userId, baseRole, reason });
+      setUserId(''); setBaseRole('user'); setReason('');
+    } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+
+  return createElement('form', { onSubmit: handleSubmit, style: { display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end' } },
+    createElement('label', { htmlFor: 'protected-member-user-id' }, 'Existing user ID',
+      createElement('input', { id: 'protected-member-user-id', value: userId, required: true, onChange: (event) => setUserId(event.target.value) })),
+    createElement('label', { htmlFor: 'protected-member-base-role' }, 'Base role',
+      createElement('select', { id: 'protected-member-base-role', value: baseRole, onChange: (event) => setBaseRole(event.target.value) },
+        createElement('option', { value: 'user' }, 'User'), createElement('option', { value: 'admin' }, 'Administrator'))),
+    createElement('label', { htmlFor: 'protected-member-reason' }, 'Reason',
+      createElement('input', { id: 'protected-member-reason', value: reason, minLength: 10, maxLength: 1000, required: true, onChange: (event) => setReason(event.target.value) })),
+    createElement('button', { type: 'submit', disabled: busy || !userId || !validReason }, busy ? 'Adding…' : 'Add protected member'),
+    error ? createElement(ErrorMessage, { message: error }) : null);
+}
+
+function ProtectedMemberRow({ member, onRoleChange, onDeactivate }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const validReason = reason.trim().length >= 10 && reason.trim().length <= 1000;
+  async function mutate(operation) {
+    setBusy(true); setError('');
+    try { await operation(reason); setReason(''); } catch (err) { setError(err.message); } finally { setBusy(false); }
+  }
+  if (member.status !== 'active') return createElement('li', null, `${member.displayName} — inactive`);
+  const nextRole = member.baseRole === 'admin' ? 'user' : 'admin';
+  const roleVerb = member.baseRole === 'admin' ? 'Demote' : 'Promote';
+  return createElement('li', { style: { padding: '10px 0', borderBottom: '1px solid #e5e7eb' } },
+    createElement('strong', null, member.displayName), createElement('span', null, ` — ${member.email} — ${member.baseRole}`),
+    createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end' } },
+      createElement('label', { htmlFor: `protected-member-mutation-reason-${member.membershipId}` }, 'Mutation reason',
+        createElement('input', { id: `protected-member-mutation-reason-${member.membershipId}`, value: reason, minLength: 10, maxLength: 1000, required: true, onChange: (event) => setReason(event.target.value) })),
+      createElement('button', { type: 'button', disabled: busy || !validReason, 'aria-label': `${roleVerb} ${member.displayName}`, onClick: () => mutate((value) => onRoleChange(member.membershipId, nextRole, value)) }, roleVerb),
+      createElement('button', { type: 'button', disabled: busy || !validReason, 'aria-label': `Deactivate ${member.displayName}`, onClick: () => mutate((value) => onDeactivate(member.membershipId, value)) }, 'Deactivate')),
+    error ? createElement(ErrorMessage, { message: error }) : null);
+}
+
+function ProtectedSymgovMembers({ members, total, loading, error, onAdd, onRoleChange, onDeactivate }) {
+  return createElement('section', { 'aria-labelledby': 'protected-symgov-members-heading', style: { marginBottom: '32px' } },
+    createElement('h2', { id: 'protected-symgov-members-heading' }, `Protected Symgov members (${total})`),
+    error ? createElement(ErrorMessage, { message: error }) : null,
+    members ? createElement(ProtectedMemberAddForm, { onAdd }) : null,
+    loading ? createElement('p', { role: 'status' }, 'Loading protected members…') : null,
+    members ? createElement('ul', { style: { listStyle: 'none', padding: 0 } }, members.map((member) => createElement(ProtectedMemberRow, { key: member.membershipId, member, onRoleChange, onDeactivate }))) : null);
+}
+
+export function CreateOrganizationForm({ onCreate }) {
   const [code, setCode] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [initialAdminUserId, setInitialAdminUserId] = useState('');
@@ -255,10 +388,11 @@ function CreateOrganizationForm({ onCreate }) {
   );
 }
 
-function GrantAdminForm({ onGrant }) {
+export function GrantAdminForm({ onGrant }) {
   const [userId, setUserId] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const userIdInputRef = useRef(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -269,6 +403,7 @@ function GrantAdminForm({ onGrant }) {
       setUserId('');
     } catch (err) {
       setError(err.message);
+      queueMicrotask(() => userIdInputRef.current?.focus());
     } finally {
       setSaving(false);
     }
@@ -285,6 +420,7 @@ function GrantAdminForm({ onGrant }) {
         id: 'platform-admin-user-id',
         type: 'text',
         value: userId,
+        ref: userIdInputRef,
         onChange: (e) => setUserId(e.target.value),
         required: true,
         style: { display: 'block', marginTop: '4px' },
@@ -295,12 +431,13 @@ function GrantAdminForm({ onGrant }) {
   );
 }
 
-export function PlatformAdminPage() {
+export function PlatformAdminPage({ auth }) {
   const [admins, setAdmins] = useState(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [stepUpPin, setStepUpPin] = useState('');
   const PAGE_SIZE = 50;
 
   const [organizations, setOrganizations] = useState(null);
@@ -309,6 +446,20 @@ export function PlatformAdminPage() {
   const [orgLoading, setOrgLoading] = useState(false);
   const [orgError, setOrgError] = useState('');
   const ORG_PAGE_SIZE = 50;
+  const [diagnosticOrganization, setDiagnosticOrganization] = useState(null);
+  const [diagnosticMembers, setDiagnosticMembers] = useState(null);
+  const [diagnosticLoading, setDiagnosticLoading] = useState(false);
+  const [diagnosticError, setDiagnosticError] = useState('');
+  const [protectedMembers, setProtectedMembers] = useState(null);
+  const [protectedMemberTotal, setProtectedMemberTotal] = useState(0);
+  const [protectedMemberLoading, setProtectedMemberLoading] = useState(false);
+  const [protectedMemberError, setProtectedMemberError] = useState('');
+  const protect = useCallback((operation) => runWithStepUp({
+    pin: stepUpPin,
+    operation,
+    reauthenticate: (pin) => auth.reauthenticate({ pin }),
+    clearPin: () => setStepUpPin(''),
+  }), [auth, stepUpPin]);
 
   const load = useCallback(async (p) => {
     setLoading(true);
@@ -340,37 +491,89 @@ export function PlatformAdminPage() {
     }
   }, []);
 
+  const loadProtectedMembers = useCallback(async () => {
+    setProtectedMemberLoading(true);
+    setProtectedMemberError('');
+    try {
+      const data = await apiGet('/platform/organizations/symgov/members?page=1&pageSize=50');
+      setProtectedMembers(data.items);
+      setProtectedMemberTotal(data.total);
+    } catch (err) {
+      setProtectedMembers(null);
+      setProtectedMemberTotal(0);
+      setProtectedMemberError(err.message);
+    } finally {
+      setProtectedMemberLoading(false);
+    }
+  }, []);
+
   useEffect(() => { load(1); }, [load]);
   useEffect(() => { loadOrganizations(1); }, [loadOrganizations]);
+  useEffect(() => { loadProtectedMembers(); }, [loadProtectedMembers]);
 
   async function handleGrant(userId) {
-    await apiPost('/platform/admins', { userId });
+    await grantExistingPlatformAdmin({ userId, protect });
     await load(page);
   }
 
   async function handleRevoke(userId) {
-    await apiDelete(`/platform/admins/${userId}`);
+    await protect(() => apiDelete(`/platform/admins/${userId}`));
     await load(page);
   }
 
   async function handleCreateOrganization({ code, displayName, initialAdminUserId }) {
-    await apiPost('/platform/organizations', { code, displayName, initialAdminUserId });
+    await protect(() => apiPost('/platform/organizations', { code, displayName, initialAdminUserId }));
     await loadOrganizations(orgPage);
   }
 
   async function handleSuspendOrganization(organizationId) {
-    await apiPost(`/platform/organizations/${organizationId}/suspend`);
+    await protect(() => apiPost(`/platform/organizations/${organizationId}/suspend`));
     await loadOrganizations(orgPage);
   }
 
   async function handleReactivateOrganization(organizationId) {
-    await apiPost(`/platform/organizations/${organizationId}/reactivate`);
+    await protect(() => apiPost(`/platform/organizations/${organizationId}/reactivate`));
     await loadOrganizations(orgPage);
+  }
+
+  async function loadMemberDiagnostics(organization) {
+    setDiagnosticOrganization(organization);
+    setDiagnosticMembers(null);
+    setDiagnosticLoading(true);
+    setDiagnosticError('');
+    try {
+      const data = await apiGet(`/platform/organizations/${organization.id}/members?page=1&pageSize=50`);
+      setDiagnosticMembers(data.items);
+    } catch (err) {
+      setDiagnosticError(err.message);
+    } finally {
+      setDiagnosticLoading(false);
+    }
+  }
+
+  async function handleReactivateMembership(membershipId, reason) {
+    await protect(() => apiPost(`/platform/memberships/${membershipId}/reactivate`, { reason }));
+    await loadMemberDiagnostics(diagnosticOrganization);
+  }
+
+  async function handleAddProtectedMember({ userId, baseRole, reason }) {
+    await protect(() => apiPost('/platform/organizations/symgov/members', { userId, baseRole, reason }));
+    await loadProtectedMembers();
+  }
+
+  async function handleProtectedMemberRoleChange(membershipId, baseRole, reason) {
+    await protect(() => apiPatch(`/platform/organizations/symgov/members/${membershipId}`, { baseRole, reason }));
+    await loadProtectedMembers();
+  }
+
+  async function handleDeactivateProtectedMember(membershipId, reason) {
+    await protect(() => apiPost(`/platform/organizations/symgov/members/${membershipId}/deactivate`, { reason }));
+    await loadProtectedMembers();
   }
 
   if (error && !admins) {
     return createElement(
-      'main',
+      'section',
       { style: { padding: '24px' } },
       createElement('h1', null, 'Platform administration'),
       ErrorMessage({ message: error })
@@ -378,16 +581,33 @@ export function PlatformAdminPage() {
   }
 
   if (!admins) {
-    return createElement('main', { style: { padding: '24px' } }, createElement('p', null, 'Loading…'));
+    return createElement('section', { style: { padding: '24px' } }, createElement('p', { role: 'status' }, 'Loading…'));
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const orgTotalPages = Math.ceil(orgTotal / ORG_PAGE_SIZE);
 
   return createElement(
-    'main',
+    'section',
     { style: { padding: '24px', maxWidth: '800px' } },
     createElement('h1', { style: { marginBottom: '24px' } }, 'Platform administration'),
+    createElement('label', { htmlFor: 'platform-step-up-pin' },
+      'PIN for protected changes',
+      createElement('input', {
+        id: 'platform-step-up-pin', type: 'password', inputMode: 'numeric',
+        autoComplete: 'off', value: stepUpPin, maxLength: 4,
+        onChange: (event) => setStepUpPin(event.target.value),
+      })
+    ),
+    createElement(ProtectedSymgovMembers, {
+      members: protectedMembers,
+      total: protectedMemberTotal,
+      loading: protectedMemberLoading,
+      error: protectedMemberError,
+      onAdd: handleAddProtectedMember,
+      onRoleChange: handleProtectedMemberRoleChange,
+      onDeactivate: handleDeactivateProtectedMember,
+    }),
     createElement(
       'section',
       { 'aria-labelledby': 'platform-organizations-heading', style: { marginBottom: '32px' } },
@@ -405,6 +625,7 @@ export function PlatformAdminPage() {
                 organization: o,
                 onSuspend: handleSuspendOrganization,
                 onReactivate: handleReactivateOrganization,
+                onViewMembers: loadMemberDiagnostics,
               })
             )
           )
@@ -418,7 +639,14 @@ export function PlatformAdminPage() {
             createElement('span', null, `Page ${orgPage} of ${orgTotalPages}`),
             createElement('button', { onClick: () => loadOrganizations(orgPage + 1), disabled: orgPage >= orgTotalPages || orgLoading }, 'Next')
           )
-        : null
+        : null,
+      createElement(MemberDiagnostics, {
+        organization: diagnosticOrganization,
+        members: diagnosticMembers,
+        loading: diagnosticLoading,
+        error: diagnosticError,
+        onReactivate: handleReactivateMembership,
+      })
     ),
     createElement(GrantAdminForm, { onGrant: handleGrant }),
     ErrorMessage({ message: error }),

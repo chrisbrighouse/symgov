@@ -400,11 +400,16 @@ async def require_cookie_mutation_security(
         raise HTTPException(status_code=403, detail="Cross-origin request is not permitted.")
 
 
-def get_current_user(request: Request, session: Session = Depends(get_db_session)) -> AuthenticatedUser | None:
+def get_current_user(
+    request: Request,
+    session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
+) -> AuthenticatedUser | None:
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
     current = current_user_from_token(
         session,
         token,
+        settings=settings,
         before_maintenance=lambda must_change_pin, session_purpose: enforce_session_access_state(
             must_change_pin,
             session_purpose,
@@ -525,11 +530,13 @@ def require_any_role(roles: set[str]) -> Callable[[AuthenticatedUser], Authentic
 def require_authoritative_external_submission_user(
     request: Request,
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
     _: AuthenticatedUser = Depends(require_any_role({"admin", "submitter"})),
 ) -> AuthenticatedUser:
     current_user = authoritative_user_from_token(
         session,
         request.cookies.get(SESSION_COOKIE_NAME, ""),
+        settings=settings,
     )
     if current_user is None:
         raise HTTPException(status_code=401, detail="Authentication required.")
@@ -610,11 +617,12 @@ def require_recent_step_up(
 def require_authoritative_user(
     request: Request,
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> AuthenticatedUser:
     from .auth import authoritative_user_from_token
 
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
-    current_user = authoritative_user_from_token(session, token)
+    current_user = authoritative_user_from_token(session, token, settings=settings)
     if current_user is None:
         raise HTTPException(status_code=401, detail="Authentication required.")
     enforce_session_access_state(

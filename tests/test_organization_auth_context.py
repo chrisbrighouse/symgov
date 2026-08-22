@@ -64,7 +64,16 @@ def _create_tables(engine) -> None:
             table.constraints = original
 
 
-def _build_client(*, enabled=True, pilots=(), must_change_pin=False):
+def _build_client(
+    *,
+    enabled=True,
+    pilots=(),
+    must_change_pin=False,
+    platform_admin_enabled=False,
+    organization_admin_enabled=True,
+    custom_icons_enabled=False,
+    icon_upload_enabled=False,
+):
     engine = create_engine(
         "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
@@ -98,7 +107,10 @@ def _build_client(*, enabled=True, pilots=(), must_change_pin=False):
 
     settings = SymgovAPISettings(
         organizations_enabled=enabled,
-        organization_admin_enabled=True,
+        organization_admin_enabled=organization_admin_enabled,
+        organization_custom_icons_enabled=custom_icons_enabled,
+        organization_icon_upload_enabled=icon_upload_enabled,
+        platform_admin_enabled=platform_admin_enabled,
         symbol_sets_enabled=True,
         organization_symbols_enabled=True,
         organization_agents_enabled=True,
@@ -106,7 +118,7 @@ def _build_client(*, enabled=True, pilots=(), must_change_pin=False):
     )
     app.dependency_overrides[get_db_session] = override_db
     app.dependency_overrides[get_settings] = lambda: settings
-    return TestClient(app, headers={"origin": "http://testserver"}), Session, user_id
+    return TestClient(app, headers={"origin": "http://testserver"}), Session, user_id, settings
 
 
 def _add_membership(
@@ -187,7 +199,7 @@ def _login(client, path="/api/v1/auth/login"):
 
 
 def test_zero_eligible_organizations_issues_personal_session_when_feature_is_off():
-    client, Session, user_id = _build_client(enabled=False, pilots=("acme",))
+    client, Session, user_id, settings = _build_client(enabled=False, pilots=("acme",))
     _add_membership(Session, user_id, "acme", capabilities=("contributor",))
 
     response = _login(client)
@@ -202,15 +214,17 @@ def test_zero_eligible_organizations_issues_personal_session_when_feature_is_off
     assert response.json()["user"]["capabilities"] == {
         "organizationsEnabled": False,
         "organizationAdminEnabled": False,
+        "platformAdminEnabled": False,
         "symbolSetsEnabled": False,
         "organizationSymbolsEnabled": False,
         "organizationAgentsEnabled": False,
+        "organizationIconUploadEnabled": False,
     }
     assert response.cookies.get("symgov_session")
 
 
 def test_commercial_display_code_is_returned_while_pilot_uses_normalized_code():
-    client, Session, user_id = _build_client(pilots=(" ACME-01 ",))
+    client, Session, user_id, settings = _build_client(pilots=(" ACME-01 ",))
     organization_id = _add_membership(Session, user_id, "acme-01")
 
     response = _login(client)
@@ -220,13 +234,15 @@ def test_commercial_display_code_is_returned_while_pilot_uses_normalized_code():
     assert response.json()["user"]["organization"]["code"] == "ACME-01"
     token = response.cookies.get("symgov_session")
     with Session() as session:
-        principal = current_user_from_token(session, token)
+        principal = current_user_from_token(session, token, settings=settings)
         assert principal is not None
         assert principal.organization_code == "ACME-01"
 
 
 def test_one_eligible_organization_issues_bound_session_and_effective_context():
-    client, Session, user_id = _build_client(pilots=(" symgov ", "ignored"))
+    client, Session, user_id, settings = _build_client(
+        pilots=(" symgov ", "ignored"), platform_admin_enabled=True
+    )
     organization_id = _add_membership(
         Session,
         user_id,
@@ -257,21 +273,69 @@ def test_one_eligible_organization_issues_bound_session_and_effective_context():
     assert user["capabilities"] == {
         "organizationsEnabled": True,
         "organizationAdminEnabled": True,
+        "platformAdminEnabled": True,
         "symbolSetsEnabled": True,
         "organizationSymbolsEnabled": True,
         "organizationAgentsEnabled": True,
+        "organizationIconUploadEnabled": False,
     }
     token = response.cookies.get("symgov_session")
     with Session() as session:
-        principal = current_user_from_token(session, token)
+        principal = current_user_from_token(session, token, settings=settings)
         assert principal is not None
         assert principal.active_organization_id == str(organization_id)
         assert principal.session_mode == "organization"
 
 
+@pytest.mark.parametrize(
+    (
+        "enabled",
+        "organization_admin_enabled",
+        "custom_icons_enabled",
+        "icon_upload_enabled",
+        "pilots",
+        "organization_code",
+        "base_role",
+        "expected",
+    ),
+    (
+        (True, True, True, True, ("acme",), "acme", "admin", True),
+        (True, True, True, False, ("acme",), "acme", "admin", False),
+        (True, True, False, True, ("acme",), "acme", "admin", False),
+        (True, False, True, True, ("acme",), "acme", "admin", False),
+        (False, True, True, True, ("acme",), "acme", "admin", False),
+        (True, True, True, True, ("other",), "acme", "admin", False),
+        (True, True, True, True, ("acme",), "acme", "user", False),
+    ),
+)
+def test_icon_upload_capability_requires_bound_pilot_admin_and_every_flag(
+    enabled,
+    organization_admin_enabled,
+    custom_icons_enabled,
+    icon_upload_enabled,
+    pilots,
+    organization_code,
+    base_role,
+    expected,
+):
+    client, Session, user_id, _ = _build_client(
+        enabled=enabled,
+        pilots=pilots,
+        organization_admin_enabled=organization_admin_enabled,
+        custom_icons_enabled=custom_icons_enabled,
+        icon_upload_enabled=icon_upload_enabled,
+    )
+    _add_membership(Session, user_id, organization_code, base_role=base_role)
+
+    response = _login(client)
+
+    assert response.status_code == 200
+    assert response.json()["user"]["capabilities"]["organizationIconUploadEnabled"] is expected
+
+
 @pytest.mark.parametrize("path", ("/api/v1/auth/login", "/api/auth/login"))
 def test_many_organizations_issue_hashed_bounded_challenge_without_application_cookie(path):
-    client, Session, user_id = _build_client(pilots=tuple(f"org-{index}" for index in range(8)))
+    client, Session, user_id, settings = _build_client(pilots=tuple(f"org-{index}" for index in range(8)))
     for index in range(8):
         _add_membership(Session, user_id, f"org-{index}")
 
@@ -296,7 +360,7 @@ def test_many_organizations_issue_hashed_bounded_challenge_without_application_c
 
 
 def test_ineligible_memberships_are_omitted_without_private_directory_leakage():
-    client, Session, user_id = _build_client(pilots=("good", "inactive", "suspended", "member-off", "role-off"))
+    client, Session, user_id, settings = _build_client(pilots=("good", "inactive", "suspended", "member-off", "role-off"))
     good_id = _add_membership(Session, user_id, "good")
     _add_membership(Session, user_id, "inactive", organization_active=False)
     _add_membership(Session, user_id, "suspended", entitlement="suspended")
@@ -313,7 +377,7 @@ def test_ineligible_memberships_are_omitted_without_private_directory_leakage():
 
 
 def test_platform_admin_requires_every_independent_active_condition():
-    client, Session, user_id = _build_client(pilots=("acme",))
+    client, Session, user_id, settings = _build_client(pilots=("acme",))
     _add_membership(Session, user_id, "acme", base_role="admin", platform_admin=True)
 
     response = _login(client)
@@ -323,7 +387,7 @@ def test_platform_admin_requires_every_independent_active_condition():
 
 
 def test_must_change_pin_does_not_query_organizations_or_issue_challenge(monkeypatch):
-    client, Session, _ = _build_client(enabled=True, pilots=("symgov",), must_change_pin=True)
+    client, Session, _, settings = _build_client(enabled=True, pilots=("symgov",), must_change_pin=True)
 
     def forbidden(*_args, **_kwargs):
         raise AssertionError("organization eligibility lookup reached")
@@ -344,7 +408,7 @@ def test_must_change_pin_does_not_query_organizations_or_issue_challenge(monkeyp
 @pytest.mark.parametrize("membership_count", (1, 2), ids=("one-organization", "several-organizations"))
 def test_successful_mandatory_pin_change_reenters_context_selection(membership_count):
     codes = tuple(f"org-{index}" for index in range(membership_count))
-    client, Session, user_id = _build_client(enabled=True, pilots=codes, must_change_pin=True)
+    client, Session, user_id, settings = _build_client(enabled=True, pilots=codes, must_change_pin=True)
     organization_ids = [_add_membership(Session, user_id, code) for code in codes]
     login_response = _login(client)
     limited_token = login_response.cookies.get("symgov_session")
@@ -388,7 +452,7 @@ def test_auth_me_aliases_return_only_bounded_current_context_without_private_mem
         "sentinel-member-inactive",
         "sentinel-role-inactive",
     )
-    client, Session, user_id = _build_client(pilots=pilot_codes)
+    client, Session, user_id, settings = _build_client(pilots=pilot_codes)
     sentinel_organizations = {
         "sentinel-inactive-org": _add_membership(
             Session, user_id, "sentinel-inactive-org", organization_active=False
@@ -433,9 +497,11 @@ def test_auth_me_aliases_return_only_bounded_current_context_without_private_mem
     expected_capabilities = {
         "organizationsEnabled": True,
         "organizationAdminEnabled": True,
+        "platformAdminEnabled": False,
         "symbolSetsEnabled": True,
         "organizationSymbolsEnabled": True,
         "organizationAgentsEnabled": True,
+        "organizationIconUploadEnabled": False,
     }
 
     for path in ("/api/v1/auth/me", "/api/auth/me"):
@@ -461,7 +527,7 @@ def test_auth_me_aliases_return_only_bounded_current_context_without_private_mem
 @pytest.mark.parametrize("outcome", ("personal", "organization", "challenge"))
 def test_login_aliases_have_exact_response_and_cookie_parity(path, outcome):
     pilots = ("good",) if outcome == "organization" else (("alpha", "beta") if outcome == "challenge" else ())
-    client, Session, user_id = _build_client(pilots=pilots)
+    client, Session, user_id, settings = _build_client(pilots=pilots)
     organization_id = None
     challenge_organizations = {}
     if outcome == "organization":
@@ -578,9 +644,11 @@ def test_login_aliases_have_exact_response_and_cookie_parity(path, outcome):
     assert user["capabilities"] == {
         "organizationsEnabled": True,
         "organizationAdminEnabled": True,
+        "platformAdminEnabled": False,
         "symbolSetsEnabled": True,
         "organizationSymbolsEnabled": True,
         "organizationAgentsEnabled": True,
+        "organizationIconUploadEnabled": False,
     }
     token = response.cookies.get("symgov_session")
     assert token and client.cookies.get("symgov_session") == token
@@ -601,7 +669,7 @@ def test_login_aliases_have_exact_response_and_cookie_parity(path, outcome):
     ids=("v1", "legacy"),
 )
 def test_successful_mandatory_pin_change_with_no_eligible_organization_issues_personal_session(path):
-    client, Session, user_id = _build_client(
+    client, Session, user_id, settings = _build_client(
         enabled=True,
         pilots=("pilot-without-membership",),
         must_change_pin=True,
@@ -636,9 +704,11 @@ def test_successful_mandatory_pin_change_with_no_eligible_organization_issues_pe
         "capabilities": {
             "organizationsEnabled": True,
             "organizationAdminEnabled": True,
+            "platformAdminEnabled": False,
             "symbolSetsEnabled": True,
             "organizationSymbolsEnabled": True,
             "organizationAgentsEnabled": True,
+            "organizationIconUploadEnabled": False,
         },
         "recentStepUpAt": None,
     }

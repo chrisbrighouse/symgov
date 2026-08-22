@@ -52,6 +52,23 @@ legacy_router = APIRouter(tags=["auth"])
 
 def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | None = None) -> AuthUserResponse:
     effective = settings or SymgovAPISettings()
+    pilot_codes = {
+        str(code).strip().lower()
+        for code in effective.organization_pilot_codes
+        if str(code).strip()
+    }
+    organization_icon_upload_enabled = bool(
+        effective.organizations_enabled
+        and effective.organization_admin_enabled
+        and effective.organization_custom_icons_enabled
+        and effective.organization_icon_upload_enabled
+        and user.session_purpose == "application"
+        and user.session_mode == "organization"
+        and user.active_organization_id is not None
+        and user.organization_base_role == "admin"
+        and user.organization_code
+        and user.organization_code.strip().lower() in pilot_codes
+    )
     return AuthUserResponse(
         id=user.id,
         email=user.email,
@@ -75,9 +92,15 @@ def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | No
         capabilities={
             "organizationsEnabled": effective.organizations_enabled,
             "organizationAdminEnabled": effective.organizations_enabled and effective.organization_admin_enabled,
+            "platformAdminEnabled": (
+                effective.organizations_enabled
+                and effective.organization_admin_enabled
+                and effective.platform_admin_enabled
+            ),
             "symbolSetsEnabled": effective.organizations_enabled and effective.symbol_sets_enabled,
             "organizationSymbolsEnabled": effective.organizations_enabled and effective.organization_symbols_enabled,
             "organizationAgentsEnabled": effective.organizations_enabled and effective.organization_agents_enabled,
+            "organizationIconUploadEnabled": organization_icon_upload_enabled,
         },
         recentStepUpAt=user.recent_step_up_at.isoformat() if user.recent_step_up_at else None,
     )
@@ -277,7 +300,7 @@ async def select_organization(
         active_organization_id=selected.organization_id,
         recent_step_up_at=None,
     )
-    current = current_user_from_token(session, token)
+    current = current_user_from_token(session, token, settings=settings)
     if current is None:
         session.rollback()
         raise HTTPException(status_code=500, detail="Organization session could not be created.")
@@ -337,7 +360,9 @@ async def login(
             response.delete_cookie(SESSION_COOKIE_NAME, path="/")
             return AuthLoginResponse(user=None, selectionChallenge=selection_challenge)
     session.commit()
-    current = current_user_from_token(session, token)
+    if token is None:
+        raise HTTPException(status_code=500, detail="Login session could not be created.")
+    current = current_user_from_token(session, token, settings=settings)
     if current is None:
         raise HTTPException(status_code=500, detail="Login session could not be created.")
     session.commit()
@@ -397,7 +422,7 @@ async def reauthenticate(
 @legacy_router.get("/auth/me", response_model=AuthMeResponse, include_in_schema=False)
 def me(request: Request, session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)) -> AuthMeResponse:
     token = request.cookies.get(SESSION_COOKIE_NAME, "")
-    current = current_user_from_token(session, token)
+    current = current_user_from_token(session, token, settings=settings)
     if current is None:
         return AuthMeResponse(user=None)
     session.commit()
@@ -449,7 +474,7 @@ async def change_pin(
     session.commit()
     if token is None:
         raise HTTPException(status_code=500, detail="Updated user session could not be created.")
-    refreshed = current_user_from_token(session, token)
+    refreshed = current_user_from_token(session, token, settings=settings)
     if refreshed is None:
         raise HTTPException(status_code=500, detail="Updated user session could not be loaded.")
     response.set_cookie(

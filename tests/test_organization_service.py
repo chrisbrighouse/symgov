@@ -9,6 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from symgov_backend.organization_service import (
+    add_protected_organization_member,
     assign_platform_admin,
     create_organization_with_initial_admin,
     deactivate_membership,
@@ -17,15 +18,21 @@ from symgov_backend.organization_service import (
     list_organizations,
     list_platform_admins,
     reactivate_organization,
+    reactivate_membership,
+    finalize_organization_icon_upload,
+    grant_member_capability,
+    remove_organization_icon,
     revoke_platform_admin,
     replace_membership_base_role,
     suspend_organization,
+    update_organization,
 )
 from symgov_backend.models import (
     Organization,
     OrganizationMembership,
     OrganizationRoleAssignment,
     PlatformRoleAssignment,
+    OrganizationMemberCapability,
     User,
     UserRole,
     UserSession,
@@ -53,6 +60,7 @@ def _session_factory():
         OrganizationRoleAssignment.__table__,
         PlatformRoleAssignment.__table__,
         UserSession.__table__,
+        OrganizationMemberCapability.__table__,
     ):
         original_constraints = table.constraints
         try:
@@ -275,7 +283,7 @@ def test_last_active_admin_guard_ignores_inactive_and_deleted_admin_users():
                     session,
                     membership_id=created.membership.id,
                     new_base_role="user",
-                    actor_user_id=actor.id,
+                    actor_user_id=owner.id,
                 )
             except ValueError as exc:
                 assert "last active organization admin" in str(exc).lower()
@@ -425,7 +433,7 @@ def test_symgov_admin_with_active_platform_role_cannot_be_demoted_or_deactivated
             try:
                 operation()
             except ValueError as exc:
-                assert "platform administrator" in str(exc).lower()
+                assert "protected symgov organization" in str(exc).lower()
             else:
                 raise AssertionError("Expected active Platform Admin eligibility protection.")
 
@@ -636,3 +644,90 @@ def test_suspend_and_reactivate_require_effective_platform_admin():
                 assert "platform administrator" in str(exc).lower()
             else:
                 raise AssertionError("Expected effective Platform Admin requirement.")
+
+
+def test_ordinary_mutations_revalidate_live_organization_admin_authority():
+    Session = _session_factory()
+    with Session() as session:
+        platform_actor = _seed_platform_admin_actor(session)
+        owner = _seed_user(session, email="owner-live-authority@example.test")
+        outsider = _seed_user(session, email="outsider-live-authority@example.test")
+        target = _seed_user(session, email="target-live-authority@example.test")
+        created = create_organization_with_initial_admin(
+            session,
+            code="LIVE-AUTH",
+            display_name="Live Authority",
+            initial_admin_user_id=owner.id,
+            actor_user_id=platform_actor.id,
+        )
+        target_membership = OrganizationMembership(
+            id=uuid.uuid4(), organization_id=created.organization.id, user_id=target.id,
+            status="active", activated_at=created.membership.activated_at,
+            created_at=created.membership.created_at, updated_at=created.membership.updated_at,
+        )
+        session.add(target_membership)
+        session.commit()
+
+        operations = (
+            lambda: update_organization(
+                session, created.organization.id, actor_user_id=outsider.id,
+                display_name="Unauthorized rename",
+            ),
+            lambda: grant_member_capability(
+                session, target_membership.id, capability="contributor",
+                actor_user_id=outsider.id, organization_id=created.organization.id,
+            ),
+            lambda: finalize_organization_icon_upload(
+                session, created.organization.id, actor_user_id=outsider.id,
+                storage_key="organizations/live-auth/icon.png", content_type="image/png",
+            ),
+        )
+        for operation in operations:
+            with pytest.raises(ValueError, match="active administrator"):
+                operation()
+            session.rollback()
+
+
+def test_reactivation_preserves_append_only_lifecycle_timestamps():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        target = _seed_user(session, email="reactivation-target@example.test")
+        org = _seed_commercial_org(session, code="REACTIVATE")
+        activated_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        deactivated_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        membership = OrganizationMembership(
+            id=uuid.uuid4(), organization_id=org.id, user_id=target.id,
+            status="inactive", activated_at=activated_at, deactivated_at=deactivated_at,
+            created_at=activated_at, updated_at=deactivated_at,
+        )
+        session.add(membership)
+        session.flush()
+
+        reactivate_membership(
+            session, membership_id=membership.id, actor_user_id=actor.id,
+            reason="Approved return to the organization",
+        )
+
+        assert membership.status == "active"
+        assert membership.activated_at == activated_at
+        assert membership.deactivated_at == deactivated_at
+
+
+def test_protected_membership_audit_receives_bounded_reason():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        target = _seed_user(session, email="protected-target@example.test")
+        symgov = session.query(Organization).filter_by(normalized_code="symgov").one()
+        with patch("symgov_backend.organization_service._emit_audit") as emit:
+            add_protected_organization_member(
+                session, symgov.id, user_id=target.id, base_role="user",
+                actor_user_id=actor.id, reason="Approved by platform operations",
+            )
+
+        membership_audit = next(
+            call for call in emit.call_args_list
+            if call.kwargs.get("action") == "membership.added"
+        )
+        assert membership_audit.kwargs["payload"]["reason"] == "Approved by platform operations"

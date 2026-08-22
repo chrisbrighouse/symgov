@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import io
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -92,7 +92,18 @@ def _build_engine_and_session():
     return Session
 
 
-def _build_client(*, pilots=(), org_admin_enabled=True, organizations_enabled=True):
+class _OrganizationTestClient(TestClient):
+    fake_bridge: "_FakeStorageBridge"
+
+
+def _build_client(
+    *,
+    pilots=(),
+    org_admin_enabled=True,
+    organizations_enabled=True,
+    custom_icons_enabled=True,
+    icon_upload_enabled=True,
+):
     Session = _build_engine_and_session()
     with Session() as session:
         admin_user = upsert_user(
@@ -133,6 +144,8 @@ def _build_client(*, pilots=(), org_admin_enabled=True, organizations_enabled=Tr
     settings = SymgovAPISettings(
         organizations_enabled=organizations_enabled,
         organization_admin_enabled=org_admin_enabled,
+        organization_custom_icons_enabled=custom_icons_enabled,
+        organization_icon_upload_enabled=icon_upload_enabled,
         symbol_sets_enabled=False,
         organization_symbols_enabled=False,
         organization_agents_enabled=False,
@@ -142,7 +155,9 @@ def _build_client(*, pilots=(), org_admin_enabled=True, organizations_enabled=Tr
     app.dependency_overrides[get_settings] = lambda: settings
     fake_bridge = _FakeStorageBridge()
     app.dependency_overrides[get_icon_storage_bridge] = lambda: fake_bridge
-    client = TestClient(app, headers={"origin": "http://testserver"}, raise_server_exceptions=False)
+    client = _OrganizationTestClient(
+        app, headers={"origin": "http://testserver"}, raise_server_exceptions=False
+    )
     client.fake_bridge = fake_bridge
     return client, Session, admin_id, member_id, other_id
 
@@ -157,10 +172,17 @@ class _FakeStorageBridge:
 
     def __init__(self):
         self.objects: dict[str, tuple[bytes, str]] = {}
+        self.upload_error_after_write: Exception | None = None
 
     def upload_object_bytes(self, *, object_key, payload, content_type, env_file=None):
         self.objects[object_key] = (payload, content_type)
+        if self.upload_error_after_write is not None:
+            raise self.upload_error_after_write
         return {"object_key": object_key, "size_bytes": len(payload)}
+
+    def delete_object(self, *, object_key, env_file=None):
+        self.objects.pop(object_key, None)
+        return {"object_key": object_key}
 
 
 def _make_png_bytes(width=64, height=64, color=(10, 20, 30)) -> bytes:
@@ -395,15 +417,15 @@ def test_list_members_tenant_isolation():
     assert "admin@example.test" in emails
 
 
-def test_list_members_accessible_to_org_user():
-    """Non-admin org members can also list members."""
+def test_list_members_restricted_to_org_admin():
+    """Member-directory visibility is restricted to organization administrators."""
     client, Session, admin_id, member_id, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id, member_id)
     _login_and_select_org(client, "member@example.test", org_id)
 
     response = client.get("/api/v1/org/me/members")
 
-    assert response.status_code == 200
+    assert response.status_code == 403
 
 
 # --- POST /org/me/members ---
@@ -673,10 +695,132 @@ def _icon_upload_json(payload_bytes: bytes, content_type: str = "image/png") -> 
 
 # --- POST /org/me/icon (custom icon upload) ---
 
+def test_upload_icon_requires_recent_step_up():
+    client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+
+    response = client.post("/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes()))
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Step-up reauthentication is required."
+    assert client.fake_bridge.objects == {}
+
+
+def test_upload_icon_rejects_expired_step_up():
+    client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+    with Session() as session:
+        user_session = session.query(UserSession).filter(UserSession.revoked_at.is_(None)).one()
+        user_session.recent_step_up_at = datetime.now(timezone.utc) - timedelta(seconds=601)
+        session.commit()
+
+    response = client.post("/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes()))
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Step-up reauthentication has expired."
+    assert client.fake_bridge.objects == {}
+
+
+def test_upload_icon_custom_icon_capability_remains_default_off():
+    client, Session, admin_id, _, _ = _build_client(
+        pilots=("acme",), custom_icons_enabled=False
+    )
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+
+    response = client.post("/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes()))
+
+    assert response.status_code == 404
+    assert client.fake_bridge.objects == {}
+
+
+def test_icon_upload_activation_flag_off_keeps_fallback_get_but_blocks_mutations():
+    client, Session, admin_id, _, _ = _build_client(
+        pilots=("acme",),
+        custom_icons_enabled=True,
+        icon_upload_enabled=False,
+    )
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+
+    get_response = client.get("/api/v1/org/me/icon")
+    post_response = client.post(
+        "/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes())
+    )
+    delete_response = client.delete("/api/v1/org/me/icon")
+
+    assert get_response.status_code == 200
+    assert "image/svg+xml" in get_response.headers["content-type"]
+    assert post_response.status_code == 404
+    assert delete_response.status_code == 404
+    assert client.fake_bridge.objects == {}
+
+
+def test_upload_icon_cleans_exact_object_after_final_authority_rejection():
+    client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+    client.fake_bridge.objects["unrelated/object.png"] = (b"keep", "image/png")
+
+    with patch(
+        "symgov_backend.routes.organizations.finalize_organization_icon_upload",
+        side_effect=ValueError("Actor must be an active administrator of the organization."),
+    ):
+        response = client.post(
+            "/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes())
+        )
+
+    assert response.status_code == 400
+    assert client.fake_bridge.objects == {
+        "unrelated/object.png": (b"keep", "image/png")
+    }
+
+
+def test_upload_icon_cleans_partial_object_when_storage_reports_failure():
+    client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+    client.fake_bridge.upload_error_after_write = RuntimeError("simulated storage failure")
+
+    response = client.post("/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes()))
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Icon storage is unavailable."
+    assert client.fake_bridge.objects == {}
+
+
+def test_upload_icon_cleans_exact_object_after_database_finalization_failure():
+    client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+    client.fake_bridge.objects["unrelated/object.png"] = (b"keep", "image/png")
+
+    with patch(
+        "symgov_backend.routes.organizations.finalize_organization_icon_upload",
+        side_effect=RuntimeError("simulated database failure"),
+    ):
+        response = client.post(
+            "/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes())
+        )
+
+    assert response.status_code == 500
+    assert client.fake_bridge.objects == {
+        "unrelated/object.png": (b"keep", "image/png")
+    }
+
 def test_upload_icon_requires_org_admin():
     client, Session, admin_id, member_id, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id, member_id)
     _login_and_select_org(client, "member@example.test", org_id)
+    _step_up(client)
 
     response = client.post("/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes()))
 
@@ -697,6 +841,7 @@ def test_upload_icon_rejects_svg():
     client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id)
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
 
     response = client.post(
         "/api/v1/org/me/icon",
@@ -713,6 +858,7 @@ def test_upload_icon_rejects_oversized_base64_body():
     client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id)
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
 
     oversized = b"a" * (600 * 1024)
     response = client.post("/api/v1/org/me/icon", json=_icon_upload_json(oversized))
@@ -724,6 +870,7 @@ def test_upload_icon_rejects_invalid_base64():
     client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id)
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
 
     response = client.post(
         "/api/v1/org/me/icon",
@@ -737,6 +884,7 @@ def test_upload_icon_rejects_invalid_image_bytes():
     client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id)
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
 
     response = client.post("/api/v1/org/me/icon", json=_icon_upload_json(b"not a real png"))
 
@@ -747,6 +895,7 @@ def test_upload_icon_rejects_declared_type_mismatch():
     client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id)
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
 
     response = client.post(
         "/api/v1/org/me/icon",
@@ -760,6 +909,7 @@ def test_upload_icon_rejects_dimensions_out_of_bounds():
     client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id)
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
 
     response = client.post(
         "/api/v1/org/me/icon",
@@ -773,6 +923,7 @@ def test_upload_icon_success_serves_uploaded_bytes_and_sets_flag():
     client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id)
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
 
     response = client.post(
         "/api/v1/org/me/icon",
@@ -794,6 +945,7 @@ def test_upload_icon_is_rate_limited():
     client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id)
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
 
     first = client.post("/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes(color=(1, 2, 3))))
     assert first.status_code == 200
@@ -845,6 +997,7 @@ def test_upload_icon_blocked_for_protected_organization():
         org_id = org.id
 
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
 
     response = client.post("/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes()))
 
@@ -855,6 +1008,7 @@ def test_upload_icon_audit_event_emitted():
     client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id)
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
 
     emitted = []
     with patch("symgov_backend.organization_service._emit_audit", side_effect=lambda *a, **kw: emitted.append(kw)):
@@ -864,15 +1018,55 @@ def test_upload_icon_audit_event_emitted():
     assert any(e["action"] == "organization.icon_uploaded" for e in emitted)
     uploaded_event = next(e for e in emitted if e["action"] == "organization.icon_uploaded")
     assert "content_type" in uploaded_event["payload"]
-    assert set(uploaded_event["payload"]) == {"content_type"}
+    assert uploaded_event["payload"]["effective_authority"] == "organization_admin"
+    assert uploaded_event["payload"]["organization_id"] == str(org_id)
+    assert uploaded_event["payload"]["source"] == "api.upload_organization_icon"
+    assert uploaded_event["payload"]["before"] == {
+        "has_custom_icon": False,
+        "content_type": None,
+    }
+    assert uploaded_event["payload"]["after"] == {
+        "has_custom_icon": True,
+        "content_type": "image/png",
+    }
+    assert "recent_step_up_at" in uploaded_event["payload"]
+    assert "storage_key" not in repr(uploaded_event["payload"])
+    assert "contentBase64" not in repr(uploaded_event["payload"])
 
 
 # --- DELETE /org/me/icon ---
+
+def test_remove_icon_requires_recent_step_up():
+    client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+
+    response = client.delete("/api/v1/org/me/icon")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Step-up reauthentication is required."
+
+
+def test_remove_icon_rejects_expired_step_up():
+    client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+    with Session() as session:
+        user_session = session.query(UserSession).filter(UserSession.revoked_at.is_(None)).one()
+        user_session.recent_step_up_at = datetime.now(timezone.utc) - timedelta(seconds=601)
+        session.commit()
+
+    response = client.delete("/api/v1/org/me/icon")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Step-up reauthentication has expired."
 
 def test_remove_icon_without_custom_icon_returns_400():
     client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id)
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
 
     response = client.delete("/api/v1/org/me/icon")
 
@@ -883,6 +1077,7 @@ def test_remove_icon_requires_org_admin():
     client, Session, admin_id, member_id, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id, member_id)
     _login_and_select_org(client, "member@example.test", org_id)
+    _step_up(client)
 
     response = client.delete("/api/v1/org/me/icon")
 
@@ -893,6 +1088,7 @@ def test_remove_icon_reverts_to_fallback():
     client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id)
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
 
     upload_response = client.post("/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes()))
     assert upload_response.json()["hasCustomIcon"] is True
@@ -910,6 +1106,7 @@ def test_remove_icon_audit_event_emitted():
     client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id)
     _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
     client.post("/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes()))
 
     emitted = []
