@@ -25,6 +25,8 @@ from .routes.published import router as published_router
 from .routes.profile import router as profile_router
 from .routes.llm import legacy_router as legacy_llm_router
 from .routes.llm import router as llm_router
+from .routes.projects import router as projects_router, stage4_route_guard
+from .routes.symbol_sets import router as symbol_sets_router
 from .routes.workspace import legacy_router as legacy_workspace_router
 from .routes.workspace import router as workspace_router
 from .agent_queue_worker import AgentQueueWorkerConfig, AgentQueueWorkerState, run_agent_queue_worker
@@ -105,6 +107,16 @@ def create_app() -> FastAPI:
         dependencies=[csrf, session_access, Depends(require_workspace_access)],
     )
     app.include_router(llm_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
+    app.include_router(
+        projects_router,
+        prefix=settings.api_prefix,
+        dependencies=[Depends(stage4_route_guard), csrf, session_access],
+    )
+    app.include_router(
+        symbol_sets_router,
+        prefix=settings.api_prefix,
+        dependencies=[Depends(stage4_route_guard), csrf, session_access],
+    )
     app.include_router(legacy_auth_router, prefix="/api", dependencies=[csrf])
     app.include_router(legacy_admin_router, prefix="/api", dependencies=[csrf, session_access])
     app.include_router(

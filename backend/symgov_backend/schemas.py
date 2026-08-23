@@ -23,6 +23,10 @@ class APIErrorResponse(BaseModel):
     detail: str
 
 
+class APIValidationErrorResponse(APIErrorResponse):
+    issues: list[dict[str, Any]]
+
+
 class CatalogSelfServiceApiKeyCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -104,6 +108,105 @@ class AuthLoginResponse(BaseModel):
 
 class AuthMeResponse(BaseModel):
     user: AuthUserResponse | None
+
+
+class ProjectCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str
+    name: str
+    shortDescription: str | None = None
+    externalReference: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class ProjectPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = None
+    shortDescription: str | None = None
+    externalReference: str | None = None
+    metadata: dict[str, Any] | None = None
+    status: str | None = None
+
+    @model_validator(mode="after")
+    def require_field(self):
+        if not self.model_fields_set:
+            raise ValueError("At least one field is required.")
+        return self
+
+    def only_status(self) -> bool:
+        return self.model_fields_set == {"status"}
+
+
+class SymbolSetCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str
+    name: str
+    description: str | None = None
+    disciplines: list[str] | None = None
+    useCases: list[str] | None = None
+
+
+class SymbolSetPatchRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = None
+    description: str | None = None
+    disciplines: list[str] | None = None
+    useCases: list[str] | None = None
+    status: str | None = None
+
+    @model_validator(mode="after")
+    def require_field(self):
+        if not self.model_fields_set:
+            raise ValueError("At least one field is required.")
+        return self
+
+
+class ProjectSummary(BaseModel):
+    id: uuid.UUID
+    code: str
+    name: str
+    shortDescription: str | None
+    status: str
+
+
+class ProjectResponse(ProjectSummary):
+    externalReference: str | None
+    metadata: dict[str, Any]
+    createdAt: datetime
+    updatedAt: datetime
+    closedAt: datetime | None
+
+
+class SymbolSetSummary(BaseModel):
+    id: uuid.UUID
+    code: str
+    name: str
+    description: str | None
+    disciplines: list[str]
+    useCases: list[str]
+    status: str
+
+
+class SymbolSetResponse(SymbolSetSummary):
+    copiedFromSymbolSetId: uuid.UUID | None
+    createdAt: datetime
+    updatedAt: datetime
+    supersededAt: datetime | None
+    archivedAt: datetime | None
+
+
+class PagedProjectResponse(BaseModel):
+    items: list[ProjectResponse]
+    page: int
+    pageSize: int
+    total: int
+
+
+class PagedSymbolSetResponse(BaseModel):
+    items: list[SymbolSetResponse]
+    page: int
+    pageSize: int
+    total: int
 
 
 class ProfileUpgradeOptionResponse(BaseModel):

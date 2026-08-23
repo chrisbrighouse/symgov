@@ -130,7 +130,7 @@ def organization_database() -> Generator[Engine, None, None]:
             )
         engine.dispose()
 
-        _alembic(url, "upgrade", "20260821_0029")
+        _alembic(url, "upgrade", "20260822_0030")
         engine = create_engine(url)
         LEGACY_SESSION_ID = legacy_session_id
         yield engine
@@ -246,7 +246,7 @@ def test_audit_immutability_migration_downgrades_safely_and_reupgrades(
                 )
             ).scalar_one() is False
     finally:
-        _alembic(url, "upgrade", "20260821_0029")
+        _alembic(url, "upgrade", "20260822_0030")
 
     with organization_database.connect() as connection:
         assert connection.execute(

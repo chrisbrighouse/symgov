@@ -12,7 +12,7 @@ def test_llm_usage_migration_head_is_single_and_linear():
     script = ScriptDirectory.from_config(cfg)
     heads = script.get_heads()
     assert len(heads) == 1
-    assert heads[0] == "20260821_0029"
+    assert heads[0] == "20260822_0030"
 
     rev = script.get_revision("20260730_0025")
     assert rev is not None

@@ -105,7 +105,145 @@ class Organization(Base):
     uploaded_icon_storage_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     uploaded_icon_content_type: Mapped[str | None] = mapped_column(Text, nullable=True)
     uploaded_icon_uploaded_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    default_symbol_set_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("symbol_sets.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class Project(Base):
+    __tablename__ = "projects"
+    __table_args__ = (
+        CheckConstraint("code ~ '^[A-Z0-9][A-Z0-9-]{0,31}$'", name="ck_projects_code_format"),
+        CheckConstraint("normalized_code = lower(code)", name="ck_projects_normalized_code"),
+        CheckConstraint("char_length(short_description) <= 50", name="ck_projects_short_description_length"),
+        CheckConstraint("btrim(name) <> '' AND char_length(name) <= 200", name="ck_projects_name_bounds"),
+        CheckConstraint("external_reference is null or char_length(external_reference) <= 200", name="ck_projects_external_reference_length"),
+        CheckConstraint("status in ('active', 'closed')", name="ck_projects_status"),
+        CheckConstraint("jsonb_typeof(metadata_json) = 'object'", name="ck_projects_metadata_object"),
+        CheckConstraint("octet_length(convert_to(metadata_json::text, 'UTF8')) <= 16384", name="ck_projects_metadata_size"),
+        UniqueConstraint("organization_id", "normalized_code", name="uq_projects_organization_normalized_code"),
+        Index("ix_projects_organization_status_code_id", "organization_id", "status", "normalized_code", "id"),
+        Index("uq_projects_organization_external_reference", "organization_id", "normalized_external_reference", unique=True, postgresql_where=text("normalized_external_reference is not null")),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False)
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_code: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    short_description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    external_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    normalized_external_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SymbolSet(Base):
+    __tablename__ = "symbol_sets"
+    __table_args__ = (
+        CheckConstraint("code ~ '^[A-Z0-9][A-Z0-9-]{0,31}$'", name="ck_symbol_sets_code_format"),
+        CheckConstraint("normalized_code = lower(code)", name="ck_symbol_sets_normalized_code"),
+        CheckConstraint("status in ('draft', 'active', 'superseded', 'archived')", name="ck_symbol_sets_status"),
+        CheckConstraint("description is null or char_length(description) <= 2000", name="ck_symbol_sets_description_length"),
+        CheckConstraint("btrim(name) <> '' AND char_length(name) <= 200", name="ck_symbol_sets_name_bounds"),
+        CheckConstraint("jsonb_typeof(disciplines_json) = 'array' AND jsonb_array_length(disciplines_json) <= 32", name="ck_symbol_sets_disciplines_array_bounds"),
+        CheckConstraint("jsonb_typeof(use_cases_json) = 'array' AND jsonb_array_length(use_cases_json) <= 32", name="ck_symbol_sets_use_cases_array_bounds"),
+        CheckConstraint("copied_from_symbol_set_id IS NULL OR copied_from_symbol_set_id <> id", name="ck_symbol_sets_copy_not_self"),
+        UniqueConstraint("owner_organization_id", "normalized_code", name="uq_symbol_sets_owner_normalized_code"),
+        Index("ix_symbol_sets_owner_status_code_id", "owner_organization_id", "status", "normalized_code", "id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False)
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_code: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    disciplines_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    use_cases_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    copied_from_symbol_set_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_sets.id", ondelete="RESTRICT"), nullable=True)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    superseded_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ProjectSymbolSet(Base):
+    __tablename__ = "project_symbol_sets"
+    __table_args__ = (
+        CheckConstraint("status in ('active', 'inactive')", name="ck_project_symbol_sets_status"),
+        UniqueConstraint("project_id", "symbol_set_id", name="uq_project_symbol_sets_project_set"),
+        Index("uq_project_symbol_sets_active_default", "project_id", unique=True, postgresql_where=text("status = 'active' AND is_default = true")),
+        Index("ix_project_symbol_sets_project_status_set", "project_id", "status", "symbol_set_id"),
+        Index("ix_project_symbol_sets_set_status_project", "symbol_set_id", "status", "project_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False)
+    symbol_set_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_sets.id", ondelete="RESTRICT"), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SymbolSetItem(Base):
+    __tablename__ = "symbol_set_items"
+    __table_args__ = (
+        CheckConstraint("sort_order >= 0", name="ck_symbol_set_items_sort_order"),
+        CheckConstraint("availability_status in ('active', 'unavailable')", name="ck_symbol_set_items_availability_status"),
+        CheckConstraint("jsonb_typeof(provenance_json) = 'object'", name="ck_symbol_set_items_provenance_object"),
+        CheckConstraint("group_name is null or char_length(group_name) <= 200", name="ck_symbol_set_items_group_name_length"),
+        CheckConstraint("display_label is null or char_length(display_label) <= 200", name="ck_symbol_set_items_display_label_length"),
+        CheckConstraint("preferred_format is null or char_length(preferred_format) <= 200", name="ck_symbol_set_items_preferred_format_length"),
+        CheckConstraint("notes is null or char_length(notes) <= 2000", name="ck_symbol_set_items_notes_length"),
+        CheckConstraint("availability_reason is null or char_length(availability_reason) <= 500", name="ck_symbol_set_items_availability_reason_length"),
+        CheckConstraint("octet_length(convert_to(provenance_json::text, 'UTF8')) <= 16384", name="ck_symbol_set_items_provenance_size"),
+        UniqueConstraint("symbol_set_id", "governed_symbol_id", name="uq_symbol_set_items_set_symbol"),
+        Index("ix_symbol_set_items_set_order_symbol", "symbol_set_id", "sort_order", "governed_symbol_id"),
+        Index("ix_symbol_set_items_symbol_set", "governed_symbol_id", "symbol_set_id"),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbol_set_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_sets.id", ondelete="RESTRICT"), nullable=False)
+    governed_symbol_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("governed_symbols.id", ondelete="RESTRICT"), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    group_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    display_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preferred_format: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provenance_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    availability_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    availability_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_resolved_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class UserProjectSetSelection(Base):
+    __tablename__ = "user_project_set_selections"
+    __table_args__ = (
+        Index("ix_user_project_set_selections_active_set_project_user", "active_symbol_set_id", "project_id", "user_id"),
+        Index("ix_user_project_set_selections_project_user", "project_id", "user_id"),
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), primary_key=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="RESTRICT"), primary_key=True)
+    active_symbol_set_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_sets.id", ondelete="RESTRICT"), nullable=False)
+    selected_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class UserSessionProjectContext(Base):
+    __tablename__ = "user_session_project_contexts"
+    __table_args__ = (Index("ix_user_session_project_contexts_project_session", "project_id", "user_session_id"),)
+    user_session_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("user_sessions.id", ondelete="CASCADE"), primary_key=True)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="RESTRICT"), nullable=False)
+    selected_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 

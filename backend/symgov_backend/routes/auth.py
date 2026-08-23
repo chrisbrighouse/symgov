@@ -69,6 +69,15 @@ def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | No
         and user.organization_code
         and user.organization_code.strip().lower() in pilot_codes
     )
+    symbol_sets_enabled = bool(
+        effective.organizations_enabled
+        and effective.symbol_sets_enabled
+        and user.session_purpose == "application"
+        and user.session_mode == "organization"
+        and user.active_organization_id is not None
+        and user.organization_code
+        and user.organization_code.strip().lower() in pilot_codes
+    )
     return AuthUserResponse(
         id=user.id,
         email=user.email,
@@ -97,7 +106,7 @@ def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | No
                 and effective.organization_admin_enabled
                 and effective.platform_admin_enabled
             ),
-            "symbolSetsEnabled": effective.organizations_enabled and effective.symbol_sets_enabled,
+            "symbolSetsEnabled": symbol_sets_enabled,
             "organizationSymbolsEnabled": effective.organizations_enabled and effective.organization_symbols_enabled,
             "organizationAgentsEnabled": effective.organizations_enabled and effective.organization_agents_enabled,
             "organizationIconUploadEnabled": organization_icon_upload_enabled,

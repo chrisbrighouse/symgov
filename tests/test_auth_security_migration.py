@@ -14,7 +14,7 @@ def test_account_security_migration_is_single_linear_head():
     cfg.set_main_option("script_location", "backend/alembic")
     script = ScriptDirectory.from_config(cfg)
 
-    assert script.get_heads() == ["20260821_0029"]
+    assert script.get_heads() == ["20260822_0030"]
     revision = script.get_revision("20260808_0027")
     assert revision is not None
     assert revision.down_revision == "20260802_0026"
