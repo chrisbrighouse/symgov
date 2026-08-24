@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
@@ -124,8 +124,8 @@ class ProjectPatchRequest(BaseModel):
     name: str | None = None
     shortDescription: str | None = None
     externalReference: str | None = None
-    metadata: dict[str, Any] | None = None
-    status: str | None = None
+    metadata: dict[str, Any] = cast(dict[str, Any], None)
+    status: str = cast(str, None)
 
     @model_validator(mode="after")
     def require_field(self):
@@ -150,9 +150,9 @@ class SymbolSetPatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = None
     description: str | None = None
-    disciplines: list[str] | None = None
-    useCases: list[str] | None = None
-    status: str | None = None
+    disciplines: list[str] = cast(list[str], None)
+    useCases: list[str] = cast(list[str], None)
+    status: str = cast(str, None)
 
     @model_validator(mode="after")
     def require_field(self):

@@ -51,12 +51,12 @@ def _ensure_symbol_tables(Session):
                 column.server_default = original_defaults[column.name]
 
 
-def _symbol(Session, slug):
+def _symbol(Session, slug, identifier=None):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     with Session() as session:
         owner = session.query(User).first()
         row = GovernedSymbol(
-            id=uuid.uuid4(),
+            id=identifier or uuid.uuid4(),
             slug=slug,
             canonical_name=slug,
             category="test",
@@ -141,6 +141,45 @@ def test_item_replacement_is_ordered_and_uses_current_revision_availability(monk
         assert session.query(SymbolSetItem).filter_by(symbol_set_id=uuid.UUID(set_id), governed_symbol_id=second_id).one_or_none() is None
 
 
+def test_item_replacement_locks_requested_and_removed_symbols_in_uuid_order_before_delete(monkeypatch):
+    client, Session = _stage4_client()
+    _ensure_symbol_tables(Session)
+    set_id = _active_set(client)
+    removed_id = _symbol(Session, "removed-low-symbol", uuid.UUID("a0000000-0000-0000-0000-000000000001"))
+    retained_id = _symbol(Session, "retained-high-symbol", uuid.UUID("f0000000-0000-0000-0000-000000000001"))
+    _eligibility(monkeypatch, {removed_id: uuid.uuid4(), retained_id: uuid.uuid4()})
+    initial = {"items": [
+        {"governedSymbolId": str(removed_id), "sortOrder": 1},
+        {"governedSymbolId": str(retained_id), "sortOrder": 2},
+    ]}
+    assert client.put(f"/api/v1/org/me/symbol-sets/{set_id}/items", json=initial).status_code == 200
+
+    locked_ids = []
+    original_get = Session.class_.get
+    original_delete = Session.class_.delete
+
+    def record_get(session, entity, identifier, **kwargs):
+        if entity is GovernedSymbol and kwargs.get("with_for_update"):
+            locked_ids.append(identifier)
+        return original_get(session, entity, identifier, **kwargs)
+
+    def assert_full_lock_set_before_delete(session, instance):
+        if isinstance(instance, SymbolSetItem):
+            assert locked_ids == [removed_id, retained_id]
+        return original_delete(session, instance)
+
+    monkeypatch.setattr(Session.class_, "get", record_get)
+    monkeypatch.setattr(Session.class_, "delete", assert_full_lock_set_before_delete)
+
+    response = client.put(
+        f"/api/v1/org/me/symbol-sets/{set_id}/items",
+        json={"items": [{"governedSymbolId": str(retained_id), "sortOrder": 2}]},
+    )
+
+    assert response.status_code == 200
+    assert locked_ids == [removed_id, retained_id]
+
+
 def test_identical_item_replacement_is_a_no_op(monkeypatch):
     client, Session = _stage4_client()
     _ensure_symbol_tables(Session)
@@ -160,6 +199,39 @@ def test_identical_item_replacement_is_a_no_op(monkeypatch):
         second_count = session.query(AuditEvent).filter(AuditEvent.action == "symbol_set.items_replaced").count()
 
     assert second_count == first_count
+
+
+def test_item_replacement_distinguishes_json_booleans_from_numbers(monkeypatch):
+    client, Session = _stage4_client()
+    _ensure_symbol_tables(Session)
+    set_id = _active_set(client)
+    symbol_id = _symbol(Session, "provenance-json-types")
+    _eligibility(monkeypatch, {symbol_id: uuid.uuid4()})
+    path = f"/api/v1/org/me/symbol-sets/{set_id}/items"
+    numeric = {"items": [{
+        "governedSymbolId": str(symbol_id),
+        "sortOrder": 1,
+        "provenance": {"nested": {"flag": 1}},
+    }]}
+    boolean = {"items": [{
+        "governedSymbolId": str(symbol_id),
+        "sortOrder": 1,
+        "provenance": {"nested": {"flag": True}},
+    }]}
+    assert client.put(path, json=numeric).status_code == 200
+    with Session() as session:
+        before_audits = session.query(AuditEvent).filter(
+            AuditEvent.action == "symbol_set.items_replaced"
+        ).count()
+
+    response = client.put(path, json=boolean)
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["provenance"] == {"nested": {"flag": True}}
+    with Session() as session:
+        assert session.query(AuditEvent).filter(
+            AuditEvent.action == "symbol_set.items_replaced"
+        ).count() == before_audits + 1
 
 
 def test_multi_item_replacement_compares_each_item_to_its_own_provenance(monkeypatch):
@@ -202,6 +274,45 @@ def test_distinct_item_replacements_have_stable_noncolliding_audit_ids(monkeypat
     assert len(events) == 2
     assert first_event.id in {event.id for event in events}
     assert events[0].id != events[1].id
+
+
+def test_recurrent_item_replacement_records_distinct_audit_events(monkeypatch):
+    client, Session = _stage4_client()
+    _ensure_symbol_tables(Session)
+    set_id = _active_set(client)
+    first_id = _symbol(Session, "audit-recurrence-first")
+    second_id = _symbol(Session, "audit-recurrence-second")
+    _eligibility(monkeypatch, {first_id: uuid.uuid4(), second_id: uuid.uuid4()})
+    first = {"items": [{
+        "governedSymbolId": str(first_id),
+        "sortOrder": 1,
+        "displayLabel": "First state",
+        "provenance": {"source": "first"},
+    }]}
+    second = {"items": [{
+        "governedSymbolId": str(second_id),
+        "sortOrder": 2,
+        "displayLabel": "Second state",
+        "provenance": {"source": "second"},
+    }]}
+
+    responses = [
+        client.put(f"/api/v1/org/me/symbol-sets/{set_id}/items", json=payload)
+        for payload in (first, second, first)
+    ]
+
+    assert [response.status_code for response in responses] == [200, 200, 200]
+    with Session() as session:
+        events = session.query(AuditEvent).filter(
+            AuditEvent.entity_id == uuid.UUID(set_id),
+            AuditEvent.action == "symbol_set.items_replaced",
+        ).all()
+        items = session.query(SymbolSetItem).filter_by(symbol_set_id=uuid.UUID(set_id)).all()
+    assert len(events) == 3
+    assert len({event.id for event in events}) == 3
+    assert [(item.governed_symbol_id, item.display_label, item.provenance_json) for item in items] == [
+        (first_id, "First state", {"source": "first"}),
+    ]
 
 
 def test_new_item_must_be_currently_public_and_failure_writes_nothing(monkeypatch):

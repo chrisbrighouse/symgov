@@ -55,25 +55,36 @@ def require_stage4_principal(
     probe = session.query(UserSession).filter(UserSession.token_hash == token_hash).one_or_none()
     if probe is None:
         _fail(401, "Authentication required.")
+    assert probe is not None
     now = datetime.now(timezone.utc)
     if probe.revoked_at is not None or _aware(probe.expires_at) <= now or probe.purpose != "application":
         _fail(401, "Authentication required.")
     if probe.session_mode != "organization" or probe.active_organization_id is None:
         _fail(403, "An organization-bound session is required.")
-    user = session.query(User).filter(User.id == probe.auth_user_id).with_for_update().one_or_none()
-    organization = session.query(Organization).filter(Organization.id == probe.active_organization_id).with_for_update().one_or_none()
+    probe_values = (
+        probe.id,
+        probe.auth_user_id,
+        probe.active_organization_id,
+        probe.token_hash,
+        probe.purpose,
+        probe.session_mode,
+        probe.revoked_at,
+        _aware(probe.expires_at),
+    )
+    user = session.query(User).filter(User.id == probe_values[1]).with_for_update(read=True).one_or_none()
+    organization = session.query(Organization).filter(Organization.id == probe_values[2]).with_for_update(read=True).one_or_none()
     membership = session.query(OrganizationMembership).filter(
-        OrganizationMembership.organization_id == probe.active_organization_id,
-        OrganizationMembership.user_id == probe.auth_user_id,
+        OrganizationMembership.organization_id == probe_values[2],
+        OrganizationMembership.user_id == probe_values[1],
         OrganizationMembership.status == "active",
-    ).with_for_update().one_or_none()
+    ).with_for_update(read=True).one_or_none()
     role = None
     if membership is not None:
         role = session.query(OrganizationRoleAssignment).filter(
             OrganizationRoleAssignment.membership_id == membership.id,
             OrganizationRoleAssignment.is_active.is_(True),
             OrganizationRoleAssignment.revoked_at.is_(None),
-        ).with_for_update().one_or_none()
+        ).with_for_update(read=True).one_or_none()
     pilots = {str(value).strip().lower() for value in settings.organization_pilot_codes if str(value).strip()}
     if (
         user is None or not user.is_active or user.deleted_at is not None
@@ -81,20 +92,22 @@ def require_stage4_principal(
         or organization.normalized_code not in pilots or membership is None or role is None
     ):
         _fail(404)
-    current = session.query(UserSession).filter(UserSession.id == probe.id, UserSession.token_hash == token_hash).with_for_update().one_or_none()
+    current = session.query(UserSession).filter(
+        UserSession.id == probe_values[0], UserSession.token_hash == token_hash
+    ).populate_existing().with_for_update(read=True).one_or_none()
     if current is None:
         _fail(401, "Authentication required.")
     assert current is not None
     if (
-        current.auth_user_id != probe.auth_user_id
-        or current.active_organization_id != probe.active_organization_id
-        or current.token_hash != probe.token_hash
-        or current.purpose != probe.purpose
-        or current.session_mode != probe.session_mode
-        or current.revoked_at != probe.revoked_at
-        or _aware(current.expires_at) != _aware(probe.expires_at)
+        current.auth_user_id != probe_values[1]
+        or current.active_organization_id != probe_values[2]
+        or current.token_hash != probe_values[3]
+        or current.purpose != probe_values[4]
+        or current.session_mode != probe_values[5]
+        or current.revoked_at != probe_values[6]
+        or _aware(current.expires_at) != probe_values[7]
         or current.revoked_at is not None
-        or _aware(current.expires_at) <= now
+        or _aware(current.expires_at) <= datetime.now(timezone.utc)
         or current.purpose != "application"
         or current.session_mode != "organization"
         or current.active_organization_id != organization.id

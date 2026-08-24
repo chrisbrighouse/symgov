@@ -11,6 +11,7 @@ import time
 import uuid
 from types import SimpleNamespace
 
+from fastapi import HTTPException
 from starlette.requests import Request
 import pytest
 from sqlalchemy import create_engine, inspect, text
@@ -19,9 +20,10 @@ from sqlalchemy.orm import sessionmaker
 
 from symgov_backend.public_symbol_eligibility import current_public_symbols
 from symgov_backend.auth import hash_session_token
-from symgov_backend.models import ProjectSymbolSet, UserProjectSetSelection
+from symgov_backend.models import AuditEvent, Project, ProjectSymbolSet, UserProjectSetSelection
 from symgov_backend.project_service import patch_project
-from symgov_backend.symbol_set_service import clear_organization_default, replace_projects, _lock_organization_default_anchors
+from symgov_backend.stage4_authorization import require_stage4_principal
+from symgov_backend.symbol_set_service import clear_organization_default, patch_set, replace_projects, _lock_organization_default_anchors
 
 psycopg = pytest.importorskip("psycopg")
 
@@ -547,6 +549,346 @@ def test_wp1_default_race_has_one_durable_winner_and_one_loser(wp1_database):
     with wp1_database.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM project_symbol_sets WHERE project_id=:project AND is_default"), {"project": project}).scalar_one() == 1
         assert connection.execute(text("SELECT is_default FROM project_symbol_sets WHERE id=:id"), {"id": first_availability}).scalar_one() is True
+
+
+def test_wp3_availability_default_transfer_emits_complete_audit_evidence(wp1_database):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    raw_token = uuid.uuid4().hex
+    with wp1_database.begin() as connection:
+        user = _user(connection, f"default-audit-{uuid.uuid4()}@example.test")
+        owner_code = f"J{uuid.uuid4().hex[:7].upper()}"
+        owner = _organization(connection, owner_code, user)
+        _admin(connection, owner, user)
+        project = _project(connection, owner, user, "DEFAULTAUDIT")
+        old_default = _symbol_set(connection, owner, user, "DEFAULTOLD")
+        new_default = _symbol_set(connection, owner, user, "DEFAULTNEW")
+        _availability(connection, project, old_default, user, default=True)
+        connection.execute(text("""
+            INSERT INTO user_sessions
+            (id, auth_user_id, token_hash, created_at, expires_at, last_seen_at,
+             purpose, session_mode, active_organization_id)
+            VALUES (:id, :user, :token, :now, :expires, :now,
+                    'application', 'organization', :organization)
+        """), {
+            "id": uuid.uuid4(), "user": user, "token": hash_session_token(raw_token),
+            "now": now, "expires": now + timedelta(hours=1), "organization": owner,
+        })
+
+    SessionLocal = sessionmaker(bind=wp1_database, autoflush=False, expire_on_commit=False)
+    request = Request({"type": "http", "headers": [(b"cookie", f"symgov_session={raw_token}".encode())]})
+    settings = SimpleNamespace(
+        organizations_enabled=True,
+        symbol_sets_enabled=True,
+        organization_pilot_codes=(owner_code.lower(),),
+    )
+    with SessionLocal.begin() as session:
+        replace_projects(
+            session,
+            request,
+            settings,
+            new_default,
+            SimpleNamespace(projects=[SimpleNamespace(projectId=project, isDefault=True)]),
+        )
+
+    with wp1_database.connect() as connection:
+        default_event = connection.execute(text("""
+            SELECT entity_type, entity_id, payload_json
+            FROM audit_events
+            WHERE action = 'symbol_set.project_default_changed'
+              AND entity_id = :project
+        """), {"project": project}).one()
+        assert default_event.entity_type == "project"
+        assert default_event.entity_id == project
+        assert default_event.payload_json["projectId"] == str(project)
+        assert default_event.payload_json["symbolSetId"] == str(new_default)
+        assert default_event.payload_json["oldDefaultSymbolSetId"] == str(old_default)
+        assert default_event.payload_json["newDefaultSymbolSetId"] == str(new_default)
+        assert default_event.payload_json["beforeAvailableSymbolSetCount"] == 1
+        assert default_event.payload_json["afterAvailableSymbolSetCount"] == 2
+
+        availability_event = connection.execute(text("""
+            SELECT payload_json
+            FROM audit_events
+            WHERE action = 'symbol_set.project_availability_replaced'
+              AND entity_id = :symbol_set
+        """), {"symbol_set": new_default}).scalar_one()
+        assert availability_event["affectedProjectIds"] == [str(project)]
+        assert availability_event["beforeProjectCount"] == 0
+        assert availability_event["afterProjectCount"] == 1
+
+
+def test_wp3_authority_shared_reads_coexist_and_writers_serialize(wp1_database):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    raw_token = uuid.uuid4().hex
+    authority_session_id = uuid.uuid4()
+    with wp1_database.begin() as connection:
+        user = _user(connection, f"authority-share-{uuid.uuid4()}@example.test")
+        owner_code = f"H{uuid.uuid4().hex[:7].upper()}"
+        owner = _organization(connection, owner_code, user)
+        _admin(connection, owner, user)
+        connection.execute(text("""
+            INSERT INTO user_sessions
+            (id, auth_user_id, token_hash, created_at, expires_at, last_seen_at,
+             purpose, session_mode, active_organization_id)
+            VALUES (:id, :user, :token, :now, :expires, :now,
+                    'application', 'organization', :organization)
+        """), {
+            "id": authority_session_id, "user": user, "token": hash_session_token(raw_token),
+            "now": now, "expires": now + timedelta(hours=1), "organization": owner,
+        })
+
+    SessionLocal = sessionmaker(bind=wp1_database, autoflush=False, expire_on_commit=False)
+    request = Request({"type": "http", "headers": [(b"cookie", f"symgov_session={raw_token}".encode())]})
+    settings = SimpleNamespace(
+        organizations_enabled=True,
+        symbol_sets_enabled=True,
+        organization_pilot_codes=(owner_code.lower(),),
+    )
+
+    first_reader = SessionLocal()
+    require_stage4_principal(first_reader, request, settings, admin=True)
+    second_started = threading.Event()
+    second_done = threading.Event()
+    second_errors = []
+
+    def read_authority() -> None:
+        session = SessionLocal()
+        try:
+            second_started.set()
+            require_stage4_principal(session, request, settings, admin=True)
+            session.commit()
+        except Exception as error:  # pragma: no cover - asserted below
+            session.rollback()
+            second_errors.append(type(error).__name__)
+        finally:
+            session.close()
+            second_done.set()
+
+    second_thread = threading.Thread(target=read_authority)
+    second_thread.start()
+    assert second_started.wait(timeout=2)
+    shared_reads_coexisted = second_done.wait(timeout=1)
+    first_reader.rollback()
+    first_reader.close()
+    assert second_done.wait(timeout=5)
+    second_thread.join(timeout=1)
+    assert shared_reads_coexisted
+    assert second_errors == []
+
+    authority_reader = SessionLocal()
+    require_stage4_principal(authority_reader, request, settings, admin=True)
+    writer_started = threading.Event()
+    writer_done = threading.Event()
+    writer_errors = []
+    url = wp1_database.url.render_as_string(hide_password=False).replace("+psycopg", "")
+
+    def change_authority() -> None:
+        connection = psycopg.connect(url)
+        try:
+            connection.execute("BEGIN")
+            connection.execute("SET LOCAL statement_timeout='5000ms'")
+            writer_started.set()
+            connection.execute(
+                "UPDATE user_sessions SET revoked_at=now() WHERE id=%s",
+                (authority_session_id,),
+            )
+            connection.commit()
+        except Exception as error:  # pragma: no cover - asserted below
+            connection.rollback()
+            writer_errors.append(type(error).__name__)
+        finally:
+            connection.close()
+            writer_done.set()
+
+    writer_thread = threading.Thread(target=change_authority)
+    writer_thread.start()
+    assert writer_started.wait(timeout=2)
+    assert not writer_done.wait(timeout=0.3)
+    authority_reader.rollback()
+    authority_reader.close()
+    assert writer_done.wait(timeout=5)
+    writer_thread.join(timeout=1)
+    assert writer_errors == []
+    with wp1_database.connect() as connection:
+        assert connection.execute(text(
+            "SELECT revoked_at FROM user_sessions WHERE id=:id"
+        ), {"id": authority_session_id}).scalar_one() is not None
+
+
+@pytest.mark.parametrize("authority_change", ["revoked", "expired"])
+def test_wp3_authority_recheck_observes_commit_between_probe_and_lock(
+    wp1_database, authority_change, monkeypatch
+):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    raw_token = uuid.uuid4().hex
+    authority_session_id = uuid.uuid4()
+    with wp1_database.begin() as connection:
+        user = _user(connection, f"authority-fresh-{authority_change}-{uuid.uuid4()}@example.test")
+        owner_code = f"F{uuid.uuid4().hex[:7].upper()}"
+        owner = _organization(connection, owner_code, user)
+        _admin(connection, owner, user)
+        project = _project(connection, owner, user, f"FRESH{authority_change.upper()}")
+        connection.execute(text("""
+            INSERT INTO user_sessions
+            (id, auth_user_id, token_hash, created_at, expires_at, last_seen_at,
+             purpose, session_mode, active_organization_id)
+            VALUES (:id, :user, :token, :now, :expires, :now,
+                    'application', 'organization', :organization)
+        """), {
+            "id": authority_session_id, "user": user, "token": hash_session_token(raw_token),
+            "now": now, "expires": now + timedelta(hours=1), "organization": owner,
+        })
+
+    SessionLocal = sessionmaker(bind=wp1_database, autoflush=False, expire_on_commit=False)
+    request = Request({"type": "http", "headers": [(b"cookie", f"symgov_session={raw_token}".encode())]})
+    settings = SimpleNamespace(
+        organizations_enabled=True,
+        symbol_sets_enabled=True,
+        organization_pilot_codes=(owner_code.lower(),),
+    )
+    original_query = SessionLocal.class_.query
+    changed = False
+    domain_accessed = False
+
+    def query_after_probe(session, *entities, **kwargs):
+        nonlocal changed, domain_accessed
+        if entities and entities[0] in (Project, ProjectSymbolSet, AuditEvent):
+            domain_accessed = True
+        query = original_query(session, *entities, **kwargs)
+        if not changed and entities and getattr(entities[0], "__name__", None) == "User":
+            with wp1_database.begin() as connection:
+                if authority_change == "revoked":
+                    connection.execute(text(
+                        "UPDATE user_sessions SET revoked_at=:now WHERE id=:id"
+                    ), {"now": now, "id": authority_session_id})
+                else:
+                    connection.execute(text(
+                        "UPDATE user_sessions SET expires_at=:expired WHERE id=:id"
+                    ), {"expired": now - timedelta(minutes=1), "id": authority_session_id})
+            changed = True
+        return query
+
+    monkeypatch.setattr(SessionLocal.class_, "query", query_after_probe)
+    session = SessionLocal()
+    try:
+        with pytest.raises(HTTPException) as caught:
+            patch_project(
+                session,
+                request,
+                settings,
+                project,
+                SimpleNamespace(
+                    status="closed",
+                    model_fields_set={"status"},
+                    only_status=lambda: True,
+                ),
+            )
+        assert caught.value.status_code == 401
+        assert changed
+        assert not domain_accessed
+        assert not session.new and not session.dirty and not session.deleted
+    finally:
+        session.rollback()
+        session.close()
+    with wp1_database.connect() as connection:
+        assert connection.execute(text(
+            "SELECT status FROM projects WHERE id=:id"
+        ), {"id": project}).scalar_one() == "active"
+        assert connection.execute(text(
+            "SELECT count(*) FROM audit_events WHERE entity_id=:id"
+        ), {"id": project}).scalar_one() == 0
+
+
+def test_wp3_postgresql_lifecycle_and_default_cleanup_audits_are_complete(wp1_database):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    raw_token = uuid.uuid4().hex
+    with wp1_database.begin() as connection:
+        user = _user(connection, f"lifecycle-audit-{uuid.uuid4()}@example.test")
+        owner_code = f"A{uuid.uuid4().hex[:7].upper()}"
+        owner = _organization(connection, owner_code, user)
+        _admin(connection, owner, user)
+        cleanup_project = _project(connection, owner, user, "AUDITCLEAN")
+        cleanup_set = _symbol_set(connection, owner, user, "AUDITCLEANSET")
+        _availability(connection, cleanup_project, cleanup_set, user, default=True)
+        connection.execute(text(
+            "UPDATE organizations SET default_symbol_set_id=:set_id WHERE id=:owner"
+        ), {"set_id": cleanup_set, "owner": owner})
+        closing_project = _project(connection, owner, user, "AUDITCLOSE")
+        closing_set = _symbol_set(connection, owner, user, "AUDITCLOSESET")
+        _availability(connection, closing_project, closing_set, user, default=True)
+        connection.execute(text("""
+            INSERT INTO user_sessions
+            (id, auth_user_id, token_hash, created_at, expires_at, last_seen_at,
+             purpose, session_mode, active_organization_id)
+            VALUES (:id, :user, :token, :now, :expires, :now,
+                    'application', 'organization', :organization)
+        """), {
+            "id": uuid.uuid4(), "user": user, "token": hash_session_token(raw_token),
+            "now": now, "expires": now + timedelta(hours=1), "organization": owner,
+        })
+
+    SessionLocal = sessionmaker(bind=wp1_database, autoflush=False, expire_on_commit=False)
+    request = Request({"type": "http", "headers": [(b"cookie", f"symgov_session={raw_token}".encode())]})
+    settings = SimpleNamespace(
+        organizations_enabled=True,
+        symbol_sets_enabled=True,
+        organization_pilot_codes=(owner_code.lower(),),
+    )
+    with SessionLocal.begin() as session:
+        patch_set(
+            session, request, settings, cleanup_set,
+            SimpleNamespace(
+                status="superseded", model_fields_set={"status"}, name=None,
+                description=None, disciplines=None, useCases=None,
+            ),
+        )
+    with SessionLocal.begin() as session:
+        patch_project(
+            session, request, settings, closing_project,
+            SimpleNamespace(
+                status="closed", model_fields_set={"status"}, only_status=lambda: True,
+            ),
+        )
+
+    with wp1_database.connect() as connection:
+        events = {
+            row.action: row
+            for row in connection.execute(text("""
+                SELECT action, actor_id, payload_json
+                FROM audit_events
+                WHERE entity_id IN (:cleanup_set, :cleanup_project, :owner, :closing_project)
+                  AND action IN (
+                    'symbol_set.superseded', 'symbol_set.project_default_changed',
+                    'organization.symbol_set_default_changed', 'project.closed'
+                  )
+            """), {
+                "cleanup_set": cleanup_set, "cleanup_project": cleanup_project,
+                "owner": owner, "closing_project": closing_project,
+            })
+        }
+        assert set(events) == {
+            "symbol_set.superseded", "symbol_set.project_default_changed",
+            "organization.symbol_set_default_changed", "project.closed",
+        }
+        assert {row.actor_id for row in events.values()} == {user}
+        lifecycle = events["symbol_set.superseded"].payload_json
+        assert lifecycle["oldStatus"] == "active"
+        assert lifecycle["newStatus"] == "superseded"
+        assert lifecycle["affectedProjectIds"] == [str(cleanup_project)]
+        assert lifecycle["beforeAvailableProjectCount"] == 1
+        assert lifecycle["afterAvailableProjectCount"] == 0
+        project_default = events["symbol_set.project_default_changed"].payload_json
+        assert project_default["oldDefaultSymbolSetId"] == str(cleanup_set)
+        assert project_default["newDefaultSymbolSetId"] is None
+        organization_default = events["organization.symbol_set_default_changed"].payload_json
+        assert organization_default["oldDefaultSymbolSetId"] == str(cleanup_set)
+        assert organization_default["newDefaultSymbolSetId"] is None
+        closed = events["project.closed"].payload_json
+        assert closed["oldStatus"] == "active"
+        assert closed["newStatus"] == "closed"
+        assert closed["affectedSymbolSetIds"] == [str(closing_set)]
+        assert closed["beforeAvailableSymbolSetCount"] == 1
+        assert closed["afterAvailableSymbolSetCount"] == 0
 
 
 def test_wp3_service_cleanup_and_availability_paths_share_project_before_set_lock_order(wp1_database):

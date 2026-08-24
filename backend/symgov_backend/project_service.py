@@ -73,6 +73,12 @@ def validate_json(value: object) -> dict:
     return value
 
 
+def json_values_equal(left: object, right: object) -> bool:
+    return json.dumps(left, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False) == json.dumps(
+        right, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
+
+
 def audit(session: Session, principal: Stage4Principal, entity_type: str, entity_id: uuid.UUID, action: str, details: dict, *, event_id: uuid.UUID | None = None) -> None:
     payload = {"source": "stage4", "organizationId": str(principal.organization.id), **details}
     session.add(AuditEvent(id=event_id or uuid.uuid4(), entity_type=entity_type, entity_id=entity_id, action=action, actor_id=principal.user.id, payload_json=payload, created_at=now()))
@@ -135,17 +141,35 @@ def patch_project(session: Session, request: Request, settings, project_id: uuid
         if data.status == "closed" and data.only_status(): return row
         raise HTTPException(409, "Project lifecycle transition is not permitted.")
     changed = []
-    if "name" in data.model_fields_set: row.name = normalize_text(data.name, "Name", 200); changed.append("name")
+    previous_status = row.status
+    affected_symbol_set_ids = []
+    before_available_symbol_set_count = 0
+    after_available_symbol_set_count = 0
+    if "name" in data.model_fields_set:
+        candidate = normalize_text(data.name, "Name", 200)
+        if candidate != row.name:
+            row.name = candidate
+            changed.append("name")
     if "shortDescription" in data.model_fields_set:
-        value = unicodedata.normalize("NFKC", data.shortDescription or "")
-        if len(value) > 50: raise ValueError("shortDescription must be at most 50 characters.")
-        row.short_description = value or None; changed.append("shortDescription")
+        candidate = unicodedata.normalize("NFKC", data.shortDescription or "")
+        if len(candidate) > 50: raise ValueError("shortDescription must be at most 50 characters.")
+        candidate = candidate or None
+        if candidate != row.short_description:
+            row.short_description = candidate
+            changed.append("shortDescription")
     if "externalReference" in data.model_fields_set:
         candidate = normalize_optional_text(data.externalReference, 200); candidate_key = candidate.casefold() if candidate else None
-        if candidate_key is not None and session.query(Project.id).filter(Project.organization_id == principal.organization.id, Project.normalized_external_reference == candidate_key, Project.id != row.id).first() is not None:
-            raise ValueError("External reference is already in use.")
-        row.external_reference = candidate; row.normalized_external_reference = candidate_key; changed.append("externalReference")
-    if "metadata" in data.model_fields_set: row.metadata_json = validate_json(data.metadata or {}); changed.append("metadata")
+        if candidate != row.external_reference or candidate_key != row.normalized_external_reference:
+            if candidate_key is not None and session.query(Project.id).filter(Project.organization_id == principal.organization.id, Project.normalized_external_reference == candidate_key, Project.id != row.id).first() is not None:
+                raise ValueError("External reference is already in use.")
+            row.external_reference = candidate
+            row.normalized_external_reference = candidate_key
+            changed.append("externalReference")
+    if "metadata" in data.model_fields_set:
+        candidate = validate_json(data.metadata)
+        if not json_values_equal(candidate, row.metadata_json):
+            row.metadata_json = candidate
+            changed.append("metadata")
     if data.status is not None and data.status != row.status:
         if data.status != "closed": raise HTTPException(409, "Project lifecycle transition is not permitted.")
         row.status = "closed"; row.closed_at = now()
@@ -153,14 +177,21 @@ def patch_project(session: Session, request: Request, settings, project_id: uuid
         # the affected Set anchors in the same statement, rather than using an
         # unlocked dependent-link read to define which Sets to lock. The
         # dependent rows are locked only after the Project and Set anchors.
-        session.query(SymbolSet).join(
+        locked_sets = session.query(SymbolSet).join(
             ProjectSymbolSet,
             ProjectSymbolSet.symbol_set_id == SymbolSet.id,
         ).filter(
             ProjectSymbolSet.project_id == row.id,
             SymbolSet.owner_organization_id == principal.organization.id,
         ).order_by(SymbolSet.id).with_for_update(of=SymbolSet).all()
-        session.query(ProjectSymbolSet).filter(ProjectSymbolSet.project_id == row.id).with_for_update().all()
+        links = session.query(ProjectSymbolSet).filter(ProjectSymbolSet.project_id == row.id).order_by(
+            ProjectSymbolSet.symbol_set_id
+        ).with_for_update().all()
+        active_set_ids = {link.symbol_set_id for link in links if link.status == "active"}
+        affected_symbol_set_ids = sorted(
+            {symbol_set.id for symbol_set in locked_sets if symbol_set.id in active_set_ids}, key=str
+        )
+        before_available_symbol_set_count = len(active_set_ids)
         session.query(UserProjectSetSelection).filter(UserProjectSetSelection.project_id == row.id).with_for_update().all()
         session.query(UserSessionProjectContext).filter(UserSessionProjectContext.project_id == row.id).with_for_update().all()
         session.query(ProjectSymbolSet).filter(ProjectSymbolSet.project_id == row.id).update({"status": "inactive", "is_default": False})
@@ -168,5 +199,15 @@ def patch_project(session: Session, request: Request, settings, project_id: uuid
         session.query(UserSessionProjectContext).filter(UserSessionProjectContext.project_id == row.id).delete(synchronize_session=False)
         changed.append("status")
     if changed:
-        row.updated_at = now(); audit(session, principal, "project", row.id, "project.closed" if row.status == "closed" else "project.updated", {"projectId": str(row.id), "changedFields": changed})
+        row.updated_at = now()
+        details = {"projectId": str(row.id), "changedFields": changed}
+        if row.status != previous_status:
+            details.update({
+                "oldStatus": previous_status,
+                "newStatus": row.status,
+                "affectedSymbolSetIds": [str(value) for value in affected_symbol_set_ids],
+                "beforeAvailableSymbolSetCount": before_available_symbol_set_count,
+                "afterAvailableSymbolSetCount": after_available_symbol_set_count,
+            })
+        audit(session, principal, "project", row.id, "project.closed" if row.status == "closed" else "project.updated", details)
     return row

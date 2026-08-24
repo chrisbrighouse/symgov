@@ -8,8 +8,8 @@ from fastapi import HTTPException, Request
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from .models import GovernedSymbol, Organization, Project, ProjectSymbolSet, SymbolSet, SymbolSetItem, UserProjectSetSelection
-from .project_service import audit, get_principal, normalize_code, normalize_optional_text, normalize_text, project_dict, validate_json
+from .models import AuditEvent, GovernedSymbol, Organization, Project, ProjectSymbolSet, SymbolSet, SymbolSetItem, UserProjectSetSelection
+from .project_service import audit, get_principal, json_values_equal, normalize_code, normalize_optional_text, normalize_text, project_dict, validate_json
 from .public_symbol_eligibility import current_public_symbols
 
 TRANSITIONS = {"draft": {"active", "archived"}, "active": {"superseded", "archived"}, "superseded": {"archived"}, "archived": set()}
@@ -87,11 +87,31 @@ def patch_set(session: Session, request: Request, settings, set_id: uuid.UUID, d
     ):
         raise HTTPException(409, "Symbol Set lifecycle transition is not permitted.")
     changed = []
+    previous_status = row.status
+    affected_project_ids = []
+    before_available_project_count = 0
+    after_available_project_count = 0
     if row.status == "archived" and data.status != "archived": raise HTTPException(409, "Symbol Set lifecycle transition is not permitted.")
-    if "name" in data.model_fields_set: row.name = normalize_text(data.name, "Name", 200); changed.append("name")
-    if "description" in data.model_fields_set: row.description = normalize_optional_text(data.description, 2000); changed.append("description")
-    if "disciplines" in data.model_fields_set: row.disciplines_json = labels(data.disciplines); changed.append("disciplines")
-    if "useCases" in data.model_fields_set: row.use_cases_json = labels(data.useCases); changed.append("useCases")
+    if "name" in data.model_fields_set:
+        candidate = normalize_text(data.name, "Name", 200)
+        if candidate != row.name:
+            row.name = candidate
+            changed.append("name")
+    if "description" in data.model_fields_set:
+        candidate = normalize_optional_text(data.description, 2000)
+        if candidate != row.description:
+            row.description = candidate
+            changed.append("description")
+    if "disciplines" in data.model_fields_set:
+        candidate = labels(data.disciplines)
+        if candidate != row.disciplines_json:
+            row.disciplines_json = candidate
+            changed.append("disciplines")
+    if "useCases" in data.model_fields_set:
+        candidate = labels(data.useCases)
+        if candidate != row.use_cases_json:
+            row.use_cases_json = candidate
+            changed.append("useCases")
     if data.status is not None and data.status != row.status:
         if data.status not in TRANSITIONS[row.status]: raise HTTPException(409, "Symbol Set lifecycle transition is not permitted.")
         row.status = data.status; changed.append("status")
@@ -99,15 +119,81 @@ def patch_set(session: Session, request: Request, settings, set_id: uuid.UUID, d
         if data.status == "archived": row.archived_at = stamp_now = stamp()
         if data.status in {"superseded", "archived"}:
             links = session.query(ProjectSymbolSet).filter(ProjectSymbolSet.symbol_set_id == row.id).order_by(ProjectSymbolSet.project_id).with_for_update().all()
-            project_ids = [link.project_id for link in links]
+            changed_links = [link for link in links if link.status != "inactive" or link.is_default]
+            affected_project_ids = sorted({link.project_id for link in changed_links}, key=str)
+            before_available_project_count = sum(link.status == "active" for link in links)
+            active_links_before = session.query(ProjectSymbolSet).filter(
+                ProjectSymbolSet.project_id.in_(affected_project_ids),
+                ProjectSymbolSet.status == "active",
+            ).order_by(ProjectSymbolSet.project_id, ProjectSymbolSet.symbol_set_id).with_for_update().all() if affected_project_ids else []
+            project_defaults_before = {
+                link.project_id: link.symbol_set_id for link in active_links_before if link.is_default
+            }
+            project_counts_before = {
+                project_id: sum(link.project_id == project_id for link in active_links_before)
+                for project_id in affected_project_ids
+            }
             session.query(UserProjectSetSelection).filter(UserProjectSetSelection.active_symbol_set_id == row.id).with_for_update().all()
-            session.query(Organization).filter(Organization.id == principal.organization.id).with_for_update().one()
+            organization = session.query(Organization).filter(Organization.id == principal.organization.id).with_for_update().one()
+            organization_default_before = organization.default_symbol_set_id
             session.query(ProjectSymbolSet).filter(ProjectSymbolSet.symbol_set_id == row.id).update({"status": "inactive", "is_default": False})
             session.query(UserProjectSetSelection).filter(UserProjectSetSelection.active_symbol_set_id == row.id).delete(synchronize_session=False)
-            session.query(Organization).filter(Organization.default_symbol_set_id == row.id).update({"default_symbol_set_id": None})
+            if organization.default_symbol_set_id == row.id:
+                organization.default_symbol_set_id = None
+                organization.updated_at = stamp()
+            session.flush()
+            active_links_after = session.query(ProjectSymbolSet).filter(
+                ProjectSymbolSet.project_id.in_(affected_project_ids),
+                ProjectSymbolSet.status == "active",
+            ).order_by(ProjectSymbolSet.project_id, ProjectSymbolSet.symbol_set_id).all() if affected_project_ids else []
+            project_defaults_after = {
+                link.project_id: link.symbol_set_id for link in active_links_after if link.is_default
+            }
+            project_counts_after = {
+                project_id: sum(link.project_id == project_id for link in active_links_after)
+                for project_id in affected_project_ids
+            }
+            after_available_project_count = sum(
+                link.symbol_set_id == row.id for link in active_links_after
+            )
+            for project_id in affected_project_ids:
+                if project_defaults_before.get(project_id) != project_defaults_after.get(project_id):
+                    audit(session, principal, "project", project_id, "symbol_set.project_default_changed", {
+                        "projectId": str(project_id),
+                        "symbolSetId": str(row.id),
+                        "oldDefaultSymbolSetId": str(project_defaults_before[project_id]) if project_id in project_defaults_before else None,
+                        "newDefaultSymbolSetId": str(project_defaults_after[project_id]) if project_id in project_defaults_after else None,
+                        "affectedSymbolSetIds": [str(row.id)],
+                        "beforeAvailableSymbolSetCount": project_counts_before[project_id],
+                        "afterAvailableSymbolSetCount": project_counts_after[project_id],
+                    })
+            if organization_default_before == row.id:
+                audit(session, principal, "organization", organization.id, "organization.symbol_set_default_changed", {
+                    "oldDefaultSymbolSetId": str(row.id),
+                    "newDefaultSymbolSetId": None,
+                    "affectedProjectIds": [str(value) for value in affected_project_ids],
+                    "beforeAvailableProjectCount": before_available_project_count,
+                    "afterAvailableProjectCount": after_available_project_count,
+                })
     if changed:
-        row.updated_at = stamp(); action = {"active":"symbol_set.activated", "superseded":"symbol_set.superseded", "archived":"symbol_set.archived"}.get(row.status, "symbol_set.updated")
-        audit(session, principal, "symbol_set", row.id, action, {"symbolSetId": str(row.id), "changedFields": changed})
+        row.updated_at = stamp()
+        action = "symbol_set.updated"
+        if row.status != previous_status:
+            action = {
+                "active": "symbol_set.activated",
+                "superseded": "symbol_set.superseded",
+                "archived": "symbol_set.archived",
+            }[row.status]
+        details = {"symbolSetId": str(row.id), "changedFields": changed}
+        if row.status != previous_status:
+            details.update({
+                "oldStatus": previous_status,
+                "newStatus": row.status,
+                "affectedProjectIds": [str(value) for value in affected_project_ids],
+                "beforeAvailableProjectCount": before_available_project_count,
+                "afterAvailableProjectCount": after_available_project_count,
+            })
+        audit(session, principal, "symbol_set", row.id, action, details)
     return row
 
 
@@ -184,11 +270,13 @@ def replace_items(session, request, settings, set_id, data):
         raise ValueError("sortOrder must be non-negative.")
     if len(ids) > 1000:
         raise ValueError("At most 1000 items may be supplied.")
-    for symbol_id in sorted(ids, key=str):
+    existing = {item.governed_symbol_id: item for item in session.query(SymbolSetItem).filter(
+        SymbolSetItem.symbol_set_id == row.id,
+    ).all()}
+    for symbol_id in sorted(set(ids) | set(existing), key=str):
         if session.get(GovernedSymbol, symbol_id, with_for_update=True) is None:
             raise HTTPException(404, "Not found.")
     current = current_public_symbols(session, ids)
-    existing = {item.governed_symbol_id: item for item in session.query(SymbolSetItem).filter(SymbolSetItem.symbol_set_id == row.id).all()}
     prepared = []
     for item in values:
         provenance = validate_json(item.provenance)
@@ -212,7 +300,7 @@ def replace_items(session, request, settings, set_id, data):
         and existing[symbol_id].display_label == item.displayLabel
         and existing[symbol_id].notes == item.notes
         and existing[symbol_id].preferred_format == item.preferredFormat
-        and (existing[symbol_id].provenance_json or {}) == provenance
+        and json_values_equal(existing[symbol_id].provenance_json or {}, provenance)
         for symbol_id, (item, provenance) in prepared_by_id.items()
     ):
         return list_items(session, request, settings, row.id, page=1, page_size=50)[1]
@@ -234,12 +322,21 @@ def replace_items(session, request, settings, set_id, data):
         if symbol_id not in supplied:
             session.delete(old)
     session.flush()
+    replacement_sequence = session.query(AuditEvent).filter(
+        AuditEvent.entity_type == "symbol_set",
+        AuditEvent.entity_id == row.id,
+        AuditEvent.action == "symbol_set.items_replaced",
+    ).count() + 1
     audit(session, principal, "symbol_set", row.id, "symbol_set.items_replaced", {
         "symbolSetId": str(row.id),
         "affectedSymbolIds": sorted({str(value) for value in set(existing) | set(ids)}),
         "beforeItemCount": len(existing),
         "afterItemCount": len(ids),
-    }, event_id=uuid.uuid5(uuid.NAMESPACE_URL, "symbol-set-items:" + str(row.id) + ":" + json.dumps(replacement_identity, sort_keys=True, separators=(",", ":"))))
+    }, event_id=uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        "symbol-set-items:" + str(row.id) + ":" + str(replacement_sequence) + ":"
+        + json.dumps(replacement_identity, sort_keys=True, separators=(",", ":")),
+    ))
     return list_items(session, request, settings, row.id, page=1, page_size=50)[1]
 
 
@@ -270,37 +367,76 @@ def replace_projects(session, request, settings, set_id, data):
         raise HTTPException(409, "Project is not active.")
     desired = {entry.projectId: bool(entry.isDefault) for entry in entries}
     active_existing = {project_id: link for project_id, link in existing.items() if link.status == "active"}
+    affected_project_ids = sorted(set(active_existing) | set(desired), key=str)
+    active_links_before = session.query(ProjectSymbolSet).filter(
+        ProjectSymbolSet.project_id.in_(affected_project_ids),
+        ProjectSymbolSet.status == "active",
+    ).order_by(ProjectSymbolSet.project_id, ProjectSymbolSet.symbol_set_id).with_for_update().all() if affected_project_ids else []
+    defaults_before = {
+        link.project_id: link.symbol_set_id for link in active_links_before if link.is_default
+    }
+    counts_before = {
+        project_id: sum(link.project_id == project_id for link in active_links_before)
+        for project_id in affected_project_ids
+    }
     if set(active_existing) == set(desired) and all(
         link.is_default == desired[project_id]
         for project_id, link in active_existing.items()
     ):
         competing_defaults = any(
-            desired[project_id]
-            and session.query(ProjectSymbolSet.id).filter(
-                ProjectSymbolSet.project_id == project_id,
-                ProjectSymbolSet.symbol_set_id != row.id,
-                ProjectSymbolSet.status == "active",
-                ProjectSymbolSet.is_default.is_(True),
-            ).first() is not None
+            desired[project_id] and defaults_before.get(project_id) != row.id
             for project_id in desired
         )
         if not competing_defaults:
             return list_projects_for_set(session, row.id, principal, page=1, page_size=50)
     now = stamp()
     for entry in entries:
+        if entry.isDefault:
+            session.query(ProjectSymbolSet).filter(
+                ProjectSymbolSet.project_id == entry.projectId,
+                ProjectSymbolSet.symbol_set_id != row.id,
+                ProjectSymbolSet.status == "active",
+            ).update({"is_default": False}, synchronize_session="fetch")
+    for entry in entries:
         link = existing.get(entry.projectId)
         if link is None:
             link = ProjectSymbolSet(id=uuid.uuid4(), project_id=entry.projectId, symbol_set_id=row.id, created_by_user_id=principal.user.id, created_at=now, updated_at=now)
             session.add(link)
         link.status = "active"; link.is_default = bool(entry.isDefault); link.updated_at = now
-        if entry.isDefault:
-            session.query(ProjectSymbolSet).filter(ProjectSymbolSet.project_id == entry.projectId, ProjectSymbolSet.symbol_set_id != row.id, ProjectSymbolSet.status == "active").update({"is_default": False}, synchronize_session=False)
     for project_id, link in existing.items():
         if link.status == "active" and project_id not in desired:
             session.query(UserProjectSetSelection).filter(UserProjectSetSelection.project_id == project_id, UserProjectSetSelection.active_symbol_set_id == row.id).delete(synchronize_session=False)
             session.delete(link)
     session.flush()
-    audit(session, principal, "symbol_set", row.id, "symbol_set.project_availability_replaced", {"symbolSetId": str(row.id), "projectIds": [str(value) for value in project_ids]})
+    active_links_after = session.query(ProjectSymbolSet).filter(
+        ProjectSymbolSet.project_id.in_(affected_project_ids),
+        ProjectSymbolSet.status == "active",
+    ).order_by(ProjectSymbolSet.project_id, ProjectSymbolSet.symbol_set_id).all() if affected_project_ids else []
+    defaults_after = {
+        link.project_id: link.symbol_set_id for link in active_links_after if link.is_default
+    }
+    counts_after = {
+        project_id: sum(link.project_id == project_id for link in active_links_after)
+        for project_id in affected_project_ids
+    }
+    for project_id in affected_project_ids:
+        if defaults_before.get(project_id) != defaults_after.get(project_id):
+            audit(session, principal, "project", project_id, "symbol_set.project_default_changed", {
+                "projectId": str(project_id),
+                "symbolSetId": str(row.id),
+                "oldDefaultSymbolSetId": str(defaults_before[project_id]) if project_id in defaults_before else None,
+                "newDefaultSymbolSetId": str(defaults_after[project_id]) if project_id in defaults_after else None,
+                "beforeAvailableSymbolSetCount": counts_before[project_id],
+                "afterAvailableSymbolSetCount": counts_after[project_id],
+            })
+    affected_ids = [str(value) for value in affected_project_ids]
+    audit(session, principal, "symbol_set", row.id, "symbol_set.project_availability_replaced", {
+        "symbolSetId": str(row.id),
+        "projectIds": sorted(str(value) for value in project_ids),
+        "affectedProjectIds": affected_ids,
+        "beforeProjectCount": len(active_existing),
+        "afterProjectCount": len(desired),
+    })
     return list_projects_for_set(session, row.id, principal, page=1, page_size=50)
 
 

@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from symgov_backend.symbol_set_service import TRANSITIONS, labels
 from types import SimpleNamespace
+from collections import Counter
+import uuid
+
+import pytest
 
 import symgov_backend.symbol_set_service as symbol_set_service
+from symgov_backend.models import AuditEvent
 
 
 def _client(**kwargs):
@@ -64,6 +69,122 @@ def test_symbol_set_lifecycle_uses_real_fastapi_and_closed_world_transitions():
     terminal = client.patch(f"/api/v1/org/me/symbol-sets/{symbol_set_id}", json={"name": "Nope"})
     assert terminal.status_code == 409
     assert terminal.json() == {"error": "request_error", "detail": "Symbol Set lifecycle transition is not permitted."}
+
+
+def test_symbol_set_patch_audits_activation_only_for_the_real_transition():
+    client, Session = _client()
+    created = client.post(
+        "/api/v1/org/me/symbol-sets",
+        json={"code": "SET-AUDIT", "name": "Initial"},
+    )
+    assert created.status_code == 201
+    symbol_set_id = created.json()["id"]
+
+    activated = client.patch(
+        f"/api/v1/org/me/symbol-sets/{symbol_set_id}",
+        json={"status": "active"},
+    )
+    updated = client.patch(
+        f"/api/v1/org/me/symbol-sets/{symbol_set_id}",
+        json={"name": "Renamed"},
+    )
+
+    assert activated.status_code == updated.status_code == 200
+    with Session() as session:
+        action_counts = Counter(
+            event.action
+            for event in session.query(AuditEvent)
+            .filter(AuditEvent.entity_id == uuid.UUID(symbol_set_id))
+            .all()
+        )
+    assert action_counts == Counter({
+        "symbol_set.created": 1,
+        "symbol_set.activated": 1,
+        "symbol_set.updated": 1,
+    })
+    with Session() as session:
+        event = session.query(AuditEvent).filter_by(
+            entity_id=uuid.UUID(symbol_set_id), action="symbol_set.activated"
+        ).one()
+        assert event.payload_json["oldStatus"] == "draft"
+        assert event.payload_json["newStatus"] == "active"
+        assert event.payload_json["changedFields"] == ["status"]
+        assert event.payload_json["affectedProjectIds"] == []
+        assert event.payload_json["beforeAvailableProjectCount"] == 0
+        assert event.payload_json["afterAvailableProjectCount"] == 0
+
+
+def test_symbol_set_patch_identical_normalized_values_is_a_true_no_op():
+    client, Session = _client()
+    created = client.post(
+        "/api/v1/org/me/symbol-sets",
+        json={
+            "code": "SET-NOOP",
+            "name": "Electrical Set",
+            "description": "Primary symbols",
+            "disciplines": ["Electrical", "P&ID"],
+            "useCases": ["Design", "Review"],
+        },
+    )
+    assert created.status_code == 201
+    symbol_set = created.json()
+    symbol_set_id = symbol_set["id"]
+    with Session() as session:
+        before_updated_at = session.query(symbol_set_service.SymbolSet).filter_by(
+            id=uuid.UUID(symbol_set_id)
+        ).one().updated_at
+        before_audits = session.query(AuditEvent).filter_by(entity_id=uuid.UUID(symbol_set_id)).count()
+
+    response = client.patch(
+        f"/api/v1/org/me/symbol-sets/{symbol_set_id}",
+        json={
+            "name": "  Ｅｌｅｃｔｒｉｃａｌ Ｓｅｔ  ",
+            "description": "  Primary symbols  ",
+            "disciplines": [" Electrical ", "electrical", "P&ID"],
+            "useCases": [" Design ", "design", "Review"],
+            "status": "draft",
+        },
+    )
+
+    assert response.status_code == 200
+    with Session() as session:
+        after_updated_at = session.query(symbol_set_service.SymbolSet).filter_by(
+            id=uuid.UUID(symbol_set_id)
+        ).one().updated_at
+        after_audits = session.query(AuditEvent).filter_by(entity_id=uuid.UUID(symbol_set_id)).count()
+    assert after_updated_at == before_updated_at
+    assert after_audits == before_audits
+
+
+@pytest.mark.parametrize("field", ("disciplines", "useCases", "status"))
+def test_symbol_set_patch_rejects_explicit_null_for_non_nullable_fields(field):
+    client, _ = _client()
+    created = client.post("/api/v1/org/me/symbol-sets", json={"code": "SET-NULL", "name": "Electrical"})
+    response = client.patch(
+        f"/api/v1/org/me/symbol-sets/{created.json()['id']}",
+        json={field: None},
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert set(body) == {"error", "detail", "issues"}
+    assert body["error"] == "validation_error"
+    assert any(issue["loc"][-1] == field for issue in body["issues"])
+
+
+def test_symbol_set_patch_explicit_null_clears_nullable_description():
+    client, _ = _client()
+    created = client.post(
+        "/api/v1/org/me/symbol-sets",
+        json={"code": "SET-CLEAR", "name": "Electrical", "description": "Initial"},
+    )
+    response = client.patch(
+        f"/api/v1/org/me/symbol-sets/{created.json()['id']}",
+        json={"description": None},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["description"] is None
 
 
 def test_symbol_set_real_fastapi_member_can_read_active_but_not_mutate():

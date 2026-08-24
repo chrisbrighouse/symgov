@@ -138,6 +138,123 @@ def test_project_lifecycle_uses_real_fastapi_and_bound_organization_session():
     assert client.get(f"/api/v1/org/me/projects/{project_id}").json()["status"] == "closed"
     with Session() as session:
         assert session.query(project_service.AuditEvent).count() == 3
+        event = session.query(project_service.AuditEvent).filter_by(
+            entity_id=project_service.uuid.UUID(project_id), action="project.closed"
+        ).one()
+        assert event.payload_json["oldStatus"] == "active"
+        assert event.payload_json["newStatus"] == "closed"
+        assert event.payload_json["changedFields"] == ["status"]
+        assert event.payload_json["affectedSymbolSetIds"] == []
+        assert event.payload_json["beforeAvailableSymbolSetCount"] == 0
+        assert event.payload_json["afterAvailableSymbolSetCount"] == 0
+
+
+def test_project_patch_identical_normalized_values_is_a_true_no_op():
+    client, Session = _stage4_client()
+    created = client.post(
+        "/api/v1/org/me/projects",
+        json={
+            "code": "P-NOOP",
+            "name": "Design Office",
+            "shortDescription": "Design phase",
+            "externalReference": "EXT-01",
+            "metadata": {"phase": "design", "nested": {"count": 1}},
+        },
+    )
+    assert created.status_code == 201
+    project = created.json()
+    project_id = project["id"]
+    with Session() as session:
+        before_updated_at = session.query(project_service.Project).filter_by(
+            id=project_service.uuid.UUID(project_id)
+        ).one().updated_at
+        before_audits = session.query(project_service.AuditEvent).filter_by(
+            entity_id=project_service.uuid.UUID(project_id)
+        ).count()
+
+    response = client.patch(
+        f"/api/v1/org/me/projects/{project_id}",
+        json={
+            "name": "  Ｄｅｓｉｇｎ Ｏｆｆｉｃｅ  ",
+            "shortDescription": "Ｄｅｓｉｇｎ ｐｈａｓｅ",
+            "externalReference": "  EXT-01  ",
+            "metadata": {"nested": {"count": 1}, "phase": "design"},
+            "status": "active",
+        },
+    )
+
+    assert response.status_code == 200
+    with Session() as session:
+        after_updated_at = session.query(project_service.Project).filter_by(
+            id=project_service.uuid.UUID(project_id)
+        ).one().updated_at
+        after_audits = session.query(project_service.AuditEvent).filter_by(
+            entity_id=project_service.uuid.UUID(project_id)
+        ).count()
+    assert after_updated_at == before_updated_at
+    assert after_audits == before_audits
+
+
+def test_project_patch_distinguishes_json_booleans_from_numbers():
+    client, Session = _stage4_client()
+    created = client.post(
+        "/api/v1/org/me/projects",
+        json={"code": "P-JSON-TYPES", "name": "First", "metadata": {"nested": {"flag": 1}}},
+    )
+    project_id = created.json()["id"]
+    with Session() as session:
+        before_audits = session.query(project_service.AuditEvent).filter_by(
+            entity_id=project_service.uuid.UUID(project_id)
+        ).count()
+
+    response = client.patch(
+        f"/api/v1/org/me/projects/{project_id}",
+        json={"metadata": {"nested": {"flag": True}}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["metadata"] == {"nested": {"flag": True}}
+    with Session() as session:
+        assert session.query(project_service.AuditEvent).filter_by(
+            entity_id=project_service.uuid.UUID(project_id)
+        ).count() == before_audits + 1
+
+
+@pytest.mark.parametrize("field", ("metadata", "status"))
+def test_project_patch_rejects_explicit_null_for_non_nullable_fields(field):
+    client, _ = _stage4_client()
+    created = client.post("/api/v1/org/me/projects", json={"code": "P-NULL", "name": "First"})
+    response = client.patch(
+        f"/api/v1/org/me/projects/{created.json()['id']}",
+        json={field: None},
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert set(body) == {"error", "detail", "issues"}
+    assert body["error"] == "validation_error"
+    assert any(issue["loc"][-1] == field for issue in body["issues"])
+
+
+def test_project_patch_explicit_null_clears_nullable_fields():
+    client, _ = _stage4_client()
+    created = client.post(
+        "/api/v1/org/me/projects",
+        json={
+            "code": "P-CLEAR",
+            "name": "First",
+            "shortDescription": "Short",
+            "externalReference": "EXT-CLEAR",
+        },
+    )
+    response = client.patch(
+        f"/api/v1/org/me/projects/{created.json()['id']}",
+        json={"shortDescription": None, "externalReference": None},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["shortDescription"] is None
+    assert response.json()["externalReference"] is None
 
 
 @pytest.mark.parametrize(
