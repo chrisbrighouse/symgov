@@ -209,6 +209,83 @@ class PagedSymbolSetResponse(BaseModel):
     total: int
 
 
+class SymbolSetCopyRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    code: str
+    name: str
+
+
+class SymbolSetItemInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    governedSymbolId: uuid.UUID
+    sortOrder: int = Field(ge=0)
+    groupName: str | None = None
+    displayLabel: str | None = None
+    notes: str | None = None
+    preferredFormat: str | None = None
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class SymbolSetItemsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    items: list[SymbolSetItemInput] = Field(max_length=1000)
+
+
+class SymbolSetItemResponse(BaseModel):
+    id: uuid.UUID
+    governedSymbolId: uuid.UUID
+    sortOrder: int
+    groupName: str | None
+    displayLabel: str | None
+    notes: str | None
+    preferredFormat: str | None
+    provenance: dict[str, Any]
+    currentRevisionId: uuid.UUID | None
+    availabilityStatus: str
+    availabilityReason: str | None
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class SymbolSetItemsResponse(BaseModel):
+    items: list[SymbolSetItemResponse]
+    page: int
+    pageSize: int
+    total: int
+
+
+class SymbolSetProjectInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    projectId: uuid.UUID
+    isDefault: bool = False
+
+
+class SymbolSetProjectsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    projects: list[SymbolSetProjectInput] = Field(max_length=500)
+
+
+class SymbolSetProjectEntry(BaseModel):
+    project: ProjectSummary
+    isDefault: bool
+
+
+class SymbolSetProjectsResponse(BaseModel):
+    items: list[SymbolSetProjectEntry]
+    page: int
+    pageSize: int
+    total: int
+
+
+class OrganizationDefaultSymbolSetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    setId: uuid.UUID
+
+
+class OrganizationDefaultSymbolSetResponse(BaseModel):
+    defaultSymbolSetId: uuid.UUID
+
+
 class ProfileUpgradeOptionResponse(BaseModel):
     years: int
     totalPricePence: int

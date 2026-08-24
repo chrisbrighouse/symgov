@@ -95,14 +95,21 @@ def test_project_metadata_is_bounded_and_finite():
 
 
 def test_project_patch_applies_other_fields_when_status_is_unchanged(monkeypatch):
-    row = SimpleNamespace(status="active", name="Old", id="project-id", closed_at=None, updated_at="before")
+    organization = SimpleNamespace(id="organization-id")
+    row = SimpleNamespace(status="active", name="Old", id="project-id", organization_id=organization.id, closed_at=None, updated_at="before")
     audits = []
-    monkeypatch.setattr(project_service, "get_project", lambda *args, **kwargs: (SimpleNamespace(is_admin=True), row))
+    principal = SimpleNamespace(is_admin=True, organization=organization)
+    monkeypatch.setattr(project_service, "get_project", lambda *args, **kwargs: (principal, row))
     monkeypatch.setattr(project_service, "audit", lambda *args, **kwargs: audits.append(args))
     monkeypatch.setattr(project_service, "now", lambda: "after")
+    class Query:
+        def filter(self, *args): return self
+        def with_for_update(self): return self
+        def one_or_none(self): return row
+    session = SimpleNamespace(query=lambda *args: Query())
     data = SimpleNamespace(model_fields_set={"name", "status"}, name="New", shortDescription=None,
                            externalReference=None, metadata=None, status="active")
-    project_service.patch_project(SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), "project-id", data)
+    project_service.patch_project(session, SimpleNamespace(), SimpleNamespace(), "project-id", data)
     assert row.name == "New"
     assert row.updated_at == "after"
     assert audits

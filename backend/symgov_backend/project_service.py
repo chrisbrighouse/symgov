@@ -10,7 +10,7 @@ import uuid
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
-from .models import AuditEvent, Project, ProjectSymbolSet, UserProjectSetSelection, UserSessionProjectContext
+from .models import AuditEvent, Project, ProjectSymbolSet, SymbolSet, UserProjectSetSelection, UserSessionProjectContext
 from .stage4_authorization import Stage4Principal, require_stage4_principal
 
 CODE_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{0,31}$")
@@ -73,9 +73,9 @@ def validate_json(value: object) -> dict:
     return value
 
 
-def audit(session: Session, principal: Stage4Principal, entity_type: str, entity_id: uuid.UUID, action: str, details: dict) -> None:
+def audit(session: Session, principal: Stage4Principal, entity_type: str, entity_id: uuid.UUID, action: str, details: dict, *, event_id: uuid.UUID | None = None) -> None:
     payload = {"source": "stage4", "organizationId": str(principal.organization.id), **details}
-    session.add(AuditEvent(id=uuid.uuid4(), entity_type=entity_type, entity_id=entity_id, action=action, actor_id=principal.user.id, payload_json=payload, created_at=now()))
+    session.add(AuditEvent(id=event_id or uuid.uuid4(), entity_type=entity_type, entity_id=entity_id, action=action, actor_id=principal.user.id, payload_json=payload, created_at=now()))
 
 
 def project_dict(row: Project) -> dict:
@@ -126,6 +126,9 @@ def get_project(session: Session, request: Request, settings, project_id: uuid.U
 
 def patch_project(session: Session, request: Request, settings, project_id: uuid.UUID, data):
     principal, row = get_project(session, request, settings, project_id)
+    row = session.query(Project).filter(Project.id == project_id, Project.organization_id == principal.organization.id).with_for_update().one_or_none()
+    if row is None or (row.status != "active" and not principal.is_admin):
+        raise HTTPException(404, "Not found.")
     if not principal.is_admin:
         raise HTTPException(403, "Organization Admin privileges are required.")
     if row.status == "closed":
@@ -146,6 +149,20 @@ def patch_project(session: Session, request: Request, settings, project_id: uuid
     if data.status is not None and data.status != row.status:
         if data.status != "closed": raise HTTPException(409, "Project lifecycle transition is not permitted.")
         row.status = "closed"; row.closed_at = now()
+        # The Project anchor is already locked above. Discover and lock only
+        # the affected Set anchors in the same statement, rather than using an
+        # unlocked dependent-link read to define which Sets to lock. The
+        # dependent rows are locked only after the Project and Set anchors.
+        session.query(SymbolSet).join(
+            ProjectSymbolSet,
+            ProjectSymbolSet.symbol_set_id == SymbolSet.id,
+        ).filter(
+            ProjectSymbolSet.project_id == row.id,
+            SymbolSet.owner_organization_id == principal.organization.id,
+        ).order_by(SymbolSet.id).with_for_update(of=SymbolSet).all()
+        session.query(ProjectSymbolSet).filter(ProjectSymbolSet.project_id == row.id).with_for_update().all()
+        session.query(UserProjectSetSelection).filter(UserProjectSetSelection.project_id == row.id).with_for_update().all()
+        session.query(UserSessionProjectContext).filter(UserSessionProjectContext.project_id == row.id).with_for_update().all()
         session.query(ProjectSymbolSet).filter(ProjectSymbolSet.project_id == row.id).update({"status": "inactive", "is_default": False})
         session.query(UserProjectSetSelection).filter(UserProjectSetSelection.project_id == row.id).delete(synchronize_session=False)
         session.query(UserSessionProjectContext).filter(UserSessionProjectContext.project_id == row.id).delete(synchronize_session=False)

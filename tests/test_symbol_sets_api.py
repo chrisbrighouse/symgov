@@ -28,14 +28,21 @@ def test_symbol_set_labels_normalize_dedupe_and_preserve_first_spelling():
 
 
 def test_symbol_set_patch_applies_other_fields_when_status_is_unchanged(monkeypatch):
-    row = SimpleNamespace(status="active", name="Old", id="set-id", superseded_at=None, archived_at=None, updated_at="before")
+    organization = SimpleNamespace(id="organization-id")
+    row = SimpleNamespace(status="active", name="Old", id="set-id", owner_organization_id=organization.id, superseded_at=None, archived_at=None, updated_at="before")
     audits = []
-    monkeypatch.setattr(symbol_set_service, "get_set", lambda *args, **kwargs: (SimpleNamespace(is_admin=True), row))
+    principal = SimpleNamespace(is_admin=True, organization=organization)
+    monkeypatch.setattr(symbol_set_service, "get_set", lambda *args, **kwargs: (principal, row))
     monkeypatch.setattr(symbol_set_service, "audit", lambda *args, **kwargs: audits.append(args))
     monkeypatch.setattr(symbol_set_service, "stamp", lambda: "after")
+    class Query:
+        def filter(self, *args): return self
+        def with_for_update(self): return self
+        def one_or_none(self): return row
+    session = SimpleNamespace(query=lambda *args: Query())
     data = SimpleNamespace(model_fields_set={"name", "status"}, name="New", description=None,
                            disciplines=None, useCases=None, status="active")
-    symbol_set_service.patch_set(SimpleNamespace(), SimpleNamespace(), SimpleNamespace(), "set-id", data)
+    symbol_set_service.patch_set(session, SimpleNamespace(), SimpleNamespace(), "set-id", data)
     assert row.name == "New"
     assert row.updated_at == "after"
     assert audits

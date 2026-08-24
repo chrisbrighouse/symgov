@@ -82,7 +82,23 @@ def require_stage4_principal(
     ):
         _fail(404)
     current = session.query(UserSession).filter(UserSession.id == probe.id, UserSession.token_hash == token_hash).with_for_update().one_or_none()
-    if current is None or current.revoked_at is not None or _aware(current.expires_at) <= now or current.active_organization_id != organization.id:
+    if current is None:
+        _fail(401, "Authentication required.")
+    assert current is not None
+    if (
+        current.auth_user_id != probe.auth_user_id
+        or current.active_organization_id != probe.active_organization_id
+        or current.token_hash != probe.token_hash
+        or current.purpose != probe.purpose
+        or current.session_mode != probe.session_mode
+        or current.revoked_at != probe.revoked_at
+        or _aware(current.expires_at) != _aware(probe.expires_at)
+        or current.revoked_at is not None
+        or _aware(current.expires_at) <= now
+        or current.purpose != "application"
+        or current.session_mode != "organization"
+        or current.active_organization_id != organization.id
+    ):
         _fail(401, "Authentication required.")
     principal = Stage4Principal(user, current, organization, membership, role)
     if admin and not principal.is_admin:

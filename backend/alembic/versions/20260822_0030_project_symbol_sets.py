@@ -229,8 +229,18 @@ def upgrade() -> None:
     op.execute("""
     CREATE OR REPLACE FUNCTION validate_organization_symbol_set_default() RETURNS TRIGGER AS $$
     BEGIN
-      IF NEW.default_symbol_set_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM symbol_sets s WHERE s.id = NEW.default_symbol_set_id AND s.owner_organization_id = NEW.id AND s.status = 'active')
-      THEN RAISE EXCEPTION 'organization default requires active same-owner symbol set'; END IF;
+      IF NEW.default_symbol_set_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1
+        FROM symbol_sets s
+        JOIN project_symbol_sets ps ON ps.symbol_set_id = s.id
+        JOIN projects p ON p.id = ps.project_id
+        WHERE s.id = NEW.default_symbol_set_id
+          AND s.owner_organization_id = NEW.id
+          AND s.status = 'active'
+          AND ps.status = 'active'
+          AND p.status = 'active'
+          AND p.organization_id = NEW.id
+      ) THEN RAISE EXCEPTION 'organization default requires active project availability'; END IF;
       RETURN NEW;
     END; $$ LANGUAGE plpgsql;
     CREATE CONSTRAINT TRIGGER trg_organization_symbol_set_default_valid

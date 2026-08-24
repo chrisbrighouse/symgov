@@ -22,8 +22,8 @@ def page_args(page: int = Query(1, ge=1), page_size: int = Query(50, alias="page
     return page, page_size
 
 
-@router.get("", response_model=PagedProjectResponse)
-def projects(request: Request, page_data=Depends(page_args), include_closed: bool = False, session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
+@router.get("", response_model=PagedProjectResponse, responses={401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}})
+def projects(request: Request, page_data=Depends(page_args), include_closed: bool = Query(False, alias="includeClosed"), session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
     page, page_size = page_data
     _, result = list_projects(session, request, settings, page=page, page_size=page_size, include_closed=include_closed)
     return result
@@ -36,14 +36,14 @@ def create(data: ProjectCreateRequest, request: Request, session: Session = Depe
     except ValueError as exc: raise RequestValidationError([{"loc": ("body",), "msg": str(exc), "type": "value_error"}]) from exc
 
 
-@router.get("/{project_id}", response_model=ProjectResponse, responses={401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 409: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}})
-def detail(project_id: uuid.UUID, request: Request, session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
-    _, row = get_project(session, request, settings, project_id)
+@router.get("/{projectId}", response_model=ProjectResponse, responses={401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 409: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}})
+def detail(projectId: uuid.UUID, request: Request, session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
+    _, row = get_project(session, request, settings, projectId)
     return project_dict(row)
 
 
-@router.patch("/{project_id}", response_model=ProjectResponse, responses={401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 409: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}})
-def update(project_id: uuid.UUID, data: ProjectPatchRequest, request: Request, session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
+@router.patch("/{projectId}", response_model=ProjectResponse, responses={401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 409: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}})
+def update(projectId: uuid.UUID, data: ProjectPatchRequest, request: Request, session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
     try:
-        row = patch_project(session, request, settings, project_id, data); session.commit(); return project_dict(row)
+        row = patch_project(session, request, settings, projectId, data); session.commit(); return project_dict(row)
     except ValueError as exc: raise RequestValidationError([{"loc": ("body",), "msg": str(exc), "type": "value_error"}]) from exc

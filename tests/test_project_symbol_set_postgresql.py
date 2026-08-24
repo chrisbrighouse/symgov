@@ -9,10 +9,19 @@ import subprocess
 import threading
 import time
 import uuid
+from types import SimpleNamespace
 
+from starlette.requests import Request
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import sessionmaker
+
+from symgov_backend.public_symbol_eligibility import current_public_symbols
+from symgov_backend.auth import hash_session_token
+from symgov_backend.models import ProjectSymbolSet, UserProjectSetSelection
+from symgov_backend.project_service import patch_project
+from symgov_backend.symbol_set_service import clear_organization_default, replace_projects, _lock_organization_default_anchors
 
 psycopg = pytest.importorskip("psycopg")
 
@@ -100,6 +109,24 @@ def test_wp1_upgrade_is_real_0029_to_0030_rehearsal(wp1_database):
         functions = {row[0] for row in connection.execute(text("SELECT proname FROM pg_proc WHERE proname IN ('stage4_jsonb_max_depth','stage4_string_array_bounds','validate_symbol_set_copy_owner','validate_project_symbol_set_owner','validate_symbol_set_dependents','validate_project_dependents','validate_user_project_set_selection','validate_user_session_project_context','validate_organization_symbol_set_default','protect_project_identity','protect_symbol_set_identity','lock_governed_symbols_deterministically','lock_governed_symbol_boundary','cleanup_user_session_project_context')"))}
         assert functions == {"stage4_jsonb_max_depth", "stage4_string_array_bounds", "validate_symbol_set_copy_owner", "validate_project_symbol_set_owner", "validate_symbol_set_dependents", "validate_project_dependents", "validate_user_project_set_selection", "validate_user_session_project_context", "validate_organization_symbol_set_default", "protect_project_identity", "protect_symbol_set_identity", "lock_governed_symbols_deterministically", "lock_governed_symbol_boundary", "cleanup_user_session_project_context"}
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260822_0030"
+
+
+def test_public_eligibility_rejects_revision_owned_by_a_different_symbol(wp1_database):
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    requested, other, revision = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    pack, page = uuid.uuid4(), uuid.uuid4()
+    with wp1_database.begin() as connection:
+        owner = _user(connection, f"eligibility-{uuid.uuid4()}@example.test")
+        for symbol_id, slug in ((requested, "eligibility-requested"), (other, "eligibility-other")):
+            connection.execute(text("INSERT INTO governed_symbols (id,slug,canonical_name,category,discipline,owner_id,created_at,updated_at) VALUES (:id,:slug,:slug,'test','test',:owner,:now,:now)"), {"id": symbol_id, "slug": slug, "owner": owner, "now": now})
+        connection.execute(text("INSERT INTO symbol_revisions (id,symbol_id,revision_label,lifecycle_state,payload_json,author_id,created_at) VALUES (:id,:symbol,'1','published','{}'::jsonb,:owner,:now)"), {"id": revision, "symbol": other, "owner": owner, "now": now})
+        connection.execute(text("UPDATE governed_symbols SET current_revision_id=:revision WHERE id=:symbol"), {"revision": revision, "symbol": requested})
+        connection.execute(text("INSERT INTO publication_packs (id,pack_code,title,audience,effective_date,status,created_at,updated_at) VALUES (:id,:code,'Eligibility','public',CURRENT_DATE,'published',:now,:now)"), {"id": pack, "code": f"ELIG-{uuid.uuid4().hex}", "now": now})
+        connection.execute(text("INSERT INTO published_pages (id,page_code,title,pack_id,current_symbol_revision_id,effective_date,created_at,updated_at) VALUES (:id,:code,'Eligibility',:pack,:revision,CURRENT_DATE,:now,:now)"), {"id": page, "code": f"ELIG-PAGE-{uuid.uuid4().hex}", "pack": pack, "revision": revision, "now": now})
+        connection.execute(text("INSERT INTO pack_entries (id,pack_id,symbol_revision_id,published_page_id,sort_order,created_at) VALUES (:id,:pack,:revision,:page,1,:now)"), {"id": uuid.uuid4(), "pack": pack, "revision": revision, "page": page, "now": now})
+        assert current_public_symbols(connection, [requested]) == {}
+        connection.execute(text("UPDATE symbol_revisions SET symbol_id=:symbol WHERE id=:revision"), {"symbol": requested, "revision": revision})
+        assert current_public_symbols(connection, [requested]) == {requested: revision}
 
 
 def test_wp1_copy_owner_and_self_checks_are_commit_time_safe(wp1_database):
@@ -334,6 +361,21 @@ def test_wp1_selection_and_organization_default_require_active_same_owner_rows(w
             connection.execute(text("INSERT INTO user_project_set_selections (user_id,project_id,active_symbol_set_id,selected_at,updated_at) VALUES (:u,:p,:s,now(),now())"), {"u": invalid_user, "p": project, "s": inactive})
 
 
+def test_wp3_organization_default_requires_active_project_availability_at_commit(wp1_database):
+    with wp1_database.begin() as connection:
+        user = _user(connection, f"org-default-availability-{uuid.uuid4()}@example.test")
+        owner = _organization(connection, f"U{uuid.uuid4().hex[:7].upper()}", user)
+        _admin(connection, owner, user)
+        symbol_set = _symbol_set(connection, owner, user, "NOAVAIL")
+
+    with pytest.raises(DBAPIError, match="availability"):
+        with wp1_database.begin() as connection:
+            connection.execute(
+                text("UPDATE organizations SET default_symbol_set_id=:symbol_set WHERE id=:organization"),
+                {"symbol_set": symbol_set, "organization": owner},
+            )
+
+
 def test_wp1_session_context_and_old_writer_cleanup_are_real(wp1_database):
     with wp1_database.begin() as connection:
         user = _user(connection, f"context-{uuid.uuid4()}@example.test")
@@ -505,6 +547,76 @@ def test_wp1_default_race_has_one_durable_winner_and_one_loser(wp1_database):
     with wp1_database.connect() as connection:
         assert connection.execute(text("SELECT count(*) FROM project_symbol_sets WHERE project_id=:project AND is_default"), {"project": project}).scalar_one() == 1
         assert connection.execute(text("SELECT is_default FROM project_symbol_sets WHERE id=:id"), {"id": first_availability}).scalar_one() is True
+
+
+def test_wp3_service_cleanup_and_availability_paths_share_project_before_set_lock_order(wp1_database):
+    with wp1_database.begin() as connection:
+        user = _user(connection, f"lock-order-{uuid.uuid4()}@example.test")
+        owner_code = f"O{uuid.uuid4().hex[:7].upper()}"
+        owner = _organization(connection, owner_code, user)
+        _admin(connection, owner, user)
+        project = _project(connection, owner, user, "LOCKORDER")
+        symbol_set = _symbol_set(connection, owner, user, "LOCKORDERSET")
+        availability = _availability(connection, project, symbol_set, user)
+        connection.execute(text("UPDATE organizations SET default_symbol_set_id=:symbol_set WHERE id=:organization"), {"symbol_set": symbol_set, "organization": owner})
+        connection.execute(text("INSERT INTO user_project_set_selections (user_id,project_id,active_symbol_set_id,selected_at,updated_at) VALUES (:user,:project,:symbol_set,now(),now())"), {"user": user, "project": project, "symbol_set": symbol_set})
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        raw_token = uuid.uuid4().hex
+        connection.execute(text("INSERT INTO user_sessions (id,auth_user_id,token_hash,created_at,expires_at,last_seen_at,purpose,session_mode,active_organization_id) VALUES (:id,:user,:token,:now,:expires,:now,'application','organization',:organization)"), {"id": uuid.uuid4(), "user": user, "token": hash_session_token(raw_token), "now": now, "expires": now + timedelta(hours=1), "organization": owner})
+
+    SessionLocal = sessionmaker(bind=wp1_database)
+    barrier = threading.Barrier(2)
+    outcomes = []
+    request = Request({"type": "http", "headers": [(b"cookie", f"symgov_session={raw_token}".encode())]})
+    settings = SimpleNamespace(organizations_enabled=True, symbol_sets_enabled=True, organization_pilot_codes=(owner_code.lower(),))
+
+    def run_service_path(mode: str) -> None:
+        session = SessionLocal()
+        try:
+            barrier.wait(timeout=2)
+            if mode == "cleanup":
+                clear_organization_default(session, request, settings)
+                patch_project(
+                    session,
+                    request,
+                    settings,
+                    project,
+                    SimpleNamespace(
+                        status="closed",
+                        model_fields_set={"status"},
+                        only_status=lambda: True,
+                    ),
+                )
+            else:
+                replace_projects(
+                    session,
+                    request,
+                    settings,
+                    symbol_set,
+                    SimpleNamespace(projects=[SimpleNamespace(projectId=project, isDefault=True)]),
+                )
+            session.commit()
+            outcomes.append("committed")
+        except Exception as error:  # pragma: no cover - failure details are asserted below
+            session.rollback()
+            outcomes.append(type(error).__name__)
+        finally:
+            session.close()
+
+    threads = [threading.Thread(target=run_service_path, args=(mode,)) for mode in ("cleanup", "availability")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=8)
+    assert sorted(outcomes) in (["HTTPException", "committed"], ["committed", "committed"])
+    assert all(not thread.is_alive() for thread in threads)
+
+    with SessionLocal.begin() as session:
+        _, organization = _lock_organization_default_anchors(session, owner)
+        assert organization.default_symbol_set_id is None
+        link = session.query(ProjectSymbolSet).filter_by(id=availability).one_or_none()
+        assert link is None or (link.status == "inactive" and link.is_default is False)
+        assert session.query(UserProjectSetSelection).filter_by(project_id=project, active_symbol_set_id=symbol_set).count() == 0
 
 
 def test_wp1_session_context_rejects_wrong_org_revoked_personal_and_closed_project(wp1_database):

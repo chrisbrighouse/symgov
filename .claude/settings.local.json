@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(PYTHONPATH=backend timeout 100 python3 -m pytest tests/test_platform_admin_api.py -q)",
+      "Bash(node --test frontend/src/platformAdmin.test.js)",
+      "Bash(node --test frontend/src/platformAdmin.test.js frontend/src/organizationSession.test.js frontend/src/OrganizationAdminPage.test.js)",
+      "Bash(node *)"
+    ]
+  }
+}
