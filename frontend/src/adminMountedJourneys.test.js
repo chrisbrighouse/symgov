@@ -18,7 +18,7 @@ function response(status, payload) {
   };
 }
 
-function user({ organizationRole = 'user', platform = false, organizationAdminEnabled = true, platformAdminEnabled = true, organizationIconUploadEnabled = false } = {}) {
+function user({ organizationRole = 'user', platform = false, organizationAdminEnabled = true, platformAdminEnabled = true, organizationIconUploadEnabled = false, symbolSetsEnabled = false } = {}) {
   return {
     id: 'u-1',
     email: 'admin@example.test',
@@ -29,7 +29,7 @@ function user({ organizationRole = 'user', platform = false, organizationAdminEn
     session: { mode: 'organization', purpose: 'application', activeOrganizationId: 'org-1' },
     organization: { id: 'org-1', code: platform ? 'symgov' : 'acme', displayName: platform ? 'Symgov' : 'Acme', baseRole: organizationRole, capabilities: [] },
     isPlatformAdmin: platform,
-    capabilities: { organizationAdminEnabled, platformAdminEnabled, organizationIconUploadEnabled },
+    capabilities: { organizationAdminEnabled, platformAdminEnabled, organizationIconUploadEnabled, symbolSetsEnabled },
     recentStepUpAt: null,
   };
 }
@@ -127,6 +127,34 @@ describe('mounted admin App journeys', () => {
     const memberPosts = requests.filter((request) => request.url.endsWith('/org/me/members') && request.method === 'POST');
     assert.deepEqual(JSON.parse(memberPosts[0].body), { userId: 'u-2', baseRole: 'admin' });
     assert.doesNotMatch(memberPosts[0].body, /pin/i);
+    await act(async () => renderer.unmount());
+  });
+
+  it('mounts Project and Symbol Set selectors only for symbol-set-enabled organization sessions', async () => {
+    const requests = [];
+    globalThis.fetch = async (url, options = {}) => {
+      const method = options.method || 'GET';
+      requests.push({ url, method });
+      if (url.endsWith('/auth/me')) return response(200, { user: user({ organizationRole: 'admin', symbolSetsEnabled: true }) });
+      if (url.endsWith('/org/me') && method === 'GET') return response(200, organization());
+      if (url.includes('/org/me/members?')) return response(200, memberList());
+      if (url.includes('/org/me/projects?')) {
+        return response(200, { items: [{ id: 'p-1', code: 'P-01', name: 'Plant', shortDescription: 'North works', status: 'active', externalReference: null, metadata: {}, createdAt: '2026-08-20T10:00:00Z', updatedAt: '2026-08-20T10:00:00Z', closedAt: null }], page: 1, pageSize: 25, total: 1 });
+      }
+      if (url.includes('/org/me/symbol-context') && method === 'GET') {
+        return response(200, { selectedProject: null, activeSet: null, reason: 'none' });
+      }
+      if (url.includes('/org/me/symbol-sets?')) {
+        return response(200, { items: [], page: 1, pageSize: 200, total: 0 });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    };
+
+    const renderer = await mount('/organization/admin');
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Active Project' }));
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Active Symbol Set' }));
+    assert.match(JSON.stringify(renderer.toJSON()), /Select a Project first/);
+    assert.equal(requests.some((request) => request.url.includes('/organization/context')), false);
     await act(async () => renderer.unmount());
   });
 

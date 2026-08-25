@@ -256,6 +256,154 @@ export async function changeCurrentUserPin({ currentPin, newPin }) {
   });
 }
 
+function withQuery(path, params = {}) {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== '') {
+      query.set(key, String(value));
+    }
+  }
+  const suffix = query.toString();
+  return suffix ? `${path}?${suffix}` : path;
+}
+
+function requireOk(result, fallbackMessage) {
+  if (!result.ok) {
+    throw new Error(result.message || fallbackMessage);
+  }
+  return result.payload;
+}
+
+export async function fetchSymbolContext() {
+  const result = await requestJson('/org/me/symbol-context', { cache: 'no-store' });
+  return requireOk(result, 'Project context load failed.');
+}
+
+export async function selectProjectContext(projectId) {
+  const result = await requestJson('/org/me/symbol-context/project', {
+    method: 'PUT',
+    body: JSON.stringify({ projectId })
+  });
+  return requireOk(result, 'Project selection failed.');
+}
+
+export async function clearProjectSelection() {
+  const result = await requestJson('/org/me/symbol-context/project', {
+    method: 'DELETE',
+    body: JSON.stringify({})
+  });
+  if (!result.ok) {
+    throw new Error(result.message || 'Project clear failed.');
+  }
+  return result.payload || null;
+}
+
+export async function selectActiveSymbolSet(setCode) {
+  const result = await requestJson('/org/me/symbol-context/active-set', {
+    method: 'PUT',
+    body: JSON.stringify({ setCode })
+  });
+  return requireOk(result, 'Symbol Set selection failed.');
+}
+
+export async function clearActiveSymbolSetSelection() {
+  const result = await requestJson('/org/me/symbol-context/active-set', {
+    method: 'DELETE',
+    body: JSON.stringify({})
+  });
+  return requireOk(result, 'Symbol Set clear failed.');
+}
+
+export async function listOrganizationProjects({ page = 1, pageSize = 25, includeClosed = false } = {}) {
+  const result = await requestJson(withQuery('/org/me/projects', {
+    page,
+    pageSize,
+    includeClosed: includeClosed ? 'true' : 'false'
+  }), { cache: 'no-store' });
+  const payload = requireOk(result, 'Projects load failed.');
+  return {
+    items: Array.isArray(payload?.items) ? payload.items : [],
+    page: Number(payload?.page || page),
+    pageSize: Number(payload?.pageSize || pageSize),
+    total: Number(payload?.total || 0)
+  };
+}
+
+export async function createOrganizationProject(payload) {
+  const result = await requestJson('/org/me/projects', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  return requireOk(result, 'Project create failed.');
+}
+
+export async function updateOrganizationProject(projectId, payload) {
+  const result = await requestJson(`/org/me/projects/${encodeURIComponent(projectId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  });
+  return requireOk(result, 'Project update failed.');
+}
+
+export async function listOrganizationSymbolSets({ page = 1, pageSize = 50, status = '', projectId = '' } = {}) {
+  const result = await requestJson(withQuery('/org/me/symbol-sets', {
+    page,
+    pageSize,
+    status,
+    projectId
+  }), { cache: 'no-store' });
+  const payload = requireOk(result, 'Symbol Set load failed.');
+  return {
+    items: Array.isArray(payload?.items) ? payload.items : [],
+    page: Number(payload?.page || page),
+    pageSize: Number(payload?.pageSize || pageSize),
+    total: Number(payload?.total || 0)
+  };
+}
+
+export async function createOrganizationSymbolSet(payload) {
+  const result = await requestJson('/org/me/symbol-sets', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  return requireOk(result, 'Symbol Set create failed.');
+}
+
+export async function updateOrganizationSymbolSet(setId, payload) {
+  const result = await requestJson(`/org/me/symbol-sets/${encodeURIComponent(setId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  });
+  return requireOk(result, 'Symbol Set update failed.');
+}
+
+export async function copyOrganizationSymbolSet(setId, payload) {
+  const result = await requestJson(`/org/me/symbol-sets/${encodeURIComponent(setId)}/copy`, {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  return requireOk(result, 'Symbol Set copy failed.');
+}
+
+export async function setOrganizationDefaultSymbolSet(setId) {
+  const result = await requestJson('/org/me/default-symbol-set', {
+    method: 'PUT',
+    body: JSON.stringify({ setId })
+  });
+  return requireOk(result, 'Setting Organization default Symbol Set failed.');
+}
+
+export async function clearOrganizationDefaultSymbolSet() {
+  const result = await requestJson('/org/me/default-symbol-set', {
+    method: 'DELETE',
+    body: JSON.stringify({})
+  });
+  if (!result.ok) {
+    throw new Error(result.message || 'Clearing Organization default Symbol Set failed.');
+  }
+  return result.payload || null;
+}
+
 export async function fetchAdminUsers(params = {}) {
   const query = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {

@@ -1,6 +1,10 @@
 import { createElement, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { runWithStepUp } from './adminJourneys.js';
 import { requestJson } from './api.js';
+import { canMountProjectContext } from './projectContext.js';
+import { ProjectContextBar } from './ProjectContextBar.js';
+import { OrganizationProjectsPanel } from './OrganizationProjectsPanel.js';
+import { OrganizationSymbolSetsPanel } from './OrganizationSymbolSetsPanel.js';
 
 function resultValue(result) {
   if (!result.ok) {
@@ -638,6 +642,7 @@ export function OrganizationAdminPage({ auth }) {
   const [org, setOrg] = useState(null);
   const [error, setError] = useState('');
   const [stepUpPin, setStepUpPin] = useState('');
+  const [contextRefreshToken, setContextRefreshToken] = useState(0);
 
   useEffect(() => {
     apiGet('/org/me')
@@ -652,6 +657,10 @@ export function OrganizationAdminPage({ auth }) {
     reauthenticate: (pin) => auth.reauthenticate({ pin }),
     clearPin: () => setStepUpPin(''),
   }), [auth, stepUpPin]);
+  const symbolSetsUiEnabled = canMountProjectContext(auth);
+  const notifyContextChange = useCallback(() => {
+    setContextRefreshToken((current) => current + 1);
+  }, []);
 
   if (error) {
     return createElement(
@@ -678,6 +687,13 @@ export function OrganizationAdminPage({ auth }) {
         onChange: (event) => setStepUpPin(event.target.value),
       })
     ) : null,
+    symbolSetsUiEnabled
+      ? createElement(ProjectContextBar, {
+          auth,
+          refreshToken: contextRefreshToken,
+          onContextChanged: notifyContextChange,
+        })
+      : null,
     createElement(OrgDetailSection, { org, isAdmin, onUpdate: setOrg, protect }),
     createElement(OrgIconSection, {
       org,
@@ -686,6 +702,18 @@ export function OrganizationAdminPage({ auth }) {
       onUpdate: setOrg,
       protect,
     }),
+    symbolSetsUiEnabled
+      ? createElement(OrganizationProjectsPanel, {
+          isAdmin,
+          onContextChanged: notifyContextChange,
+        })
+      : null,
+    symbolSetsUiEnabled
+      ? createElement(OrganizationSymbolSetsPanel, {
+          isAdmin,
+          onContextChanged: notifyContextChange,
+        })
+      : null,
     createElement(MemberListSection, { isAdmin, protect })
   );
 }
