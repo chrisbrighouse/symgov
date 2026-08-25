@@ -104,3 +104,35 @@ def test_project_list_publishes_custom_validation_and_auth_error_schemas():
         assert operation["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith(
             "APIErrorResponse"
         )
+
+
+def test_wp4_context_routes_publish_exact_openapi_contract():
+    paths = create_app().openapi()["paths"]
+    contracts = (
+        ("/api/v1/org/me/symbol-context", "get", "200", "SymbolContextResponse"),
+        ("/api/v1/org/me/symbol-context/project", "put", "200", "SymbolContextResponse"),
+        ("/api/v1/org/me/symbol-context/project", "delete", "204", None),
+        ("/api/v1/org/me/symbol-context/active-set", "put", "200", "SymbolContextResponse"),
+        ("/api/v1/org/me/symbol-context/active-set", "delete", "200", "SymbolContextResponse"),
+    )
+    for path, method, success, schema in contracts:
+        operation = paths[path][method]
+        assert operation.get("parameters", []) == []
+        if schema is None:
+            assert operation["responses"][success] == {"description": "Successful Response"}
+        else:
+            assert operation["responses"][success]["content"]["application/json"]["schema"]["$ref"].endswith(schema)
+        for status in ("401", "403", "404", "409"):
+            assert operation["responses"][status]["content"]["application/json"]["schema"]["$ref"].endswith("APIErrorResponse")
+        assert operation["responses"]["422"]["content"]["application/json"]["schema"]["$ref"].endswith("APIValidationErrorResponse")
+
+    schemas = create_app().openapi()["components"]["schemas"]
+    assert schemas["ProjectSelectionRequest"]["required"] == ["projectId"]
+    assert schemas["ProjectSelectionRequest"]["additionalProperties"] is False
+    assert schemas["ActiveSetSelectionRequest"]["required"] == ["setCode"]
+    assert schemas["ActiveSetSelectionRequest"]["additionalProperties"] is False
+    assert schemas["SymbolContextResponse"]["required"] == ["selectedProject", "activeSet", "reason"]
+    assert schemas["SymbolContextResponse"]["additionalProperties"] is False
+    assert schemas["SymbolContextResponse"]["properties"]["reason"]["enum"] == [
+        "explicit", "user_preference", "project_default", "organization_default", "none"
+    ]

@@ -21,9 +21,13 @@ from sqlalchemy.orm import sessionmaker
 from symgov_backend.public_symbol_eligibility import current_public_symbols
 from symgov_backend.auth import hash_session_token
 from symgov_backend.models import AuditEvent, Project, ProjectSymbolSet, UserProjectSetSelection
+import symgov_backend.project_service as project_service
 from symgov_backend.project_service import patch_project
 from symgov_backend.stage4_authorization import require_stage4_principal
-from symgov_backend.symbol_set_service import clear_organization_default, patch_set, replace_projects, _lock_organization_default_anchors
+import symgov_backend.symbol_context_service as symbol_context_service
+import symgov_backend.symbol_set_service as symbol_set_service
+from symgov_backend.symbol_set_service import clear_organization_default, patch_set, replace_projects, set_organization_default, _lock_organization_default_anchors
+from symgov_backend.symbol_context_service import select_active_set, select_project
 
 psycopg = pytest.importorskip("psycopg")
 
@@ -271,6 +275,36 @@ def _availability(connection, project_id, symbol_set_id, user_id, *, status="act
     """), {"id": identifier, "project": project_id, "set_id": symbol_set_id,
            "status": status, "default": default, "user": user_id, "now": now})
     return identifier
+
+
+def _wait_for_postgresql_blocker(engine, backend_pid: int, *, timeout: float = 5.0) -> list[int]:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        with engine.connect() as connection:
+            blockers = connection.execute(
+                text("SELECT pg_blocking_pids(:backend_pid)"),
+                {"backend_pid": backend_pid},
+            ).scalar_one()
+        if blockers:
+            return blockers
+        time.sleep(0.01)
+    pytest.fail(f"PostgreSQL backend {backend_pid} was not observed waiting on a lock")
+
+
+def _wait_for_event_or_postgresql_blocker(engine, event: threading.Event, backend_pid: int, *, timeout: float = 5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if event.is_set():
+            return "event", []
+        with engine.connect() as connection:
+            blockers = connection.execute(
+                text("SELECT pg_blocking_pids(:backend_pid)"),
+                {"backend_pid": backend_pid},
+            ).scalar_one()
+        if blockers:
+            return "blocked", blockers
+        time.sleep(0.01)
+    pytest.fail(f"PostgreSQL backend {backend_pid} neither reached the contender barrier nor waited on a lock")
 
 
 
@@ -891,7 +925,257 @@ def test_wp3_postgresql_lifecycle_and_default_cleanup_audits_are_complete(wp1_da
         assert closed["afterAvailableSymbolSetCount"] == 0
 
 
-def test_wp3_service_cleanup_and_availability_paths_share_project_before_set_lock_order(wp1_database):
+def test_wp4_organization_default_and_availability_serialize_without_lock_upgrade_deadlock(wp1_database, monkeypatch):
+    owner_code = f"D{uuid.uuid4().hex[:7].upper()}"
+    raw_token = uuid.uuid4().hex
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    with wp1_database.begin() as connection:
+        user = _user(connection, f"default-availability-{uuid.uuid4()}@example.test")
+        owner = _organization(connection, owner_code, user)
+        _admin(connection, owner, user)
+        project = _project(connection, owner, user, "DEFAULTLOCK")
+        symbol_set = _symbol_set(connection, owner, user, "DEFAULTLOCKSET")
+        _availability(connection, project, symbol_set, user)
+        connection.execute(text(
+            "INSERT INTO user_sessions "
+            "(id,auth_user_id,token_hash,created_at,expires_at,last_seen_at,purpose,session_mode,active_organization_id) "
+            "VALUES (:id,:user,:token,:now,:expires,:now,'application','organization',:organization)"
+        ), {"id": uuid.uuid4(), "user": user, "token": hash_session_token(raw_token), "now": now,
+            "expires": now + timedelta(hours=1), "organization": owner})
+
+    SessionLocal = sessionmaker(bind=wp1_database)
+    request = Request({"type": "http", "headers": [(b"cookie", f"symgov_session={raw_token}".encode())]})
+    settings = SimpleNamespace(
+        organizations_enabled=True,
+        symbol_sets_enabled=True,
+        organization_pilot_codes=(owner_code.lower(),),
+    )
+    availability_contender = threading.Barrier(2)
+    release_availability = threading.Event()
+    writer_has_project_set_anchors = threading.Event()
+    release_writer = threading.Event()
+    backend_pids = {}
+    outcomes = []
+    original_lock_anchors = symbol_set_service._lock_project_set_anchors
+
+    def controlled_lock_anchors(session, set_id, organization_id, requested_ids=()):
+        if threading.current_thread().name == "default-availability":
+            availability_contender.wait(timeout=5)
+            assert release_availability.wait(timeout=5)
+        result = original_lock_anchors(session, set_id, organization_id, requested_ids)
+        if threading.current_thread().name == "default-writer":
+            writer_has_project_set_anchors.set()
+            assert release_writer.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(symbol_set_service, "_lock_project_set_anchors", controlled_lock_anchors)
+
+    def run(mode: str) -> None:
+        with SessionLocal() as session:
+            try:
+                backend_pids[mode] = session.execute(text("SELECT pg_backend_pid()")).scalar_one()
+                session.execute(text("SET LOCAL statement_timeout='5000ms'"))
+                if mode == "availability":
+                    replace_projects(
+                        session, request, settings, symbol_set,
+                        SimpleNamespace(projects=[SimpleNamespace(projectId=project, isDefault=True)]),
+                    )
+                else:
+                    set_organization_default(session, request, settings, symbol_set)
+                session.commit()
+                outcomes.append({"mode": mode, "type": "committed", "sqlstate": None})
+            except Exception as error:  # pragma: no cover - failure details are asserted below
+                session.rollback()
+                outcomes.append({
+                    "mode": mode,
+                    "type": type(error).__name__,
+                    "sqlstate": getattr(getattr(error, "orig", None), "sqlstate", None),
+                })
+
+    availability_thread = threading.Thread(target=run, args=("availability",), name="default-availability")
+    writer_thread = threading.Thread(target=run, args=("writer",), name="default-writer")
+    availability_thread.start()
+    availability_contender.wait(timeout=5)
+    writer_thread.start()
+    while "writer" not in backend_pids:
+        assert writer_thread.is_alive()
+        time.sleep(0.01)
+    writer_state, writer_blockers = _wait_for_event_or_postgresql_blocker(
+        wp1_database, writer_has_project_set_anchors, backend_pids["writer"]
+    )
+    if writer_state == "event":
+        release_availability.set()
+        while "availability" not in backend_pids:
+            assert availability_thread.is_alive()
+            time.sleep(0.01)
+        assert _wait_for_postgresql_blocker(wp1_database, backend_pids["availability"])
+        release_writer.set()
+    else:
+        assert writer_blockers
+        release_availability.set()
+        availability_thread.join(timeout=5)
+        release_writer.set()
+    availability_thread.join(timeout=8)
+    writer_thread.join(timeout=8)
+    assert not availability_thread.is_alive() and not writer_thread.is_alive()
+    assert sorted((outcome["mode"], outcome["type"]) for outcome in outcomes) == [
+        ("availability", "committed"), ("writer", "committed")
+    ], outcomes
+
+    with SessionLocal() as session:
+        assert session.query(ProjectSymbolSet).filter_by(
+            project_id=project, symbol_set_id=symbol_set, status="active", is_default=True
+        ).count() == 1
+        assert session.execute(text(
+            "SELECT default_symbol_set_id FROM organizations WHERE id=:owner"
+        ), {"owner": owner}).scalar_one() == symbol_set
+        events = session.query(AuditEvent).filter(AuditEvent.action.in_([
+            "symbol_set.project_availability_replaced",
+            "symbol_set.project_default_changed",
+            "organization.symbol_set_default_changed",
+        ]), AuditEvent.entity_id.in_([symbol_set, project, owner])).order_by(AuditEvent.action).all()
+        assert [(event.action, event.payload_json) for event in events] == [
+            ("organization.symbol_set_default_changed", {
+                "source": "stage4", "organizationId": str(owner),
+                "oldDefaultSymbolSetId": None, "newDefaultSymbolSetId": str(symbol_set),
+            }),
+            ("symbol_set.project_availability_replaced", {
+                "source": "stage4", "organizationId": str(owner), "symbolSetId": str(symbol_set),
+                "projectIds": [str(project)], "affectedProjectIds": [str(project)],
+                "beforeProjectCount": 1, "afterProjectCount": 1,
+            }),
+            ("symbol_set.project_default_changed", {
+                "source": "stage4", "organizationId": str(owner), "projectId": str(project),
+                "symbolSetId": str(symbol_set), "oldDefaultSymbolSetId": None,
+                "newDefaultSymbolSetId": str(symbol_set),
+                "beforeAvailableSymbolSetCount": 1, "afterAvailableSymbolSetCount": 1,
+            }),
+        ]
+
+
+def test_wp4_symbol_set_lifecycle_and_availability_serialize_without_lock_upgrade_deadlock(wp1_database, monkeypatch):
+    owner_code = f"L{uuid.uuid4().hex[:7].upper()}"
+    raw_token = uuid.uuid4().hex
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    with wp1_database.begin() as connection:
+        user = _user(connection, f"lifecycle-availability-{uuid.uuid4()}@example.test")
+        owner = _organization(connection, owner_code, user)
+        _admin(connection, owner, user)
+        project = _project(connection, owner, user, "LIFECYCLELOCK")
+        symbol_set = _symbol_set(connection, owner, user, "LIFECYCLELOCKSET")
+        _availability(connection, project, symbol_set, user)
+        connection.execute(text(
+            "INSERT INTO user_sessions "
+            "(id,auth_user_id,token_hash,created_at,expires_at,last_seen_at,purpose,session_mode,active_organization_id) "
+            "VALUES (:id,:user,:token,:now,:expires,:now,'application','organization',:organization)"
+        ), {"id": uuid.uuid4(), "user": user, "token": hash_session_token(raw_token), "now": now,
+            "expires": now + timedelta(hours=1), "organization": owner})
+
+    SessionLocal = sessionmaker(bind=wp1_database)
+    request = Request({"type": "http", "headers": [(b"cookie", f"symgov_session={raw_token}".encode())]})
+    settings = SimpleNamespace(
+        organizations_enabled=True,
+        symbol_sets_enabled=True,
+        organization_pilot_codes=(owner_code.lower(),),
+    )
+    availability_contender = threading.Barrier(2)
+    release_availability = threading.Event()
+    writer_has_project_set_anchors = threading.Event()
+    release_writer = threading.Event()
+    backend_pids = {}
+    outcomes = []
+    original_lock_anchors = symbol_set_service._lock_project_set_anchors
+
+    def controlled_lock_anchors(session, set_id, organization_id, requested_ids=()):
+        if threading.current_thread().name == "lifecycle-availability":
+            availability_contender.wait(timeout=5)
+            assert release_availability.wait(timeout=5)
+        result = original_lock_anchors(session, set_id, organization_id, requested_ids)
+        if threading.current_thread().name == "lifecycle-writer":
+            writer_has_project_set_anchors.set()
+            assert release_writer.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(symbol_set_service, "_lock_project_set_anchors", controlled_lock_anchors)
+
+    def run(mode: str) -> None:
+        with SessionLocal() as session:
+            try:
+                backend_pids[mode] = session.execute(text("SELECT pg_backend_pid()")).scalar_one()
+                session.execute(text("SET LOCAL statement_timeout='5000ms'"))
+                if mode == "availability":
+                    replace_projects(session, request, settings, symbol_set, SimpleNamespace(projects=[]))
+                else:
+                    patch_set(
+                        session, request, settings, symbol_set,
+                        SimpleNamespace(
+                            status="superseded", model_fields_set={"status"}, name=None,
+                            description=None, disciplines=None, useCases=None,
+                        ),
+                    )
+                session.commit()
+                outcomes.append({"mode": mode, "type": "committed", "sqlstate": None})
+            except Exception as error:  # pragma: no cover - failure details are asserted below
+                session.rollback()
+                outcomes.append({
+                    "mode": mode,
+                    "type": type(error).__name__,
+                    "sqlstate": getattr(getattr(error, "orig", None), "sqlstate", None),
+                })
+
+    availability_thread = threading.Thread(target=run, args=("availability",), name="lifecycle-availability")
+    writer_thread = threading.Thread(target=run, args=("writer",), name="lifecycle-writer")
+    availability_thread.start()
+    availability_contender.wait(timeout=5)
+    writer_thread.start()
+    while "writer" not in backend_pids:
+        assert writer_thread.is_alive()
+        time.sleep(0.01)
+    writer_state, writer_blockers = _wait_for_event_or_postgresql_blocker(
+        wp1_database, writer_has_project_set_anchors, backend_pids["writer"]
+    )
+    if writer_state == "event":
+        release_availability.set()
+        while "availability" not in backend_pids:
+            assert availability_thread.is_alive()
+            time.sleep(0.01)
+        assert _wait_for_postgresql_blocker(wp1_database, backend_pids["availability"])
+        release_writer.set()
+    else:
+        assert writer_blockers
+        release_availability.set()
+        availability_thread.join(timeout=5)
+        release_writer.set()
+    availability_thread.join(timeout=8)
+    writer_thread.join(timeout=8)
+    assert not availability_thread.is_alive() and not writer_thread.is_alive()
+    assert sorted((outcome["mode"], outcome["type"]) for outcome in outcomes) == [
+        ("availability", "committed"), ("writer", "committed")
+    ], outcomes
+
+    with SessionLocal() as session:
+        assert session.execute(text("SELECT status FROM symbol_sets WHERE id=:id"), {"id": symbol_set}).scalar_one() == "superseded"
+        assert session.query(ProjectSymbolSet).filter_by(project_id=project, symbol_set_id=symbol_set).count() == 0
+        events = session.query(AuditEvent).filter(
+            AuditEvent.action.in_(["symbol_set.project_availability_replaced", "symbol_set.superseded"]),
+            AuditEvent.entity_id == symbol_set,
+        ).order_by(AuditEvent.action).all()
+        assert [(event.action, event.payload_json) for event in events] == [
+            ("symbol_set.project_availability_replaced", {
+                "source": "stage4", "organizationId": str(owner), "symbolSetId": str(symbol_set),
+                "projectIds": [], "affectedProjectIds": [str(project)],
+                "beforeProjectCount": 1, "afterProjectCount": 0,
+            }),
+            ("symbol_set.superseded", {
+                "source": "stage4", "organizationId": str(owner), "symbolSetId": str(symbol_set),
+                "changedFields": ["status"], "oldStatus": "active", "newStatus": "superseded",
+                "affectedProjectIds": [], "beforeAvailableProjectCount": 0,
+                "afterAvailableProjectCount": 0,
+            }),
+        ]
+
+
+def test_wp3_service_cleanup_and_availability_paths_share_project_before_set_lock_order(wp1_database, monkeypatch):
     with wp1_database.begin() as connection:
         user = _user(connection, f"lock-order-{uuid.uuid4()}@example.test")
         owner_code = f"O{uuid.uuid4().hex[:7].upper()}"
@@ -907,15 +1191,31 @@ def test_wp3_service_cleanup_and_availability_paths_share_project_before_set_loc
         connection.execute(text("INSERT INTO user_sessions (id,auth_user_id,token_hash,created_at,expires_at,last_seen_at,purpose,session_mode,active_organization_id) VALUES (:id,:user,:token,:now,:expires,:now,'application','organization',:organization)"), {"id": uuid.uuid4(), "user": user, "token": hash_session_token(raw_token), "now": now, "expires": now + timedelta(hours=1), "organization": owner})
 
     SessionLocal = sessionmaker(bind=wp1_database)
-    barrier = threading.Barrier(2)
+    availability_before_anchor_lock = threading.Event()
+    release_availability = threading.Event()
     outcomes = []
     request = Request({"type": "http", "headers": [(b"cookie", f"symgov_session={raw_token}".encode())]})
     settings = SimpleNamespace(organizations_enabled=True, symbol_sets_enabled=True, organization_pilot_codes=(owner_code.lower(),))
 
+    original_lock_anchors = symbol_set_service._lock_project_set_anchors
+
+    def controlled_lock_anchors(session, set_id, organization_id, requested_ids=()):
+        if threading.current_thread().name == "availability":
+            availability_before_anchor_lock.set()
+            assert release_availability.wait(timeout=5)
+        return original_lock_anchors(session, set_id, organization_id, requested_ids)
+
+    monkeypatch.setattr(symbol_set_service, "_lock_project_set_anchors", controlled_lock_anchors)
+    backend_pids = {}
+    cleanup_pid_ready = threading.Event()
+
     def run_service_path(mode: str) -> None:
         session = SessionLocal()
         try:
-            barrier.wait(timeout=2)
+            backend_pids[mode] = session.execute(text("SELECT pg_backend_pid()")).scalar_one()
+            if mode == "cleanup":
+                cleanup_pid_ready.set()
+            session.execute(text("SET LOCAL statement_timeout='5000ms'"))
             if mode == "cleanup":
                 clear_organization_default(session, request, settings)
                 patch_project(
@@ -938,20 +1238,32 @@ def test_wp3_service_cleanup_and_availability_paths_share_project_before_set_loc
                     SimpleNamespace(projects=[SimpleNamespace(projectId=project, isDefault=True)]),
                 )
             session.commit()
-            outcomes.append("committed")
+            outcomes.append({"mode": mode, "type": "committed", "sqlstate": None, "message": None})
         except Exception as error:  # pragma: no cover - failure details are asserted below
             session.rollback()
-            outcomes.append(type(error).__name__)
+            outcomes.append({
+                "mode": mode,
+                "type": type(error).__name__,
+                "sqlstate": getattr(getattr(error, "orig", None), "sqlstate", None),
+                "message": str(error),
+            })
         finally:
             session.close()
 
-    threads = [threading.Thread(target=run_service_path, args=(mode,)) for mode in ("cleanup", "availability")]
-    for thread in threads:
-        thread.start()
+    availability_thread = threading.Thread(target=run_service_path, args=("availability",), name="availability")
+    cleanup_thread = threading.Thread(target=run_service_path, args=("cleanup",), name="cleanup")
+    threads = [cleanup_thread, availability_thread]
+    availability_thread.start()
+    assert availability_before_anchor_lock.wait(timeout=2)
+    cleanup_thread.start()
+    assert cleanup_pid_ready.wait(timeout=2)
+    _wait_for_postgresql_blocker(wp1_database, backend_pids["cleanup"])
+    release_availability.set()
     for thread in threads:
         thread.join(timeout=8)
-    assert sorted(outcomes) in (["HTTPException", "committed"], ["committed", "committed"])
-    assert all(not thread.is_alive() for thread in threads)
+    outcome_types = sorted(outcome["type"] for outcome in outcomes)
+    assert outcome_types in (["HTTPException", "committed"], ["committed", "committed"]), outcomes
+    assert all(not thread.is_alive() for thread in threads), outcomes
 
     with SessionLocal.begin() as session:
         _, organization = _lock_organization_default_anchors(session, owner)
@@ -959,6 +1271,47 @@ def test_wp3_service_cleanup_and_availability_paths_share_project_before_set_loc
         link = session.query(ProjectSymbolSet).filter_by(id=availability).one_or_none()
         assert link is None or (link.status == "inactive" and link.is_default is False)
         assert session.query(UserProjectSetSelection).filter_by(project_id=project, active_symbol_set_id=symbol_set).count() == 0
+        events = session.query(AuditEvent).filter(
+            AuditEvent.action.in_([
+                "organization.symbol_set_default_changed",
+                "symbol_set.project_availability_replaced",
+                "symbol_set.project_default_changed",
+                "project.closed",
+            ]),
+            AuditEvent.entity_id.in_([owner, symbol_set, project]),
+        ).order_by(AuditEvent.action).all()
+        expected_events = [
+            ("organization.symbol_set_default_changed", owner, {
+                "source": "stage4", "organizationId": str(owner),
+                "oldDefaultSymbolSetId": str(symbol_set), "newDefaultSymbolSetId": None,
+            }),
+            ("project.closed", project, {
+                "source": "stage4", "organizationId": str(owner), "projectId": str(project),
+                "changedFields": ["status"], "oldStatus": "active", "newStatus": "closed",
+                "affectedSymbolSetIds": [str(symbol_set)],
+                "beforeAvailableSymbolSetCount": 1, "afterAvailableSymbolSetCount": 0,
+            }),
+        ]
+        availability_outcome = next(outcome for outcome in outcomes if outcome["mode"] == "availability")
+        if availability_outcome["type"] == "committed":
+            expected_events.extend([
+                ("symbol_set.project_availability_replaced", symbol_set, {
+                    "source": "stage4", "organizationId": str(owner), "symbolSetId": str(symbol_set),
+                    "projectIds": [str(project)], "affectedProjectIds": [str(project)],
+                    "beforeProjectCount": 1, "afterProjectCount": 1,
+                }),
+                ("symbol_set.project_default_changed", project, {
+                    "source": "stage4", "organizationId": str(owner), "projectId": str(project),
+                    "symbolSetId": str(symbol_set), "oldDefaultSymbolSetId": None,
+                    "newDefaultSymbolSetId": str(symbol_set),
+                    "beforeAvailableSymbolSetCount": 1, "afterAvailableSymbolSetCount": 1,
+                }),
+            ])
+        else:
+            assert availability_outcome["type"] == "HTTPException"
+        assert [(event.action, event.entity_id, event.payload_json) for event in events] == sorted(
+            expected_events, key=lambda event: event[0]
+        )
 
 
 def test_wp1_session_context_rejects_wrong_org_revoked_personal_and_closed_project(wp1_database):
@@ -1056,6 +1409,340 @@ def test_wp1_role_executes_all_contract_deletes(wp1_database):
             params = {"id": identifier, "user": user, "project": project, "session": session}
             connection.execute(text(statement), params)
         connection.execute(text("SELECT lock_governed_symbols_deterministically(ARRAY[:id]::uuid[])"), {"id": governed})
+
+
+def test_wp4_same_session_project_selection_and_active_set_selection_share_project_before_context_order(wp1_database, monkeypatch):
+    owner_code = f"S{uuid.uuid4().hex[:7].upper()}"
+    raw_token = uuid.uuid4().hex
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    with wp1_database.begin() as connection:
+        user = _user(connection, f"project-active-set-{uuid.uuid4()}@example.test")
+        owner = _organization(connection, owner_code, user)
+        _admin(connection, owner, user)
+        project = _project(connection, owner, user, "PROJECTACTIVE")
+        symbol_set = _symbol_set(connection, owner, user, "PROJECTACTIVESET")
+        _availability(connection, project, symbol_set, user)
+        session_id = uuid.uuid4()
+        connection.execute(text(
+            "INSERT INTO user_sessions "
+            "(id,auth_user_id,token_hash,created_at,expires_at,last_seen_at,purpose,session_mode,active_organization_id) "
+            "VALUES (:id,:user,:token,:now,:expires,:now,'application','organization',:organization)"
+        ), {"id": session_id, "user": user, "token": hash_session_token(raw_token), "now": now,
+            "expires": now + timedelta(hours=1), "organization": owner})
+        connection.execute(text(
+            "INSERT INTO user_session_project_contexts (user_session_id,project_id,selected_at,updated_at) "
+            "VALUES (:session,:project,:now,:now)"
+        ), {"session": session_id, "project": project, "now": now})
+
+    SessionLocal = sessionmaker(bind=wp1_database)
+    request = Request({"type": "http", "headers": [(b"cookie", f"symgov_session={raw_token}".encode())]})
+    settings = SimpleNamespace(
+        organizations_enabled=True,
+        symbol_sets_enabled=True,
+        organization_pilot_codes=(owner_code.lower(),),
+    )
+    active_set_contender = threading.Barrier(2)
+    release_active_set = threading.Event()
+    selector_holds_context = threading.Event()
+    release_selector = threading.Event()
+    backend_pids = {}
+    outcomes = []
+    original_active_project = symbol_context_service._active_project
+    original_context_row = symbol_context_service._context_row
+
+    def controlled_active_project(session, principal, project_id, *, lock=False):
+        if threading.current_thread().name == "active-set-selector" and lock:
+            active_set_contender.wait(timeout=5)
+            assert release_active_set.wait(timeout=5)
+        return original_active_project(session, principal, project_id, lock=lock)
+
+    def controlled_context_row(session, principal, *, lock=False):
+        result = original_context_row(session, principal, lock=lock)
+        if threading.current_thread().name == "project-selector" and lock:
+            selector_holds_context.set()
+            assert release_selector.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(symbol_context_service, "_active_project", controlled_active_project)
+    monkeypatch.setattr(symbol_context_service, "_context_row", controlled_context_row)
+
+    def run(mode: str) -> None:
+        with SessionLocal() as session:
+            try:
+                backend_pids[mode] = session.execute(text("SELECT pg_backend_pid()")).scalar_one()
+                session.execute(text("SET LOCAL statement_timeout='5000ms'"))
+                if mode == "active_set":
+                    select_active_set(session, request, settings, "PROJECTACTIVESET")
+                else:
+                    select_project(session, request, settings, project)
+                session.commit()
+                outcomes.append({"mode": mode, "type": "committed", "sqlstate": None})
+            except Exception as error:  # pragma: no cover - failure details are asserted below
+                session.rollback()
+                outcomes.append({
+                    "mode": mode, "type": type(error).__name__,
+                    "sqlstate": getattr(getattr(error, "orig", None), "sqlstate", None),
+                })
+
+    active_thread = threading.Thread(target=run, args=("active_set",), name="active-set-selector")
+    selector_thread = threading.Thread(target=run, args=("project",), name="project-selector")
+    active_thread.start()
+    active_set_contender.wait(timeout=5)
+    selector_thread.start()
+    while "project" not in backend_pids:
+        assert selector_thread.is_alive()
+        time.sleep(0.01)
+    selector_state, selector_blockers = _wait_for_event_or_postgresql_blocker(
+        wp1_database, selector_holds_context, backend_pids["project"]
+    )
+    if selector_state == "blocked":
+        assert selector_blockers
+        release_active_set.set()
+        release_selector.set()
+    else:
+        release_active_set.set()
+        while "active_set" not in backend_pids:
+            assert active_thread.is_alive()
+            time.sleep(0.01)
+        assert _wait_for_postgresql_blocker(wp1_database, backend_pids["active_set"])
+        release_selector.set()
+    active_thread.join(timeout=8)
+    selector_thread.join(timeout=8)
+    assert not active_thread.is_alive() and not selector_thread.is_alive()
+    assert sorted((outcome["mode"], outcome["type"]) for outcome in outcomes) == [
+        ("active_set", "committed"), ("project", "committed")
+    ], outcomes
+
+    with SessionLocal() as session:
+        assert session.execute(text(
+            "SELECT project_id FROM user_session_project_contexts WHERE user_session_id=:session"
+        ), {"session": session_id}).scalar_one() == project
+        assert session.query(UserProjectSetSelection).filter_by(
+            user_id=user, project_id=project, active_symbol_set_id=symbol_set
+        ).count() == 1
+        events = session.query(AuditEvent).filter(AuditEvent.action.in_([
+            "project.selected", "symbol_set.selected"
+        ]), AuditEvent.actor_id == user).all()
+        assert [(event.action, event.entity_id, event.payload_json) for event in events] == [
+            ("symbol_set.selected", symbol_set, {
+                "source": "stage4", "organizationId": str(owner), "projectId": str(project),
+                "symbolSetId": str(symbol_set), "reason": "explicit",
+            })
+        ]
+
+
+def test_wp4_project_closure_and_active_set_selection_share_project_before_context_order(wp1_database, monkeypatch):
+    owner_code = f"C{uuid.uuid4().hex[:7].upper()}"
+    raw_token = uuid.uuid4().hex
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    with wp1_database.begin() as connection:
+        user = _user(connection, f"project-close-active-set-{uuid.uuid4()}@example.test")
+        owner = _organization(connection, owner_code, user)
+        _admin(connection, owner, user)
+        project = _project(connection, owner, user, "CLOSEACTIVE")
+        symbol_set = _symbol_set(connection, owner, user, "CLOSEACTIVESET")
+        _availability(connection, project, symbol_set, user)
+        session_id = uuid.uuid4()
+        connection.execute(text(
+            "INSERT INTO user_sessions "
+            "(id,auth_user_id,token_hash,created_at,expires_at,last_seen_at,purpose,session_mode,active_organization_id) "
+            "VALUES (:id,:user,:token,:now,:expires,:now,'application','organization',:organization)"
+        ), {"id": session_id, "user": user, "token": hash_session_token(raw_token), "now": now,
+            "expires": now + timedelta(hours=1), "organization": owner})
+        connection.execute(text(
+            "INSERT INTO user_session_project_contexts (user_session_id,project_id,selected_at,updated_at) "
+            "VALUES (:session,:project,:now,:now)"
+        ), {"session": session_id, "project": project, "now": now})
+
+    SessionLocal = sessionmaker(bind=wp1_database)
+    request = Request({"type": "http", "headers": [(b"cookie", f"symgov_session={raw_token}".encode())]})
+    settings = SimpleNamespace(
+        organizations_enabled=True,
+        symbol_sets_enabled=True,
+        organization_pilot_codes=(owner_code.lower(),),
+    )
+    active_set_contender = threading.Barrier(2)
+    release_active_set = threading.Event()
+    closer_has_dependents = threading.Event()
+    release_closer = threading.Event()
+    backend_pids = {}
+    outcomes = []
+    original_active_project = symbol_context_service._active_project
+    original_audit = project_service.audit
+
+    def controlled_active_project(session, principal, project_id, *, lock=False):
+        if threading.current_thread().name == "closing-active-set" and lock:
+            active_set_contender.wait(timeout=5)
+            assert release_active_set.wait(timeout=5)
+        return original_active_project(session, principal, project_id, lock=lock)
+
+    def controlled_audit(session, principal, entity_type, entity_id, action, details, **kwargs):
+        if threading.current_thread().name == "project-closer" and action == "project.closed":
+            closer_has_dependents.set()
+            assert release_closer.wait(timeout=5)
+        return original_audit(session, principal, entity_type, entity_id, action, details, **kwargs)
+
+    monkeypatch.setattr(symbol_context_service, "_active_project", controlled_active_project)
+    monkeypatch.setattr(project_service, "audit", controlled_audit)
+
+    def run(mode: str) -> None:
+        with SessionLocal() as session:
+            try:
+                backend_pids[mode] = session.execute(text("SELECT pg_backend_pid()")).scalar_one()
+                session.execute(text("SET LOCAL statement_timeout='5000ms'"))
+                if mode == "active_set":
+                    select_active_set(session, request, settings, "CLOSEACTIVESET")
+                else:
+                    patch_project(
+                        session, request, settings, project,
+                        SimpleNamespace(status="closed", model_fields_set={"status"}, only_status=lambda: True),
+                    )
+                session.commit()
+                outcomes.append({"mode": mode, "type": "committed", "status": None, "sqlstate": None})
+            except Exception as error:  # pragma: no cover - failure details are asserted below
+                session.rollback()
+                outcomes.append({
+                    "mode": mode, "type": type(error).__name__,
+                    "status": getattr(error, "status_code", None),
+                    "sqlstate": getattr(getattr(error, "orig", None), "sqlstate", None),
+                })
+
+    active_thread = threading.Thread(target=run, args=("active_set",), name="closing-active-set")
+    closer_thread = threading.Thread(target=run, args=("closer",), name="project-closer")
+    active_thread.start()
+    active_set_contender.wait(timeout=5)
+    closer_thread.start()
+    while "closer" not in backend_pids:
+        assert closer_thread.is_alive()
+        time.sleep(0.01)
+    closer_state, closer_blockers = _wait_for_event_or_postgresql_blocker(
+        wp1_database, closer_has_dependents, backend_pids["closer"]
+    )
+    if closer_state == "blocked":
+        assert closer_blockers
+        release_active_set.set()
+        release_closer.set()
+    else:
+        release_active_set.set()
+        while "active_set" not in backend_pids:
+            assert active_thread.is_alive()
+            time.sleep(0.01)
+        assert _wait_for_postgresql_blocker(wp1_database, backend_pids["active_set"])
+        release_closer.set()
+    active_thread.join(timeout=8)
+    closer_thread.join(timeout=8)
+    assert not active_thread.is_alive() and not closer_thread.is_alive()
+    assert sorted((outcome["mode"], outcome["type"], outcome["status"]) for outcome in outcomes) == [
+        ("active_set", "HTTPException", 409), ("closer", "committed", None)
+    ], outcomes
+
+    with SessionLocal() as session:
+        assert session.execute(text("SELECT status FROM projects WHERE id=:id"), {"id": project}).scalar_one() == "closed"
+        assert session.execute(text(
+            "SELECT count(*) FROM user_session_project_contexts WHERE user_session_id=:session"
+        ), {"session": session_id}).scalar_one() == 0
+        assert session.query(UserProjectSetSelection).filter_by(user_id=user, project_id=project).count() == 0
+        events = session.query(AuditEvent).filter(AuditEvent.action.in_([
+            "project.closed", "symbol_set.selected"
+        ]), AuditEvent.actor_id == user).all()
+        assert [(event.action, event.entity_id, event.payload_json) for event in events] == [
+            ("project.closed", project, {
+                "source": "stage4", "organizationId": str(owner), "projectId": str(project),
+                "changedFields": ["status"], "oldStatus": "active", "newStatus": "closed",
+                "affectedSymbolSetIds": [str(symbol_set)],
+                "beforeAvailableSymbolSetCount": 1, "afterAvailableSymbolSetCount": 0,
+            })
+        ]
+
+
+def test_wp4_concurrent_preference_updates_are_last_project_lock_winner(wp1_database, monkeypatch):
+    owner_code = f"W{uuid.uuid4().hex[:7].upper()}"
+    raw_token = uuid.uuid4().hex
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    with wp1_database.begin() as connection:
+        user = _user(connection, f"wp4-race-{uuid.uuid4()}@example.test")
+        owner = _organization(connection, owner_code, user)
+        _admin(connection, owner, user)
+        project = _project(connection, owner, user, "WP4RACE")
+        first_set = _symbol_set(connection, owner, user, "WP4FIRST")
+        second_set = _symbol_set(connection, owner, user, "WP4SECOND")
+        _availability(connection, project, first_set, user)
+        _availability(connection, project, second_set, user)
+        session_id = uuid.uuid4()
+        connection.execute(text(
+            "INSERT INTO user_sessions "
+            "(id,auth_user_id,token_hash,created_at,expires_at,last_seen_at,purpose,session_mode,active_organization_id) "
+            "VALUES (:id,:user,:token,:now,:expires,:now,'application','organization',:organization)"
+        ), {"id": session_id, "user": user, "token": hash_session_token(raw_token), "now": now,
+            "expires": now + timedelta(hours=1), "organization": owner})
+        connection.execute(text(
+            "INSERT INTO user_session_project_contexts (user_session_id,project_id,selected_at,updated_at) "
+            "VALUES (:session,:project,:now,:now)"
+        ), {"session": session_id, "project": project, "now": now})
+
+    SessionLocal = sessionmaker(bind=wp1_database)
+    request = Request({"type": "http", "headers": [(b"cookie", f"symgov_session={raw_token}".encode())]})
+    settings = SimpleNamespace(
+        organizations_enabled=True,
+        symbol_sets_enabled=True,
+        organization_pilot_codes=(owner_code.lower(),),
+    )
+    first = SessionLocal()
+    outcome = []
+    contender_at_project_lock = threading.Barrier(2)
+    contender_done = threading.Event()
+    contender_backend_pid = []
+    original_active_project = symbol_context_service._active_project
+
+    def synchronized_active_project(session, principal, project_id, *, lock=False):
+        if threading.current_thread().name == "preference-contender" and lock:
+            contender_at_project_lock.wait(timeout=5)
+        return original_active_project(session, principal, project_id, lock=lock)
+
+    monkeypatch.setattr(symbol_context_service, "_active_project", synchronized_active_project)
+
+    def select_second():
+        try:
+            with SessionLocal() as second:
+                contender_backend_pid.append(second.execute(text("SELECT pg_backend_pid()")).scalar_one())
+                select_active_set(second, request, settings, "WP4SECOND")
+                second.commit()
+                outcome.append("committed")
+        finally:
+            contender_done.set()
+
+    try:
+        select_active_set(first, request, settings, "WP4FIRST")
+        thread = threading.Thread(target=select_second, name="preference-contender")
+        thread.start()
+        contender_at_project_lock.wait(timeout=5)
+        blockers = _wait_for_postgresql_blocker(wp1_database, contender_backend_pid[0])
+        assert blockers
+        first.commit()
+        assert contender_done.wait(timeout=5)
+        thread.join(timeout=1)
+        assert outcome == ["committed"]
+    finally:
+        first.close()
+
+    with SessionLocal() as session:
+        selection = session.query(UserProjectSetSelection).filter_by(user_id=user, project_id=project).one()
+        assert selection.active_symbol_set_id == second_set
+        events = session.query(AuditEvent).filter(
+            AuditEvent.action == "symbol_set.selected",
+            AuditEvent.actor_id == user,
+            AuditEvent.entity_id.in_([first_set, second_set]),
+        ).all()
+        assert {event.entity_id: event.payload_json for event in events} == {
+            first_set: {
+                "source": "stage4", "organizationId": str(owner), "projectId": str(project),
+                "symbolSetId": str(first_set), "reason": "explicit",
+            },
+            second_set: {
+                "source": "stage4", "organizationId": str(owner), "projectId": str(project),
+                "symbolSetId": str(second_set), "reason": "explicit",
+            },
+        }
 
 
 @pytest.fixture

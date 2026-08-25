@@ -76,6 +76,9 @@ def get_set(session: Session, request: Request, settings, set_id: uuid.UUID, *, 
 
 def patch_set(session: Session, request: Request, settings, set_id: uuid.UUID, data):
     principal, row = get_set(session, request, settings, set_id)
+    organization = None
+    if data.status in {"superseded", "archived"}:
+        organization = _lock_organization_anchor(session, principal.organization.id)
     _lock_project_set_anchors(session, set_id, principal.organization.id)
     row = session.query(SymbolSet).filter(SymbolSet.id == set_id, SymbolSet.owner_organization_id == principal.organization.id).with_for_update().one_or_none()
     if row is None or (row.status != "active" and not principal.is_admin):
@@ -134,7 +137,7 @@ def patch_set(session: Session, request: Request, settings, set_id: uuid.UUID, d
                 for project_id in affected_project_ids
             }
             session.query(UserProjectSetSelection).filter(UserProjectSetSelection.active_symbol_set_id == row.id).with_for_update().all()
-            organization = session.query(Organization).filter(Organization.id == principal.organization.id).with_for_update().one()
+            assert organization is not None
             organization_default_before = organization.default_symbol_set_id
             session.query(ProjectSymbolSet).filter(ProjectSymbolSet.symbol_set_id == row.id).update({"status": "inactive", "is_default": False})
             session.query(UserProjectSetSelection).filter(UserProjectSetSelection.active_symbol_set_id == row.id).delete(synchronize_session=False)
@@ -217,16 +220,24 @@ def _lock_project_set_anchors(session: Session, set_id, organization_id, request
 
 
 def _lock_organization_default_anchors(session: Session, organization_id):
-    default_id = session.query(Organization.default_symbol_set_id).filter(
-        Organization.id == organization_id,
-    ).scalar()
+    # Authorization holds a shared Organization lock. Upgrade it before taking
+    # Project/Set locks so a concurrent availability writer cannot wait on our
+    # Project lock while we wait on its shared Organization lock.
+    organization = _lock_organization_anchor(session, organization_id)
+    default_id = organization.default_symbol_set_id
     if default_id is None:
-        return None, session.get(Organization, organization_id, with_for_update=True)
+        return None, organization
     _, symbol_set = _lock_project_set_anchors(session, default_id, organization_id)
-    organization = session.get(Organization, organization_id, with_for_update=True)
     if organization.default_symbol_set_id != default_id:
         raise HTTPException(409, "Organization default changed during cleanup; retry.")
     return symbol_set, organization
+
+
+def _lock_organization_anchor(session: Session, organization_id):
+    """Upgrade authorization's shared Organization lock before lower anchors."""
+    return session.query(Organization).filter(
+        Organization.id == organization_id,
+    ).with_for_update().one()
 
 
 def _admin_set(session, request, settings, set_id):
@@ -450,6 +461,7 @@ def set_organization_default(session, request, settings, set_id):
     principal, row = _admin_set(session, request, settings, set_id)
     if row.status != "active":
         raise HTTPException(409, "Only active Symbol Sets may be the organization default.")
+    organization = _lock_organization_anchor(session, principal.organization.id)
     _, row = _lock_project_set_anchors(session, row.id, principal.organization.id)
     if row is None:
         raise HTTPException(404, "Not found.")
@@ -461,7 +473,6 @@ def set_organization_default(session, request, settings, set_id):
         Project.status == "active",
     ).first() is None:
         raise HTTPException(409, "Organization default Symbol Set must be available to an active Project.")
-    organization = session.get(Organization, principal.organization.id, with_for_update=True)
     if organization.default_symbol_set_id == row.id:
         return {"defaultSymbolSetId": str(row.id)}
     previous_default = organization.default_symbol_set_id

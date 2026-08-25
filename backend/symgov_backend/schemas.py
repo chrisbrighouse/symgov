@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
@@ -284,6 +284,23 @@ class OrganizationDefaultSymbolSetRequest(BaseModel):
 
 class OrganizationDefaultSymbolSetResponse(BaseModel):
     defaultSymbolSetId: uuid.UUID
+
+
+class ProjectSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    projectId: uuid.UUID
+
+
+class ActiveSetSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    setCode: str
+
+
+class SymbolContextResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    selectedProject: ProjectSummary | None
+    activeSet: SymbolSetSummary | None
+    reason: Literal["explicit", "user_preference", "project_default", "organization_default", "none"]
 
 
 class ProfileUpgradeOptionResponse(BaseModel):
