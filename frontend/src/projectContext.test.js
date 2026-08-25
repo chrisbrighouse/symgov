@@ -5,6 +5,10 @@ import { act, create } from 'react-test-renderer';
 
 import { ProjectContextBar } from './ProjectContextBar.js';
 import {
+  clearActiveSymbolSetSelection,
+  clearProjectSelection,
+} from './api.js';
+import {
   canMountProjectContext,
   codePointCount,
   contextStatusMessage,
@@ -58,6 +62,36 @@ describe('Project context eligibility and normalization', () => {
     assert.equal(contextStatusMessage({ activeSet: { code: 'SET-01' }, reason: 'explicit' }, 'set'), 'Symbol Set SET-01 selected.');
     assert.equal(contextStatusMessage({ activeSet: { code: 'DEFAULT' }, reason: 'project_default' }, 'clear-set'), 'Symbol Set preference cleared. Project default DEFAULT is active.');
     assert.equal(contextStatusMessage({ activeSet: null, reason: 'none' }, 'clear-set'), 'Symbol Set preference cleared. No Symbol Set is active.');
+  });
+
+  it('sends bodyless DELETE requests when clearing Project and Symbol Set selections', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests = [];
+    globalThis.fetch = async (url, options = {}) => {
+      requests.push({ url, options });
+      return { ok: true, status: 204, text: async () => '' };
+    };
+
+    try {
+      await clearProjectSelection();
+      await clearActiveSymbolSetSelection();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    assert.equal(requests.length, 2);
+    assert.deepEqual(
+      requests.map(({ url, options }) => ({
+        path: new URL(url, 'https://symgov.test').pathname,
+        method: options.method,
+        credentials: options.credentials,
+        hasBody: Object.hasOwn(options, 'body'),
+      })),
+      [
+        { path: '/api/v1/org/me/symbol-context/project', method: 'DELETE', credentials: 'include', hasBody: false },
+        { path: '/api/v1/org/me/symbol-context/active-set', method: 'DELETE', credentials: 'include', hasBody: false },
+      ],
+    );
   });
 });
 

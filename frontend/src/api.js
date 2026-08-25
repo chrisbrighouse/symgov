@@ -289,8 +289,7 @@ export async function selectProjectContext(projectId) {
 
 export async function clearProjectSelection() {
   const result = await requestJson('/org/me/symbol-context/project', {
-    method: 'DELETE',
-    body: JSON.stringify({})
+    method: 'DELETE'
   });
   if (!result.ok) {
     throw new Error(result.message || 'Project clear failed.');
@@ -308,8 +307,7 @@ export async function selectActiveSymbolSet(setCode) {
 
 export async function clearActiveSymbolSetSelection() {
   const result = await requestJson('/org/me/symbol-context/active-set', {
-    method: 'DELETE',
-    body: JSON.stringify({})
+    method: 'DELETE'
   });
   return requireOk(result, 'Symbol Set clear failed.');
 }

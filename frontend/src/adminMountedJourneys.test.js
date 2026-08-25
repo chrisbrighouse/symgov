@@ -158,6 +158,69 @@ describe('mounted admin App journeys', () => {
     await act(async () => renderer.unmount());
   });
 
+  it('mounts context-only selectors for an eligible ordinary member through the authenticated App shell', async () => {
+    const requests = [];
+    const currentUser = user({ organizationRole: 'user', symbolSetsEnabled: true });
+    const projects = [
+      { id: 'p-zero', code: 'P-ZERO', name: 'Empty project', shortDescription: 'No sets yet', status: 'active' },
+      { id: 'p-active', code: 'P-ACT', name: 'Active project', shortDescription: 'Has one active set', status: 'active' },
+    ];
+    let selectedProject = null;
+    globalThis.fetch = async (url, options = {}) => {
+      const method = options.method || 'GET';
+      requests.push({ url, method, body: options.body });
+      if (url.endsWith('/auth/me')) return response(200, { user: currentUser });
+      if (url.includes('/org/me/projects?')) {
+        return response(200, { items: projects, page: 1, pageSize: 25, total: 2 });
+      }
+      if (url.endsWith('/org/me/symbol-context/project') && method === 'PUT') {
+        const projectId = JSON.parse(options.body).projectId;
+        selectedProject = projects.find((project) => project.id === projectId);
+        return response(200, { selectedProject, activeSet: null, reason: 'none' });
+      }
+      if (url.endsWith('/org/me/symbol-context') && method === 'GET') {
+        return response(200, { selectedProject, activeSet: null, reason: 'none' });
+      }
+      if (url.includes('/org/me/symbol-sets?')) {
+        const items = url.includes('projectId=p-active')
+          ? [{ id: 's-active', code: 'SET-A', name: 'Active set', status: 'active' }]
+          : [];
+        return response(200, { items, page: 1, pageSize: 200, total: items.length });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    };
+
+    const renderer = await mount('/support');
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Active Project' }));
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Active Symbol Set' }));
+
+    await act(async () => {
+      await renderer.root.findByProps({ 'aria-label': 'Active Project' }).props.onChange({ target: { value: 'p-zero' } });
+    });
+    assert.match(JSON.stringify(renderer.toJSON()), /No active Symbol Sets are available for this Project/);
+
+    await act(async () => {
+      await renderer.root.findByProps({ 'aria-label': 'Active Project' }).props.onChange({ target: { value: 'p-active' } });
+    });
+    const setOptions = renderer.root.findByProps({ 'aria-label': 'Active Symbol Set' }).findAllByType('option');
+    assert.ok(setOptions.some((option) => option.children.join('').includes('SET-A')));
+    assert.ok(requests.some(({ url }) => url.includes('/org/me/symbol-sets?') && url.includes('status=active') && url.includes('projectId=p-active')));
+
+    for (const label of [
+      'Create Project',
+      'Edit Project P-ACT',
+      'Close Project P-ACT',
+      'Create Symbol Set',
+      'Edit Symbol Set SET-A',
+      'Archive Symbol Set SET-A',
+      'Set SET-A as Organization default',
+      'Copy Symbol Set SET-A',
+    ]) {
+      assert.equal(renderer.root.findAllByProps({ 'aria-label': label }).length, 0, label);
+    }
+    await act(async () => renderer.unmount());
+  });
+
   it('mounts Platform Admin through App navigation and preserves backend denial', async () => {
     const requests = [];
     globalThis.fetch = async (url, options = {}) => {

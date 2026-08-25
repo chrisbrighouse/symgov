@@ -60,6 +60,8 @@ import ProfilePage from './ProfilePage.jsx';
 import OrganizationSelectionPage from './OrganizationSelectionPage.js';
 import { adminRouteElements } from './adminRoutes.js';
 import { canAccessOrganizationAdmin, canAccessPlatformAdmin } from './adminJourneys.js';
+import { ProjectContextBar } from './ProjectContextBar.js';
+import { canMountProjectContext } from './projectContext.js';
 import { Header } from './Header.js';
 import FavouriteButton from './FavouriteButton.js';
 import FavouriteFilter from './FavouriteFilter.js';
@@ -468,6 +470,7 @@ function AppContent() {
   const location = useLocation();
   const isStandardsRoute = location.pathname.startsWith('/standards');
   const showRail = Boolean(auth.user) && location.pathname !== '/login' && location.pathname !== '/change-pin';
+  const showMemberProjectContext = canMountProjectContext(auth) && auth.user.organization.baseRole !== 'admin';
 
   return (
     <div className={`app-shell ${isStandardsRoute ? 'mode-standards' : 'mode-workspace'} ${showRail ? 'has-side-rail' : ''}`}>
@@ -475,6 +478,7 @@ function AppContent() {
       <Header auth={auth} />
       {showRail ? <SideRail /> : null}
       <main className="page-frame">
+        {showMemberProjectContext ? <ProjectContextBar auth={auth} /> : null}
         <Routes>
           <Route path="/" element={<HomeRedirect />} />
           <Route path="/login" element={<LoginPage />} />
