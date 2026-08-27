@@ -33,6 +33,7 @@ def symbol_row(*, name: str, discipline: str, formats: list[str], keywords: list
     slug = name.lower().replace(" ", "-")
     return SimpleNamespace(
         symbol_id=str(uuid.uuid4()),
+        catalog_symbol_id="0003-12",
         slug=slug,
         canonical_name=name,
         category="symbol",
@@ -146,6 +147,7 @@ def test_search_catalog_symbols_caps_limit_and_returns_public_symbol_summaries()
     assert session.executed[-1][1]["limit"] == 100
     assert set(result.items[0]) == {
         "displayId",
+        "catalogSymbolId",
         "symbolId",
         "slug",
         "name",

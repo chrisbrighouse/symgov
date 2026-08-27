@@ -94,6 +94,7 @@ def symbol_row(**overrides):
     now = datetime(2026, 7, 10, 12, 0, tzinfo=timezone.utc)
     base = {
         "symbol_id": str(uuid.uuid4()),
+        "catalog_symbol_id": "0003-12",
         "slug": "smoke-detector",
         "canonical_name": "Smoke Detector",
         "category": "symbol",

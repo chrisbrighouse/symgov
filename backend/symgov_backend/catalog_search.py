@@ -64,6 +64,7 @@ def catalog_symbol_summary(row) -> dict:
 
     return {
         "displayId": display_id,
+        "catalogSymbolId": display_id,
         "symbolId": str(row.symbol_id),
         "slug": row.slug,
         "name": payload.get("name") or payload.get("canonical_name") or row.canonical_name,

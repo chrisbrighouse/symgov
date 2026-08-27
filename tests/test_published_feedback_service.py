@@ -38,6 +38,7 @@ CATALOG_KEY_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 def published_row():
     return SimpleNamespace(
         symbol_id=SYMBOL_ID,
+        catalog_symbol_id="0002-32",
         symbol_revision_id=REVISION_ID,
         page_id=PAGE_ID,
         slug="check-valve",

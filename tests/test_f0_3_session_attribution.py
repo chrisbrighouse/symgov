@@ -19,6 +19,7 @@ from symgov_backend.models import (
     AuditEvent,
     GovernedSymbol,
     HumanReviewDecision,
+    PublicationApprovalTarget,
     PublicationJob,
     ReviewCase,
     ReviewCaseAction,
@@ -779,9 +780,10 @@ def test_historical_actor_null_decision_remains_readable_from_snapshots():
 
 
 def approved_decision(*, code: str = "approve", actor_id=None) -> HumanReviewDecision:
+    review_case_id = uuid4()
     return HumanReviewDecision(
         id=uuid4(),
-        review_case_id=uuid4(),
+        review_case_id=review_case_id,
         decision_code=code,
         decision_summary="Ada Reviewer approved.",
         decision_note=None,
@@ -789,8 +791,8 @@ def approved_decision(*, code: str = "approve", actor_id=None) -> HumanReviewDec
         decider_name="Ada Reviewer",
         decider_role="reviewer",
         from_stage="review",
-        to_stage="approved",
-        decision_payload_json={},
+        to_stage="ready_for_publication_handoff",
+        decision_payload_json={"review_case_id": str(review_case_id)},
         created_at=datetime.now(timezone.utc),
     )
 
@@ -818,6 +820,7 @@ def test_execute_publication_handoff_queues_decision_actor_and_audits_human(monk
     )
     decision = approved_decision()
     decision.review_case_id = review_case.id
+    decision.decision_payload_json = {"review_case_id": str(review_case.id)}
     action = ReviewCaseAction(
         id=uuid4(),
         review_case_id=review_case.id,
@@ -826,13 +829,13 @@ def test_execute_publication_handoff_queues_decision_actor_and_audits_human(monk
         action_status="pending",
         target_agent_slug="rupert",
         target_stage="publication_staging",
-        action_payload_json={},
+        action_payload_json={"decision_code": "approve"},
         created_by_type="human",
         created_by_id=decision.decided_by,
         created_at=datetime.now(timezone.utc),
     )
     rupert = SimpleNamespace(id=uuid4(), slug="rupert")
-    revision = SimpleNamespace(id=uuid4(), payload_json={})
+    revision = SimpleNamespace(id=uuid4(), symbol_id=uuid4(), revision_label="A", payload_json={})
     queued = []
     runner_paths = []
 
@@ -850,7 +853,11 @@ def test_execute_publication_handoff_queues_decision_actor_and_audits_human(monk
             return self
 
         def first(self):
-            return action if self.model is ReviewCaseAction else None
+            if self.model is ReviewCaseAction:
+                return action
+            if self.model is HumanReviewDecision:
+                return decision
+            return None
 
         def one_or_none(self):
             return rupert if self.model is AgentDefinition else None
@@ -890,6 +897,11 @@ def test_execute_publication_handoff_queues_decision_actor_and_audits_human(monk
     )
     monkeypatch.setattr(publication_handoff, "detect_graphical_duplicates", lambda *_args, **_kwargs: [])
     monkeypatch.setattr(publication_handoff, "build_pack_metadata", lambda *_args, **_kwargs: ("pack", "Pack"))
+    monkeypatch.setattr(
+        publication_handoff,
+        "ensure_publication_approval_target",
+        lambda *_args, **_kwargs: SimpleNamespace(id=uuid4(), content_sha256="approval-sha256"),
+    )
 
     def write_queue(queue_item):
         queued.append(queue_item)
@@ -1009,15 +1021,19 @@ def test_runtime_rejects_queue_decision_and_case_identity_mismatch(failure_case,
         "human_decision",
         "human_approved",
         "approval_actor",
+        "approval_target_id",
+        "approval_content_sha256",
     ],
 )
-def test_existing_durable_publication_queue_must_match_runtime_queue_authority(mismatch):
+def test_existing_durable_publication_queue_must_match_runtime_queue_authority(mismatch, monkeypatch):
     decision = approved_decision()
     revision_id = uuid4()
     agent_definition_id = uuid4()
     approval_actor = publication_handoff.approval_actor_snapshot(decision)
     now = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     queue_item_id = uuid4()
+    approval_target_id = str(uuid4())
+    approval_content_sha256 = "approval-sha256"
     queue_item = {
         "id": str(queue_item_id),
         "agent_id": "rupert",
@@ -1032,6 +1048,8 @@ def test_existing_durable_publication_queue_must_match_runtime_queue_authority(m
             "human_decision": "approve",
             "human_approved": True,
             "approval_actor": approval_actor,
+            "approval_target_id": approval_target_id,
+            "approval_content_sha256": approval_content_sha256,
         },
         "created_at": now,
         "started_at": now,
@@ -1071,8 +1089,11 @@ def test_existing_durable_publication_queue_must_match_runtime_queue_authority(m
 
     revision = SimpleNamespace(
         id=revision_id,
+        symbol_id=uuid4(),
+        revision_label="A",
         payload_json={"review_decision_id": str(decision.id)},
     )
+    monkeypatch.setattr(runtime, "resolve_durable_publication_revisions", lambda *_args, **_kwargs: [revision])
     agent_definition = SimpleNamespace(id=agent_definition_id, slug="rupert")
 
     class Query:
@@ -1146,7 +1167,7 @@ def test_existing_durable_publication_queue_must_match_runtime_queue_authority(m
     assert bridge.service_user_calls == 0
 
 
-def test_runtime_publication_persistence_attributes_governance_to_human_and_execution_to_service():
+def test_runtime_publication_persistence_attributes_governance_to_human_and_execution_to_service(monkeypatch):
     decision = approved_decision()
     revision = SimpleNamespace(
         id=uuid4(),
@@ -1155,7 +1176,14 @@ def test_runtime_publication_persistence_attributes_governance_to_human_and_exec
         lifecycle_state="approved",
         payload_json={"review_decision_id": str(decision.id)},
     )
-    symbol = SimpleNamespace(id=revision.symbol_id, slug="pump", canonical_name="Pump", current_revision_id=None, updated_at=None)
+    symbol = SimpleNamespace(
+        id=revision.symbol_id,
+        catalog_symbol_id="S-000001",
+        slug="pump",
+        canonical_name="Pump",
+        current_revision_id=None,
+        updated_at=None,
+    )
     rupert = SimpleNamespace(id=uuid4(), slug="rupert")
     service_user = SimpleNamespace(id=uuid4())
 
@@ -1182,7 +1210,7 @@ def test_runtime_publication_persistence_attributes_governance_to_human_and_exec
         def __init__(self):
             self.rows = [decision]
 
-        def get(self, model, key):
+        def get(self, model, key, **_kwargs):
             if model is HumanReviewDecision and key == decision.id:
                 return decision
             if model is SymbolRevision and key == revision.id:
@@ -1274,6 +1302,7 @@ def test_runtime_publication_persistence_attributes_governance_to_human_and_exec
     report = {"id": str(uuid4())}
 
     bridge = Bridge()
+    monkeypatch.setattr(runtime, "resolve_durable_publication_revisions", lambda *_args, **_kwargs: [revision])
     bridge.persist_publication_execution(queue_item, run_record, artifact_record, report)
     bridge.persist_publication_execution(queue_item, run_record, artifact_record, report)
 
@@ -1443,8 +1472,8 @@ def test_publication_persistence_rejects_invalid_durable_approval_before_any_wri
         ("missing", "does not exactly match trusted publication handoff"),
         ("duplicate_artifact", "duplicate revision IDs"),
         ("duplicate_handoff", "duplicate revision IDs"),
-        ("wrong_revision_decision", "does not belong to durable review decision"),
-        ("missing_revision_decision", "does not belong to durable review decision"),
+        ("wrong_revision_decision", "content identity has changed"),
+        ("missing_revision_decision", "content identity has changed"),
     ],
 )
 def test_publication_persistence_rejects_unapproved_revision_scope_before_any_write(
@@ -1475,12 +1504,56 @@ def test_publication_persistence_rejects_unapproved_revision_scope_before_any_wr
 
     revision = SimpleNamespace(
         id=trusted_revision_id,
+        symbol_id=uuid4(),
+        revision_label="A",
         payload_json=(
             {"review_decision_id": str(revision_decision_id)}
             if revision_decision_id is not None
             else {}
         ),
     )
+    other_revision = SimpleNamespace(
+        id=other_revision_id,
+        symbol_id=uuid4(),
+        revision_label="B",
+        payload_json={"review_decision_id": str(decision.id)},
+    )
+    revision_by_id = {
+        trusted_revision_id: revision,
+        other_revision_id: other_revision,
+    }
+    approved_target_by_id = {
+        trusted_revision_id: SimpleNamespace(
+            id=trusted_revision_id,
+            symbol_id=revision.symbol_id,
+            revision_label=revision.revision_label,
+            payload_json={"review_decision_id": str(decision.id)},
+        ),
+        other_revision_id: SimpleNamespace(
+            id=other_revision_id,
+            symbol_id=other_revision.symbol_id,
+            revision_label=other_revision.revision_label,
+            payload_json={"review_decision_id": str(decision.id)},
+        ),
+    }
+    target_revisions = [approved_target_by_id[revision_id] for revision_id in trusted_ids if revision_id in approved_target_by_id]
+    revision_targets_json = runtime.build_publication_approval_revision_targets(None, target_revisions)
+    approval_content_sha256 = runtime._canonical_json_sha256(revision_targets_json)
+    approval_target = SimpleNamespace(
+        id=uuid4(),
+        review_decision_id=decision.id,
+        review_case_id=decision.review_case_id,
+        revision_targets_json=revision_targets_json,
+        content_sha256=approval_content_sha256,
+    )
+
+    class PublicationApprovalTargetQuery:
+        def filter_by(self, **kwargs):
+            assert kwargs == {"review_decision_id": decision.id}
+            return self
+
+        def one_or_none(self):
+            return approval_target
 
     class RecordingSession:
         def __init__(self):
@@ -1494,15 +1567,14 @@ def test_publication_persistence_rejects_unapproved_revision_scope_before_any_wr
             if model is SymbolRevision and key == trusted_revision_id:
                 return revision
             if model is SymbolRevision and key == other_revision_id:
-                return SimpleNamespace(
-                    id=other_revision_id,
-                    payload_json={"review_decision_id": str(decision.id)},
-                )
+                return other_revision
             raise AssertionError(f"unexpected durable lookup: {model} {key}")
 
         def query(self, model):
+            if model is PublicationApprovalTarget:
+                return PublicationApprovalTargetQuery()
             self.write_calls.append(("query", model))
-            raise AssertionError("publication query occurred before revision-scope validation")
+            raise AssertionError("unexpected publication query before revision-scope validation")
 
         def add(self, item):
             self.write_calls.append(("add", item))
@@ -1551,6 +1623,8 @@ def test_publication_persistence_rejects_unapproved_revision_scope_before_any_wr
             "human_decision": "approve",
             "human_approved": True,
             "approval_actor": publication_handoff.approval_actor_snapshot(decision),
+            "approval_target_id": str(approval_target.id),
+            "approval_content_sha256": approval_target.content_sha256,
             "symbol_revision_ids": [str(item) for item in trusted_ids],
         },
         "created_at": now,
@@ -1574,6 +1648,8 @@ def test_publication_persistence_rejects_unapproved_revision_scope_before_any_wr
         "payload_json": {
             "decision": "stage",
             "staged_symbol_revisions": [str(item) for item in staged_ids],
+            "approval_target_id": str(approval_target.id),
+            "approval_content_sha256": approval_target.content_sha256,
             "release_target": "standards-current",
             "publication_pack": {"pack_code": "blocked-pack", "effective_date": now[:10]},
         },

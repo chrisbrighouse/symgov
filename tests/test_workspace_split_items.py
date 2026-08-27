@@ -24,6 +24,7 @@ class RaceySplitItemSession:
         self.children = children
         self.added = []
         self.rollback_called = False
+        self.savepoint_rollback_called = False
         self.flush_calls = 0
         self.existing_by_id = {}
         for child in children:
@@ -49,7 +50,7 @@ class RaceySplitItemSession:
     def get(self, model, item_id):
         if model is IntakeRecord:
             return None
-        if model is ReviewSplitItem and self.rollback_called:
+        if model is ReviewSplitItem and self.savepoint_rollback_called:
             return self.existing_by_id.get(item_id)
         return None
 
@@ -66,6 +67,20 @@ class RaceySplitItemSession:
 
     def rollback(self):
         self.rollback_called = True
+
+    def begin_nested(self):
+        session = self
+
+        class Savepoint:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, _exc, _traceback):
+                if exc_type is not None:
+                    session.savepoint_rollback_called = True
+                return False
+
+        return Savepoint()
 
 
 def test_ensure_split_items_recovers_from_concurrent_duplicate_primary_key_insert():
@@ -99,6 +114,7 @@ def test_ensure_split_items_recovers_from_concurrent_duplicate_primary_key_inser
         source_file_name="fire-sheet.jpg",
     )
 
-    assert session.flush_calls == 1
-    assert session.rollback_called is True
+    assert session.flush_calls == len(children)
+    assert session.savepoint_rollback_called is True
+    assert session.rollback_called is False
     assert [item.child_key for item in items] == [child["attachment_object_key"] for child in children]

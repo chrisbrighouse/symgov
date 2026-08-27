@@ -102,6 +102,7 @@ def symbol_row(**overrides):
     }
     base = {
         "symbol_id": str(uuid.uuid4()),
+        "catalog_symbol_id": "0003-12",
         "slug": "smoke-detector",
         "canonical_name": "Smoke Detector",
         "category": "symbol",

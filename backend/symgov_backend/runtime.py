@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import socket
 import struct
@@ -24,7 +25,9 @@ if os.environ.get("SYMGOV_DISABLE_BACKEND_DEPS", "").strip().lower() not in {"1"
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from .catalog_symbol_ids import ensure_catalog_symbol_id
 from .db import create_session_factory, read_env_file
+from .publication_authority import lock_review_case_decision_authority
 from .property_options import remember_property_option
 from .service_users import enforce_noninteractive_service_account, new_service_pin_hash
 from .models import (
@@ -42,6 +45,7 @@ from .models import (
     PackEntry,
     ProvenanceAssessment,
     PublicationJob,
+    PublicationApprovalTarget,
     PublicationPack,
     PublishedPage,
     ReviewCase,
@@ -65,6 +69,24 @@ DEFAULT_STORAGE_ENV_FILE = Path("/data/.openclaw/workspace/symgov/.env.backend.s
 LEGACY_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "symgov/runtime-legacy-id")
 DEFAULT_AGENT_MODEL = "ollama/gemma4:e4b"
 DEFAULT_VLAD_GEMINI_MODEL = "gemini/gemini-2.5-flash"
+
+
+def allocate_catalog_identity_for_publication(
+    session,
+    symbol: GovernedSymbol,
+    *,
+    allocated_at: datetime,
+) -> str:
+    """Allocate and verify canonical identity inside the publication transaction."""
+    identifier = ensure_catalog_symbol_id(
+        session,
+        symbol.id,
+        allocated_at=allocated_at,
+        allocation_source="global_sequence",
+    )
+    if getattr(symbol, "catalog_symbol_id", None) != identifier:
+        raise RuntimeError("Catalog symbol ID allocation did not bind the governed symbol.")
+    return identifier
 
 
 def get_gemini_api_key() -> str:
@@ -540,6 +562,144 @@ def coerce_uuid(value: str | uuid.UUID | None) -> uuid.UUID | None:
         return uuid.uuid5(LEGACY_ID_NAMESPACE, str(value))
 
 
+def _canonical_json_sha256(value: Any) -> str:
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _revision_artifact_object_keys(payload: Any) -> list[str]:
+    values: set[str] = set()
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key.endswith("object_key") and isinstance(child, str) and child.strip():
+                    values.add(child.strip())
+                else:
+                    visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(payload)
+    return sorted(values)
+
+
+MAX_PUBLICATION_APPROVAL_OBJECT_BYTES = 64 * 1024 * 1024
+
+
+def _verified_attachment_content_sha256(attachment: Attachment) -> str:
+    object_key = str(attachment.object_key or "").strip()
+    durable_sha256 = str(attachment.sha256 or "").strip().lower()
+    try:
+        durable_size = int(attachment.size_bytes)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Approved revision artifact content identity is invalid.") from exc
+    if (
+        not object_key
+        or len(durable_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in durable_sha256)
+        or durable_size < 0
+        or durable_size > MAX_PUBLICATION_APPROVAL_OBJECT_BYTES
+    ):
+        raise RuntimeError("Approved revision artifact content identity is invalid.")
+    try:
+        downloaded = download_object_bytes(
+            object_key=object_key,
+            max_bytes=durable_size,
+        )
+    except Exception as exc:
+        raise RuntimeError("Approved revision artifact content identity could not be verified.") from exc
+    payload = downloaded.get("payload")
+    if not isinstance(payload, bytes):
+        raise RuntimeError("Approved revision artifact content identity could not be verified.")
+    current_sha256 = hashlib.sha256(payload).hexdigest()
+    if len(payload) != durable_size or current_sha256 != durable_sha256:
+        raise RuntimeError("Approved revision artifact content identity does not match current object bytes.")
+    return current_sha256
+
+
+def build_publication_approval_revision_targets(
+    session,
+    revisions: list[SymbolRevision],
+) -> list[dict[str, Any]]:
+    targets: list[dict[str, Any]] = []
+    for revision in revisions:
+        payload = revision.payload_json if isinstance(revision.payload_json, dict) else {}
+        artifact_targets = []
+        for object_key in _revision_artifact_object_keys(payload):
+            attachment = (
+                session.query(Attachment)
+                .filter(Attachment.object_key == object_key)
+                .one_or_none()
+            )
+            if attachment is None or not attachment.sha256:
+                raise RuntimeError(
+                    f"Approved revision artifact {object_key} lacks a durable attachment content identity."
+                )
+            verified_sha256 = _verified_attachment_content_sha256(attachment)
+            artifact_targets.append(
+                {
+                    "attachment_id": str(attachment.id),
+                    "object_key": attachment.object_key,
+                    "sha256": verified_sha256,
+                    "size_bytes": int(attachment.size_bytes),
+                    "content_type": attachment.content_type,
+                }
+            )
+        targets.append(
+            {
+                "revision_id": str(revision.id),
+                "symbol_id": str(revision.symbol_id),
+                "revision_label": revision.revision_label,
+                "payload_sha256": _canonical_json_sha256(payload),
+                "artifacts": artifact_targets,
+            }
+        )
+    return targets
+
+
+def ensure_publication_approval_target(
+    session,
+    *,
+    review_decision: HumanReviewDecision,
+    revisions: list[SymbolRevision],
+    created_at: datetime,
+) -> PublicationApprovalTarget:
+    revision_targets = build_publication_approval_revision_targets(session, revisions)
+    content_sha256 = _canonical_json_sha256(revision_targets)
+    existing = (
+        session.query(PublicationApprovalTarget)
+        .filter_by(review_decision_id=review_decision.id)
+        .one_or_none()
+    )
+    if existing is not None:
+        if (
+            existing.review_case_id != review_decision.review_case_id
+            or existing.revision_targets_json != revision_targets
+            or existing.content_sha256 != content_sha256
+        ):
+            raise RuntimeError("Existing immutable publication approval target does not match approved content identity.")
+        return existing
+    target = PublicationApprovalTarget(
+        id=uuid.uuid5(LEGACY_ID_NAMESPACE, f"publication-approval-target:{review_decision.id}"),
+        review_decision_id=review_decision.id,
+        review_case_id=review_decision.review_case_id,
+        revision_targets_json=revision_targets,
+        content_sha256=content_sha256,
+        created_at=created_at,
+    )
+    session.add(target)
+    session.flush()
+    return target
+
+
 def resolve_durable_publication_approval(
     session,
     queue_item: dict[str, Any],
@@ -557,6 +717,8 @@ def resolve_durable_publication_approval(
         raise RuntimeError("Publication review decision does not exist.")
     if decision.decision_code != "approve":
         raise RuntimeError("Publication review decision is not an approval.")
+    if decision.superseded_at is not None:
+        raise RuntimeError("Publication review decision has been superseded.")
     payload_review_case_id = coerce_uuid(payload.get("review_case_id"))
     if payload_review_case_id is None or payload_review_case_id != decision.review_case_id:
         raise RuntimeError("Queued publication review case does not match durable review decision.")
@@ -602,6 +764,8 @@ def validate_existing_durable_publication_queue_item(
                 "human_decision",
                 "human_approved",
                 "approval_actor",
+                "approval_target_id",
+                "approval_content_sha256",
             )
         )
     )
@@ -639,22 +803,41 @@ def resolve_durable_publication_revisions(
         raise RuntimeError(
             "Rupert publication artifact revision scope does not exactly match trusted publication handoff."
         )
+    approval_target = (
+        session.query(PublicationApprovalTarget)
+        .filter_by(review_decision_id=review_decision.id)
+        .one_or_none()
+    )
+    if approval_target is None or approval_target.review_case_id != review_decision.review_case_id:
+        raise RuntimeError("Durable publication approval target is missing or inconsistent.")
+    target_id = str(approval_target.id)
+    target_sha256 = approval_target.content_sha256
+    if (
+        str(payload.get("approval_target_id") or "") != target_id
+        or str(payload.get("approval_content_sha256") or "") != target_sha256
+        or str(artifact.get("approval_target_id") or "") != target_id
+        or str(artifact.get("approval_content_sha256") or "") != target_sha256
+    ):
+        raise RuntimeError("Runtime publication boundaries do not match durable approval target.")
+    target_revision_ids = parse_revision_ids(
+        [target.get("revision_id") for target in approval_target.revision_targets_json],
+        source="Durable publication approval target",
+    )
+    if trusted_revision_ids != target_revision_ids:
+        raise RuntimeError("Runtime publication revision scope does not exactly match durable approval target.")
 
     revisions: list[SymbolRevision] = []
     for revision_id in trusted_revision_ids:
         revision = session.get(SymbolRevision, revision_id)
         if revision is None:
             raise RuntimeError(f"Missing symbol_revisions row for id {revision_id}.")
-        revision_payload = revision.payload_json if isinstance(revision.payload_json, dict) else {}
-        try:
-            revision_decision_id = uuid.UUID(str(revision_payload.get("review_decision_id")))
-        except (TypeError, ValueError, AttributeError):
-            revision_decision_id = None
-        if revision_decision_id != review_decision.id:
-            raise RuntimeError(
-                f"Symbol revision {revision_id} does not belong to durable review decision {review_decision.id}."
-            )
         revisions.append(revision)
+    current_targets = build_publication_approval_revision_targets(session, revisions)
+    if (
+        current_targets != approval_target.revision_targets_json
+        or _canonical_json_sha256(current_targets) != target_sha256
+    ):
+        raise RuntimeError("Approved publication revision content identity has changed.")
     return revisions
 
 
@@ -733,6 +916,27 @@ def resolve_hannah_photo_candidate_record(
     )
     session.add(record)
     return record
+
+
+def validate_hannah_attached_photo(
+    session,
+    *,
+    symbol_id: uuid.UUID,
+    symbol_revision_id: uuid.UUID | None,
+    attachment_id: uuid.UUID | None,
+    object_key: str | None,
+) -> None:
+    revision = session.get(SymbolRevision, symbol_revision_id) if symbol_revision_id else None
+    attachment = session.get(Attachment, attachment_id) if attachment_id else None
+    if (
+        revision is None
+        or revision.symbol_id != symbol_id
+        or attachment is None
+        or attachment.object_key != object_key
+        or attachment.parent_type != "symbol_revision"
+        or attachment.parent_id != symbol_revision_id
+    ):
+        raise RuntimeError("Attached Hannah photo attachment ownership is inconsistent.")
 
 
 def env_flag(name: str, default: bool = False) -> bool:
@@ -957,7 +1161,10 @@ def download_object_bytes(
     *,
     object_key: str,
     env_file: str | os.PathLike[str] | None = None,
+    max_bytes: int | None = None,
 ) -> dict[str, Any]:
+    if max_bytes is not None and (not isinstance(max_bytes, int) or max_bytes < 0):
+        raise ValueError("Storage download byte limit must be a non-negative integer.")
     resolved_env_path, env = read_storage_env_file(env_file)
     settings = _storage_connection_settings(env)
     endpoint = settings["endpoint"]
@@ -1031,7 +1238,9 @@ def download_object_bytes(
     with urllib.request.urlopen(request, timeout=15) as response:
         if not (200 <= response.status < 300):
             raise RuntimeError(f"Storage download failed with HTTP {response.status} for {object_key}")
-        payload = response.read()
+        payload = response.read() if max_bytes is None else response.read(max_bytes + 1)
+        if max_bytes is not None and len(payload) > max_bytes:
+            raise RuntimeError("Storage object exceeds the permitted download size.")
         content_type = response.headers.get("Content-Type") or "application/octet-stream"
         etag = response.headers.get("ETag")
 
@@ -1333,6 +1542,18 @@ class RuntimePersistenceBridge:
                 image_url = str(candidate.get("image_url") or "").strip()
                 if symbol_id is None or not image_url:
                     continue
+                symbol_revision_id = coerce_uuid(candidate.get("symbol_revision_id"))
+                attachment_id = coerce_uuid(candidate.get("attachment_id"))
+                object_key = str(candidate.get("object_key") or "").strip() or None
+                status = candidate.get("status") or "candidate"
+                if status == "attached":
+                    validate_hannah_attached_photo(
+                        session,
+                        symbol_id=symbol_id,
+                        symbol_revision_id=symbol_revision_id,
+                        attachment_id=attachment_id,
+                        object_key=object_key,
+                    )
                 row = session.query(HannahPhotoCandidate).filter_by(symbol_id=symbol_id, image_url=image_url).one_or_none()
                 action = "updated"
                 if row is None:
@@ -1345,7 +1566,7 @@ class RuntimePersistenceBridge:
                     session.add(row)
                     action = "inserted"
 
-                row.symbol_revision_id = coerce_uuid(candidate.get("symbol_revision_id"))
+                row.symbol_revision_id = symbol_revision_id
                 row.published_page_id = coerce_uuid(candidate.get("published_page_id"))
                 row.queue_item_id = queue_item_id
                 row.source_url = candidate.get("source_url") or image_url
@@ -1354,10 +1575,10 @@ class RuntimePersistenceBridge:
                 row.description = candidate.get("description")
                 row.rights_status = candidate.get("rights_status") or "unknown"
                 row.license_label = candidate.get("license_label")
-                row.status = candidate.get("status") or "candidate"
+                row.status = status
                 row.relevance_score = coerce_numeric(candidate.get("relevance_score"))
-                row.attachment_id = coerce_uuid(candidate.get("attachment_id"))
-                row.object_key = candidate.get("object_key")
+                row.attachment_id = attachment_id
+                row.object_key = object_key
                 row.evidence_json = candidate.get("evidence") or {}
                 row.last_seen_at = completed_at
                 candidate_results.append({"id": str(row.id), "symbol_id": str(symbol_id), "status": row.status, "action": action})
@@ -2139,6 +2360,12 @@ class RuntimePersistenceBridge:
         created_at = parse_timestamp(queue_item.get("created_at")) if queue_item.get("created_at") else started_at
 
         with self.session_scope() as session:
+            payload = dict(queue_item.get("payload_json") or {})
+            decision_id = coerce_uuid(payload.get("review_decision_id"))
+            review_case_id = coerce_uuid(payload.get("review_case_id"))
+            if decision_id is None or review_case_id is None:
+                raise RuntimeError("Queued publication authority identity is missing.")
+            lock_review_case_decision_authority(session, review_case_id)
             review_decision, approval_actor = resolve_durable_publication_approval(session, queue_item)
             approval_actor_id = uuid.UUID(approval_actor["id"])
             revisions = resolve_durable_publication_revisions(
@@ -2256,6 +2483,11 @@ class RuntimePersistenceBridge:
                 symbol = session.get(GovernedSymbol, revision.symbol_id)
                 if symbol is None:
                     raise RuntimeError(f"Missing governed_symbols row for revision {revision_id}.")
+                allocate_catalog_identity_for_publication(
+                    session,
+                    symbol,
+                    allocated_at=completed_at,
+                )
 
                 page_code = self.generate_published_page_code(
                     symbol_slug=symbol.slug,

@@ -44,6 +44,7 @@ from ..models import (
     WhitneyDemandSignal,
 )
 from ..publication_handoff import execute_publication_handoff
+from ..publication_authority import lock_review_case_decision_authority
 from ..review_followup_handoff import execute_review_followup_handoff
 from ..runtime import SCOTT_SOURCE_DISCOVERY_DEFAULT_SEED_QUERY, coerce_uuid, download_object_bytes
 from ..schemas import (
@@ -2703,10 +2704,6 @@ def create_workspace_review_decision(
     session: Session = Depends(get_db_session),
 ) -> WorkspaceReviewDecisionResponse:
     parsed_case_id = parse_review_case_id(review_case_id)
-    review_case = session.get(ReviewCase, parsed_case_id)
-    if review_case is None:
-        raise HTTPException(status_code=404, detail="Review case not found.")
-
     decision_code = request.decisionCode.strip()
     if decision_code not in DECISION_TRANSITIONS:
         raise HTTPException(status_code=422, detail=f"Unsupported review decision: {decision_code}.")
@@ -2716,6 +2713,11 @@ def create_workspace_review_decision(
     )
     if invalid_child_actions:
         raise HTTPException(status_code=422, detail=f"Unsupported child action(s): {', '.join(invalid_child_actions)}.")
+
+    lock_review_case_decision_authority(session, parsed_case_id)
+    review_case = session.get(ReviewCase, parsed_case_id)
+    if review_case is None:
+        raise HTTPException(status_code=404, detail="Review case not found.")
 
     now = datetime.now(timezone.utc).replace(microsecond=0)
     previous_decisions = (

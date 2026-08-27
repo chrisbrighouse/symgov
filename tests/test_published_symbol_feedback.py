@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 from types import SimpleNamespace
 from uuid import UUID
+from fastapi import HTTPException
 
 REQUEST_ID = UUID("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
 
@@ -149,19 +150,21 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         self.assertIsNone(sequence)
         self.assertEqual(display_name, "0007-4")
 
-    def test_published_symbol_display_id_prefers_pack_code_and_sequence(self) -> None:
+    def test_published_symbol_display_id_uses_canonical_catalog_identity(self) -> None:
         row = SimpleNamespace(
+            catalog_symbol_id="S-000123",
             slug="4-way-valve",
             pack_code="0001",
             sort_order=3,
             payload_json={"display_name": "4-way-valve", "package_display_id": "0001", "package_symbol_sequence": 3},
         )
 
-        self.assertEqual(published_symbol_display_id(row), "0001-3")
+        self.assertEqual(published_symbol_display_id(row), "S-000123")
 
     def test_published_symbol_row_exposes_comment_indicator_fields(self) -> None:
         row = SimpleNamespace(
             symbol_id=UUID("11111111-1111-1111-1111-111111111111"),
+            catalog_symbol_id="0002-32",
             slug="0002-32",
             canonical_name="Check valve",
             category="Valve",
@@ -192,6 +195,7 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
     def test_published_symbol_row_uses_manifest_preview_not_raw_dxf(self) -> None:
         row = SimpleNamespace(
             symbol_id=UUID("11111111-1111-1111-1111-111111111111"),
+            catalog_symbol_id="0002-33",
             slug="0002-33",
             canonical_name="Pump",
             category="Pump",
@@ -239,6 +243,7 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
     def test_published_symbol_row_hides_preview_when_only_raw_dxf_exists(self) -> None:
         row = SimpleNamespace(
             symbol_id=UUID("11111111-1111-1111-1111-111111111111"),
+            catalog_symbol_id="0002-34",
             slug="0002-34",
             canonical_name="Valve",
             category="Valve",
@@ -311,6 +316,9 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
                 return QueryResult()
 
         with patch(
+            "symgov_backend.routes.published.resolve_catalog_symbol",
+            return_value=SimpleNamespace(symbol_id=UUID("11111111-1111-1111-1111-111111111111")),
+        ), patch(
             "symgov_backend.routes.published.download_object_bytes",
             return_value={"payload": b"<svg />", "content_type": "image/svg+xml"},
         ):
@@ -348,6 +356,9 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
                 return QueryResult()
 
         with patch(
+            "symgov_backend.routes.published.resolve_catalog_symbol",
+            return_value=SimpleNamespace(symbol_id=UUID("11111111-1111-1111-1111-111111111111")),
+        ), patch(
             "symgov_backend.routes.published.download_object_bytes",
             return_value={"payload": b"<svg><script /></svg>", "content_type": "image/svg+xml"},
         ):
@@ -357,7 +368,7 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         self.assertEqual(response.headers["content-security-policy"], "sandbox")
         self.assertEqual(response.headers["x-content-type-options"], "nosniff")
 
-    def test_published_preview_endpoint_sandboxes_all_responses_despite_active_content_mismatches(self) -> None:
+    def test_published_preview_endpoint_rejects_active_content_mismatches(self) -> None:
         payload_json = {
             "visual_assets": {
                 "preview": {
@@ -395,14 +406,16 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         )
         for media_type, body in cases:
             with self.subTest(media_type=media_type), patch(
+                "symgov_backend.routes.published.resolve_catalog_symbol",
+                return_value=SimpleNamespace(symbol_id=UUID("11111111-1111-1111-1111-111111111111")),
+            ), patch(
                 "symgov_backend.routes.published.download_object_bytes",
                 return_value={"payload": body, "content_type": media_type},
             ):
-                response = get_published_symbol_preview("mislabeled", format="PNG", session=Session(media_type))
+                with self.assertRaises(HTTPException) as exc:
+                    get_published_symbol_preview("mislabeled", format="PNG", session=Session(media_type))
 
-            self.assertEqual(response.media_type, media_type)
-            self.assertEqual(response.headers["content-security-policy"], "sandbox")
-            self.assertEqual(response.headers["x-content-type-options"], "nosniff")
+            self.assertEqual(exc.exception.status_code, 404)
 
     def test_published_symbol_comment_item_serializes_history_entry(self) -> None:
         comment = SimpleNamespace(

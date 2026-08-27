@@ -6,8 +6,8 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
-from sqlalchemy import Text, bindparam, cast, func, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import bindparam, func, text
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..asset_manifest import list_download_assets
@@ -17,7 +17,16 @@ from ..catalog_favourites import (
     load_favourite_symbol_ids,
     remove_catalog_favourite,
 )
+from ..catalog_symbol_resolution import (
+    CatalogSymbolLookupUnavailable,
+    resolve_catalog_symbol,
+)
 from ..dependencies import get_db_session, require_user
+from ..image_content import (
+    UnsafeImageContentError,
+    safe_image_response_headers,
+    validate_stored_image,
+)
 from ..models import (
     AgentQueueItem,
     Attachment,
@@ -104,6 +113,7 @@ def published_symbol_row(
     return {
         "id": row.slug,
         "symbolId": row.symbol_id,
+        "catalogSymbolId": symbol_display_id,
         "displayName": symbol_display_id,
         "packageDisplayId": payload.get("package_display_id"),
         "packageSymbolSequence": payload.get("package_symbol_sequence"),
@@ -129,7 +139,7 @@ def published_symbol_row(
         "downloads": published_download_labels(downloads),
         "downloadAssets": list_download_assets(payload, fallback_source_asset=published_fallback_source_asset(payload)),
         "sortOrder": row.sort_order,
-        "previewUrl": f"/api/v1/published/symbols/{row.slug}/preview" if preview_asset else None,
+        "previewUrl": f"/api/v1/published/symbols/{symbol_display_id}/preview" if preview_asset else None,
         "previewAsset": preview_asset,
         "previewAssets": preview_assets,
         "supplementalPhotos": supplemental_photos,
@@ -137,6 +147,7 @@ def published_symbol_row(
         "commentCount": comment_count,
         "isFavourite": symbol_uuid is not None and symbol_uuid in (favourite_symbol_ids or set()),
         "payload": payload,
+        "links": {"web": f"/#/s/{symbol_display_id}"},
     }
 
 
@@ -314,20 +325,59 @@ def pack_row(row) -> dict:
 
 
 def _load_published_symbol_row(session: Session, symbol_ref: str):
-    rows = session.execute(
-        text(
-            PUBLISHED_SYMBOLS_SQL
-            + """
-            AND (gs.slug = :symbol_ref OR gs.id::text = :symbol_ref)
-            ORDER BY pp.effective_date DESC, pk.effective_date DESC
-            LIMIT 1
-            """
-        ),
-        {"symbol_ref": symbol_ref},
-    ).all()
+    try:
+        resolved = resolve_catalog_symbol(
+            session,
+            symbol_ref,
+            route_family="published.symbol_detail",
+        )
+    except CatalogSymbolLookupUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "catalog_symbol_lookup_unavailable",
+                "message": "Catalog symbol lookup is temporarily unavailable. Please retry.",
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "catalog_symbol_lookup_unavailable",
+                "message": "Catalog symbol lookup is temporarily unavailable. Please retry.",
+            },
+        ) from exc
+    if resolved is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "catalog_symbol_not_found", "message": "Published symbol was not found."},
+        )
+    try:
+        rows = session.execute(
+            text(
+                PUBLISHED_SYMBOLS_SQL
+                + """
+                AND gs.id = :symbol_id
+                ORDER BY pp.effective_date DESC, pk.effective_date DESC
+                LIMIT 1
+                """
+            ),
+            {"symbol_id": resolved.symbol_id, "symbol_ref": symbol_ref},
+        ).all()
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "catalog_symbol_lookup_unavailable",
+                "message": "Catalog symbol lookup is temporarily unavailable. Please retry.",
+            },
+        ) from exc
     if not rows:
-        raise HTTPException(status_code=404, detail="Published symbol was not found.")
-    return rows[0]
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "catalog_symbol_unavailable", "message": "This Catalog symbol is not currently available."},
+        )
+    return rows[0], getattr(resolved, "matched_by", "canonical")
 
 
 @router.get("/favourites")
@@ -345,7 +395,7 @@ def add_current_user_catalog_favourite(
     current_user: AuthenticatedUser = Depends(require_user),
     session: Session = Depends(get_db_session),
 ) -> dict:
-    row = _load_published_symbol_row(session, symbol_ref)
+    row, _resolved_by = _load_published_symbol_row(session, symbol_ref)
     symbol_id = uuid.UUID(str(row.symbol_id))
     add_catalog_favourite(session, current_user.id, symbol_id)
     return {"symbolId": str(symbol_id), "isFavourite": True}
@@ -368,7 +418,7 @@ def remove_current_user_catalog_favourite(
     ):
         symbol_id = requested_symbol_id
     else:
-        row = _load_published_symbol_row(session, symbol_ref)
+        row, _resolved_by = _load_published_symbol_row(session, symbol_ref)
         symbol_id = uuid.UUID(str(row.symbol_id))
     remove_catalog_favourite(session, current_user.id, symbol_id)
     return {"symbolId": str(symbol_id), "isFavourite": False}
@@ -434,7 +484,7 @@ def get_published_symbol(
     current_user: AuthenticatedUser = Depends(require_user),
     session: Session = Depends(get_db_session),
 ) -> dict:
-    row = _load_published_symbol_row(session, symbol_id)
+    row, resolved_by = _load_published_symbol_row(session, symbol_id)
     rows = [row]
     supplemental = load_supplemental_photos(session, rows)
     comment_counts = load_comment_counts(session, rows)
@@ -443,30 +493,21 @@ def get_published_symbol(
         current_user.id,
         [uuid.UUID(str(row.symbol_id))],
     )
-    return {"item": published_symbol_row(row, supplemental, comment_counts, favourite_ids)}
+    return {
+        "item": published_symbol_row(row, supplemental, comment_counts, favourite_ids),
+        "resolvedBy": resolved_by,
+    }
 
 
 @router.get("/symbols/{symbol_id}/comments")
 @legacy_router.get("/published/symbols/{symbol_id}/comments", include_in_schema=False)
 def get_published_symbol_comments(symbol_id: str, session: Session = Depends(get_db_session)) -> dict:
-    rows = session.execute(
-        text(
-            PUBLISHED_SYMBOLS_SQL
-            + """
-            AND (gs.slug = :symbol_id OR gs.id::text = :symbol_id)
-            ORDER BY pp.effective_date DESC, pk.effective_date DESC
-            LIMIT 1
-            """
-        ),
-        {"symbol_id": symbol_id},
-    ).all()
-    if not rows:
-        raise HTTPException(status_code=404, detail="Published symbol was not found.")
-    symbol_uuid = uuid.UUID(str(rows[0].symbol_id))
+    row, _resolved_by = _load_published_symbol_row(session, symbol_id)
+    symbol_uuid = uuid.UUID(str(row.symbol_id))
     items = load_comment_history(session, symbol_uuid)
     return {
         "symbolId": str(symbol_uuid),
-        "displayId": published_symbol_display_id(rows[0]),
+        "displayId": published_symbol_display_id(row),
         "commentCount": len(items),
         "items": items,
     }
@@ -690,23 +731,11 @@ async def run_published_symbol_command(
 def get_published_symbol_preview(
     symbol_id: str,
     format: str | None = Query(default=None),
+    current_user: AuthenticatedUser = Depends(require_user),
     session: Session = Depends(get_db_session),
 ) -> Response:
-    rows = session.execute(
-        text(
-            PUBLISHED_SYMBOLS_SQL
-            + """
-            AND (gs.slug = :symbol_id OR gs.id::text = :symbol_id)
-            ORDER BY pp.effective_date DESC, pk.effective_date DESC
-            LIMIT 1
-            """
-        ),
-        {"symbol_id": symbol_id},
-    ).all()
-    if not rows:
-        raise HTTPException(status_code=404, detail="Published symbol was not found.")
-
-    payload_json = rows[0].payload_json or {}
+    row, _resolved_by = _load_published_symbol_row(session, symbol_id)
+    payload_json = row.payload_json or {}
     preview_asset = choose_published_preview_asset(payload_json, requested_format=format)
     object_key = preview_asset.get("object_key") if preview_asset else None
     if not object_key:
@@ -714,33 +743,67 @@ def get_published_symbol_preview(
 
     attachment = session.query(Attachment).filter(Attachment.object_key == object_key).one_or_none()
     payload = download_object_bytes(object_key=object_key, env_file=str(get_settings().storage_env_file))
-    media_type = attachment.content_type if attachment is not None else payload["content_type"]
-    headers = {
-        "Content-Security-Policy": "sandbox",
-        "X-Content-Type-Options": "nosniff",
-    }
-    return Response(content=payload["payload"], media_type=media_type, headers=headers)
+    try:
+        media_type = validate_stored_image(
+            payload["payload"],
+            attachment.content_type if attachment is not None else None,
+            payload.get("content_type"),
+        )
+    except UnsafeImageContentError as exc:
+        raise HTTPException(status_code=404, detail="Published symbol preview was not found.") from exc
+    return Response(
+        content=payload["payload"],
+        media_type=media_type,
+        headers=safe_image_response_headers(),
+    )
 
 
 @router.get("/symbols/{symbol_id}/supplemental-photos/{photo_id}/preview")
 @legacy_router.get("/published/symbols/{symbol_id}/supplemental-photos/{photo_id}/preview", include_in_schema=False)
-def get_published_symbol_supplemental_photo_preview(symbol_id: str, photo_id: str, session: Session = Depends(get_db_session)) -> Response:
-    row = (
+def get_published_symbol_supplemental_photo_preview(
+    symbol_id: str,
+    photo_id: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+) -> Response:
+    published_row, _resolved_by = _load_published_symbol_row(session, symbol_id)
+    candidate = (
         session.query(HannahPhotoCandidate)
-        .join(GovernedSymbol, GovernedSymbol.id == HannahPhotoCandidate.symbol_id)
         .filter(HannahPhotoCandidate.id == photo_id)
+        .filter(HannahPhotoCandidate.symbol_id == published_row.symbol_id)
+        .filter(HannahPhotoCandidate.symbol_revision_id == published_row.symbol_revision_id)
         .filter(HannahPhotoCandidate.status == "attached")
+        .filter(HannahPhotoCandidate.attachment_id.isnot(None))
         .filter(HannahPhotoCandidate.object_key.isnot(None))
-        .filter((GovernedSymbol.slug == symbol_id) | (cast(GovernedSymbol.id, Text) == symbol_id))
         .one_or_none()
     )
-    if row is None or not row.object_key:
+    if candidate is None or not candidate.object_key:
         raise HTTPException(status_code=404, detail="Published supplemental photo was not found.")
 
-    attachment = session.query(Attachment).filter(Attachment.object_key == row.object_key).one_or_none()
-    payload = download_object_bytes(object_key=row.object_key, env_file=str(get_settings().storage_env_file))
-    media_type = attachment.content_type if attachment is not None else payload["content_type"]
-    return Response(content=payload["payload"], media_type=media_type)
+    attachment = (
+        session.query(Attachment)
+        .filter(Attachment.id == candidate.attachment_id)
+        .filter(Attachment.object_key == candidate.object_key)
+        .filter(Attachment.parent_type == "symbol_revision")
+        .filter(Attachment.parent_id == published_row.symbol_revision_id)
+        .one_or_none()
+    )
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="Published supplemental photo was not found.")
+    payload = download_object_bytes(object_key=candidate.object_key, env_file=str(get_settings().storage_env_file))
+    try:
+        media_type = validate_stored_image(
+            payload["payload"],
+            attachment.content_type,
+            payload.get("content_type"),
+        )
+    except UnsafeImageContentError as exc:
+        raise HTTPException(status_code=404, detail="Published supplemental photo was not found.") from exc
+    return Response(
+        content=payload["payload"],
+        media_type=media_type,
+        headers=safe_image_response_headers(),
+    )
 
 
 @router.get("/pages/{page_code}")

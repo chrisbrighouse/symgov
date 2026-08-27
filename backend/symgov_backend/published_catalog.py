@@ -6,6 +6,7 @@ from .asset_manifest import list_preview_assets, select_preview_asset
 PUBLISHED_SYMBOLS_SQL = """
     SELECT
         gs.id::text AS symbol_id,
+        gs.catalog_symbol_id,
         gs.slug,
         gs.canonical_name,
         gs.category,
@@ -41,25 +42,10 @@ PUBLISHED_SYMBOLS_SQL = """
 
 
 def published_symbol_display_id(row) -> str:
-    payload = row.payload_json or {}
-    package_id = payload.get("package_display_id") or getattr(row, "pack_code", None)
-    sequence = payload.get("package_symbol_sequence")
-    if sequence is None:
-        sequence = getattr(row, "sort_order", None)
-
-    if package_id and sequence is not None:
-        try:
-            sequence_value = int(sequence)
-            return f"{package_id}-{sequence_value}"
-        except (TypeError, ValueError):
-            pass
-
-    return (
-        payload.get("display_name")
-        or payload.get("workspace_display_name")
-        or payload.get("symbol_display_id")
-        or row.slug
-    )
+    identifier = getattr(row, "catalog_symbol_id", None)
+    if not isinstance(identifier, str) or not identifier:
+        raise RuntimeError("Published row is missing its canonical Catalog symbol ID.")
+    return identifier
 
 
 def published_fallback_source_asset(payload: dict | None) -> dict:

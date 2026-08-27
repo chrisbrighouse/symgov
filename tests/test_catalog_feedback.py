@@ -41,6 +41,7 @@ IDEMPOTENCY_KEY = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 def published_row():
     return SimpleNamespace(
         symbol_id=SYMBOL_ID,
+        catalog_symbol_id="0002-32",
         symbol_revision_id=REVISION_ID,
         page_id=PAGE_ID,
         slug="check-valve",
@@ -417,16 +418,16 @@ def test_symbol_lookup_prioritizes_display_id_then_slug_then_uuid_while_preservi
         "/api/v1/catalog/symbols/0002-32/feedback", json=valid_body(), headers=auth_headers()
     )
     assert response.status_code == 201
-    sql, params = next((sql, params) for sql, params in session.sql if "symbol_ref" in params)
+    sql, params = next(
+        (sql, params)
+        for sql, params in reversed(session.sql)
+        if "symbol_ref" in params and "symbol_id" in params
+    )
     normalized = " ".join(sql.split()).lower()
-    assert params == {"symbol_ref": "0002-32"}
-    assert "case" in normalized
-    order_position = normalized.index("order by case")
-    ranking_sql = normalized[order_position:]
-    display_position = ranking_sql.index("package_display_id")
-    slug_position = ranking_sql.index("gs.slug = :symbol_ref")
-    uuid_position = ranking_sql.index("gs.id::text = :symbol_ref")
-    assert display_position < slug_position < uuid_position
+    assert params["symbol_ref"] == "0002-32"
+    assert params["symbol_id"] == SYMBOL_ID
+    assert "gs.id = :symbol_id" in normalized
+    assert "payload_json ->>" not in normalized
     assert "pk.pack_code asc" in normalized
     assert "pe.sort_order asc" in normalized
     assert "pp.id asc" in normalized

@@ -374,6 +374,7 @@ class BrowserBoundarySession:
     def __init__(self, *, race=False):
         self.row = SimpleNamespace(
             symbol_id=SYMBOL_ID,
+            catalog_symbol_id="S-000001",
             symbol_revision_id=UUID("33333333-3333-4333-8333-333333333333"),
             revision_label="Rev A",
             page_id=UUID("44444444-4444-4444-8444-444444444444"),

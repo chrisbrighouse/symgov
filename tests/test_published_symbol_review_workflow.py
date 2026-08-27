@@ -36,6 +36,7 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         symbol = SimpleNamespace(
             id=symbol_id,
+            catalog_symbol_id="0001-3",
             slug="0001-3",
             canonical_name="Test Symbol",
             category="Test",
@@ -52,6 +53,7 @@ class PublishedSymbolReviewWorkflowTests(unittest.IsolatedAsyncioTestCase):
         class FakeRow:
             def __init__(self):
                 self.symbol_id = symbol_id
+                self.catalog_symbol_id = "0001-3"
                 self.slug = "0001-3"
                 self.canonical_name = "Test Symbol"
                 self.category = "Test"

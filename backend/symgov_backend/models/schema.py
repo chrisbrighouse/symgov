@@ -1401,6 +1401,42 @@ class HumanReviewDecision(Base):
     superseded_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class PublicationApprovalTarget(Base):
+    __tablename__ = "publication_approval_targets"
+    __table_args__ = (
+        CheckConstraint(
+            "jsonb_typeof(revision_targets_json) = 'array' "
+            "AND jsonb_array_length(revision_targets_json) > 0",
+            name="publication_approval_targets_nonempty_revisions",
+        ),
+        CheckConstraint(
+            "content_sha256 ~ '^[0-9a-f]{64}$'",
+            name="publication_approval_targets_sha256",
+        ),
+        Index(
+            "ix_publication_approval_targets_case_created_at",
+            "review_case_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    review_decision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("human_review_decisions.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    review_case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("review_cases.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    revision_targets_json: Mapped[list] = mapped_column(JSONB, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ReviewCaseAction(Base):
     __tablename__ = "review_case_actions"
     __table_args__ = (

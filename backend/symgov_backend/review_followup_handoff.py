@@ -176,6 +176,7 @@ def execute_review_followup_handoff(
     *,
     review_case_id: uuid.UUID,
     decision_id: uuid.UUID,
+    commit_transaction: bool = True,
 ) -> dict[str, Any]:
     action = (
         session.query(ReviewCaseAction)
@@ -200,7 +201,10 @@ def execute_review_followup_handoff(
             "error": "Missing review case, decision, or Libby agent definition.",
         }
         action.completed_at = utc_now()
-        session.commit()
+        if commit_transaction:
+            session.commit()
+        else:
+            session.flush()
         return {"status": "failed", "detail": action.action_payload_json["error"]}
 
     actor = review_actor_snapshot(decision)
@@ -212,7 +216,10 @@ def execute_review_followup_handoff(
             "error": "Missing review case, decision, or Libby agent definition.",
         }
         action.completed_at = utc_now()
-        session.commit()
+        if commit_transaction:
+            session.commit()
+        else:
+            session.flush()
         return {"status": "failed", "detail": action.action_payload_json["error"]}
 
     now = utc_now()
@@ -276,7 +283,10 @@ def execute_review_followup_handoff(
             created_at=now,
         )
     )
-    session.commit()
+    if commit_transaction:
+        session.commit()
+    else:
+        session.flush()
 
     write_json(LIBBY_RUNTIME_ROOT / "agent_queue_items" / f"{queue_id}.json", queue_item)
     return {

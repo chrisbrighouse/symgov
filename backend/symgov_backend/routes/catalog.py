@@ -16,7 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..asset_manifest import canonical_asset_format, content_type_for_format, list_download_assets
@@ -37,6 +37,10 @@ from ..catalog_search import (
     row_taxonomy_input as _row_taxonomy_input,
     search_catalog_symbols_for_context,
 )
+from ..catalog_symbol_resolution import (
+    CatalogSymbolLookupUnavailable,
+    resolve_catalog_symbol,
+)
 from ..catalog_taxonomy import (
     CATALOG_CATEGORY_ORDER,
     CATALOG_DISCIPLINE_ORDER,
@@ -51,6 +55,11 @@ from ..dependencies import (
     get_db_session,
     matched_route_template,
     session_access_decision,
+)
+from ..image_content import (
+    UnsafeImageContentError,
+    safe_image_response_headers,
+    validate_stored_image,
 )
 from ..models import (
     AgentQueueItem,
@@ -417,7 +426,10 @@ def _preview_response(display_id: str, preview_asset: dict | None) -> dict | Non
 
 
 def _catalog_links(display_id: str, preview_asset: dict | None, *, download_available: bool = False) -> dict:
-    links = {"api": f"/api/v1/catalog/symbols/{display_id}"}
+    links = {
+        "api": f"/api/v1/catalog/symbols/{display_id}",
+        "web": f"/#/s/{display_id}",
+    }
     if preview_asset:
         links["thumbnail"] = f"/api/v1/catalog/symbols/{display_id}/thumbnail"
         links["preview"] = f"/api/v1/catalog/symbols/{display_id}/preview"
@@ -442,6 +454,7 @@ def _catalog_symbol_detail(row) -> dict:
     provenance = {key: value for key, value in provenance.items() if value is not None}
     return {
         "displayId": display_id,
+        "catalogSymbolId": display_id,
         "symbolId": str(row.symbol_id),
         "slug": row.slug,
         "name": payload.get("name") or payload.get("canonical_name") or row.canonical_name,
@@ -479,69 +492,116 @@ def _catalog_symbol_detail(row) -> dict:
     }
 
 
-def _published_symbol_ref_filter_sql() -> str:
-    return """
-        AND (
-            gs.slug = :symbol_ref
-            OR gs.id::text = :symbol_ref
-            OR ((sr.payload_json ->> 'package_display_id') || '-' || (sr.payload_json ->> 'package_symbol_sequence')) = :symbol_ref
-            OR (sr.payload_json ->> 'display_name') = :symbol_ref
-            OR (sr.payload_json ->> 'workspace_display_name') = :symbol_ref
-            OR (sr.payload_json ->> 'symbol_display_id') = :symbol_ref
-        )
-    """
-
-
 def _load_catalog_symbol_row(session: Session, symbol_ref: str):
-    rows = session.execute(
-        text(
-            PUBLISHED_SYMBOLS_SQL
-            + _published_symbol_ref_filter_sql()
-            + """
-            ORDER BY CASE
-                WHEN ((sr.payload_json ->> 'package_display_id') || '-' || (sr.payload_json ->> 'package_symbol_sequence')) = :symbol_ref
-                    OR (sr.payload_json ->> 'display_name') = :symbol_ref
-                    OR (sr.payload_json ->> 'workspace_display_name') = :symbol_ref
-                    OR (sr.payload_json ->> 'symbol_display_id') = :symbol_ref THEN 0
-                WHEN gs.slug = :symbol_ref THEN 1
-                WHEN gs.id::text = :symbol_ref THEN 2
-                ELSE 3
-            END,
-            pp.effective_date DESC, pk.effective_date DESC
-            LIMIT 1
-            """
-        ),
-        {"symbol_ref": symbol_ref},
-    ).all()
+    try:
+        resolved = resolve_catalog_symbol(
+            session,
+            symbol_ref,
+            route_family="catalog.symbol_detail",
+        )
+    except CatalogSymbolLookupUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "catalog_symbol_lookup_unavailable",
+                "message": "Catalog symbol lookup is temporarily unavailable. Please retry.",
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "catalog_symbol_lookup_unavailable",
+                "message": "Catalog symbol lookup is temporarily unavailable. Please retry.",
+            },
+        ) from exc
+    if resolved is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "catalog_symbol_not_found", "message": "Catalog symbol was not found."},
+        )
+    try:
+        rows = session.execute(
+            text(
+                PUBLISHED_SYMBOLS_SQL
+                + """
+                AND gs.id = :symbol_id
+                ORDER BY pp.effective_date DESC, pk.effective_date DESC
+                LIMIT 1
+                """
+            ),
+            {"symbol_id": resolved.symbol_id, "symbol_ref": symbol_ref},
+        ).all()
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "catalog_symbol_lookup_unavailable",
+                "message": "Catalog symbol lookup is temporarily unavailable. Please retry.",
+            },
+        ) from exc
     if not rows:
-        raise HTTPException(status_code=404, detail="Catalog symbol was not found.")
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "catalog_symbol_unavailable", "message": "This Catalog symbol is not currently available."},
+        )
     return rows[0]
 
 
 def _load_catalog_symbol_rows_for_feedback(session: Session, symbol_ref: str):
-    rows = session.execute(
-        text(
-            PUBLISHED_SYMBOLS_SQL
-            + _published_symbol_ref_filter_sql()
-            + """
-            ORDER BY CASE
-                WHEN ((sr.payload_json ->> 'package_display_id') || '-' || (sr.payload_json ->> 'package_symbol_sequence')) = :symbol_ref
-                    OR (sr.payload_json ->> 'display_name') = :symbol_ref
-                    OR (sr.payload_json ->> 'workspace_display_name') = :symbol_ref
-                    OR (sr.payload_json ->> 'symbol_display_id') = :symbol_ref THEN 0
-                WHEN gs.slug = :symbol_ref THEN 1
-                WHEN gs.id::text = :symbol_ref THEN 2
-                ELSE 3
-            END,
-            pk.pack_code ASC,
-            pe.sort_order ASC,
-            pp.id ASC
-            """
-        ),
-        {"symbol_ref": symbol_ref},
-    ).all()
+    try:
+        resolved = resolve_catalog_symbol(
+            session,
+            symbol_ref,
+            route_family="catalog.feedback",
+        )
+    except CatalogSymbolLookupUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "catalog_symbol_lookup_unavailable",
+                "message": "Catalog symbol lookup is temporarily unavailable. Please retry.",
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "catalog_symbol_lookup_unavailable",
+                "message": "Catalog symbol lookup is temporarily unavailable. Please retry.",
+            },
+        ) from exc
+    if resolved is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "catalog_symbol_not_found", "message": "Catalog symbol was not found."},
+        )
+    try:
+        rows = session.execute(
+            text(
+                PUBLISHED_SYMBOLS_SQL
+                + """
+                AND gs.id = :symbol_id
+                ORDER BY pk.pack_code ASC,
+                pe.sort_order ASC,
+                pp.id ASC
+                """
+            ),
+            {"symbol_id": resolved.symbol_id, "symbol_ref": symbol_ref},
+        ).all()
+    except SQLAlchemyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "catalog_symbol_lookup_unavailable",
+                "message": "Catalog symbol lookup is temporarily unavailable. Please retry.",
+            },
+        ) from exc
     if not rows:
-        raise HTTPException(status_code=404, detail="Catalog symbol was not found.")
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "catalog_symbol_unavailable", "message": "This Catalog symbol is not currently available."},
+        )
     return rows
 
 
@@ -553,8 +613,19 @@ def _catalog_symbol_preview_bytes(symbol_ref: str, session: Session) -> Response
         raise HTTPException(status_code=404, detail="Catalog symbol preview was not found.")
     attachment = session.query(Attachment).filter(Attachment.object_key == object_key).one_or_none()
     payload = download_object_bytes(object_key=object_key, env_file=str(get_settings().storage_env_file))
-    media_type = attachment.content_type if attachment is not None else payload["content_type"]
-    return Response(content=payload["payload"], media_type=media_type)
+    try:
+        media_type = validate_stored_image(
+            payload["payload"],
+            attachment.content_type if attachment is not None else None,
+            payload.get("content_type"),
+        )
+    except UnsafeImageContentError as exc:
+        raise HTTPException(status_code=404, detail="Catalog symbol preview was not found.") from exc
+    return Response(
+        content=payload["payload"],
+        media_type=media_type,
+        headers=safe_image_response_headers(),
+    )
 
 
 async def _read_bounded_catalog_body(request: Request) -> bytes:

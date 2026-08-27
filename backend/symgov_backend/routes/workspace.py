@@ -59,6 +59,7 @@ from ..agent_queue_worker import AgentQueueWorkerState, agent_worker_health_payl
 from ..published_feedback_gate import published_feedback_claims_paused
 from ..tracy_operations import tracy_status_summary
 from ..publication_handoff import execute_publication_handoff
+from ..publication_authority import lock_review_case_decision_authority
 from ..property_options import remember_property_option
 from ..review_followup_handoff import execute_review_followup_handoff
 from ..runtime import (
@@ -1167,6 +1168,7 @@ def ensure_split_items(
     package_id = package_display_id(session, intake_record)
     now = datetime.now(timezone.utc).replace(microsecond=0)
     items = []
+    new_items = []
     for index, child in enumerate(manifest.get("children") or [], start=1):
         object_key = child.get("attachment_object_key")
         proposed_symbol_id = str(child.get("proposed_symbol_id") or child.get("file_name") or "UNSPECIFIED")
@@ -1196,7 +1198,7 @@ def ensure_split_items(
                 created_at=now,
                 updated_at=now,
             )
-            session.add(item)
+            new_items.append(item)
         else:
             existing_payload = item.payload_json or {}
             existing_payload = {
@@ -1226,26 +1228,26 @@ def ensure_split_items(
             item.updated_at = now
         items.append(item)
     if items:
-        try:
+        if new_items:
+            recovered_items = {item.id: item for item in items}
+            for item in new_items:
+                try:
+                    with session.begin_nested():
+                        session.add(item)
+                        session.flush()
+                except IntegrityError as exc:
+                    if not is_review_split_item_duplicate_integrity_error(exc):
+                        raise
+                    reloaded = session.get(ReviewSplitItem, item.id)
+                    if reloaded is None:
+                        raise RuntimeError(
+                            "review_split_items duplicate recovery could not reload split item: "
+                            + str(item.id)
+                        ) from exc
+                    recovered_items[item.id] = reloaded
+            items = [recovered_items[item.id] for item in items]
+        else:
             session.flush()
-        except IntegrityError as exc:
-            if not is_review_split_item_duplicate_integrity_error(exc):
-                raise
-            session.rollback()
-            reloaded_items = []
-            missing_ids = []
-            for item in items:
-                reloaded = session.get(ReviewSplitItem, item.id)
-                if reloaded is None:
-                    missing_ids.append(str(item.id))
-                else:
-                    reloaded_items.append(reloaded)
-            if missing_ids:
-                raise RuntimeError(
-                    "review_split_items duplicate recovery could not reload split items: "
-                    + ", ".join(missing_ids)
-                ) from exc
-            items = reloaded_items
     return items
 
 
@@ -3652,6 +3654,7 @@ def list_workspace_review_cases(
                 continue
             classification_record = load_current_classification(session, review_case_id=str(review_case.id))
             source_file_name = resolve_source_file_name(validation_report)
+            lock_review_case_decision_authority(session, review_case.id)
             split_items = ensure_split_items(
                 session,
                 review_case=review_case,
@@ -3984,18 +3987,19 @@ def create_workspace_rights_review_decision(
 ) -> WorkspaceRightsReviewDecisionResponse:
     actor = review_operation_actor(current_user)
     parsed_case_id = parse_review_case_id(review_case_id)
-    review_case = session.get(ReviewCase, parsed_case_id)
-    if review_case is None:
-        raise HTTPException(status_code=404, detail="Review case not found.")
-    if review_case.current_stage != "provenance_rights_review":
-        raise HTTPException(status_code=422, detail="Review case is not a rights review.")
-
     decision_code = request.decisionCode.strip()
     if decision_code not in RIGHTS_DECISION_TRANSITIONS:
         raise HTTPException(status_code=422, detail=f"Unsupported rights review decision: {decision_code}.")
     note_required = {"restrict_publication", "request_rights_evidence", "mark_conflict", "defer_rights"}
     if decision_code in note_required and not request.evidenceNote.strip():
         raise HTTPException(status_code=422, detail="Evidence note is required for this rights decision.")
+
+    lock_review_case_decision_authority(session, parsed_case_id)
+    review_case = session.get(ReviewCase, parsed_case_id)
+    if review_case is None:
+        raise HTTPException(status_code=404, detail="Review case not found.")
+    if review_case.current_stage != "provenance_rights_review":
+        raise HTTPException(status_code=422, detail="Review case is not a rights review.")
 
     now = datetime.now(timezone.utc).replace(microsecond=0)
     previous_decisions = (
@@ -4140,10 +4144,6 @@ def create_workspace_review_decision(
 ) -> WorkspaceReviewDecisionResponse:
     actor = review_operation_actor(current_user)
     parsed_case_id = parse_review_case_id(review_case_id)
-    review_case = session.get(ReviewCase, parsed_case_id)
-    if review_case is None:
-        raise HTTPException(status_code=404, detail="Review case not found.")
-
     decision_code = request.decisionCode.strip()
     if decision_code not in DECISION_TRANSITIONS:
         raise HTTPException(status_code=422, detail=f"Unsupported review decision: {decision_code}.")
@@ -4153,6 +4153,11 @@ def create_workspace_review_decision(
     )
     if invalid_child_actions:
         raise HTTPException(status_code=422, detail=f"Unsupported child action(s): {', '.join(invalid_child_actions)}.")
+
+    lock_review_case_decision_authority(session, parsed_case_id)
+    review_case = session.get(ReviewCase, parsed_case_id)
+    if review_case is None:
+        raise HTTPException(status_code=404, detail="Review case not found.")
 
     now = datetime.now(timezone.utc).replace(microsecond=0)
     previous_decisions = (
@@ -4319,6 +4324,7 @@ def process_workspace_split_review_decisions(
 ) -> WorkspaceSplitReviewProcessResponse:
     actor = review_operation_actor(current_user)
     parsed_case_id = parse_review_case_id(review_case_id)
+    lock_review_case_decision_authority(session, parsed_case_id)
     row = session.execute(
         select(ReviewCase, ValidationReport)
         .join(
@@ -4378,6 +4384,7 @@ def process_workspace_split_review_decisions(
     total_open_before = len([item for item in split_items if is_open_split_item_status(item.status)])
     now = datetime.now(timezone.utc).replace(microsecond=0)
     processed_items: list[WorkspaceSplitReviewProcessItemResponse] = []
+    deferred_handoffs: list[tuple[uuid.UUID, bool, str]] = []
 
     for item, child_payload in child_decisions:
         action_code = child_payload["action"]
@@ -4502,15 +4509,9 @@ def process_workspace_split_review_decisions(
             item.processed_at = now
         item.updated_at = now
         session.flush()
-        session.commit()
 
         if is_approval:
-            execute_publication_handoff(
-                session,
-                review_case_id=review_case.id,
-                decision_id=decision.id,
-                close_review_case=False,
-            )
+            deferred_handoffs.append((decision.id, True, child_payload["childId"]))
         elif is_terminal_disposition:
             session.add(
                 AuditEvent(
@@ -4528,7 +4529,6 @@ def process_workspace_split_review_decisions(
                     created_at=now,
                 )
             )
-            session.commit()
         elif duplicate_exception_confirmed:
             item.status = "duplicate_resolved"
             item.latest_action = "duplicate_confirmed"
@@ -4562,13 +4562,8 @@ def process_workspace_split_review_decisions(
                     created_at=item.processed_at,
                 )
             )
-            session.commit()
         else:
-            execute_review_followup_handoff(
-                session,
-                review_case_id=review_case.id,
-                decision_id=decision.id,
-            )
+            deferred_handoffs.append((decision.id, False, child_payload["childId"]))
 
         refreshed_action = (
             session.query(ReviewCaseAction)
@@ -4589,7 +4584,6 @@ def process_workspace_split_review_decisions(
             item.processed_at = item.processed_at or datetime.now(timezone.utc).replace(microsecond=0)
             item.updated_at = item.updated_at or item.processed_at
             session.add(item)
-        session.commit()
 
         processed_items.append(
             WorkspaceSplitReviewProcessItemResponse(
@@ -4624,7 +4618,61 @@ def process_workspace_split_review_decisions(
                     created_at=closed_at,
                 )
             )
-            session.commit()
+    if deferred_handoffs:
+        session.commit()
+
+    # Handoffs perform external/runtime work.  Run them only after the split
+    # decisions are durable, so a child failure cannot leave an orphan queue
+    # file or make a second DB session contend with this transaction's lock.
+    for decision_id, is_approval, child_id in deferred_handoffs:
+        if is_approval:
+            execute_publication_handoff(
+                session,
+                review_case_id=parsed_case_id,
+                decision_id=decision_id,
+                commit_before_external=True,
+            )
+        else:
+            execute_review_followup_handoff(
+                session,
+                review_case_id=parsed_case_id,
+                decision_id=decision_id,
+            )
+        action = (
+            session.query(ReviewCaseAction)
+            .filter(ReviewCaseAction.decision_id == decision_id)
+            .order_by(ReviewCaseAction.created_at.asc())
+            .first()
+        )
+        item = (
+            session.query(ReviewSplitItem)
+            .filter(
+                ReviewSplitItem.review_case_id == parsed_case_id,
+                ReviewSplitItem.proposed_symbol_id == child_id,
+            )
+            .first()
+        )
+        if item is not None:
+            final_status, final_target_agent_slug = split_item_status_after_handoff(
+                item,
+                is_approval=is_approval,
+            )
+            item.status = final_status
+            item.downstream_agent_slug = final_target_agent_slug
+            item.downstream_queue_item_id = (
+                (action.action_payload_json or {}).get("rupert_queue_item_id")
+                or (action.action_payload_json or {}).get("libby_queue_item_id")
+                if action is not None
+                else None
+            )
+            item.updated_at = datetime.now(timezone.utc).replace(microsecond=0)
+            session.add(item)
+            for response_item in processed_items:
+                if response_item.childId == child_id:
+                    response_item.status = item.status
+                    response_item.targetAgentSlug = item.downstream_agent_slug
+                    response_item.downstreamQueueItemId = item.downstream_queue_item_id
+    session.commit()
 
     review_case = session.get(ReviewCase, parsed_case_id)
     return WorkspaceSplitReviewProcessResponse(

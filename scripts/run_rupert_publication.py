@@ -299,6 +299,8 @@ def run_publication_task(task, release_area_root=None):
         "release_manifest_path": str(release_manifest_path) if release_manifest_path else None,
         "publication_pack": publication_pack,
         "staged_symbol_revisions": symbol_revision_ids,
+        "approval_target_id": task.get("approval_target_id"),
+        "approval_content_sha256": task.get("approval_content_sha256"),
         "published_page_proposals": published_page_proposals,
         "pack_entry_proposals": pack_entry_proposals,
         "standards_availability_summary": standards_availability_summary,

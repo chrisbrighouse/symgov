@@ -4,12 +4,15 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import uuid
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from symgov_backend.app import create_app
 from symgov_backend.catalog_api_auth import hash_api_key
-from symgov_backend.dependencies import get_db_session
+from symgov_backend.dependencies import get_db_session, require_session_access
 from symgov_backend.models import Attachment, CatalogApiKey, CatalogApiUsageEvent
+from symgov_backend.routes.published import legacy_router as legacy_published_router
+from symgov_backend.routes.published import router as published_router
 
 
 class CatalogApiKeyQuery:
@@ -122,6 +125,7 @@ def symbol_row(**overrides):
     }
     base = {
         "symbol_id": str(uuid.uuid4()),
+        "catalog_symbol_id": "0003-12",
         "slug": "smoke-detector",
         "canonical_name": "Smoke Detector",
         "category": "symbol",
@@ -178,6 +182,37 @@ def auth_headers(token: str = "valid-token") -> dict[str, str]:
     }
 
 
+def test_published_preview_routes_authenticate_missing_and_invalid_sessions_before_route_database_access():
+    app = FastAPI()
+    app.include_router(published_router, prefix="/api/v1")
+    app.include_router(legacy_published_router, prefix="/api")
+    route_database_access = []
+
+    def override_route_database():
+        route_database_access.append(True)
+        yield object()
+
+    app.dependency_overrides[get_db_session] = override_route_database
+    app.dependency_overrides[require_session_access] = lambda: None
+    client = TestClient(app, raise_server_exceptions=False)
+    paths = (
+        "/api/v1/published/symbols/0003-12/preview",
+        "/api/published/symbols/0003-12/preview",
+        "/api/v1/published/symbols/0003-12/supplemental-photos/11111111-1111-1111-1111-111111111111/preview",
+        "/api/published/symbols/0003-12/supplemental-photos/11111111-1111-1111-1111-111111111111/preview",
+    )
+
+    for path in paths:
+        missing = client.get(path)
+        invalid = client.get(path, cookies={"symgov_session": "invalid-session"})
+        assert missing.status_code == 401
+        assert invalid.status_code == 401
+        assert missing.json()["detail"] == "Authentication required."
+        assert invalid.json()["detail"] == "Authentication required."
+
+    assert route_database_access == []
+
+
 def test_catalog_symbol_detail_requires_valid_catalog_read_key():
     client, session = build_client(key_rows=[api_key_row("valid-token")], symbol_rows=[symbol_row()])
 
@@ -188,7 +223,7 @@ def test_catalog_symbol_detail_requires_valid_catalog_read_key():
     assert missing.status_code == 401
     assert invalid.status_code == 401
     assert allowed.status_code == 200
-    assert len(session.executed) == 1
+    assert len(session.executed) == 2
 
 
 def test_catalog_symbol_detail_rejects_valid_key_without_catalog_read_scope():
@@ -253,6 +288,7 @@ def test_catalog_symbol_detail_resolves_display_id_slug_and_uuid_with_public_lin
         }
         assert payload["links"] == {
             "api": "/api/v1/catalog/symbols/0003-12",
+            "web": "/#/s/0003-12",
             "thumbnail": "/api/v1/catalog/symbols/0003-12/thumbnail",
             "preview": "/api/v1/catalog/symbols/0003-12/preview",
             "download": "/api/v1/catalog/symbols/download",
@@ -264,10 +300,10 @@ def test_catalog_symbol_detail_resolves_display_id_slug_and_uuid_with_public_lin
         assert "downloadassets" not in serialized
         assert "downloadurl" not in serialized
         executed_sql, params = session.executed[-1]
-        assert "gs.slug = :symbol_ref" in executed_sql
-        assert "gs.id::text = :symbol_ref" in executed_sql
-        assert "package_display_id" in executed_sql
+        assert "gs.id = :symbol_id" in executed_sql
+        assert "payload_json ->>" not in executed_sql
         assert params["symbol_ref"] == symbol_ref
+        assert str(params["symbol_id"]) == row.symbol_id
         assert any(isinstance(event, CatalogApiUsageEvent) and event.route_name == "catalog_symbol_detail" for event in session.added)
         assert session.added[-1].symbol_ref == symbol_ref
 
@@ -278,8 +314,34 @@ def test_catalog_symbol_detail_returns_404_for_unknown_symbol_ref():
     response = client.get("/api/v1/catalog/symbols/unknown-symbol", headers=auth_headers())
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "Catalog symbol was not found."
-    assert len(session.executed) == 1
+    assert response.json() == {
+        "error": "not_found",
+        "detail": "Catalog symbol was not found.",
+        "code": "catalog_symbol_not_found",
+    }
+    assert len(session.executed) >= 1
+
+
+def test_catalog_symbol_detail_maps_resolver_failures_to_bounded_503_without_leaks(monkeypatch):
+    client, _session = build_client(key_rows=[api_key_row("valid-token")], symbol_rows=[symbol_row()])
+
+    import symgov_backend.routes.catalog as catalog_route
+
+    monkeypatch.setattr(
+        catalog_route,
+        "resolve_catalog_symbol",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("SELECT * FROM secrets token=abc123")),
+        raising=False,
+    )
+
+    response = client.get("/api/v1/catalog/symbols/0003-12", headers=auth_headers())
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": "request_error",
+        "detail": "Catalog symbol lookup is temporarily unavailable. Please retry.",
+        "code": "catalog_symbol_lookup_unavailable",
+    }
 
 
 def test_catalog_symbol_preview_alias_requires_catalog_read_and_streams_preview_asset(monkeypatch):
@@ -309,13 +371,39 @@ def test_catalog_symbol_preview_alias_requires_catalog_read_and_streams_preview_
     assert no_scope_session.executed == []
     assert allowed.status_code == 200
     assert allowed.headers["content-type"].startswith("image/svg+xml")
+    assert allowed.headers["content-security-policy"] == "sandbox"
+    assert allowed.headers["x-content-type-options"] == "nosniff"
     assert allowed.content == b"<svg>preview</svg>"
     assert thumbnail.status_code == 200
+    assert thumbnail.headers["content-security-policy"] == "sandbox"
+    assert thumbnail.headers["x-content-type-options"] == "nosniff"
     assert thumbnail.content == b"<svg>preview</svg>"
     assert [event.route_name for event in session.added if isinstance(event, CatalogApiUsageEvent)] == [
         "catalog_symbol_preview",
         "catalog_symbol_thumbnail",
     ]
+
+
+def test_catalog_preview_and_thumbnail_reject_mislabeled_active_content(monkeypatch):
+    client, _session = build_client(
+        key_rows=[api_key_row("valid-token")],
+        symbol_rows=[symbol_row()],
+        attachment_rows=[attachment_row(content_type="image/png")],
+    )
+    import symgov_backend.routes.catalog as catalog_route
+
+    monkeypatch.setattr(
+        catalog_route,
+        "download_object_bytes",
+        lambda **_kwargs: {"payload": b"<html><script>alert(1)</script></html>", "content_type": "image/png"},
+    )
+
+    for suffix in ("preview", "thumbnail"):
+        response = client.get(
+            f"/api/v1/catalog/symbols/0003-12/{suffix}",
+            headers=auth_headers(),
+        )
+        assert response.status_code == 404
 
 
 def test_catalog_symbol_detail_usage_logging_failure_does_not_fail_response():

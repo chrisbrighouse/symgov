@@ -85,6 +85,7 @@ def _symbol(*, slug, name, display_id, object_key, format_="PNG"):
     package_id, sequence = display_id.split("-", 1)
     return SimpleNamespace(
         symbol_id=str(uuid.uuid4()),
+        catalog_symbol_id=display_id,
         slug=slug,
         canonical_name=name,
         category="symbol",

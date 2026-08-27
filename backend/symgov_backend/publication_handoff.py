@@ -36,7 +36,13 @@ from .models import (
 )
 from .service_users import enforce_noninteractive_service_account, new_service_pin_hash
 from .settings import get_settings
-from .runtime import coerce_uuid, download_object_bytes, slugify_public_code
+from .publication_authority import lock_review_case_decision_authority
+from .runtime import (
+    coerce_uuid,
+    download_object_bytes,
+    ensure_publication_approval_target,
+    slugify_public_code,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -102,6 +108,55 @@ def approval_actor_snapshot(decision: HumanReviewDecision) -> dict[str, str]:
         "display_name": display_name,
         "effective_role": effective_role,
     }
+
+
+def validate_publication_handoff_authority(
+    session: Session,
+    *,
+    action: ReviewCaseAction,
+    review_case: ReviewCase,
+    decision: HumanReviewDecision,
+    review_case_id: uuid.UUID,
+    decision_id: uuid.UUID,
+) -> dict[str, str]:
+    if (
+        action.review_case_id != review_case_id
+        or action.decision_id != decision_id
+        or review_case.id != review_case_id
+        or decision.id != decision_id
+        or decision.review_case_id != review_case_id
+    ):
+        raise RuntimeError("Publication handoff action, review case, and decision identities are inconsistent.")
+    if decision.decision_code != "approve":
+        raise RuntimeError("Publication requires an approve review decision.")
+    if decision.superseded_at is not None:
+        raise RuntimeError("Publication review decision has been superseded.")
+
+    approval_actor = approval_actor_snapshot(decision)
+    action_payload = dict(action.action_payload_json or {})
+    decision_payload = dict(decision.decision_payload_json or {})
+    if (
+        action_payload.get("decision_code") != decision.decision_code
+        or str(decision_payload.get("review_case_id") or "") != str(review_case_id)
+    ):
+        raise RuntimeError("Queued publication handoff snapshot does not match the current review decision.")
+
+    current_decision = (
+        session.query(HumanReviewDecision)
+        .filter(HumanReviewDecision.review_case_id == review_case_id)
+        .filter(HumanReviewDecision.superseded_at.is_(None))
+        .order_by(HumanReviewDecision.created_at.desc())
+        .first()
+    )
+    if current_decision is None or current_decision.id != decision_id:
+        raise RuntimeError("Publication handoff decision is not the current review decision.")
+    if (
+        review_case.current_stage != "ready_for_publication_handoff"
+        or decision.to_stage != review_case.current_stage
+        or action.target_stage != "publication_staging"
+    ):
+        raise RuntimeError("Publication handoff case stage does not match the approved decision.")
+    return approval_actor
 
 
 def source_package_display_id(intake_record: IntakeRecord | None) -> str | None:
@@ -880,6 +935,7 @@ def queue_libby_duplicate_followup(
     decision: HumanReviewDecision,
     action: ReviewCaseAction,
     duplicates: list[dict[str, Any]],
+    commit_transaction: bool = True,
 ) -> dict[str, Any]:
     now = utc_now()
     libby_definition = session.query(AgentDefinition).filter_by(slug="libby").one_or_none()
@@ -981,13 +1037,15 @@ def queue_libby_duplicate_followup(
             created_at=now,
         )
     )
-    session.commit()
-
     queue_file = Path("/data/.openclaw/workspaces/libby/runtime") / "agent_queue_items" / f"{queue_id}.json"
     queue_file.parent.mkdir(parents=True, exist_ok=True)
     with queue_file.open("w", encoding="utf-8") as handle:
         json.dump(queue_item, handle, indent=2)
         handle.write("\n")
+    if commit_transaction:
+        session.commit()
+    else:
+        session.flush()
     return {"status": "duplicate_detected", "libby_queue_item_id": queue_id, "reviewer_message": reviewer_message}
 
 
@@ -997,7 +1055,10 @@ def execute_publication_handoff(
     review_case_id: uuid.UUID,
     decision_id: uuid.UUID,
     close_review_case: bool = True,
+    commit_transaction: bool = True,
+    commit_before_external: bool = False,
 ) -> dict[str, Any]:
+    lock_review_case_decision_authority(session, review_case_id)
     action = (
         session.query(ReviewCaseAction)
         .filter(
@@ -1014,24 +1075,29 @@ def execute_publication_handoff(
 
     review_case = session.get(ReviewCase, review_case_id)
     decision = session.get(HumanReviewDecision, decision_id)
+    if review_case is None or decision is None:
+        return {"status": "failed", "detail": "Missing review case or decision."}
+    try:
+        approval_actor = validate_publication_handoff_authority(
+            session,
+            action=action,
+            review_case=review_case,
+            decision=decision,
+            review_case_id=review_case_id,
+            decision_id=decision_id,
+        )
+    except RuntimeError as exc:
+        return {"status": "failed", "detail": str(exc)}
+
     rupert_definition = session.query(AgentDefinition).filter_by(slug="rupert").one_or_none()
-    if review_case is None or decision is None or rupert_definition is None:
-        action.action_status = "failed"
-        action.action_payload_json = {
-            **(action.action_payload_json or {}),
-            "error": "Missing review case, decision, or Rupert agent definition.",
-        }
-        action.completed_at = utc_now()
-        session.commit()
-        return {"status": "failed", "detail": action.action_payload_json["error"]}
+    if rupert_definition is None:
+        return {"status": "failed", "detail": "Missing Rupert agent definition."}
 
     now = utc_now()
     action.action_status = "running"
     action.started_at = now
-    session.commit()
 
     try:
-        approval_actor = approval_actor_snapshot(decision)
         context = load_review_context(session, review_case)
         revisions = approved_revisions_for_decision(
             session,
@@ -1048,8 +1114,15 @@ def execute_publication_handoff(
                 decision=decision,
                 action=action,
                 duplicates=duplicate_matches,
+                commit_transaction=commit_transaction,
             )
         revision_ids = [str(revision.id) for revision in revisions]
+        approval_target = ensure_publication_approval_target(
+            session,
+            review_decision=decision,
+            revisions=revisions,
+            created_at=now,
+        )
         display_ids = revision_display_ids(revisions)
         pack_code, pack_title = build_pack_metadata(context, review_case)
         queue_id = f"aqi-rupert-review-{str(decision.id)[:8]}-{now.strftime('%Y%m%dT%H%M%SZ')}"
@@ -1066,6 +1139,8 @@ def execute_publication_handoff(
                 "human_decision": "approve",
                 "human_approved": True,
                 "approval_actor": approval_actor,
+                "approval_target_id": str(approval_target.id),
+                "approval_content_sha256": approval_target.content_sha256,
                 "symbol_revision_ids": revision_ids,
                 "symbol_display_ids": display_ids,
                 "display_name": display_ids[0] if len(display_ids) == 1 else None,
@@ -1091,9 +1166,14 @@ def execute_publication_handoff(
             "publication_pack_code": pack_code,
             "duplicate_gate_override": duplicate_override,
             "approval_actor": approval_actor,
+            "approval_target_id": str(approval_target.id),
+            "approval_content_sha256": approval_target.content_sha256,
         }
-        session.commit()
-
+        if commit_before_external:
+            # Rupert persists its result from a separate DB session.  Commit
+            # the authority/queue state before starting it so that session
+            # cannot wait on the lock still held by this transaction.
+            session.commit()
         queue_path = write_rupert_queue_item(queue_item)
         result = run_rupert(queue_path)
         completed_at = utc_now()
@@ -1132,9 +1212,14 @@ def execute_publication_handoff(
                 created_at=completed_at,
             )
         )
-        session.commit()
+        if commit_transaction:
+            session.commit()
+        else:
+            session.flush()
         return {"status": "completed", "rupert_queue_item_id": queue_id, "symbol_revision_ids": revision_ids}
     except Exception as exc:
+        if not commit_transaction:
+            raise
         failed_at = utc_now()
         session.rollback()
         action = session.get(ReviewCaseAction, action.id)
