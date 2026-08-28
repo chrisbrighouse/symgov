@@ -611,12 +611,26 @@ def _catalog_symbol_preview_bytes(symbol_ref: str, session: Session) -> Response
     object_key = preview_asset.get("object_key") if preview_asset else None
     if not object_key:
         raise HTTPException(status_code=404, detail="Catalog symbol preview was not found.")
-    attachment = session.query(Attachment).filter(Attachment.object_key == object_key).one_or_none()
+    try:
+        revision_id = uuid.UUID(str(row.symbol_revision_id))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Catalog symbol preview was not found.") from exc
+    attachment = (
+        session.query(Attachment)
+        .filter(
+            Attachment.object_key == object_key,
+            Attachment.parent_type == "symbol_revision",
+            Attachment.parent_id == revision_id,
+        )
+        .one_or_none()
+    )
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="Catalog symbol preview was not found.")
     payload = download_object_bytes(object_key=object_key, env_file=str(get_settings().storage_env_file))
     try:
         media_type = validate_stored_image(
             payload["payload"],
-            attachment.content_type if attachment is not None else None,
+            attachment.content_type,
             payload.get("content_type"),
         )
     except UnsafeImageContentError as exc:

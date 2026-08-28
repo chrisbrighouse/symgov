@@ -878,6 +878,143 @@ def test_publication_approval_target_creation_rejects_same_key_byte_substitution
         ).one_or_none() is None
 
 
+def test_publication_approval_target_rejects_attachment_owned_by_other_revision(
+    publication_context,
+    monkeypatch,
+) -> None:
+    target_object_key = "catalog/previews/foreign-owned.png"
+    approved_bytes = b"\x89PNG\r\n\x1a\nrevision-owned"
+    _, target_revision_id = _seed_symbol(publication_context, slug="target-owner")
+    _, foreign_revision_id = _seed_symbol(publication_context, slug="foreign-owner")
+    review_case_id = uuid.uuid4()
+    decision_id = uuid.uuid4()
+    with publication_context.Session.begin() as session:
+        revision = session.get(SymbolRevision, target_revision_id)
+        revision.payload_json = {"source_object_key": target_object_key}
+        review_case = ReviewCase(
+            id=review_case_id,
+            source_entity_type="symbol_revision",
+            source_entity_id=target_revision_id,
+            current_stage="ready_for_publication_handoff",
+            owner_id=publication_context.owner_id,
+            escalation_level="medium",
+            opened_at=publication_context.now,
+            closed_at=None,
+        )
+        decision = HumanReviewDecision(
+            id=decision_id,
+            review_case_id=review_case_id,
+            decision_code="approve",
+            decision_summary="Approved target revision.",
+            decision_note=None,
+            decided_by=publication_context.owner_id,
+            decider_name="Publication Owner",
+            decider_role="reviewer",
+            from_stage="review",
+            to_stage="ready_for_publication_handoff",
+            decision_payload_json={"review_case_id": str(review_case_id)},
+            created_at=publication_context.now,
+        )
+        session.add(review_case)
+        session.flush()
+        session.add(decision)
+        session.add(
+            Attachment(
+                id=uuid.uuid4(),
+                parent_type="symbol_revision",
+                parent_id=foreign_revision_id,
+                filename="foreign-owned.png",
+                object_key=target_object_key,
+                content_type="image/png",
+                size_bytes=len(approved_bytes),
+                sha256=hashlib.sha256(approved_bytes).hexdigest(),
+                created_at=publication_context.now,
+            )
+        )
+
+    with publication_context.Session() as session:
+        monkeypatch.setattr(
+            runtime,
+            "download_object_bytes",
+            lambda **_kwargs: {"payload": approved_bytes, "content_type": "image/png"},
+        )
+
+        with pytest.raises(RuntimeError, match="revision-owned attachment"):
+            runtime.ensure_publication_approval_target(
+                session,
+                review_decision=session.get(HumanReviewDecision, decision_id),
+                revisions=[session.get(SymbolRevision, target_revision_id)],
+                created_at=publication_context.now,
+            )
+
+        assert session.query(runtime.PublicationApprovalTarget).filter_by(
+            review_decision_id=decision_id
+        ).one_or_none() is None
+
+
+def test_duplicate_followup_commit_failure_emits_no_libby_runtime_file(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    review_case = SimpleNamespace(id=uuid.uuid4(), current_stage="ready_for_publication_handoff", closed_at=None)
+    decision = SimpleNamespace(id=uuid.uuid4(), decided_by=uuid.uuid4())
+    action = SimpleNamespace(id=uuid.uuid4(), action_status="running", completed_at=None, action_payload_json={})
+    libby = SimpleNamespace(id=uuid.uuid4())
+
+    class Query:
+        def filter_by(self, **_kwargs):
+            return self
+
+        def one_or_none(self):
+            return libby
+
+    class CommitFailingSession:
+        def query(self, model):
+            assert model is AgentDefinition
+            return Query()
+
+        def get(self, model, _item_id):
+            assert model is AgentQueueItem
+            return None
+
+        def add(self, _item):
+            return None
+
+        def commit(self):
+            raise RuntimeError("synthetic duplicate queue commit failure")
+
+        def flush(self):
+            return None
+
+    monkeypatch.setattr(publication_handoff, "Path", lambda _value: tmp_path)
+    monkeypatch.setattr(publication_handoff, "approval_actor_snapshot", lambda _decision: {})
+    monkeypatch.setattr(
+        publication_handoff,
+        "mark_split_item_duplicate_pending_for_decision",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic duplicate queue commit failure"):
+        publication_handoff.queue_libby_duplicate_followup(
+            CommitFailingSession(),
+            review_case=review_case,
+            decision=decision,
+            action=action,
+            duplicates=[
+                {
+                    "candidate_revision_id": str(uuid.uuid4()),
+                    "matched_symbol_slug": "published-symbol",
+                    "hamming_distance": 0,
+                    "distance_threshold": 4,
+                    "pixel_difference": 0.0,
+                    "pixel_difference_threshold": 0.08,
+                }
+            ],
+        )
+
+    assert list(tmp_path.rglob("*.json")) == []
+
+
 def test_runtime_publication_rejects_same_key_byte_substitution_before_writes(
     publication_context,
     monkeypatch,

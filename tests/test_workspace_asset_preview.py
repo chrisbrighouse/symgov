@@ -367,7 +367,7 @@ def test_workspace_review_source_preview_endpoint_uses_intake_companion_for_vali
 
     def fake_download_object_bytes(*, object_key, env_file):
         captured["object_key"] = object_key
-        return {"payload": b"jpeg-bytes", "content_type": "image/jpeg"}
+        return {"payload": b"\xff\xd8\xff\xe0jpeg-bytes", "content_type": "image/jpeg"}
 
     monkeypatch.setattr(workspace_routes, "download_object_bytes", fake_download_object_bytes)
     monkeypatch.setattr(
@@ -380,7 +380,9 @@ def test_workspace_review_source_preview_endpoint_uses_intake_companion_for_vali
 
     assert captured["object_key"] == "symbols/valve.jpg"
     assert response.media_type == "image/jpeg"
-    assert response.body == b"jpeg-bytes"
+    assert response.body == b"\xff\xd8\xff\xe0jpeg-bytes"
+    assert response.headers["content-security-policy"] == "sandbox"
+    assert response.headers["x-content-type-options"] == "nosniff"
 
 
 def test_workspace_review_source_preview_endpoint_serves_requested_previewable_asset(monkeypatch):
@@ -425,7 +427,7 @@ def test_workspace_review_source_preview_endpoint_serves_requested_previewable_a
 
     def fake_download_object_bytes(*, object_key, env_file):
         captured["object_key"] = object_key
-        return {"payload": b"svg-bytes", "content_type": "image/svg+xml"}
+        return {"payload": b"<svg><script>alert(1)</script></svg>", "content_type": "image/svg+xml"}
 
     monkeypatch.setattr(workspace_routes, "download_object_bytes", fake_download_object_bytes)
     monkeypatch.setattr(workspace_routes, "get_settings", lambda: SimpleNamespace(storage_env_file="storage.env"))
@@ -436,8 +438,125 @@ def test_workspace_review_source_preview_endpoint_serves_requested_previewable_a
 
     assert captured["object_key"] == "validation/valve.svg"
     assert response.media_type == "image/svg+xml"
-    assert response.body == b"svg-bytes"
+    assert response.body == b"<svg><script>alert(1)</script></svg>"
     assert response.headers["cache-control"] == "no-store"
+    assert response.headers["content-security-policy"] == "sandbox"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+    monkeypatch.setattr(
+        workspace_routes,
+        "download_object_bytes",
+        lambda **_kwargs: {
+            "payload": b"<html><script>alert(1)</script></html>",
+            "content_type": "image/svg+xml",
+        },
+    )
+    with pytest.raises(workspace_routes.HTTPException) as error:
+        workspace_routes.get_workspace_review_source_preview(
+            str(review_case_id), object_key="validation/valve.svg", session=PreviewSession()
+        )
+
+    assert error.value.status_code == 404
+    assert error.value.detail == "Review source preview not found."
+
+
+def test_workspace_review_child_preview_validates_image_bytes_and_sets_safe_headers(monkeypatch):
+    review_case = SimpleNamespace(id=uuid.uuid4())
+    validation_report = SimpleNamespace(id=uuid.uuid4())
+    object_key = "children/valve.png"
+    attachment = SimpleNamespace(content_type="image/png")
+
+    class PreviewSession:
+        def __init__(self):
+            self.calls = 0
+
+        def execute(self, _statement):
+            self.calls += 1
+            if self.calls == 1:
+                return SimpleNamespace(one_or_none=lambda: (review_case, validation_report))
+            return SimpleNamespace(scalar_one_or_none=lambda: attachment)
+
+    monkeypatch.setattr(
+        workspace_routes,
+        "build_children",
+        lambda *_args, **_kwargs: [SimpleNamespace(attachmentObjectKey=object_key)],
+    )
+    monkeypatch.setattr(workspace_routes, "resolve_source_file_name", lambda _report: "valve.png")
+    monkeypatch.setattr(
+        workspace_routes,
+        "download_object_bytes",
+        lambda **_kwargs: {"payload": b"\x89PNG\r\n\x1a\npreview", "content_type": "image/png"},
+    )
+    monkeypatch.setattr(workspace_routes, "get_settings", lambda: SimpleNamespace(storage_env_file="storage.env"))
+
+    response = workspace_routes.get_workspace_review_child_preview(
+        str(review_case.id),
+        object_key=object_key,
+        session=PreviewSession(),
+    )
+
+    assert response.media_type == "image/png"
+    assert response.headers["content-security-policy"] == "sandbox"
+    assert response.headers["x-content-type-options"] == "nosniff"
+
+    attachment.content_type = "image/svg+xml"
+    monkeypatch.setattr(
+        workspace_routes,
+        "download_object_bytes",
+        lambda **_kwargs: {
+            "payload": b"<svg><script>alert(1)</script></svg>",
+            "content_type": "image/svg+xml",
+        },
+    )
+    svg_response = workspace_routes.get_workspace_review_child_preview(
+        str(review_case.id),
+        object_key=object_key,
+        session=PreviewSession(),
+    )
+
+    assert svg_response.media_type == "image/svg+xml"
+    assert svg_response.headers["content-security-policy"] == "sandbox"
+    assert svg_response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_workspace_review_child_preview_rejects_mislabeled_active_content(monkeypatch):
+    review_case = SimpleNamespace(id=uuid.uuid4())
+    validation_report = SimpleNamespace(id=uuid.uuid4())
+    object_key = "children/valve.png"
+    attachment = SimpleNamespace(content_type="image/png")
+
+    class PreviewSession:
+        def __init__(self):
+            self.calls = 0
+
+        def execute(self, _statement):
+            self.calls += 1
+            if self.calls == 1:
+                return SimpleNamespace(one_or_none=lambda: (review_case, validation_report))
+            return SimpleNamespace(scalar_one_or_none=lambda: attachment)
+
+    monkeypatch.setattr(
+        workspace_routes,
+        "build_children",
+        lambda *_args, **_kwargs: [SimpleNamespace(attachmentObjectKey=object_key)],
+    )
+    monkeypatch.setattr(workspace_routes, "resolve_source_file_name", lambda _report: "valve.png")
+    monkeypatch.setattr(
+        workspace_routes,
+        "download_object_bytes",
+        lambda **_kwargs: {"payload": b"<html><script>alert(1)</script></html>", "content_type": "image/png"},
+    )
+    monkeypatch.setattr(workspace_routes, "get_settings", lambda: SimpleNamespace(storage_env_file="storage.env"))
+
+    with pytest.raises(workspace_routes.HTTPException) as error:
+        workspace_routes.get_workspace_review_child_preview(
+            str(review_case.id),
+            object_key=object_key,
+            session=PreviewSession(),
+        )
+
+    assert error.value.status_code == 404
+    assert error.value.detail == "Review child preview not found."
 
 
 @pytest.mark.parametrize("object_key", ["symbols/valve.dxf", "other/private.svg"])

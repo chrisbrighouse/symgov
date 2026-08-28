@@ -21,6 +21,7 @@ from ..auth import AuthenticatedUser, ReviewOperationActor, derive_review_operat
 from ..filename_inference import infer_filename_metadata
 from ..asset_manifest import choose_preview_asset, content_type_for_format, is_browser_previewable, list_available_assets
 from ..dependencies import get_db_session, require_workspace_access
+from ..image_content import UnsafeImageContentError, safe_image_response_headers, validate_stored_image
 from ..models import (
     AgentDefinition,
     AgentQueueItem,
@@ -4743,8 +4744,19 @@ def get_workspace_review_child_preview(
 
     attachment = session.execute(select(Attachment).where(Attachment.object_key == object_key)).scalar_one_or_none()
     payload = download_object_bytes(object_key=object_key, env_file=str(get_settings().storage_env_file))
-    media_type = attachment.content_type if attachment is not None else payload["content_type"]
-    return Response(content=payload["payload"], media_type=media_type)
+    try:
+        media_type = validate_stored_image(
+            payload["payload"],
+            attachment.content_type if attachment is not None else None,
+            payload.get("content_type"),
+        )
+    except UnsafeImageContentError as exc:
+        raise HTTPException(status_code=404, detail="Review child preview not found.") from exc
+    return Response(
+        content=payload["payload"],
+        media_type=media_type,
+        headers={"Cache-Control": "no-store", **safe_image_response_headers()},
+    )
 
 
 @router.get("/review-cases/{review_case_id}/source/preview")
@@ -4820,13 +4832,22 @@ def get_workspace_review_source_preview(
 
     attachment = session.execute(select(Attachment).where(Attachment.object_key == selected_object_key)).scalar_one_or_none()
     payload = download_object_bytes(object_key=selected_object_key, env_file=str(get_settings().storage_env_file))
-    media_type = content_type_for_format(
+    declared_media_type = content_type_for_format(
         preview_asset.get("format") if preview_asset else None,
         filename=(preview_asset or {}).get("filename") or selected_object_key,
         content_type=(preview_asset or {}).get("content_type") or (attachment.content_type if attachment is not None else payload["content_type"]),
     )
+    try:
+        media_type = validate_stored_image(
+            payload["payload"],
+            declared_media_type,
+            attachment.content_type if attachment is not None else None,
+            payload.get("content_type"),
+        )
+    except UnsafeImageContentError as exc:
+        raise HTTPException(status_code=404, detail="Review source preview not found.") from exc
     return Response(
         content=payload["payload"],
         media_type=media_type,
-        headers={"Cache-Control": "no-store"},
+        headers={"Cache-Control": "no-store", **safe_image_response_headers()},
     )

@@ -1037,15 +1037,14 @@ def queue_libby_duplicate_followup(
             created_at=now,
         )
     )
+    if not commit_transaction:
+        raise RuntimeError("Duplicate follow-up runtime delivery requires a durable queue transaction.")
+    session.commit()
     queue_file = Path("/data/.openclaw/workspaces/libby/runtime") / "agent_queue_items" / f"{queue_id}.json"
     queue_file.parent.mkdir(parents=True, exist_ok=True)
     with queue_file.open("w", encoding="utf-8") as handle:
         json.dump(queue_item, handle, indent=2)
         handle.write("\n")
-    if commit_transaction:
-        session.commit()
-    else:
-        session.flush()
     return {"status": "duplicate_detected", "libby_queue_item_id": queue_id, "reviewer_message": reviewer_message}
 
 

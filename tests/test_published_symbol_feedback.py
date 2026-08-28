@@ -310,7 +310,10 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
 
         class Session:
             def execute(self, *_args, **_kwargs):
-                return SimpleNamespace(all=lambda: [SimpleNamespace(payload_json=payload_json)])
+                return SimpleNamespace(all=lambda: [SimpleNamespace(
+                    symbol_revision_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                    payload_json=payload_json,
+                )])
 
             def query(self, *_args):
                 return QueryResult()
@@ -350,7 +353,10 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
 
         class Session:
             def execute(self, *_args, **_kwargs):
-                return SimpleNamespace(all=lambda: [SimpleNamespace(payload_json=payload_json)])
+                return SimpleNamespace(all=lambda: [SimpleNamespace(
+                    symbol_revision_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                    payload_json=payload_json,
+                )])
 
             def query(self, *_args):
                 return QueryResult()
@@ -395,7 +401,10 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
                 self.content_type = content_type
 
             def execute(self, *_args, **_kwargs):
-                return SimpleNamespace(all=lambda: [SimpleNamespace(payload_json=payload_json)])
+                return SimpleNamespace(all=lambda: [SimpleNamespace(
+                    symbol_revision_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                    payload_json=payload_json,
+                )])
 
             def query(self, *_args):
                 return QueryResult(self.content_type)
@@ -416,6 +425,65 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
                     get_published_symbol_preview("mislabeled", format="PNG", session=Session(media_type))
 
             self.assertEqual(exc.exception.status_code, 404)
+
+    def test_published_preview_rejects_attachment_owned_by_other_revision(self) -> None:
+        target_revision_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        foreign_revision_id = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        payload_json = {
+            "visual_assets": {
+                "preview": {
+                    "object_key": "symbols/owner-bound.svg",
+                    "filename": "owner-bound.svg",
+                    "content_type": "image/svg+xml",
+                    "format": "svg",
+                }
+            }
+        }
+
+        class QueryResult:
+            def __init__(self):
+                self.criteria = []
+
+            def filter(self, *criteria):
+                self.criteria.extend(criteria)
+                return self
+
+            def one_or_none(self):
+                if len(self.criteria) >= 3:
+                    return None
+                return SimpleNamespace(
+                    content_type="image/svg+xml",
+                    object_key="symbols/owner-bound.svg",
+                    parent_type="symbol_revision",
+                    parent_id=foreign_revision_id,
+                )
+
+        class Session:
+            def execute(self, *_args, **_kwargs):
+                return SimpleNamespace(
+                    all=lambda: [
+                        SimpleNamespace(
+                            symbol_revision_id=str(target_revision_id),
+                            payload_json=payload_json,
+                        )
+                    ]
+                )
+
+            def query(self, *_args):
+                return QueryResult()
+
+        with patch(
+            "symgov_backend.routes.published.resolve_catalog_symbol",
+            return_value=SimpleNamespace(symbol_id=UUID("11111111-1111-1111-1111-111111111111")),
+        ), patch(
+            "symgov_backend.routes.published.download_object_bytes",
+            return_value={"payload": b"<svg />", "content_type": "image/svg+xml"},
+        ):
+            with self.assertRaises(HTTPException) as exc:
+                get_published_symbol_preview("owner-bound", format="SVG", session=Session())
+
+        self.assertEqual(exc.exception.status_code, 404)
+        self.assertEqual(exc.exception.detail, "Published symbol preview was not found.")
 
     def test_published_symbol_comment_item_serializes_history_entry(self) -> None:
         comment = SimpleNamespace(

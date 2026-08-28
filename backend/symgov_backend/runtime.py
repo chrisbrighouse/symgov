@@ -636,10 +636,18 @@ def build_publication_approval_revision_targets(
         for object_key in _revision_artifact_object_keys(payload):
             attachment = (
                 session.query(Attachment)
-                .filter(Attachment.object_key == object_key)
+                .filter(
+                    Attachment.object_key == object_key,
+                    Attachment.parent_type == "symbol_revision",
+                    Attachment.parent_id == revision.id,
+                )
                 .one_or_none()
             )
-            if attachment is None or not attachment.sha256:
+            if attachment is None:
+                raise RuntimeError(
+                    f"Approved revision artifact {object_key} is not a revision-owned attachment."
+                )
+            if not attachment.sha256:
                 raise RuntimeError(
                     f"Approved revision artifact {object_key} lacks a durable attachment content identity."
                 )

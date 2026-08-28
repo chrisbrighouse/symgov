@@ -35,12 +35,26 @@ class CatalogApiKeyQuery:
 class AttachmentQuery:
     def __init__(self, rows):
         self.rows = rows
+        self.criteria = []
 
     def filter(self, *criteria):
+        self.criteria.extend(criteria)
         return self
 
     def one_or_none(self):
-        return self.rows[0] if self.rows else None
+        compiled = "\n".join(
+            str(criterion.compile(compile_kwargs={"literal_binds": True}))
+            for criterion in self.criteria
+        )
+        for row in self.rows:
+            if hasattr(row, "object_key") and str(row.object_key) not in compiled:
+                continue
+            if "attachments.parent_type" in compiled and hasattr(row, "parent_type") and str(row.parent_type) not in compiled:
+                continue
+            if "attachments.parent_id" in compiled and hasattr(row, "parent_id") and str(row.parent_id) not in compiled:
+                continue
+            return row
+        return None
 
 
 class ExecuteRows:
@@ -404,6 +418,33 @@ def test_catalog_preview_and_thumbnail_reject_mislabeled_active_content(monkeypa
             headers=auth_headers(),
         )
         assert response.status_code == 404
+
+
+def test_catalog_preview_rejects_attachment_owned_by_other_revision(monkeypatch):
+    row = symbol_row()
+    client, _session = build_client(
+        key_rows=[api_key_row("valid-token")],
+        symbol_rows=[row],
+        attachment_rows=[
+            attachment_row(
+                object_key="previews/smoke-detector.svg",
+                parent_type="symbol_revision",
+                parent_id=uuid.uuid4(),
+            )
+        ],
+    )
+    import symgov_backend.routes.catalog as catalog_route
+
+    monkeypatch.setattr(
+        catalog_route,
+        "download_object_bytes",
+        lambda **_kwargs: {"payload": b"<svg></svg>", "content_type": "image/svg+xml"},
+    )
+
+    response = client.get("/api/v1/catalog/symbols/0003-12/preview", headers=auth_headers())
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Catalog symbol preview was not found."
 
 
 def test_catalog_symbol_detail_usage_logging_failure_does_not_fail_response():
