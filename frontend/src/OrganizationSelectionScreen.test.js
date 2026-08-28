@@ -1,9 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
+import TestRenderer, { act } from 'react-test-renderer';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import OrganizationSelectionPage, { OrganizationSelectionScreen } from './OrganizationSelectionPage.js';
+
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+function NavigationProbe() {
+  const location = useLocation();
+  return createElement('output', { id: 'navigation-probe' }, `${location.pathname}${location.search}${location.hash}`);
+}
 
 const challenge = {
   token: 'test-token',
@@ -108,4 +116,60 @@ test('OrganizationSelectionPage: terminal challenge loss provides a deterministi
   assert.match(markup, /Organization selection challenge is invalid or unavailable\./);
   assert.match(markup, /href="\/login"/);
   assert.match(markup, /Return to sign-in/);
+});
+
+test('OrganizationSelectionPage: successful selection resumes the validated destination', async () => {
+  const auth = {
+    challenge,
+    selectOrganization: async () => ({ ok: true, session: { user: { mustChangePin: false } } })
+  };
+  let renderer;
+
+  await act(async () => {
+    renderer = TestRenderer.create(createElement(
+      MemoryRouter,
+      { initialEntries: [{ pathname: '/select-organization', state: { from: '/standards?symbol=S-000001#detail' } }] },
+      createElement(
+        'div',
+        null,
+        createElement(OrganizationSelectionPage, { auth }),
+        createElement(NavigationProbe)
+      )
+    ));
+  });
+
+  const selectionButton = renderer.root.findAll((node) => node.type === 'button' && node.props.className === 'org-selection-button')[0];
+  await act(async () => {
+    await selectionButton.props.onClick();
+  });
+
+  assert.equal(renderer.root.findByProps({ id: 'navigation-probe' }).children[0], '/standards?symbol=S-000001#detail');
+});
+
+test('OrganizationSelectionPage: successful selection forwards the destination through mandatory PIN change', async () => {
+  const auth = {
+    challenge,
+    selectOrganization: async () => ({ ok: true, session: { user: { mustChangePin: true } } })
+  };
+  let renderer;
+
+  await act(async () => {
+    renderer = TestRenderer.create(createElement(
+      MemoryRouter,
+      { initialEntries: [{ pathname: '/select-organization', state: { from: '/standards?symbol=S-000001#detail' } }] },
+      createElement(
+        'div',
+        null,
+        createElement(OrganizationSelectionPage, { auth }),
+        createElement(NavigationProbe)
+      )
+    ));
+  });
+
+  const selectionButton = renderer.root.findAll((node) => node.type === 'button' && node.props.className === 'org-selection-button')[0];
+  await act(async () => {
+    await selectionButton.props.onClick();
+  });
+
+  assert.equal(renderer.root.findByProps({ id: 'navigation-probe' }).children[0], '/change-pin');
 });

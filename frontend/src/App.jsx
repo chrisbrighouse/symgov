@@ -54,6 +54,10 @@ import {
   normalizeSessionResponse,
   selectOrganization as apiSelectOrganization
 } from './organizationSession.js';
+import {
+  destinationFromRouterState,
+  internalDestinationFromLocation
+} from './catalogRoutes.js';
 import { appConfig } from './config.js';
 import CatalogDeveloperHub from './CatalogDeveloperHub.jsx';
 import ProfilePage from './ProfilePage.jsx';
@@ -337,18 +341,38 @@ function defaultPathForUser() {
 
 function AuthProvider({ children }) {
   const [authState, setAuthState] = useState({ loading: true, user: null, challenge: null, type: null, message: '' });
+  const logoutSucceededRef = useRef(false);
+  const authRequestSequenceRef = useRef(0);
 
-  const updateFromResponse = (result, options) => {
+  const beginAuthRequest = () => {
+    authRequestSequenceRef.current += 1;
+    return authRequestSequenceRef.current;
+  };
+
+  const staleAuthResult = (result) => ({
+    ...result,
+    ok: false,
+    stale: true,
+    message: 'Authentication state changed. Please try again.',
+    session: null
+  });
+
+  const updateFromResponse = (result, options, requestSequence) => {
     const session = normalizeSessionResponse(result.payload);
+    if (requestSequence !== undefined && requestSequence !== authRequestSequenceRef.current) {
+      return staleAuthResult(result);
+    }
+    logoutSucceededRef.current = false;
     setAuthState((current) => authStateFromResponse(current, result, options));
     return { ...result, session };
   };
 
   useEffect(() => {
     let cancelled = false;
+    const requestSequence = beginAuthRequest();
     fetchCurrentUser().then((result) => {
       if (!cancelled) {
-        updateFromResponse(result);
+        updateFromResponse(result, undefined, requestSequence);
       }
     });
     return () => {
@@ -358,24 +382,32 @@ function AuthProvider({ children }) {
 
   const value = useMemo(() => ({
     ...authState,
+    loggedOut: logoutSucceededRef.current,
     refresh: async () => {
+      const requestSequence = beginAuthRequest();
       const result = await fetchCurrentUser();
-      return updateFromResponse(result);
+      return updateFromResponse(result, undefined, requestSequence);
     },
     login: async ({ email, pin }) => {
+      const requestSequence = beginAuthRequest();
       setAuthState((current) => ({ ...current, loading: true, challenge: null, message: '' }));
       const result = await loginUser({ email, pin });
-      return updateFromResponse(result);
+      return updateFromResponse(result, undefined, requestSequence);
     },
     selectOrganization: async (params) => {
+      const requestSequence = beginAuthRequest();
       setAuthState((current) => ({ ...current, loading: true, message: '' }));
       const result = await apiSelectOrganization(params);
-      return updateFromResponse(result, { preserveRetryableChallenge: true });
+      return updateFromResponse(result, { preserveRetryableChallenge: true }, requestSequence);
     },
     changePin: async ({ currentPin, newPin }) => {
+      const requestSequence = beginAuthRequest();
       const result = await changeCurrentUserPin({ currentPin, newPin });
+      if (requestSequence !== authRequestSequenceRef.current) {
+        return staleAuthResult(result);
+      }
       if (result.ok) {
-        updateFromResponse(result);
+        updateFromResponse(result, undefined, requestSequence);
       }
       return result;
     },
@@ -389,7 +421,12 @@ function AuthProvider({ children }) {
       return result.payload;
     },
     logout: async () => {
+      const requestSequence = beginAuthRequest();
       const result = await logoutUser();
+      if (requestSequence !== authRequestSequenceRef.current) {
+        return staleAuthResult(result);
+      }
+      logoutSucceededRef.current = result.ok;
       setAuthState((current) => authStateAfterLogout(current, result));
       return result;
     }
@@ -415,14 +452,18 @@ function RequireAuth({ children }) {
   }
 
   if (!auth.user) {
-    if (auth.challenge) {
-      return <Navigate to="/select-organization" replace state={{ from: location }} />;
+    if (auth.loggedOut) {
+      return <Navigate to="/login" replace />;
     }
-    return <Navigate to="/login" replace state={{ from: location }} />;
+    const destination = internalDestinationFromLocation(location);
+    if (auth.challenge) {
+      return <Navigate to="/select-organization" replace state={{ from: destination }} />;
+    }
+    return <Navigate to="/login" replace state={{ from: destination }} />;
   }
 
   if (auth.user?.mustChangePin && location.pathname !== '/change-pin') {
-    return <Navigate to="/change-pin" replace state={{ from: location }} />;
+    return <Navigate to="/change-pin" replace state={{ from: internalDestinationFromLocation(location) }} />;
   }
 
   return children;
@@ -526,6 +567,8 @@ function LoginPage() {
   const auth = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const destination = destinationFromRouterState(location.state);
+  const loginAttemptedRef = useRef(false);
   const [email, setEmail] = useState('');
   const [pin, setPin] = useState('');
   const [message, setMessage] = useState('');
@@ -534,16 +577,19 @@ function LoginPage() {
 
   useEffect(() => {
     if (auth.user) {
-      const fromPath = location.state?.from?.pathname;
-      const targetPath = auth.user.mustChangePin ? '/change-pin' : (fromPath && fromPath !== '/login' ? fromPath : defaultPathForUser(auth.user));
-      navigate(targetPath, { replace: true });
+      const continuation = loginAttemptedRef.current ? destination : '/standards';
+      navigate(auth.user.mustChangePin ? '/change-pin' : continuation, {
+        replace: true,
+        state: auth.user.mustChangePin ? { from: continuation } : undefined
+      });
     } else if (auth.challenge) {
-      navigate('/select-organization', { replace: true });
+      navigate('/select-organization', { replace: true, state: { from: destination } });
     }
-  }, [auth.user, auth.challenge, navigate, location.state]);
+  }, [auth.user, auth.challenge, destination, navigate]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    loginAttemptedRef.current = true;
     setIsSubmitting(true);
     setMessage('');
     const result = await auth.login({ email, pin });
@@ -552,7 +598,6 @@ function LoginPage() {
       setMessage(result.message || 'Login failed.');
       return;
     }
-    navigate(result.user?.mustChangePin ? '/change-pin' : defaultPathForUser(result.user), { replace: true });
   };
 
   const isBusy = isSubmitting || auth.loading;
@@ -645,6 +690,8 @@ function LoginPage() {
 function ChangePinPage() {
   const auth = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const destination = destinationFromRouterState(location.state);
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -666,7 +713,7 @@ function ChangePinPage() {
       return;
     }
     setMessage('Your PIN has been changed.');
-    navigate(defaultPathForUser(result.payload?.user), { replace: true });
+    navigate(destination, { replace: true });
   };
 
   return (

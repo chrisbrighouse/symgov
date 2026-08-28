@@ -1,5 +1,6 @@
 import { createElement, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { destinationFromRouterState } from './catalogRoutes.js';
 
 export function OrganizationIcon({ organization }) {
   if (organization.logoUrl) {
@@ -104,6 +105,9 @@ export function OrganizationSelectionScreen({
 export default function OrganizationSelectionPage({ auth }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const destination = destinationFromRouterState(location.state);
 
   if (!auth.challenge) {
     return createElement(
@@ -129,7 +133,21 @@ export default function OrganizationSelectionPage({ auth }) {
         organizationId
       });
       if (!result.ok) {
-        setError(result.message);
+        if (result.status === 401) {
+          navigate('/login', { replace: true });
+        } else {
+          setError(result.message);
+        }
+      } else if (result.session?.user) {
+        const target = result.session.user.mustChangePin ? '/change-pin' : destination;
+        navigate(
+          target,
+          result.session.user.mustChangePin
+            ? { replace: true, state: { from: destination } }
+            : { replace: true }
+        );
+      } else {
+        setError('Organization selection could not establish a session.');
       }
     } catch (err) {
       setError(err.message || 'An unexpected error occurred.');
