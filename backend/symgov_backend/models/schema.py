@@ -700,6 +700,22 @@ class LLMUsageEvent(Base):
 
 class GovernedSymbol(Base):
     __tablename__ = "governed_symbols"
+    __table_args__ = (
+        CheckConstraint(
+            "visibility in ('organization_private', 'public')",
+            name="visibility",
+        ),
+        CheckConstraint(
+            "not organization_wide or (owner_organization_id is not null and visibility = 'public')",
+            name="organization_wide_scope",
+        ),
+        Index(
+            "ix_governed_symbols_owner_visibility_organization_wide",
+            "owner_organization_id",
+            "visibility",
+            "organization_wide",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     catalog_symbol_id: Mapped[str | None] = mapped_column(Text, ForeignKey("catalog_symbol_identifiers.identifier", ondelete="RESTRICT"), nullable=True, unique=True)
@@ -708,6 +724,11 @@ class GovernedSymbol(Base):
     category: Mapped[str] = mapped_column(Text, nullable=False)
     discipline: Mapped[str] = mapped_column(Text, nullable=False)
     owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    owner_organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=True
+    )
+    visibility: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'public'"))
+    organization_wide: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     current_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_revisions.id"), nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -825,6 +846,72 @@ class SymbolRevision(Base):
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     author_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OrganizationSymbolReviewSubmission(Base):
+    __tablename__ = "organization_symbol_review_submissions"
+    __table_args__ = (
+        CheckConstraint(
+            "(status = 'active' and closed_at is null) or (status = 'closed' and closed_at is not null)",
+            name="status",
+        ),
+        CheckConstraint(
+            "rationale is null or (btrim(rationale) <> '' and char_length(rationale) <= 2000)",
+            name="rationale",
+        ),
+        Index(
+            "uq_organization_symbol_review_submissions_active_revision",
+            "symbol_revision_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+        Index(
+            "ix_org_symbol_review_submissions_tenant_symbol_revision",
+            "organization_id",
+            "governed_symbol_id",
+            "symbol_revision_id",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False)
+    governed_symbol_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("governed_symbols.id", ondelete="RESTRICT"), nullable=False)
+    symbol_revision_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_revisions.id", ondelete="RESTRICT"), nullable=False)
+    submitted_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    submitted_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    closed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class OrganizationSymbolReviewDecision(Base):
+    __tablename__ = "organization_symbol_review_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "decision in ('approved', 'rejected', 'changes_requested')",
+            name="decision",
+        ),
+        CheckConstraint(
+            "rationale is null or (btrim(rationale) <> '' and char_length(rationale) <= 2000)",
+            name="rationale",
+        ),
+        Index(
+            "ix_org_symbol_review_decisions_tenant_symbol_revision",
+            "organization_id",
+            "governed_symbol_id",
+            "symbol_revision_id",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    submission_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organization_symbol_review_submissions.id", ondelete="RESTRICT"), nullable=False, unique=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False)
+    governed_symbol_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("governed_symbols.id", ondelete="RESTRICT"), nullable=False)
+    symbol_revision_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_revisions.id", ondelete="RESTRICT"), nullable=False)
+    decided_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    decision: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class SourcePackage(Base):
