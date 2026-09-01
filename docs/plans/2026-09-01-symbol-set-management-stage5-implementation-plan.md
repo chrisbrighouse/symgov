@@ -2,7 +2,7 @@
 
 > **For Hermes / OpenClaw orchestration and Claude Code:** this is the one committed, controlling plan for Product Stage 5. Ephemeral `/tmp` manifests, restart prompts, and review verdicts produced by either orchestration layer are session-scoped evidence, not sources of truth — reconcile against this file and the current repository state (`git log`, `git status`, Alembic head) before resuming or dispatching a Stage 5 work package. If a `/tmp` artifact and this file disagree, this file wins; update this file rather than trusting a stale scratch manifest.
 
-**Status:** IMPLEMENTATION IN PROGRESS — WP5.1 is complete and committed. WP5.2–WP5.6 are planned but not started.
+**Status:** IMPLEMENTATION IN PROGRESS — WP5.1 is complete and committed. WP5.2 (a, b, c), WP5.3 (draft/revision/intake/asset service and API), and WP5.4 (organization review lifecycle) are complete, tested against the disposable Postgres container, and awaiting review/commit. The `organization-symbols` API is mounted behind the `organizations_enabled`/`organization_symbols_enabled` feature flags (both default off). WP5.5–WP5.6 are planned but not started.
 
 **Goal:** establish organization-owned private symbol drafts, an organization review lifecycle, and a single authoritative public-visibility floor that every existing public reader — HTTP routes and background agent readers alike — enforces, before any private row can exist.
 

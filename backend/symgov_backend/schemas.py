@@ -1264,3 +1264,107 @@ class PlatformDeactivateSymgovMemberRequest(BaseModel):
 class PlatformReactivateMemberRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     reason: str = Field(min_length=10, max_length=1000)
+
+
+# --- WP5.3: organization-private symbol drafts ---
+
+class OrganizationSymbolDraftCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=256)
+    category: str = Field(min_length=1, max_length=128)
+    discipline: str = Field(min_length=1, max_length=128)
+    summary: str = Field(min_length=1, max_length=2000)
+    description: str | None = Field(default=None, max_length=4000)
+    aliases: list[str] | None = None
+    keywords: list[str] | None = None
+
+
+class OrganizationSymbolAssetResponse(BaseModel):
+    id: str
+    objectKey: str
+    filename: str
+    contentType: str
+    role: str
+    sha256: str
+    sizeBytes: int
+
+
+class OrganizationSymbolRevisionResponse(BaseModel):
+    id: str
+    revisionLabel: str
+    lifecycleState: str
+    name: str
+    summary: str
+    description: str | None
+    aliases: list[str]
+    keywords: list[str]
+    assets: list[OrganizationSymbolAssetResponse]
+    createdAt: datetime
+
+
+class OrganizationSymbolDraftResponse(BaseModel):
+    id: str
+    slug: str
+    canonicalName: str
+    category: str
+    discipline: str
+    visibility: str
+    organizationWide: bool
+    organizationId: str
+    ownerId: str
+    currentRevisionId: str | None
+    currentRevision: OrganizationSymbolRevisionResponse | None
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class OrganizationSymbolDraftListResponse(BaseModel):
+    items: list[OrganizationSymbolDraftResponse]
+
+
+class OrganizationSymbolAssetUploadRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    filename: str = Field(min_length=1, max_length=256)
+    contentType: str = Field(min_length=1, max_length=128)
+    contentBase64: str = Field(min_length=1)
+    role: str = Field(default="source", pattern="^(source|preview)$")
+
+
+class OrganizationSymbolSubmissionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rationale: str | None = Field(default=None, max_length=2000)
+
+
+class OrganizationSymbolSubmissionResponse(BaseModel):
+    id: str
+    organizationId: str
+    governedSymbolId: str
+    symbolRevisionId: str
+    submittedByUserId: str
+    submittedAt: datetime
+    status: str
+
+
+# --- WP5.4: organization review lifecycle ---
+
+class OrganizationSymbolReviewDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    decision: str = Field(pattern="^(approved|rejected|changes_requested)$")
+    rationale: str | None = Field(default=None, max_length=2000)
+
+
+class OrganizationSymbolReviewDecisionResponse(BaseModel):
+    id: str
+    submissionId: str
+    organizationId: str
+    governedSymbolId: str
+    symbolRevisionId: str
+    decidedByUserId: str
+    decision: str
+    rationale: str | None
+    decidedAt: datetime
+
+
+class OrganizationSymbolOrganizationWideRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool
