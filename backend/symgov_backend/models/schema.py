@@ -706,7 +706,7 @@ class GovernedSymbol(Base):
             name="visibility",
         ),
         CheckConstraint(
-            "not organization_wide or (owner_organization_id is not null and visibility = 'public')",
+            "not organization_wide or owner_organization_id is not null",
             name="organization_wide_scope",
         ),
         Index(

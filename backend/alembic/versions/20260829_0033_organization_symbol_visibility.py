@@ -61,8 +61,7 @@ def upgrade() -> None:
     op.create_check_constraint(
         "ck_governed_symbols_organization_wide_scope",
         "governed_symbols",
-        "not organization_wide or "
-        "(owner_organization_id is not null and visibility = 'public')",
+        "not organization_wide or owner_organization_id is not null",
     )
     op.create_index(
         "ix_governed_symbols_owner_visibility_organization_wide",
@@ -187,18 +186,75 @@ def upgrade() -> None:
 
     op.execute(
         """
-        CREATE FUNCTION validate_organization_symbol_review_submission_binding()
-        RETURNS trigger LANGUAGE plpgsql AS $$
+        CREATE FUNCTION serialize_organization_symbol_review_binding()
+        RETURNS trigger LANGUAGE plpgsql
+        SET search_path = pg_catalog, public AS $$
         DECLARE
-            current_submission organization_symbol_review_submissions%ROWTYPE;
+            binding_symbol_ids uuid[];
+            binding_lock_key bigint;
+        BEGIN
+            IF TG_TABLE_NAME = 'organization_symbol_review_submissions' THEN
+                binding_symbol_ids := ARRAY[NEW.governed_symbol_id];
+            ELSIF TG_TABLE_NAME = 'governed_symbols' THEN
+                binding_symbol_ids := ARRAY[NEW.id];
+            ELSE
+                binding_symbol_ids := ARRAY[OLD.symbol_id, NEW.symbol_id];
+            END IF;
+
+            FOR binding_lock_key IN
+                SELECT DISTINCT pg_catalog.hashtextextended(
+                    'symgov:stage5:organization-review:governed-symbol:'
+                    || symbol_id::text,
+                    0
+                ) AS lock_key
+                FROM pg_catalog.unnest(binding_symbol_ids) AS symbol_id
+                WHERE symbol_id IS NOT NULL
+                ORDER BY lock_key
+            LOOP
+                PERFORM pg_catalog.pg_advisory_xact_lock(binding_lock_key);
+            END LOOP;
+            RETURN NEW;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_organization_symbol_review_submission_serialization
+        BEFORE INSERT ON organization_symbol_review_submissions
+        FOR EACH ROW EXECUTE FUNCTION serialize_organization_symbol_review_binding()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_governed_symbols_organization_review_serialization
+        BEFORE UPDATE OF owner_organization_id ON governed_symbols
+        FOR EACH ROW EXECUTE FUNCTION serialize_organization_symbol_review_binding()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_symbol_revisions_organization_review_serialization
+        BEFORE UPDATE OF symbol_id ON symbol_revisions
+        FOR EACH ROW EXECUTE FUNCTION serialize_organization_symbol_review_binding()
+        """
+    )
+
+    op.execute(
+        """
+        CREATE FUNCTION validate_organization_symbol_review_submission_binding()
+        RETURNS trigger LANGUAGE plpgsql
+        SET search_path = pg_catalog, public, pg_temp AS $$
+        DECLARE
+            current_submission public.organization_symbol_review_submissions%ROWTYPE;
         BEGIN
             SELECT * INTO current_submission
-            FROM organization_symbol_review_submissions
+            FROM public.organization_symbol_review_submissions
             WHERE id = NEW.id;
             IF NOT EXISTS (
                 SELECT 1
-                FROM governed_symbols gs
-                JOIN symbol_revisions sr
+                FROM public.governed_symbols gs
+                JOIN public.symbol_revisions sr
                   ON sr.id = current_submission.symbol_revision_id
                  AND sr.symbol_id = gs.id
                 WHERE gs.id = current_submission.governed_symbol_id
@@ -209,7 +265,7 @@ def upgrade() -> None:
             END IF;
             IF current_submission.status = 'closed' AND NOT EXISTS (
                 SELECT 1
-                FROM organization_symbol_review_decisions decision
+                FROM public.organization_symbol_review_decisions decision
                 WHERE decision.submission_id = current_submission.id
                   AND decision.organization_id = current_submission.organization_id
                   AND decision.governed_symbol_id = current_submission.governed_symbol_id
@@ -220,7 +276,7 @@ def upgrade() -> None:
             END IF;
             IF current_submission.status = 'active' AND EXISTS (
                 SELECT 1
-                FROM organization_symbol_review_decisions decision
+                FROM public.organization_symbol_review_decisions decision
                 WHERE decision.submission_id = current_submission.id
             ) THEN
                 RAISE EXCEPTION 'decided organization review submission must be closed'
@@ -242,11 +298,12 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE FUNCTION validate_organization_symbol_review_decision_binding()
-        RETURNS trigger LANGUAGE plpgsql AS $$
+        RETURNS trigger LANGUAGE plpgsql
+        SET search_path = pg_catalog, public, pg_temp AS $$
         BEGIN
             IF NOT EXISTS (
                 SELECT 1
-                FROM organization_symbol_review_submissions submission
+                FROM public.organization_symbol_review_submissions submission
                 WHERE submission.id = NEW.submission_id
                   AND submission.organization_id = NEW.organization_id
                   AND submission.governed_symbol_id = NEW.governed_symbol_id
@@ -271,29 +328,34 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE FUNCTION validate_organization_symbol_review_parent_binding()
-        RETURNS trigger LANGUAGE plpgsql AS $$
+        RETURNS trigger LANGUAGE plpgsql
+        SET search_path = pg_catalog, public, pg_temp AS $$
         BEGIN
             IF TG_TABLE_NAME = 'governed_symbols' AND EXISTS (
                 SELECT 1
-                FROM organization_symbol_review_submissions submission
-                JOIN symbol_revisions revision
+                FROM public.organization_symbol_review_submissions submission
+                JOIN public.governed_symbols current_symbol
+                  ON current_symbol.id = submission.governed_symbol_id
+                JOIN public.symbol_revisions revision
                   ON revision.id = submission.symbol_revision_id
                 WHERE submission.governed_symbol_id = NEW.id
                   AND (
-                      submission.organization_id IS DISTINCT FROM NEW.owner_organization_id
-                      OR revision.symbol_id IS DISTINCT FROM NEW.id
+                      submission.organization_id IS DISTINCT FROM current_symbol.owner_organization_id
+                      OR revision.symbol_id IS DISTINCT FROM current_symbol.id
                   )
             ) THEN
                 RAISE EXCEPTION 'governed symbol change would rebind organization review history'
                     USING ERRCODE = '23514';
             ELSIF TG_TABLE_NAME = 'symbol_revisions' AND EXISTS (
                 SELECT 1
-                FROM organization_symbol_review_submissions submission
-                JOIN governed_symbols symbol
+                FROM public.organization_symbol_review_submissions submission
+                JOIN public.symbol_revisions current_revision
+                  ON current_revision.id = submission.symbol_revision_id
+                JOIN public.governed_symbols symbol
                   ON symbol.id = submission.governed_symbol_id
                 WHERE submission.symbol_revision_id = NEW.id
                   AND (
-                      submission.governed_symbol_id IS DISTINCT FROM NEW.symbol_id
+                      submission.governed_symbol_id IS DISTINCT FROM current_revision.symbol_id
                       OR submission.organization_id IS DISTINCT FROM symbol.owner_organization_id
                   )
             ) THEN
@@ -324,22 +386,23 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE FUNCTION validate_governed_symbol_organization_wide_eligibility()
-        RETURNS trigger LANGUAGE plpgsql AS $$
+        RETURNS trigger LANGUAGE plpgsql
+        SET search_path = pg_catalog, public, pg_temp AS $$
         DECLARE
-            current_symbol governed_symbols%ROWTYPE;
+            current_symbol public.governed_symbols%ROWTYPE;
         BEGIN
             SELECT * INTO current_symbol
-            FROM governed_symbols
+            FROM public.governed_symbols
             WHERE id = NEW.id;
             IF current_symbol.organization_wide AND NOT EXISTS (
                 SELECT 1
-                FROM symbol_revisions sr
-                JOIN organization_symbol_review_decisions decision
+                FROM public.symbol_revisions sr
+                JOIN public.organization_symbol_review_decisions decision
                   ON decision.organization_id = current_symbol.owner_organization_id
                  AND decision.governed_symbol_id = current_symbol.id
                  AND decision.symbol_revision_id = sr.id
                  AND decision.decision = 'approved'
-                JOIN organization_symbol_review_submissions submission
+                JOIN public.organization_symbol_review_submissions submission
                   ON submission.id = decision.submission_id
                  AND submission.status = 'closed'
                 WHERE sr.id = current_symbol.current_revision_id
@@ -368,7 +431,7 @@ def upgrade() -> None:
         CREATE FUNCTION protect_organization_symbol_review_submission_history()
         RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
-            IF TG_OP = 'DELETE' THEN
+            IF TG_OP IN ('DELETE', 'TRUNCATE') THEN
                 RAISE EXCEPTION 'organization review submission history is append-preserving'
                     USING ERRCODE = '55000';
             END IF;
@@ -402,6 +465,13 @@ def upgrade() -> None:
     )
     op.execute(
         """
+        CREATE TRIGGER trg_organization_symbol_review_submissions_immutable_truncate
+        BEFORE TRUNCATE ON organization_symbol_review_submissions
+        FOR EACH STATEMENT EXECUTE FUNCTION protect_organization_symbol_review_submission_history()
+        """
+    )
+    op.execute(
+        """
         CREATE FUNCTION protect_organization_symbol_review_decision_history()
         RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
@@ -416,6 +486,13 @@ def upgrade() -> None:
         CREATE TRIGGER trg_organization_symbol_review_decisions_immutable
         BEFORE UPDATE OR DELETE ON organization_symbol_review_decisions
         FOR EACH ROW EXECUTE FUNCTION protect_organization_symbol_review_decision_history()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_organization_symbol_review_decisions_immutable_truncate
+        BEFORE TRUNCATE ON organization_symbol_review_decisions
+        FOR EACH STATEMENT EXECUTE FUNCTION protect_organization_symbol_review_decision_history()
         """
     )
 
@@ -511,6 +588,18 @@ def downgrade() -> None:
         "DROP TRIGGER IF EXISTS trg_governed_symbols_organization_wide_eligibility ON governed_symbols"
     )
     op.execute(
+        "DROP TRIGGER IF EXISTS trg_symbol_revisions_organization_review_serialization "
+        "ON symbol_revisions"
+    )
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_governed_symbols_organization_review_serialization "
+        "ON governed_symbols"
+    )
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_organization_symbol_review_submission_serialization "
+        "ON organization_symbol_review_submissions"
+    )
+    op.execute(
         "DROP TRIGGER IF EXISTS trg_symbol_revisions_organization_review_binding "
         "ON symbol_revisions"
     )
@@ -519,12 +608,20 @@ def downgrade() -> None:
         "ON governed_symbols"
     )
     op.execute(
+        "DROP TRIGGER IF EXISTS trg_organization_symbol_review_decisions_immutable_truncate "
+        "ON organization_symbol_review_decisions"
+    )
+    op.execute(
         "DROP TRIGGER IF EXISTS trg_organization_symbol_review_decisions_immutable "
         "ON organization_symbol_review_decisions"
     )
     op.execute(
         "DROP TRIGGER IF EXISTS trg_organization_symbol_review_decision_binding "
         "ON organization_symbol_review_decisions"
+    )
+    op.execute(
+        "DROP TRIGGER IF EXISTS trg_organization_symbol_review_submissions_immutable_truncate "
+        "ON organization_symbol_review_submissions"
     )
     op.execute(
         "DROP TRIGGER IF EXISTS trg_organization_symbol_review_submissions_immutable "
@@ -537,6 +634,7 @@ def downgrade() -> None:
     op.execute(
         "DROP FUNCTION IF EXISTS validate_governed_symbol_organization_wide_eligibility()"
     )
+    op.execute("DROP FUNCTION IF EXISTS serialize_organization_symbol_review_binding()")
     op.execute(
         "DROP FUNCTION IF EXISTS validate_organization_symbol_review_parent_binding()"
     )

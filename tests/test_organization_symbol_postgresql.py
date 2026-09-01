@@ -99,6 +99,13 @@ def stage5_database():
     with _database("symgov-stage5") as (engine, url, raw_url):
         _alembic(url, "upgrade", "20260826_0032")
         _alembic(url, "upgrade", "20260829_0033")
+        with psycopg.connect(raw_url, autocommit=True) as connection:
+            # Production runs migrations as symgov_app, so it owns governed_symbols
+            # and symbol_revisions outright; this disposable rehearsal runs migrations
+            # as postgres, so the equivalent read access is granted explicitly here.
+            connection.execute(
+                "GRANT SELECT ON governed_symbols, symbol_revisions TO symgov_app"
+            )
         yield engine, url, raw_url
 
 
@@ -228,6 +235,22 @@ def _approve(connection, submission_id, organization_id, symbol_id, revision_id,
     return decision
 
 
+def _wait_for_blocker(observer, contender_pid: int, blocker_pid: int, *, timeout: float = 5.0):
+    deadline = time.monotonic() + timeout
+    observed = []
+    while time.monotonic() < deadline:
+        observed = observer.execute(
+            "SELECT pg_blocking_pids(%s)", (contender_pid,)
+        ).fetchone()[0]
+        if blocker_pid in observed:
+            return observed
+        time.sleep(0.01)
+    raise AssertionError(
+        f"backend {contender_pid} was not blocked by {blocker_pid} within {timeout}s; "
+        f"last blockers={observed}"
+    )
+
+
 def test_0032_to_0033_upgrade_defaults_checks_indexes_and_view_are_real(stage5_database):
     engine, _, _ = stage5_database
     inspector = inspect(engine)
@@ -262,7 +285,12 @@ def test_review_bindings_history_and_organization_wide_eligibility_are_real(stag
         actor = _user(connection, "review")
         organization = _organization(connection, "review")
         other = _organization(connection, "other")
-        symbol = _symbol(connection, actor, organization_id=organization, visibility="public")
+        symbol = _symbol(
+            connection,
+            actor,
+            organization_id=organization,
+            visibility="organization_private",
+        )
         revision = _revision(connection, symbol, actor)
         other_symbol = _symbol(
             connection, actor, organization_id=organization, visibility="public"
@@ -327,6 +355,185 @@ def test_review_bindings_history_and_organization_wide_eligibility_are_real(stag
         with pytest.raises(DBAPIError, match="immutable|append-preserving"):
             with engine.begin() as connection:
                 connection.execute(text(statement), {"id": identifier})
+
+    for table in (
+        "organization_symbol_review_submissions",
+        "organization_symbol_review_decisions",
+    ):
+        connection = engine.connect()
+        transaction = connection.begin()
+        try:
+            with pytest.raises(DBAPIError, match="immutable|append-preserving"):
+                connection.execute(text(f"TRUNCATE TABLE {table} CASCADE"))
+        finally:
+            transaction.rollback()
+            connection.close()
+
+
+def test_review_validators_ignore_temporary_shadow_relations(stage5_database):
+    engine, _, raw_url = stage5_database
+    with engine.begin() as connection:
+        actor = _user(connection, "temporary-shadow")
+        organization = _organization(connection, "temporary-shadow")
+        other = _organization(connection, "temporary-shadow-other")
+        submission_symbol = _symbol(
+            connection, actor, organization_id=organization, visibility="public"
+        )
+        submission_revision = _revision(connection, submission_symbol, actor)
+        decision_symbol = _symbol(
+            connection, actor, organization_id=organization, visibility="public"
+        )
+        decision_revision = _revision(connection, decision_symbol, actor)
+        decision_submission = _submission(
+            connection,
+            organization,
+            decision_symbol,
+            decision_revision,
+            actor,
+        )
+        wide_symbol = _symbol(
+            connection, actor, organization_id=organization, visibility="public"
+        )
+        wide_revision = _revision(connection, wide_symbol, actor)
+        connection.execute(
+            text("GRANT UPDATE (organization_wide) ON public.governed_symbols TO symgov_app")
+        )
+        connection.execute(
+            text(
+                "GRANT SELECT ON public.published_pages, public.pack_entries, "
+                "public.catalog_symbol_identifiers TO symgov_app"
+            )
+        )
+
+    invalid_submission = uuid.uuid4()
+    invalid_decision = uuid.uuid4()
+    fabricated_wide_submission = uuid.uuid4()
+    fabricated_wide_decision = uuid.uuid4()
+    connection = psycopg.connect(raw_url)
+    try:
+        connection.execute("SET ROLE symgov_app")
+        for table in (
+            "governed_symbols",
+            "symbol_revisions",
+            "organization_symbol_review_submissions",
+            "organization_symbol_review_decisions",
+        ):
+            connection.execute(
+                f"CREATE TEMP TABLE {table} AS "
+                f"SELECT * FROM public.{table} WITH NO DATA"
+            )
+        connection.execute(
+            "INSERT INTO pg_temp.governed_symbols "
+            "SELECT * FROM public.governed_symbols WHERE id IN (%s,%s)",
+            (submission_symbol, wide_symbol),
+        )
+        connection.execute(
+            "UPDATE pg_temp.governed_symbols SET organization_wide=true WHERE id=%s",
+            (wide_symbol,),
+        )
+        connection.execute(
+            "INSERT INTO pg_temp.symbol_revisions "
+            "SELECT * FROM public.symbol_revisions WHERE id IN (%s,%s,%s)",
+            (submission_revision, decision_revision, wide_revision),
+        )
+        connection.execute(
+            "INSERT INTO pg_temp.organization_symbol_review_submissions "
+            "(id,organization_id,governed_symbol_id,symbol_revision_id,"
+            "submitted_by_user_id,submitted_at,status,closed_at) VALUES "
+            "(%s,%s,%s,%s,%s,now(),'active',NULL),"
+            "(%s,%s,%s,%s,%s,now(),'active',NULL),"
+            "(%s,%s,%s,%s,%s,now(),'closed',now())",
+            (
+                invalid_submission,
+                organization,
+                submission_symbol,
+                submission_revision,
+                actor,
+                decision_submission,
+                other,
+                decision_symbol,
+                decision_revision,
+                actor,
+                fabricated_wide_submission,
+                organization,
+                wide_symbol,
+                wide_revision,
+                actor,
+            ),
+        )
+        connection.execute(
+            "INSERT INTO pg_temp.organization_symbol_review_decisions "
+            "(id,submission_id,organization_id,governed_symbol_id,"
+            "symbol_revision_id,decided_by_user_id,decision,decided_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,'approved',now())",
+            (
+                fabricated_wide_decision,
+                fabricated_wide_submission,
+                organization,
+                wide_symbol,
+                wide_revision,
+                actor,
+            ),
+        )
+        connection.commit()
+
+        cases = (
+            (
+                "submission",
+                "INSERT INTO public.organization_symbol_review_submissions "
+                "(id,organization_id,governed_symbol_id,symbol_revision_id,"
+                "submitted_by_user_id,submitted_at) VALUES (%s,%s,%s,%s,%s,now())",
+                (
+                    invalid_submission,
+                    other,
+                    submission_symbol,
+                    submission_revision,
+                    actor,
+                ),
+                "binding",
+            ),
+            (
+                "decision",
+                "INSERT INTO public.organization_symbol_review_decisions "
+                "(id,submission_id,organization_id,governed_symbol_id,"
+                "symbol_revision_id,decided_by_user_id,decision,decided_at) "
+                "VALUES (%s,%s,%s,%s,%s,%s,'approved',now())",
+                (
+                    invalid_decision,
+                    decision_submission,
+                    other,
+                    decision_symbol,
+                    decision_revision,
+                    actor,
+                ),
+                "binding",
+            ),
+            (
+                "organization-wide",
+                "UPDATE public.governed_symbols SET organization_wide=true WHERE id=%s",
+                (wide_symbol,),
+                "current approved",
+            ),
+        )
+        outcomes = {}
+        for label, statement, parameters, expected_message in cases:
+            try:
+                connection.execute(statement, parameters)
+                connection.execute("SET CONSTRAINTS ALL IMMEDIATE")
+                outcomes[label] = ("accepted", "")
+            except psycopg.Error as error:
+                outcomes[label] = (error.sqlstate, str(error))
+            finally:
+                connection.rollback()
+        assert {label: outcome[0] for label, outcome in outcomes.items()} == {
+            "submission": "23514",
+            "decision": "23514",
+            "organization-wide": "23514",
+        }, outcomes
+        for label, _, _, expected_message in cases:
+            assert expected_message in outcomes[label][1]
+    finally:
+        connection.close()
 
 
 def test_one_active_review_per_revision_has_one_real_concurrent_winner(stage5_database):
@@ -403,6 +610,24 @@ def test_review_parent_rows_cannot_rebind_immutable_history(stage5_database):
         )
         _submission(connection, organization, symbol, revision, actor)
 
+    temporary_cases = (
+        (
+            "UPDATE governed_symbols SET owner_organization_id=:other WHERE id=:id",
+            "UPDATE governed_symbols SET owner_organization_id=:original WHERE id=:id",
+            {"other": other, "original": organization, "id": symbol},
+        ),
+        (
+            "UPDATE symbol_revisions SET symbol_id=:other WHERE id=:id",
+            "UPDATE symbol_revisions SET symbol_id=:original WHERE id=:id",
+            {"other": other_symbol, "original": symbol, "id": revision},
+        ),
+    )
+    for rebind, restore, parameters in temporary_cases:
+        with engine.begin() as connection:
+            connection.execute(text(rebind), parameters)
+            connection.execute(text(restore), parameters)
+            connection.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
+
     cases = (
         (
             "UPDATE governed_symbols SET owner_organization_id=:other WHERE id=:id",
@@ -423,6 +648,149 @@ def test_review_parent_rows_cannot_rebind_immutable_history(stage5_database):
         finally:
             transaction.rollback()
             connection.close()
+
+
+@pytest.mark.parametrize(
+    ("parent_kind", "first_operation"),
+    (
+        ("governed_symbol_owner", "submission"),
+        ("governed_symbol_owner", "parent_rebind"),
+        ("symbol_revision_parent", "submission"),
+        ("symbol_revision_parent", "parent_rebind"),
+    ),
+)
+def test_review_insertion_and_parent_rebind_serialize_across_transactions(
+    stage5_database, parent_kind, first_operation
+):
+    engine, _, raw_url = stage5_database
+    with engine.begin() as connection:
+        actor = _user(connection, f"binding-race-{parent_kind}-{first_operation}")
+        organization = _organization(connection, "binding-race")
+        other_organization = _organization(connection, "binding-race-other")
+        symbol = _symbol(
+            connection, actor, organization_id=organization, visibility="public"
+        )
+        revision = _revision(connection, symbol, actor)
+        other_symbol = _symbol(
+            connection, actor, organization_id=organization, visibility="public"
+        )
+
+    submission_id = uuid.uuid4()
+    if parent_kind == "governed_symbol_owner":
+        parent_statement = (
+            "UPDATE governed_symbols SET owner_organization_id=%s WHERE id=%s"
+        )
+        parent_parameters = (other_organization, symbol)
+    else:
+        parent_statement = "UPDATE symbol_revisions SET symbol_id=%s WHERE id=%s"
+        parent_parameters = (other_symbol, revision)
+
+    def insert_submission(connection):
+        connection.execute(
+            "INSERT INTO organization_symbol_review_submissions "
+            "(id,organization_id,governed_symbol_id,symbol_revision_id,"
+            "submitted_by_user_id,submitted_at) VALUES (%s,%s,%s,%s,%s,now())",
+            (submission_id, organization, symbol, revision, actor),
+        )
+
+    holder = psycopg.connect(raw_url)
+    contender = psycopg.connect(raw_url)
+    observer = psycopg.connect(raw_url, autocommit=True)
+    boundary = threading.Barrier(2)
+    finished = threading.Event()
+    outcome = {}
+    try:
+        holder.execute("BEGIN")
+        holder_pid = holder.execute("SELECT pg_backend_pid()").fetchone()[0]
+        if first_operation == "submission":
+            insert_submission(holder)
+        else:
+            holder.execute(parent_statement, parent_parameters)
+        holder.execute("SET CONSTRAINTS ALL IMMEDIATE")
+
+        contender_pid = contender.execute("SELECT pg_backend_pid()").fetchone()[0]
+
+        def contend():
+            try:
+                contender.execute("BEGIN")
+                contender.execute("SET LOCAL statement_timeout='5000ms'")
+                boundary.wait(timeout=5)
+                if first_operation == "submission":
+                    contender.execute(parent_statement, parent_parameters)
+                else:
+                    insert_submission(contender)
+                contender.execute("SET CONSTRAINTS ALL IMMEDIATE")
+                contender.commit()
+                outcome["value"] = ("committed", None)
+            except (DBAPIError, psycopg.Error) as error:
+                contender.rollback()
+                database_error = getattr(error, "orig", error)
+                outcome["value"] = (
+                    getattr(database_error, "sqlstate", None),
+                    str(database_error),
+                )
+            finally:
+                finished.set()
+
+        thread = threading.Thread(target=contend)
+        thread.start()
+        boundary.wait(timeout=5)
+        observed_blockers = _wait_for_blocker(
+            observer, contender_pid, holder_pid, timeout=5.0
+        )
+        assert holder_pid in observed_blockers
+        assert not finished.is_set()
+
+        holder.commit()
+        assert finished.wait(timeout=5)
+        thread.join(timeout=1)
+        assert not thread.is_alive()
+        assert outcome["value"][0] == "23514"
+        assert "binding" in outcome["value"][1]
+        print(
+            "binding race",
+            parent_kind,
+            first_operation,
+            f"contender_pid={contender_pid}",
+            f"blockers={observed_blockers}",
+            f"loser={outcome['value'][0]}",
+        )
+    finally:
+        holder.rollback()
+        contender.rollback()
+        holder.close()
+        contender.close()
+        observer.close()
+
+    with engine.connect() as connection:
+        submission_rows = connection.execute(
+            text(
+                "SELECT organization_id, governed_symbol_id, symbol_revision_id "
+                "FROM organization_symbol_review_submissions WHERE id=:id"
+            ),
+            {"id": submission_id},
+        ).all()
+        owner = connection.execute(
+            text("SELECT owner_organization_id FROM governed_symbols WHERE id=:id"),
+            {"id": symbol},
+        ).scalar_one()
+        revision_parent = connection.execute(
+            text("SELECT symbol_id FROM symbol_revisions WHERE id=:id"),
+            {"id": revision},
+        ).scalar_one()
+
+    if first_operation == "submission":
+        assert submission_rows == [(organization, symbol, revision)]
+        assert owner == organization
+        assert revision_parent == symbol
+    else:
+        assert submission_rows == []
+        if parent_kind == "governed_symbol_owner":
+            assert owner == other_organization
+            assert revision_parent == symbol
+        else:
+            assert owner == organization
+            assert revision_parent == other_symbol
 
 
 def test_deferred_organization_wide_validation_uses_final_row_state(stage5_database):
@@ -453,8 +821,13 @@ def test_active_public_projection_enforces_every_publication_predicate(stage5_da
     engine, _, _ = stage5_database
     with engine.begin() as connection:
         actor = _user(connection, "projection")
-        symbol = _symbol(connection, actor)
+        organization = _organization(connection, "projection")
+        symbol = _symbol(
+            connection, actor, organization_id=organization, visibility="public"
+        )
         revision = _revision(connection, symbol, actor, lifecycle="published")
+        submission = _submission(connection, organization, symbol, revision, actor)
+        _approve(connection, submission, organization, symbol, revision, actor)
         catalog_id = f"S5-{uuid.uuid4().hex[:16].upper()}"
         connection.execute(
             text(
@@ -505,6 +878,23 @@ def test_active_public_projection_enforces_every_publication_predicate(stage5_da
             ).scalar_one()
 
     assert projected() == 1
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE governed_symbols "
+                "SET visibility='organization_private', organization_wide=true WHERE id=:id"
+            ),
+            {"id": symbol},
+        )
+    assert projected() == 0
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "UPDATE governed_symbols "
+                "SET visibility='public', organization_wide=false WHERE id=:id"
+            ),
+            {"id": symbol},
+        )
     mutations = (
         ("UPDATE governed_symbols SET visibility='organization_private' WHERE id=:id", symbol),
         ("UPDATE governed_symbols SET visibility='public', current_revision_id=NULL WHERE id=:id", symbol),
@@ -522,24 +912,108 @@ def test_active_public_projection_enforces_every_publication_predicate(stage5_da
         assert projected() == count
 
 
-def test_least_privilege_grants_and_populated_downgrade_guard_are_real(stage5_database):
+def test_least_privilege_role_enforces_allowed_and_forbidden_operations(stage5_database):
     engine, url, _ = stage5_database
     with engine.connect() as connection:
+        actor = _user(connection, "least-privilege")
+        organization = _organization(connection, "least-privilege")
+        symbol = _symbol(
+            connection, actor, organization_id=organization, visibility="organization_private"
+        )
+        revision = _revision(connection, symbol, actor)
+        connection.commit()
+
+    submission_id = uuid.uuid4()
+    decision_id = uuid.uuid4()
+    connection = engine.connect()
+    try:
+        connection.execute(text("SET ROLE symgov_app"))
+
+        connection.execute(text("SELECT count(*) FROM active_public_symbol_projections"))
+
+        connection.execute(
+            text(
+                "INSERT INTO organization_symbol_review_submissions "
+                "(id,organization_id,governed_symbol_id,symbol_revision_id,submitted_by_user_id,submitted_at) "
+                "VALUES (:id,:organization,:symbol,:revision,:actor,now())"
+            ),
+            {
+                "id": submission_id,
+                "organization": organization,
+                "symbol": symbol,
+                "revision": revision,
+                "actor": actor,
+            },
+        )
         assert connection.execute(
-            text("SELECT has_table_privilege('symgov_app','active_public_symbol_projections','SELECT')")
-        ).scalar_one() is True
+            text("SELECT status FROM organization_symbol_review_submissions WHERE id=:id"),
+            {"id": submission_id},
+        ).scalar_one() == "active"
+
+        connection.execute(
+            text(
+                "INSERT INTO organization_symbol_review_decisions "
+                "(id,submission_id,organization_id,governed_symbol_id,symbol_revision_id,"
+                "decided_by_user_id,decision,decided_at) "
+                "VALUES (:id,:submission,:organization,:symbol,:revision,:actor,'approved',now())"
+            ),
+            {
+                "id": decision_id,
+                "submission": submission_id,
+                "organization": organization,
+                "symbol": symbol,
+                "revision": revision,
+                "actor": actor,
+            },
+        )
+        connection.execute(
+            text(
+                "UPDATE organization_symbol_review_submissions "
+                "SET status='closed', closed_at=now() WHERE id=:id"
+            ),
+            {"id": submission_id},
+        )
+        closed = connection.execute(
+            text(
+                "SELECT status, closed_at FROM organization_symbol_review_submissions WHERE id=:id"
+            ),
+            {"id": submission_id},
+        ).one()
+        assert closed.status == "closed"
+        assert closed.closed_at is not None
+        connection.commit()
+
+        forbidden = (
+            (
+                "DELETE FROM organization_symbol_review_submissions WHERE id=:id",
+                {"id": submission_id},
+            ),
+            ("TRUNCATE TABLE organization_symbol_review_submissions", {}),
+            (
+                "UPDATE organization_symbol_review_decisions SET rationale='x' WHERE id=:id",
+                {"id": decision_id},
+            ),
+            (
+                "DELETE FROM organization_symbol_review_decisions WHERE id=:id",
+                {"id": decision_id},
+            ),
+            ("TRUNCATE TABLE organization_symbol_review_decisions", {}),
+        )
+        for statement, parameters in forbidden:
+            with pytest.raises(DBAPIError, match="permission denied"):
+                connection.execute(text(statement), parameters)
+            connection.rollback()
+    finally:
+        connection.execute(text("RESET ROLE"))
+        connection.commit()
+        connection.close()
+
+    with engine.connect() as connection:
         assert connection.execute(
-            text("SELECT has_table_privilege('symgov_app','organization_symbol_review_submissions','SELECT,INSERT')")
-        ).scalar_one() is True
-        assert connection.execute(
-            text("SELECT has_column_privilege('symgov_app','organization_symbol_review_submissions','status','UPDATE')")
-        ).scalar_one() is True
-        assert connection.execute(
-            text("SELECT has_table_privilege('symgov_app','organization_symbol_review_submissions','DELETE,TRUNCATE')")
-        ).scalar_one() is False
-        assert connection.execute(
-            text("SELECT has_table_privilege('symgov_app','organization_symbol_review_decisions','UPDATE,DELETE,TRUNCATE')")
-        ).scalar_one() is False
+            text("SELECT status FROM organization_symbol_review_submissions WHERE id=:id"),
+            {"id": submission_id},
+        ).scalar_one() == "closed"
+
     result = _alembic(url, "downgrade", "20260826_0032", check=False)
     assert result.returncode != 0
     assert "cannot downgrade organization symbol visibility" in (result.stdout + result.stderr)

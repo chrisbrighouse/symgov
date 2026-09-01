@@ -58,7 +58,7 @@ def test_governed_symbol_visibility_metadata_preserves_legacy_public_defaults():
         "visibility in ('organization_private', 'public')"
     )
     assert checks["ck_governed_symbols_organization_wide_scope"] == (
-        "not organization_wide or (owner_organization_id is not null and visibility = 'public')"
+        "not organization_wide or owner_organization_id is not null"
     )
     tenant_index = next(
         index
@@ -154,9 +154,38 @@ def test_0033_migration_declares_visibility_review_projection_and_guards():
         "create constraint trigger trg_organization_symbol_review_decision_binding",
         "create constraint trigger trg_governed_symbols_organization_review_binding",
         "create constraint trigger trg_symbol_revisions_organization_review_binding",
+        "create function serialize_organization_symbol_review_binding() "
+        "returns trigger language plpgsql set search_path = pg_catalog, public as $$",
+        "create function validate_organization_symbol_review_submission_binding() "
+        "returns trigger language plpgsql set search_path = pg_catalog, public, pg_temp as $$",
+        "create function validate_organization_symbol_review_decision_binding() "
+        "returns trigger language plpgsql set search_path = pg_catalog, public, pg_temp as $$",
+        "create function validate_organization_symbol_review_parent_binding() "
+        "returns trigger language plpgsql set search_path = pg_catalog, public, pg_temp as $$",
+        "create function validate_governed_symbol_organization_wide_eligibility() "
+        "returns trigger language plpgsql set search_path = pg_catalog, public, pg_temp as $$",
+        "current_submission public.organization_symbol_review_submissions%rowtype",
+        "current_symbol public.governed_symbols%rowtype",
+        "symgov:stage5:organization-review:governed-symbol:",
+        "order by lock_key",
+        "pg_catalog.pg_advisory_xact_lock(binding_lock_key)",
+        "create trigger trg_organization_symbol_review_submission_serialization",
+        "before insert on organization_symbol_review_submissions",
+        "create trigger trg_governed_symbols_organization_review_serialization",
+        "before update of owner_organization_id on governed_symbols",
+        "create trigger trg_symbol_revisions_organization_review_serialization",
+        "before update of symbol_id on symbol_revisions",
         "create constraint trigger trg_governed_symbols_organization_wide_eligibility",
+        "join public.governed_symbols current_symbol on current_symbol.id = submission.governed_symbol_id",
+        "join public.symbol_revisions current_revision on current_revision.id = submission.symbol_revision_id",
         "before update or delete on organization_symbol_review_submissions",
         "before update or delete on organization_symbol_review_decisions",
+        "create trigger trg_organization_symbol_review_submissions_immutable_truncate",
+        "before truncate on organization_symbol_review_submissions",
+        "create trigger trg_organization_symbol_review_decisions_immutable_truncate",
+        "before truncate on organization_symbol_review_decisions",
+        "for each statement execute function protect_organization_symbol_review_submission_history()",
+        "for each statement execute function protect_organization_symbol_review_decision_history()",
         "create view active_public_symbol_projections as",
         "gs.visibility = 'public'",
         "sr.lifecycle_state = 'published'",
@@ -169,6 +198,9 @@ def test_0033_migration_declares_visibility_review_projection_and_guards():
         "lock table organization_symbol_review_submissions in access exclusive mode",
         "lock table governed_symbols in access exclusive mode",
         "cannot downgrade organization symbol visibility while stage 5 data exists",
+        "drop trigger if exists trg_organization_symbol_review_submissions_immutable_truncate",
+        "drop trigger if exists trg_organization_symbol_review_decisions_immutable_truncate",
+        "drop function if exists serialize_organization_symbol_review_binding()",
     )
-    for fragment in required:
-        assert _compact(fragment) in compact, f"missing migration contract: {fragment}"
+    missing = [fragment for fragment in required if _compact(fragment) not in compact]
+    assert not missing, f"missing migration contracts: {missing}"
