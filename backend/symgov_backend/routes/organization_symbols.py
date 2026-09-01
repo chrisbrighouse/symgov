@@ -14,10 +14,12 @@ import binascii
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import AuthenticatedUser
 from ..dependencies import get_db_session, require_organization_session
+from ..models import OrganizationSymbolReviewSubmission, SymbolRevision
 from ..organization_symbol_drafts import (
     OrganizationSymbolDraftError,
     OrganizationSymbolDraftNotVisible,
@@ -66,7 +68,18 @@ def _parse_uuid(value: str, *, detail: str = "Not found.") -> uuid.UUID:
         raise HTTPException(status_code=404, detail=detail) from exc
 
 
-def _revision_response(revision) -> OrganizationSymbolRevisionResponse | None:
+def _pending_submission(session: Session, revision_id: uuid.UUID) -> OrganizationSymbolReviewSubmission | None:
+    return session.execute(
+        select(OrganizationSymbolReviewSubmission).where(
+            OrganizationSymbolReviewSubmission.symbol_revision_id == revision_id,
+            OrganizationSymbolReviewSubmission.status == "active",
+        )
+    ).scalars().first()
+
+
+def _revision_response(
+    revision, pending_submission: OrganizationSymbolReviewSubmission | None = None
+) -> OrganizationSymbolRevisionResponse | None:
     if revision is None:
         return None
     payload = revision.payload_json or {}
@@ -92,10 +105,15 @@ def _revision_response(revision) -> OrganizationSymbolRevisionResponse | None:
             for asset in (payload.get("assets") or [])
         ],
         createdAt=revision.created_at,
+        pendingSubmissionId=str(pending_submission.id) if pending_submission is not None else None,
+        pendingSubmissionRationale=pending_submission.rationale if pending_submission is not None else None,
+        pendingSubmissionSubmittedAt=pending_submission.submitted_at if pending_submission is not None else None,
     )
 
 
-def _draft_response(symbol, current_revision=None) -> OrganizationSymbolDraftResponse:
+def _draft_response(
+    symbol, current_revision=None, pending_submission: OrganizationSymbolReviewSubmission | None = None
+) -> OrganizationSymbolDraftResponse:
     return OrganizationSymbolDraftResponse(
         id=str(symbol.id),
         slug=symbol.slug,
@@ -107,7 +125,7 @@ def _draft_response(symbol, current_revision=None) -> OrganizationSymbolDraftRes
         organizationId=str(symbol.owner_organization_id),
         ownerId=str(symbol.owner_id),
         currentRevisionId=str(symbol.current_revision_id) if symbol.current_revision_id else None,
-        currentRevision=_revision_response(current_revision),
+        currentRevision=_revision_response(current_revision, pending_submission),
         createdAt=symbol.created_at,
         updatedAt=symbol.updated_at,
     )
@@ -144,7 +162,12 @@ def list_organization_symbol_drafts(
     current_user: AuthenticatedUser = Depends(require_organization_session),
 ) -> OrganizationSymbolDraftListResponse:
     symbols = list_drafts(session, current_user)
-    return OrganizationSymbolDraftListResponse(items=[_draft_response(symbol) for symbol in symbols])
+    items = []
+    for symbol in symbols:
+        revision = session.get(SymbolRevision, symbol.current_revision_id) if symbol.current_revision_id else None
+        pending_submission = _pending_submission(session, revision.id) if revision is not None else None
+        items.append(_draft_response(symbol, revision, pending_submission))
+    return OrganizationSymbolDraftListResponse(items=items)
 
 
 @router.get("/{symbol_id}", response_model=OrganizationSymbolDraftResponse)
@@ -159,9 +182,11 @@ def get_organization_symbol_draft(
     except OrganizationSymbolDraftNotVisible as exc:
         raise HTTPException(status_code=404, detail="Organization symbol draft was not found.") from exc
     current_revision = None
+    pending_submission = None
     if symbol.current_revision_id is not None:
         _, current_revision = get_draft_revision(session, current_user, symbol.id, symbol.current_revision_id)
-    return _draft_response(symbol, current_revision)
+        pending_submission = _pending_submission(session, current_revision.id)
+    return _draft_response(symbol, current_revision, pending_submission)
 
 
 @router.post(

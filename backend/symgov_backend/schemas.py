@@ -1300,6 +1300,9 @@ class OrganizationSymbolRevisionResponse(BaseModel):
     keywords: list[str]
     assets: list[OrganizationSymbolAssetResponse]
     createdAt: datetime
+    pendingSubmissionId: str | None = None
+    pendingSubmissionRationale: str | None = None
+    pendingSubmissionSubmittedAt: datetime | None = None
 
 
 class OrganizationSymbolDraftResponse(BaseModel):

@@ -367,6 +367,49 @@ export async function createOrganizationSymbolSet(payload) {
   return requireOk(result, 'Symbol Set create failed.');
 }
 
+export async function listOrganizationSymbolDrafts() {
+  const result = await requestJson('/organization-symbols', { cache: 'no-store' });
+  const payload = requireOk(result, 'Organization symbol drafts load failed.');
+  return { items: Array.isArray(payload?.items) ? payload.items : [] };
+}
+
+export async function getOrganizationSymbolDraft(symbolId) {
+  const result = await requestJson(`/organization-symbols/${encodeURIComponent(symbolId)}`, { cache: 'no-store' });
+  return requireOk(result, 'Organization symbol draft load failed.');
+}
+
+export async function createOrganizationSymbolDraft(payload) {
+  const result = await requestJson('/organization-symbols', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+  return requireOk(result, 'Organization symbol draft create failed.');
+}
+
+export async function attachOrganizationSymbolAsset(symbolId, revisionId, payload) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/revisions/${encodeURIComponent(revisionId)}/assets`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+  return requireOk(result, 'Organization symbol asset upload failed.');
+}
+
+export async function submitOrganizationSymbolDraftForReview(symbolId, revisionId, payload = {}) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/revisions/${encodeURIComponent(revisionId)}/submit`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+  return requireOk(result, 'Organization symbol submission failed.');
+}
+
+export async function decideOrganizationSymbolReviewSubmission(symbolId, submissionId, payload) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/review-submissions/${encodeURIComponent(submissionId)}/decision`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+  return requireOk(result, 'Organization symbol review decision failed.');
+}
+
 export async function updateOrganizationSymbolSet(setId, payload) {
   const result = await requestJson(`/org/me/symbol-sets/${encodeURIComponent(setId)}`, {
     method: 'PATCH',

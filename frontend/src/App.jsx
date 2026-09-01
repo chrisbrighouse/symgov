@@ -65,7 +65,9 @@ import OrganizationSelectionPage from './OrganizationSelectionPage.js';
 import { adminRouteElements } from './adminRoutes.js';
 import { canAccessOrganizationAdmin, canAccessPlatformAdmin } from './adminJourneys.js';
 import { ProjectContextBar } from './ProjectContextBar.js';
-import { canMountProjectContext } from './projectContext.js';
+import { canMountOrganizationSymbolDrafts, canMountProjectContext, canReviewOrganizationSymbols } from './projectContext.js';
+import { OrganizationSymbolDraftsPage } from './OrganizationSymbolDraftsPage.js';
+import { OrganizationSymbolReviewsPage } from './OrganizationSymbolReviewsPage.js';
 import { Header } from './Header.js';
 import FavouriteButton from './FavouriteButton.js';
 import FavouriteFilter from './FavouriteFilter.js';
@@ -530,6 +532,8 @@ function AppContent() {
           <Route path="/workspace/users" element={<RequireAnyRole roles={['admin']}><AdminUsersPage /></RequireAnyRole>} />
           <Route path="/workspace/llm" element={<RequireAnyRole roles={['admin']}><AdminLlmPage /></RequireAnyRole>} />
           {adminRouteElements(auth, RequireAuth)}
+          <Route path="/organization/symbols" element={<RequireAuth><OrganizationSymbolDraftsPage auth={auth} /></RequireAuth>} />
+          <Route path="/organization/symbols/review" element={<RequireAuth><OrganizationSymbolReviewsPage auth={auth} /></RequireAuth>} />
           <Route path="/reviews" element={<RequireAnyRole roles={['admin', 'reviewer']}><ReviewsPage /></RequireAnyRole>} />
           {/* Route path="/rights" element={<RightsReviewPage />} protected by reviewer/admin auth. */}
           <Route path="/rights" element={<RequireAnyRole roles={['admin', 'reviewer']}><RightsReviewPage /></RequireAnyRole>} />
@@ -754,6 +758,8 @@ function SideRail() {
   const canAdmin = hasAnyRole(user, ['admin']);
   const canAdminOrganization = canAccessOrganizationAdmin(user);
   const canAdminPlatform = canAccessPlatformAdmin(user);
+  const canUseOrganizationSymbolDrafts = canMountOrganizationSymbolDrafts({ user });
+  const canReviewOrganizationSymbolSubmissions = canReviewOrganizationSymbols({ user });
 
   return (
     <aside className="side-rail" aria-label="Primary navigation">
@@ -774,6 +780,12 @@ function SideRail() {
         <nav className="rail-nav rail-nav-admin" aria-label="Organization administration">
           {canAdminOrganization ? <RailNavLink to="/organization/admin" label="Organization" icon="admin" /> : null}
           {canAdminPlatform ? <RailNavLink to="/platform/admin" label="Platform" icon="admin" /> : null}
+        </nav>
+      ) : null}
+      {canUseOrganizationSymbolDrafts || canReviewOrganizationSymbolSubmissions ? (
+        <nav className="rail-nav rail-nav-admin" aria-label="Organization symbol drafts">
+          {canUseOrganizationSymbolDrafts ? <RailNavLink to="/organization/symbols" label="Org Symbols" icon="admin" /> : null}
+          {canReviewOrganizationSymbolSubmissions ? <RailNavLink to="/organization/symbols/review" label="Org Symbol Review" icon="reviews" /> : null}
         </nav>
       ) : null}
     </aside>

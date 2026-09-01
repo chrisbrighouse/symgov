@@ -42,6 +42,31 @@ export function canMountProjectContext(auth) {
   return user?.capabilities?.symbolSetsEnabled === true;
 }
 
+export function canMountOrganizationSymbolDrafts(auth) {
+  const user = auth?.user;
+  if (!user) return false;
+  if (user?.session?.purpose !== 'application') return false;
+  if (user?.session?.mode !== 'organization') return false;
+  if (!user?.session?.activeOrganizationId) return false;
+  if (!user?.organization?.id || user.organization.id !== user.session.activeOrganizationId) return false;
+  return user?.capabilities?.organizationSymbolsEnabled === true;
+}
+
+function hasOrganizationCapability(auth, capability) {
+  const user = auth?.user;
+  if (!user?.organization) return false;
+  if (user.organization.baseRole === 'admin') return true;
+  return (user.organization.capabilities || []).includes(capability);
+}
+
+export function canCreateOrganizationSymbolDrafts(auth) {
+  return canMountOrganizationSymbolDrafts(auth) && hasOrganizationCapability(auth, 'contributor');
+}
+
+export function canReviewOrganizationSymbols(auth) {
+  return canMountOrganizationSymbolDrafts(auth) && hasOrganizationCapability(auth, 'symbol_reviewer');
+}
+
 export function contextStatusMessage(context, action = '') {
   const reason = context?.reason || 'none';
   const activeCode = context?.activeSet?.code || null;

@@ -3054,6 +3054,40 @@ a {
   margin-top: 0.25rem;
 }
 
+.organization-symbol-review-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(280px, 2fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.organization-symbol-review-layout .set-admin-list button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+
+.organization-symbol-review-layout .set-admin-list button.active {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+
+.organization-symbol-review-detail {
+  border: 1px solid #eceff3;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+@media (max-width: 720px) {
+  .organization-symbol-review-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .support-panel {
   width: min(52rem, 100%);
 }
