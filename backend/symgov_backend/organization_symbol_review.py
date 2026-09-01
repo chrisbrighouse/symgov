@@ -79,9 +79,17 @@ def _require_reviewer(current_user: AuthenticatedUser) -> None:
         )
 
 
-def _require_admin(current_user: AuthenticatedUser) -> None:
-    if current_user.organization_base_role != "admin":
-        raise OrganizationSymbolReviewError("Organization Admin privileges are required.")
+def _require_organization_wide_toggle_authority(current_user: AuthenticatedUser) -> None:
+    """Stage 6 WP6.3 (confirmed with Chris 2026-09-01): Organization Admin
+    or an active `symbol_reviewer` may toggle `organization_wide` --
+    broadened from the WP5.4/Stage 5 admin-only gate now that the toggle
+    is reachable from a frontend surface, on the reasoning that a
+    reviewer who is already trusted to approve a revision is equally
+    trusted to decide whether it becomes organization-wide."""
+    if current_user.organization_base_role != "admin" and "symbol_reviewer" not in current_user.organization_capabilities:
+        raise OrganizationSymbolReviewError(
+            "Organization Admin privileges or the 'symbol_reviewer' capability are required to change organization-wide scope."
+        )
 
 
 def _clean_rationale(value: str | None) -> str | None:
@@ -214,7 +222,7 @@ def set_organization_wide(
     enabled: bool,
 ) -> GovernedSymbol:
     organization_id = _active_organization_id(current_user)
-    _require_admin(current_user)
+    _require_organization_wide_toggle_authority(current_user)
 
     symbol = session.get(GovernedSymbol, symbol_id)
     if (

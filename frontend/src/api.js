@@ -410,6 +410,14 @@ export async function decideOrganizationSymbolReviewSubmission(symbolId, submiss
   return requireOk(result, 'Organization symbol review decision failed.');
 }
 
+export async function setOrganizationSymbolOrganizationWide(symbolId, enabled) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/organization-wide`,
+    { method: 'POST', body: JSON.stringify({ enabled }) }
+  );
+  return requireOk(result, 'Organization-wide scope update failed.');
+}
+
 export async function updateOrganizationSymbolSet(setId, payload) {
   const result = await requestJson(`/org/me/symbol-sets/${encodeURIComponent(setId)}`, {
     method: 'PATCH',

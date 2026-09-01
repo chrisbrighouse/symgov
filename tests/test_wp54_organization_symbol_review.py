@@ -180,7 +180,11 @@ def test_a_second_decision_on_the_same_submission_is_a_stale_decision_conflict(w
             )
 
 
-def test_organization_wide_requires_current_revision_approved_and_admin_only(wp54_fixtures):
+def test_organization_wide_requires_current_revision_approved_and_admin_or_reviewer(wp54_fixtures):
+    """Stage 6 WP6.3 (confirmed with Chris 2026-09-01) broadened this from
+    admin-only to admin-or-`symbol_reviewer`, on the reasoning that a
+    reviewer already trusted to approve a revision is equally trusted to
+    decide whether it becomes organization-wide."""
     engine = wp54_fixtures["engine"]
     symbol_id, revision_id, submission_id = _draft_and_submission(engine, wp54_fixtures)
 
@@ -193,12 +197,25 @@ def test_organization_wide_requires_current_revision_approved_and_admin_only(wp5
         decide_submission(session, wp54_fixtures["reviewer"], submission_id=submission_id, decision="approved")
         session.commit()
 
-    # A non-admin (even a reviewer) cannot toggle organization-wide.
+    # Neither admin status nor the symbol_reviewer capability alone is
+    # sufficient by itself -- but a plain contributor with neither is
+    # still rejected.
     with Session(engine) as session:
         with pytest.raises(OrganizationSymbolReviewError):
-            set_organization_wide(session, wp54_fixtures["reviewer"], symbol_id=symbol_id, enabled=True)
+            set_organization_wide(session, wp54_fixtures["contributor"], symbol_id=symbol_id, enabled=True)
 
-    # Now approved and actor is admin: succeeds.
+    # A non-admin reviewer (has the symbol_reviewer capability) can toggle.
+    with Session(engine) as session:
+        symbol = set_organization_wide(session, wp54_fixtures["reviewer"], symbol_id=symbol_id, enabled=True)
+        session.commit()
+        assert symbol.organization_wide is True
+
+    # An admin without the symbol_reviewer capability can also toggle.
+    with Session(engine) as session:
+        symbol = set_organization_wide(session, wp54_fixtures["admin_without_capability"], symbol_id=symbol_id, enabled=False)
+        session.commit()
+        assert symbol.organization_wide is False
+
     with Session(engine) as session:
         symbol = set_organization_wide(session, wp54_fixtures["admin_reviewer"], symbol_id=symbol_id, enabled=True)
         session.commit()

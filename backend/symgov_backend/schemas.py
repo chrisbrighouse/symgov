@@ -327,6 +327,24 @@ class EffectivePaletteResponse(BaseModel):
     total: int
 
 
+class SymbolSetBuilderSearchEntryResponse(BaseModel):
+    governedSymbolId: uuid.UUID
+    source: Literal["public", "organization"]
+    canonicalName: str
+    category: str
+    discipline: str
+    slug: str
+    organizationWide: bool | None
+    currentRevisionId: uuid.UUID | None
+
+
+class SymbolSetBuilderSearchResponse(BaseModel):
+    items: list[SymbolSetBuilderSearchEntryResponse]
+    page: int
+    pageSize: int
+    total: int
+
+
 class ProfileUpgradeOptionResponse(BaseModel):
     years: int
     totalPricePence: int

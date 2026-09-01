@@ -1,10 +1,11 @@
 import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { decideOrganizationSymbolReviewSubmission, listOrganizationSymbolDrafts } from './api.js';
+import { decideOrganizationSymbolReviewSubmission, listOrganizationSymbolDrafts, setOrganizationSymbolOrganizationWide } from './api.js';
 
 const DEFAULT_API = {
   listDrafts: listOrganizationSymbolDrafts,
   decide: decideOrganizationSymbolReviewSubmission,
+  setOrganizationWide: setOrganizationSymbolOrganizationWide,
 };
 
 const DECISIONS = [
@@ -30,6 +31,7 @@ export function OrganizationSymbolReviewQueuePanel({ api = DEFAULT_API }) {
   const [activeSymbolId, setActiveSymbolId] = useState('');
   const [rationaleBySymbolId, setRationaleBySymbolId] = useState({});
   const [decidingSymbolId, setDecidingSymbolId] = useState('');
+  const [togglingSymbolId, setTogglingSymbolId] = useState('');
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -61,6 +63,11 @@ export function OrganizationSymbolReviewQueuePanel({ api = DEFAULT_API }) {
 
   const activeDraft = queue.find((draft) => draft.id === activeSymbolId) || queue[0] || null;
 
+  const approvedSymbols = useMemo(
+    () => drafts.filter((draft) => draft.currentRevision?.lifecycleState === 'approved'),
+    [drafts],
+  );
+
   async function decide(draft, decisionValue) {
     const submissionId = draft.currentRevision?.pendingSubmissionId;
     if (!submissionId) return;
@@ -79,6 +86,24 @@ export function OrganizationSymbolReviewQueuePanel({ api = DEFAULT_API }) {
       setStatus({ mode: 'error', message: err.message || 'Review decision failed.' });
     } finally {
       setDecidingSymbolId('');
+    }
+  }
+
+  async function toggleOrganizationWide(draft) {
+    setTogglingSymbolId(draft.id);
+    setStatus({ mode: '', message: '' });
+    try {
+      const nextEnabled = !draft.organizationWide;
+      await api.setOrganizationWide(draft.id, nextEnabled);
+      setStatus({
+        mode: 'success',
+        message: `${draft.canonicalName}: organization-wide ${nextEnabled ? 'enabled' : 'disabled'}.`,
+      });
+      await refresh();
+    } catch (err) {
+      setStatus({ mode: 'error', message: err.message || 'Organization-wide scope update failed.' });
+    } finally {
+      setTogglingSymbolId('');
     }
   }
 
@@ -146,6 +171,38 @@ export function OrganizationSymbolReviewQueuePanel({ api = DEFAULT_API }) {
               'aria-label': `${option.label} ${activeDraft.canonicalName}`,
             }, decidingSymbolId === activeDraft.id ? 'Working…' : option.label)),
           ),
+        )
+        : null,
+    ),
+    createElement(
+      'section',
+      { className: 'organization-symbol-wide-scope-section', 'aria-labelledby': 'organization-symbol-wide-scope-heading' },
+      createElement('h3', { id: 'organization-symbol-wide-scope-heading' }, 'Organization-wide scope'),
+      !loading && !error && approvedSymbols.length === 0
+        ? createElement('p', { role: 'status' }, 'No approved organization symbols yet.')
+        : null,
+      approvedSymbols.length > 0
+        ? createElement(
+          'ul',
+          { className: 'set-admin-list', 'aria-label': 'Approved organization symbols' },
+          approvedSymbols.map((draft) => createElement(
+            'li',
+            { key: draft.id, className: 'set-admin-item' },
+            createElement(
+              'div',
+              null,
+              createElement('strong', null, `${draft.canonicalName} · ${draft.slug}`),
+              createElement('p', { className: 'set-admin-muted' },
+                `Category: ${draft.category} · Discipline: ${draft.discipline} · ${draft.organizationWide ? 'Organization-wide' : 'Set-only'}`),
+            ),
+            createElement('button', {
+              type: 'button',
+              disabled: togglingSymbolId === draft.id,
+              onClick: () => toggleOrganizationWide(draft),
+              'aria-pressed': Boolean(draft.organizationWide),
+              'aria-label': `${draft.organizationWide ? 'Disable' : 'Enable'} organization-wide scope for ${draft.canonicalName}`,
+            }, togglingSymbolId === draft.id ? 'Working…' : (draft.organizationWide ? 'Disable organization-wide' : 'Enable organization-wide')),
+          )),
         )
         : null,
     ),

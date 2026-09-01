@@ -7,9 +7,10 @@ from sqlalchemy.orm import Session
 
 from ..dependencies import get_db_session
 from ..schemas import (APIErrorResponse, APIValidationErrorResponse, OrganizationDefaultSymbolSetRequest, OrganizationDefaultSymbolSetResponse, PagedSymbolSetResponse,
-                       SymbolSetCopyRequest, SymbolSetCreateRequest, SymbolSetItemsRequest, SymbolSetItemsResponse,
+                       SymbolSetBuilderSearchResponse, SymbolSetCopyRequest, SymbolSetCreateRequest, SymbolSetItemsRequest, SymbolSetItemsResponse,
                        SymbolSetPatchRequest, SymbolSetProjectsRequest, SymbolSetProjectsResponse, SymbolSetResponse)
 from ..settings import SymgovAPISettings, get_settings
+from ..symbol_set_builder import search_symbol_set_builder
 from ..symbol_set_service import (clear_organization_default, copy_set, create_set, get_set, list_items, list_projects_for_set,
                                    list_sets, patch_set, replace_items, replace_projects, set_dict, set_organization_default)
 
@@ -25,6 +26,15 @@ def page_args(page: int = Query(1, ge=1), page_size: int = Query(50, alias="page
 def sets(request: Request, page_data=Depends(page_args), status: str | None = None, project_id: uuid.UUID | None = Query(None, alias="projectId"), session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
     page, page_size = page_data
     _, result = list_sets(session, request, settings, page=page, page_size=page_size, status=status, project_id=project_id)
+    return result
+
+
+# Registered ahead of `/{setId}` (below) so a literal "builder-search"
+# path segment is never captured as a `setId` path parameter.
+@router.get("/builder-search", response_model=SymbolSetBuilderSearchResponse, responses={401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}})
+def builder_search(request: Request, page_data=Depends(page_args), q: str | None = Query(None), session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
+    page, page_size = page_data
+    _, result = search_symbol_set_builder(session, request, settings, query_text=q, page=page, page_size=page_size)
     return result
 
 

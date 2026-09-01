@@ -49,7 +49,53 @@ from symgov_backend.auth import hash_session_token  # noqa: E402
 from symgov_backend.effective_palette import effective_palette  # noqa: E402
 from symgov_backend.organization_symbol_drafts import create_draft, submit_for_review  # noqa: E402
 from symgov_backend.organization_symbol_review import OrganizationSymbolReviewError, decide_submission, set_organization_wide  # noqa: E402
+from symgov_backend.symbol_set_builder import search_symbol_set_builder  # noqa: E402
 from symgov_backend.symbol_set_service import replace_items  # noqa: E402
+
+
+def _published_public_symbol(engine, canonical_name: str) -> uuid.UUID:
+    """Builds a genuinely published, public-eligible governed symbol via
+    raw SQL (mirrors `test_project_symbol_set_postgresql.py`'s pattern),
+    so `symbol_set_builder._search_public_symbols`'s real raw SQL against
+    `PUBLISHED_SYMBOLS_SQL` is exercised at least once against real
+    Postgres tables and the `active_public_symbol_projections` view --
+    every other Builder search test mocks this half out."""
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    symbol_id, revision_id, pack_id, page_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    with engine.begin() as connection:
+        owner = uuid.uuid4()
+        connection.execute(text(
+            "INSERT INTO users (id,email,display_name,pin_hash,pin_set_at,must_change_pin,is_active,created_at,updated_at) "
+            "VALUES (:id,:email,:email,'test',:now,false,true,:now,:now)"
+        ), {"id": owner, "email": f"builder-{owner}@example.test", "now": now})
+        connection.execute(text(
+            "INSERT INTO governed_symbols (id,slug,canonical_name,category,discipline,owner_id,created_at,updated_at) "
+            "VALUES (:id,:slug,:name,'fire','fire-safety',:owner,:now,:now)"
+        ), {"id": symbol_id, "slug": canonical_name.lower().replace(" ", "-"), "name": canonical_name, "owner": owner, "now": now})
+        connection.execute(text(
+            "INSERT INTO symbol_revisions (id,symbol_id,revision_label,lifecycle_state,payload_json,author_id,created_at) "
+            "VALUES (:id,:symbol,'1','published','{}'::jsonb,:owner,:now)"
+        ), {"id": revision_id, "symbol": symbol_id, "owner": owner, "now": now})
+        connection.execute(text("UPDATE governed_symbols SET current_revision_id=:revision WHERE id=:symbol"), {"revision": revision_id, "symbol": symbol_id})
+        catalog_id = f"BUILDER-{uuid.uuid4().hex[:16].upper()}"
+        connection.execute(text(
+            "INSERT INTO catalog_symbol_identifiers (identifier,role,governed_symbol_id,allocation_source,allocated_at) "
+            "VALUES (:catalog,'canonical',:symbol,'global_sequence',now())"
+        ), {"catalog": catalog_id, "symbol": symbol_id})
+        connection.execute(text("UPDATE governed_symbols SET catalog_symbol_id=:catalog WHERE id=:symbol"), {"catalog": catalog_id, "symbol": symbol_id})
+        connection.execute(text(
+            "INSERT INTO publication_packs (id,pack_code,title,audience,effective_date,status,created_at,updated_at) "
+            "VALUES (:id,:code,'Builder Search','public',CURRENT_DATE,'published',:now,:now)"
+        ), {"id": pack_id, "code": f"BUILDER-{uuid.uuid4().hex}", "now": now})
+        connection.execute(text(
+            "INSERT INTO published_pages (id,page_code,title,pack_id,current_symbol_revision_id,effective_date,created_at,updated_at) "
+            "VALUES (:id,:code,'Builder Search',:pack,:revision,CURRENT_DATE,:now,:now)"
+        ), {"id": page_id, "code": f"BUILDER-PAGE-{uuid.uuid4().hex}", "pack": pack_id, "revision": revision_id, "now": now})
+        connection.execute(text(
+            "INSERT INTO pack_entries (id,pack_id,symbol_revision_id,published_page_id,sort_order,created_at) "
+            "VALUES (:id,:pack,:revision,:page,1,:now)"
+        ), {"id": uuid.uuid4(), "pack": pack_id, "revision": revision_id, "page": page_id, "now": now})
+    return symbol_id
 
 
 def _activate(connection, organization_id):
@@ -183,3 +229,23 @@ def test_a_cross_organization_private_symbol_cannot_become_a_symbol_set_item(two
                 )]),
             )
     assert "eligible" in str(caught.value).lower() or getattr(caught.value, "status_code", None) == 409
+
+
+def test_builder_search_real_public_sql_excludes_a_cross_organization_private_symbol(two_organizations):
+    """Exercises the real (unmocked) `PUBLISHED_SYMBOLS_SQL`-based public
+    half of the Builder search against Postgres, and proves org A's
+    private symbol never appears in org B's search results even though
+    org B's search also matches on the same query text."""
+    fixtures = two_organizations
+    public_symbol_id = _published_public_symbol(fixtures.engine, "Shared Fire Alarm Beacon")
+    actor_a = _actor(fixtures.user_a, fixtures.org_a, base_role="admin", capabilities=("contributor", "symbol_reviewer"))
+    private_symbol_id = _organization_wide_symbol(fixtures.engine, actor_a)
+
+    request_b = _bound_session_request(fixtures.engine, fixtures.user_b, fixtures.org_b)
+    SessionLocal = sessionmaker(bind=fixtures.engine, autoflush=False, expire_on_commit=False)
+    with SessionLocal.begin() as session:
+        _, result = search_symbol_set_builder(session, request_b, fixtures.settings, query_text=None, page=1, page_size=50)
+
+    ids = {item["governedSymbolId"] for item in result["items"]}
+    assert public_symbol_id in ids
+    assert private_symbol_id not in ids

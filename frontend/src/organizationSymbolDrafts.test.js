@@ -171,4 +171,68 @@ describe('OrganizationSymbolReviewQueuePanel', () => {
     assert.match(JSON.stringify(renderer.toJSON()), /No organization symbol submissions awaiting review\./);
     await act(async () => renderer.unmount());
   });
+
+  it('lists approved organization symbols with an organization-wide toggle', async () => {
+    const approvedDraft = baseDraft({
+      canonicalName: 'Sprinkler head',
+      organizationWide: false,
+      currentRevision: {
+        lifecycleState: 'approved',
+        summary: 'A sprinkler head symbol.',
+        description: null,
+        assets: [],
+        pendingSubmissionId: null,
+        pendingSubmissionRationale: null,
+        pendingSubmissionSubmittedAt: null,
+      },
+    });
+    const api = {
+      listDrafts: async () => ({ items: [approvedDraft] }),
+      decide: async () => {},
+      setOrganizationWide: async () => {},
+    };
+    let renderer;
+    await act(async () => { renderer = create(createElement(OrganizationSymbolReviewQueuePanel, { api })); });
+    const text = JSON.stringify(renderer.toJSON());
+    assert.match(text, /Sprinkler head/);
+    assert.match(text, /Set-only/);
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Enable organization-wide scope for Sprinkler head' }));
+    await act(async () => renderer.unmount());
+  });
+
+  it('toggles organization-wide scope and refreshes', async () => {
+    const calls = [];
+    let organizationWide = false;
+    const api = {
+      listDrafts: async () => ({
+        items: [
+          baseDraft({
+            canonicalName: 'Sprinkler head',
+            organizationWide,
+            currentRevision: {
+              lifecycleState: 'approved',
+              summary: 'A sprinkler head symbol.',
+              description: null,
+              assets: [],
+              pendingSubmissionId: null,
+              pendingSubmissionRationale: null,
+              pendingSubmissionSubmittedAt: null,
+            },
+          }),
+        ],
+      }),
+      decide: async () => {},
+      setOrganizationWide: async (symbolId, enabled) => {
+        calls.push([symbolId, enabled]);
+        organizationWide = enabled;
+      },
+    };
+    let renderer;
+    await act(async () => { renderer = create(createElement(OrganizationSymbolReviewQueuePanel, { api })); });
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Enable organization-wide scope for Sprinkler head' }).props.onClick());
+    assert.deepEqual(calls[0], ['sym-1', true]);
+    assert.match(JSON.stringify(renderer.toJSON()), /Organization-wide/);
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Disable organization-wide scope for Sprinkler head' }));
+    await act(async () => renderer.unmount());
+  });
 });
