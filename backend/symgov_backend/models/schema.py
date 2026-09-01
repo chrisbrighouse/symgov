@@ -709,6 +709,10 @@ class GovernedSymbol(Base):
             "not organization_wide or owner_organization_id is not null",
             name="organization_wide_scope",
         ),
+        CheckConstraint(
+            "catalog_symbol_id is null or visibility = 'public'",
+            name="catalog_symbol_visibility_barrier",
+        ),
         Index(
             "ix_governed_symbols_owner_visibility_organization_wide",
             "owner_organization_id",

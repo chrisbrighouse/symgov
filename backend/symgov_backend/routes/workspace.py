@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from sqlalchemy import Text, and_, cast, func, inspect as inspect_database, select
+from sqlalchemy import Text, and_, cast, func, inspect as inspect_database, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
 
@@ -1068,6 +1068,7 @@ def rupert_published_metadata(session: Session, queue_item: AgentQueueItem) -> d
         .filter(PublicationPack.status == "published")
         .filter(PublicationPack.audience == "public")
         .filter(SymbolRevision.lifecycle_state == "published")
+        .filter(GovernedSymbol.visibility == "public")
         .order_by(PublishedPage.updated_at.desc())
         .first()
     )
@@ -3257,6 +3258,7 @@ def list_hannah_photo_candidates(
         )
         .join(GovernedSymbol, GovernedSymbol.id == HannahPhotoCandidate.symbol_id)
         .outerjoin(PublishedPage, PublishedPage.id == HannahPhotoCandidate.published_page_id)
+        .filter(GovernedSymbol.visibility == "public")
     )
     filter_values = {
         "symbolName": symbolName,
@@ -3587,6 +3589,7 @@ def list_whitney_demand_signals(
         )
         .outerjoin(GovernedSymbol, GovernedSymbol.id == WhitneyDemandSignal.symbol_id)
         .outerjoin(PublishedPage, PublishedPage.id == WhitneyDemandSignal.published_page_id)
+        .filter(or_(GovernedSymbol.id.is_(None), GovernedSymbol.visibility == "public"))
     )
     filter_values = {
         "signalType": signalType,
