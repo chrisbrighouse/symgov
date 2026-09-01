@@ -6,8 +6,9 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db_session
+from ..effective_palette import effective_palette
 from ..project_service import create_project, get_project, list_projects, patch_project, project_dict
-from ..schemas import APIErrorResponse, APIValidationErrorResponse, PagedProjectResponse, ProjectCreateRequest, ProjectPatchRequest, ProjectResponse
+from ..schemas import APIErrorResponse, APIValidationErrorResponse, EffectivePaletteResponse, PagedProjectResponse, ProjectCreateRequest, ProjectPatchRequest, ProjectResponse
 from ..settings import SymgovAPISettings, get_settings
 
 router = APIRouter(prefix="/org/me/projects", tags=["projects"])
@@ -47,3 +48,11 @@ def update(projectId: uuid.UUID, data: ProjectPatchRequest, request: Request, se
     try:
         row = patch_project(session, request, settings, projectId, data); session.commit(); return project_dict(row)
     except ValueError as exc: raise RequestValidationError([{"loc": ("body",), "msg": str(exc), "type": "value_error"}]) from exc
+
+
+@router.get("/{projectId}/effective-palette", response_model=EffectivePaletteResponse, responses={401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}})
+def palette(projectId: uuid.UUID, request: Request, page_data=Depends(page_args), set_code: str | None = Query(None, alias="setCode"), session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
+    page, page_size = page_data
+    _, result = effective_palette(session, request, settings, projectId, set_code=set_code, page=page, page_size=page_size)
+    session.commit()
+    return result

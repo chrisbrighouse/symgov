@@ -1,0 +1,181 @@
+# Symbol Set Management — Product Stage 6 Implementation Plan
+
+> **For Hermes / OpenClaw orchestration and Claude Code:** this is the one committed, controlling plan for Product Stage 6. Ephemeral `/tmp` manifests, restart prompts, and review verdicts produced by either orchestration layer are session-scoped evidence, not sources of truth — reconcile against this file and the current repository state (`git log`, `git status`, Alembic head) before resuming or dispatching a Stage 6 work package. If a `/tmp` artifact and this file disagree, this file wins; update this file rather than trusting a stale scratch manifest.
+
+**Status:** IMPLEMENTATION IN PROGRESS — WP6.1 (effective-palette read-model service and API) is implemented and tested locally, not yet committed. WP6.2–WP6.6 are planned but not started. All five open questions in §4 were resolved with Chris on 2026-09-01; §4 now records the decisions rather than open questions.
+
+**WP6.1 implementation note (2026-09-01):** `backend/symgov_backend/effective_palette.py` (new), a new `GET /org/me/projects/{projectId}/effective-palette` route in `routes/projects.py`, and `EffectivePaletteEntryResponse`/`EffectivePaletteResponse` in `schemas.py`. Composes `symbol_context_service._resolved_set` unchanged, adds a non-persisting explicit-`setCode` override tier, and unions in approved `organization_wide=true` governed symbols for the caller's organization (skipped entirely when `organization_symbols_enabled` is off). Tested: `tests/test_effective_palette.py` (9 SQLite route-level tests — union/ordering/dedup/pagination/resolution-order/flag-gating, eligibility mocked) and `tests/test_symbol_set_tenant_isolation.py` (3 Postgres-backed tests against a real disposable container — cross-organization non-leak, owning-organization positive control, and a direct proof that a `SymbolSetItem` cannot reference a cross-organization private symbol). Full portable backend suite re-run (`SYMGOV_BACKEND_TIMEOUT_SECONDS=1200 ./scripts/test-backend.sh`): 2086 passed, 7 failed — all 7 failures independently reproduced against `main`@`87c2b24` with none of this session's changes applied (6 stable pre-existing failures unrelated to Symbol Sets/palette; the 7th, `test_stage_2c_auth.py::test_stage_2c_full_reauth_matrix`, passed in isolation both before and after this change and appears to be a pre-existing suite-ordering flake). `npm run test:frontend` (197/197 passing, unchanged) and `npm run build` also re-run since routing changed, though WP6.1 itself is backend-only.
+
+**Goal:** a deterministic *effective palette* — the union of (a) approved/eligible Symbol Set items for the active Symbol Set and (b) approved organization-owned symbols in the active organization where `organization_wide=true`, de-duplicated by governed-symbol UUID — plus a Symbol Set Builder that searches Public Catalog and authorized organization symbols server-side and lets an authorized user assemble/reorder/group a set's items. Public Catalog browsing (Standards View / `/published/*`) remains an independently searchable, separate scope that this stage must not silently widen.
+
+**Architecture:** one new read-model service (`effective_palette.py` or equivalent) that composes the existing single-set resolution (`symbol_context_service._resolved_set`) with a new organization-wide-symbol query, reusing (not restating) the Stage-5 visibility floor; a new Symbol Set Builder API surface for adding/removing/reordering/grouping `SymbolSetItem` rows and searching the union of Public Catalog + authorized organization symbols; then the necessary Workspace/Reviews-appropriate frontend (per `CLAUDE.md`'s product split, "Standards is published-only consumption" — the Builder is an authoring surface and does not belong in Standards View).
+
+**Tech stack:** FastAPI, Pydantic v2, SQLAlchemy 2, Alembic/PostgreSQL, React 19 (function components + hooks, no JSX-free `createElement` pattern required but present in some files), Node's built-in `node --test` runner for frontend tests, pytest for backend, Docker-backed disposable PostgreSQL for migration/authorization regressions where the harness exists (see §7 caveat).
+
+**Controlling product sources:**
+
+- `docs/Symbol Set Management Spec v0.3.md`
+- `docs/plans/2026-08-08-symbol-set-management-decision-addendum.md`
+- Programme plan: `docs/2026-08-10-symbol-set-management-implementation-plan.md`, §12 ("Stage 6 — effective palette and Symbol Set Builder") remains controlling except where this repository-grounded plan makes implementation mechanics explicit.
+- `docs/plans/2026-09-01-symbol-set-management-stage5-implementation-plan.md` — Stage 5 baseline (organization-private symbols, organization review, visibility floor) this stage builds on. Its WP5.6 audit guarantees are load-bearing here: Stage 6 is the first stage that actually *consumes* `organization_wide=true` symbols in a cross-cutting reader, rather than just gating their existence.
+
+**Authority note:** this file is documentation only. It does not itself authorize a commit, push, real/shared database migration, deployment, service restart, feature activation, or destructive cleanup. Each work package still requires its own explicit go-ahead before code changes; disposable local tests are fine to run without separate authorization, subject to the harness caveat in §7.
+
+---
+
+## 1. Repository baseline and current-state evidence
+
+Baseline captured 2026-09-01:
+
+- Repository: `/data/symgov` (same repository as `/docker/openclaw-hz0t/data/symgov`)
+- Branch: `main`, `HEAD` = `87c2b24cb36599b5cc20f5c163c523bc135923af`, in sync with `origin/main`
+- Alembic sole head: `20260901_0034` (`backend/alembic/versions/20260901_0034_governed_symbol_catalog_visibility_barrier.py`)
+- Tracked tree: clean except the pre-existing, unrelated `.claude/settings.local.json` diff (leave untouched)
+- **Activation status of `organizations_enabled`/`organization_symbols_enabled`: confirmed with Chris (2026-09-01) as still not activated anywhere.** Stage 6 code must work correctly with zero live organization-wide symbols and must not implicitly assume any exist; re-verify again before any future stage that touches a real/shared environment.
+
+### 1.1 Data model already in place (no new tables needed for the core union)
+
+- `backend/symgov_backend/models/schema.py:146-174` — `SymbolSet`: `owner_organization_id`, `code`/`normalized_code` (unique per org), `status` (`draft|active|superseded|archived`).
+- `schema.py:177-193` — `ProjectSymbolSet`: project↔set availability/default join. Partial unique index `uq_project_symbol_sets_active_default` enforces exactly one `is_default=true, status='active'` row per project (`:182`).
+- `schema.py:196-225` — `SymbolSetItem`: `symbol_set_id`, `governed_symbol_id`, `sort_order` (≥0), `group_name`/`display_label`/`preferred_format`/`notes` (length-capped), `provenance_json`, `availability_status` (`active|unavailable`) + `availability_reason`, unique `(symbol_set_id, governed_symbol_id)`, ordering index `(symbol_set_id, sort_order, governed_symbol_id)`. **This is the explicit ordering/grouping/preferred-format metadata the spec (§12 task 5) requires the effective palette to preserve** — it already exists and needs no schema change.
+- `schema.py:228-238` — `UserProjectSetSelection`: per-user explicit active-set override for a project (composite PK `user_id, project_id`).
+- `schema.py:241-247` — `UserSessionProjectContext`: per-session selected project.
+- `schema.py:73-112` — `Organization.default_symbol_set_id` (nullable FK to `symbol_sets`, `ON DELETE SET NULL`): organization-level default set.
+- `schema.py:701-738` — `GovernedSymbol`: `owner_organization_id`, `visibility` (`organization_private|public`), `organization_wide` (bool, `false` default, DB-checked to require `owner_organization_id is not null` when true — constraint `organization_wide_scope`, `:708-711`), plus the Stage-5 `catalog_symbol_visibility_barrier` constraint and index `(owner_organization_id, visibility, organization_wide)` (`:716-721`).
+
+**No column or table anywhere is named or shaped like an "effective palette."** Confirmed by an exhaustive backend grep: zero hits for `effective_palette`, `effective palette`, or `Symbol Set Builder`. Stage 6's core union logic is new code, but every piece of state it needs to read (set items with ordering/grouping, organization-wide governed symbols, active-set resolution) already exists.
+
+### 1.2 Active-set resolution already implemented — reuse, do not reimplement
+
+`backend/symgov_backend/symbol_context_service.py` (270 lines, full file reviewed):
+
+- `_resolved_set(session, principal, project, *, cleanup_stale=True)` (`:68-112`) already implements almost exactly the resolution order the spec calls for (§12 task 8: "explicit eligible Set Code → user's last eligible set for the project → project default → organization default → no active set"), via one query with a `case()` ordering (`:87-93`) and reason strings `"user_preference"|"project_default"|"organization_default"|"none"`.
+- **Gap vs. the spec order:** the spec's first tier is "explicit eligible Set Code" (i.e., an explicit override supplied on the palette request itself), while `_resolved_set`'s highest tier is the *stored* `UserProjectSetSelection` (a persisted "user preference", set via `PUT /org/me/symbol-context/active-set`). These are not quite the same thing — a request-scoped explicit Set Code parameter for the effective-palette endpoint does not exist yet and must be added as a new, non-persisting override layered above `_resolved_set`'s existing precedence, not a rewrite of it.
+- `select_active_set`/`clear_active_set` (`:217-270`), router `backend/symgov_backend/routes/symbol_context.py` prefix `/org/me/symbol-context` — this is the existing single-set selection mechanism; the effective palette is additive on top of it, not a replacement.
+- **This resolves exactly one active `SymbolSet` per project.** There is no existing multi-set merge/union logic anywhere in the backend — confirmed by grep. The organization-wide-symbols half of the union (spec task 2, second bullet) is entirely new.
+
+### 1.3 Visibility floor and eligibility predicates (Stage 5, to be joined against, not restated)
+
+- `backend/symgov_backend/public_symbol_eligibility.py` (35 lines, full file) — `PUBLIC_SYMBOL_ELIGIBILITY_SQL` (`:7-27`) joins `active_public_symbol_projections` and filters `pk.status='published' AND pk.audience='public' AND sr.lifecycle_state='published'`. `current_public_symbols(session, symbol_ids)` (`:30-35`) returns `{governed_symbol_id: current_revision_id}`. Sole consumer today: `symbol_set_service.py` (3 call sites: `:264`, `:290`, `:513`).
+- `backend/symgov_backend/published_catalog.py` (79 lines) — `PUBLISHED_SYMBOLS_SQL` (`:6-47`), same join shape, 8 call sites across `catalog_search.py`, `routes/published.py`, `routes/catalog.py`.
+- **`active_public_symbol_projections` view** (`backend/alembic/versions/20260829_0033_organization_symbol_visibility.py:499-529`) — verbatim `WHERE gs.visibility = 'public' AND sr.lifecycle_state = 'published' AND pack.audience = 'public' AND pack.status = 'published'`. It carries `owner_organization_id`, `visibility`, `organization_wide` columns but its WHERE clause hard-floors to `visibility = 'public'` — **it does not, and by design should not, project `organization_private` rows.** The effective-palette query for the organization-wide half of the union must instead query `governed_symbols`/`symbol_revisions`/`organization_symbol_review` state directly (mirroring the review-approval predicate already used by `organization_symbols.py`'s `set_organization_symbol_organization_wide`), not attempt to route organization-wide symbols through this public-only view.
+- `backend/symgov_backend/routes/organization_symbols.py` (368 lines) — `POST /organization-symbols/{symbol_id}/organization-wide` (`:348-368`) is the existing organization-wide toggle, delegating to `set_organization_wide()` in `organization_symbol_review.py`. No frontend surface exists for this endpoint yet (carried forward from Stage 5 hand-off, §12 task 2's second union member depends on it).
+
+### 1.4 Existing Symbol Set API surface (`backend/symgov_backend/routes/symbol_sets.py`, 93 lines, full file)
+
+```
+GET    /org/me/symbol-sets
+PUT    /org/me/default-symbol-set
+DELETE /org/me/default-symbol-set
+POST   /org/me/symbol-sets/{setId}/copy
+GET    /org/me/symbol-sets/{setId}/items
+PUT    /org/me/symbol-sets/{setId}/items      (full replace, symbol_set_service.replace_items)
+GET    /org/me/symbol-sets/{setId}/projects
+PUT    /org/me/symbol-sets/{setId}/projects
+POST   /org/me/symbol-sets
+GET    /org/me/symbol-sets/{setId}
+PATCH  /org/me/symbol-sets/{setId}
+```
+
+`backend/symgov_backend/symbol_set_service.py` (527 lines, full file inventoried) already has `list_items`, `replace_items` (full-replace semantics, idempotent, audited as `symbol_set.items_replaced`), `copy_set`. **There is no incremental add/remove/reorder-one-item endpoint** — today a Symbol Set Builder UI would have to resend the full item list on every mutation via `replace_items`. This is workable for Stage 6 (the spec's "batch add/remove, drag/drop plus keyboard ordering" frontend task can be built against full-replace semantics) but should be an explicit design decision, not an oversight — see WP6.2.
+
+No route path anywhere in the backend contains "palette" (confirmed by grep).
+
+### 1.5 Frontend baseline (no Stage 6 UI exists yet)
+
+- **No Symbol Set Builder, palette, or drag/drop UI exists anywhere in `frontend/src`.** Symbol Sets today are pure admin metadata records — `frontend/src/OrganizationSymbolSetsPanel.js` (291 lines, embedded in `OrganizationAdminPage.js` at `/organization/admin`) only edits code/name/description/disciplines/useCases; it has no item/palette association UI.
+- `frontend/src/ProjectContextBar.js` (247 lines, mounted globally in `App.jsx:67`) is the closest existing "active context" UI: two `<select>` dropdowns for Project and Symbol Set, backed by `fetchSymbolContext`/`selectProjectContext`/`selectActiveSymbolSet` in `frontend/src/api.js:277-313`.
+- `frontend/src/projectContext.js` (135 lines, full file reviewed) exports the gate-function convention Stage 6 should extend: `canMountProjectContext` (`:35-43`, gates on `capabilities.symbolSetsEnabled`), `canMountOrganizationSymbolDrafts`/`canCreateOrganizationSymbolDrafts`/`canReviewOrganizationSymbols` (`:45-68`, gate on `capabilities.organizationSymbolsEnabled` + `organization.capabilities`/`baseRole==='admin'`). A new `canMountEffectivePalette`/`canMountSymbolSetBuilder`-shaped gate should follow this exact pattern, not invent a new one.
+- Router: `frontend/src/App.jsx:525-545` registers top-level routes; `/organization/symbols` and `/organization/symbols/review` (`:535-536`) gate capability *inside* the page component rather than via a `RequireAnyRole` route wrapper — follow this precedent for any new Builder route, consistent with how WP5.5 was built.
+- `StandardsPage()` (`App.jsx:950`, routed at `/standards`) is the existing Public Catalog search UI: search input pattern `field search-field` + `type="search"` + `aria-label` (`App.jsx:1592-1599`, reused verbatim in `ReviewsPage`/`RightsReviewPage`), facet definitions (`:1019-1026`), `filterCatalogSymbols` helper, infinite-scroll pagination via `displayCount` (`:968`, +40 per scroll), batch selection via `selectedSymbolIds` (`:957`) + `submitPublishedSymbolCommand` bulk-action flow. **Symbol Set Builder search should reuse these conventions** (search-field class, facet pattern, batch-selection state shape) rather than invent new ones — but must call a new server-side-authorized union endpoint, not `fetchPublishedSymbols()` alone, since it also needs to search authorized organization symbols (spec task 7).
+- Badge convention: `FormatPreviewBadges` (`App.jsx:1610-1652`) — `<span>`/`<button>` with a base class plus `.active`/`.unavailable` state modifier classes, `role="group"` wrapper, `aria-label`/`title` per badge. The new `Set`/`Organization-wide`/`Public` source badges (spec frontend task 1) should follow this shape.
+- **No drag/drop, keyboard-reorder, or sortable-list library or pattern exists anywhere in the frontend** — confirmed by an exhaustive grep (`draggable|dragstart|dragover|ondrop|dnd-kit|react-beautiful-dnd|reorder`: zero matches) and by inspecting the single root `package.json` (no `frontend/package.json` exists; only frontend dependency of note is `react-router-dom@^7.6.1`). The spec's "drag/drop plus keyboard ordering" (task list, item 2) has **no existing convention to extend and no library installed** — WP6.4 must pick a lightweight, dependency-free implementation (native HTML5 drag events + an explicit keyboard-reorder affordance, e.g. "move up"/"move down" buttons satisfying the accessible-keyboard-equivalent requirement) rather than adding a new npm dependency without discussing it with Chris first.
+
+### 1.6 Test commands (verified from `backend/README.md` and `scripts/test-frontend.sh`)
+
+- Backend, portable subset: `"$REPO_ROOT/scripts/test-backend.sh"` (default), `--external`, or `--full`; underlying invocation is `PYTHONPATH=backend uv run --isolated --with-requirements backend/requirements.txt --with-requirements backend/requirements-test.txt python -m pytest ...`.
+- Frontend: `npm run test:frontend` → `scripts/test-frontend.sh` → `node --test frontend/src/*.test.js` (Node's built-in test runner, no Jest/Vitest config exists).
+- Frontend build: `npm run build` → `vite build`.
+- **Caveat carried forward from the Stage 5 plan and re-checked here:** the Stage 5 plan's baseline section names `tests/test_organization_symbol_postgresql.py` as using "the Docker-backed PostgreSQL harness." This session's grep of `backend/README.md`, `scripts/test-backend.sh`, and `tests/conftest.py` for `docker|postgres|testcontainer|disposable|DATABASE_URL` found no container-orchestration code in those three files — meaning the disposable-Postgres harness, if it exists, is invoked another way (e.g. an env var pointing at an already-running container, or a helper script not covered by this grep). **Re-verify the actual disposable-Postgres invocation mechanism before WP6.1** (it is needed for any effective-palette regression that spans `organization_private`/`organization_wide` rows, which SQLite cannot exercise faithfully for the same reasons Stage 5 required real Postgres).
+
+---
+
+## 2. Work-package sequence
+
+1. **WP6.1 — effective-palette read-model service and API.** Backend-only. New service composing `_resolved_set` + a new organization-wide-symbols query, one new endpoint, full tenant-isolation regression suite.
+2. **WP6.2 — Symbol Set Builder search + incremental item mutation API.** Backend-only. Server-side-authorized union search over Public Catalog + authorized organization symbols; decide and implement the add/remove/reorder mutation shape (incremental vs. continued full-replace).
+3. **WP6.3 — organization-wide toggle frontend surface.** Small, targeted frontend addition closing the Stage 5 hand-off gap (spec explicitly needs this consumed by the union in WP6.1, so the toggle needs to be operable by a human before Stage 6 is genuinely useful).
+4. **WP6.4 — Symbol Set Builder frontend.** Search/filter, batch add/remove, drag/drop + keyboard ordering, group/order editing, source badges, empty/loading/error states. Mounted in Workspace and/or Reviews per the product split — **not** Standards View.
+5. **WP6.5 — effective palette consumer surface.** Wherever the effective palette is actually *displayed* to an end user (this needs an explicit decision with Chris — see open question in §4). Likely Workspace, possibly a new minimal Standards-adjacent read surface if the spec intends palette-aware symbol pickers elsewhere in the product; must not be added to Standards View's Public-Catalog-only scope per `CLAUDE.md`.
+6. **WP6.6 — whole-stage audit.** Re-run WP5.6's rigor against the new organization-scoped reader: prove no cross-organization private symbol can enter a palette via every code path added in WP6.1/6.2, then Contract Review and Security Review on identical bytes.
+
+Each package is serialized; WP6.3 can run in parallel with WP6.1/WP6.2 since it only touches an already-existing, already-tested backend endpoint. WP6.4 depends on WP6.1 and WP6.2 both being complete (it needs the palette read endpoint and the builder search/mutation endpoints). WP6.5 depends on WP6.1 and the open question in §4 being resolved.
+
+### WP6.1 — effective-palette read-model service and API
+
+Scope: new file (suggested `backend/symgov_backend/effective_palette.py`), new route(s) in a new or existing router, `tests/test_effective_palette.py`, `tests/test_symbol_set_tenant_isolation.py`.
+
+- Implement the union exactly per spec task 2: eligible `SymbolSetItem`s for the active set (reusing `current_public_symbols`/`PUBLIC_SYMBOL_ELIGIBILITY_SQL` for the public half of what a set item can reference) **plus** approved `organization_wide=true` governed symbols owned by the caller's active organization, de-duplicated by `governed_symbol_id`.
+- Active-set resolution: extend `_resolved_set`'s precedence with a new top tier — an explicit, request-scoped Set Code parameter that does **not** persist to `UserProjectSetSelection` (that persistence remains the job of the existing `PUT /org/me/symbol-context/active-set` endpoint). Do not modify `_resolved_set`'s existing four-tier logic; compose around it.
+- Exclusion list per spec task 4, each needing its own regression case: drafts, rejected/unapproved revisions, cross-org private symbols, `availability_status='unavailable'` set-item rows (kept in the underlying set for diagnosis per spec task 6, but excluded from what the palette actually returns to a palette *consumer*), withdrawn/deprecated public records.
+- Preserve `SymbolSetItem.sort_order`/`group_name`/`display_label`/`preferred_format` verbatim for set-sourced entries (spec task 5); assign inherited organization-wide entries a deterministic synthetic group (e.g. sort after all explicit set groups, grouped under a stable `"organization-wide"` sentinel) and position (e.g. ordered by `canonical_name` or creation time — pick one and document it, since the spec only requires *deterministic*, not any specific order).
+- Pagination: bounded, paginated per spec backend task 1 — follow the existing `page`/`page_size` convention used by `symbol_set_service.list_sets`/`list_items`.
+- **Tenant-isolation is the acceptance bar, not an afterthought.** `tests/test_symbol_set_tenant_isolation.py` needs, at minimum: two organizations, an `organization_wide=true` symbol in org A never appearing in org B's palette even when org B has an active set referencing the same governed-symbol UUID would be impossible by construction (cross-org private symbols cannot be set-item targets — confirm this is actually enforced at the `SymbolSetItem`/`GovernedSymbol` FK+check-constraint level, not just by convention, before relying on it); a public symbol not referenced by the active set excluded from the palette even though it is independently visible via `/published/*`; a draft/unapproved organization symbol excluded even when `organization_wide=true` is set on it prematurely (i.e., confirm `organization_wide` alone is not sufficient — approval state must gate too, matching spec task 4's "rejected revisions").
+- Reuse the Postgres-backed disposable-database test pattern already used for Stage 5's tenant-isolation and concurrency tests (re-verify the actual harness invocation per §1.6 caveat first) — SQLite-backed `TestClient` fixtures are acceptable only for endpoint/shape tests, not for the cross-tenant-leak regressions, consistent with the standard WP5.6 held to.
+
+### WP6.2 — Symbol Set Builder search + item mutation API
+
+Scope: extend or add to `backend/symgov_backend/routes/symbol_sets.py` and `symbol_set_service.py`; `tests/test_symbol_set_builder_api.py`.
+
+- Search endpoint: server-side union of Public Catalog eligibility (`PUBLISHED_SYMBOLS_SQL`) and authorized organization symbols (caller's active org, `visibility='organization_private'`, review-approved) — no client-only filtering (spec task 7). Decide explicitly whether this is a new endpoint or a query-parameter extension to an existing catalog search endpoint; document the choice.
+- Item mutation: **confirmed with Chris — full-replace.** The Builder UI mutates via the existing `PUT /org/me/symbol-sets/{setId}/items` (`symbol_set_service.replace_items`); no new incremental add/remove/reorder endpoints for Stage 6. This keeps the existing idempotency/audit-event handling (`symbol_set.items_replaced`) and avoids new surface area; the Builder frontend (WP6.4) is responsible for computing and sending the full replacement item list on each save.
+- Duplicate prevention: already enforced at the DB level (`SymbolSetItem` unique `(symbol_set_id, governed_symbol_id)`); the API layer needs a clean error surface for it, not new enforcement logic.
+- Acceptance: search returns only symbols the caller is authorized to see (no cross-org leak — same tenant-isolation rigor as WP6.1), item mutation regressions covering add/remove/reorder/group-edit/duplicate-rejection.
+
+### WP6.3 — organization-wide toggle frontend surface
+
+Scope: small, additive frontend change. The backend endpoint (`POST /organization-symbols/{symbol_id}/organization-wide`) already exists and is tested; this package only adds a UI control (likely in `OrganizationSymbolReviewQueuePanel.js` or a dedicated organization-symbol detail view) gated by **Organization Admin or `symbol_reviewer`** (confirmed with Chris 2026-09-01), following the existing `canReviewOrganizationSymbols`/`canMountOrganizationSymbolDrafts` gate-function pattern in `projectContext.js` (admin-or-capability, same shape as `hasOrganizationCapability`).
+
+- Acceptance: an Organization Admin or an appointed `symbol_reviewer` can toggle `organization_wide` on an approved organization symbol from the UI, and the effective palette (WP6.1) picks up the change.
+
+### WP6.4 — Symbol Set Builder frontend
+
+Scope: new page(s)/panel(s), mounted per the product split (`CLAUDE.md`: Workspace = operator/processing visibility, Reviews = SME review ergonomics, Standards = published-only consumption — the Builder is an authoring tool, so it belongs in Workspace, mirroring where WP5.5 put drafts/review rather than in Standards View).
+
+- Search/filter UI reusing `StandardsPage`'s `field search-field` + facet conventions (`App.jsx:1019-1026`, `:1592-1599`), calling WP6.2's server-side-authorized union search endpoint rather than `fetchPublishedSymbols()`.
+- Batch add/remove reusing the `selectedSymbolIds` batch-selection convention from `StandardsPage` (`App.jsx:957`).
+- Drag/drop + keyboard ordering: **no existing pattern or library** (confirmed in §1.5); **confirmed with Chris — implement natively**, no new npm dependency. HTML5 drag-and-drop events plus explicit "move up"/"move down" keyboard-accessible controls.
+- Source badges (`Set`, `Organization-wide`, `Public`) following the `FormatPreviewBadges` `<span>`/`.active`/`.unavailable` convention (`App.jsx:1610-1652`).
+- Group/section editing, duplicate prevention (surfacing WP6.2's duplicate error), accessible confirmation and non-destructive removal copy per spec frontend tasks.
+- Counts by discipline/category/format; loading/empty/inaccessible/unavailable/deprecated/unapproved/demoted/archived states per spec.
+- `frontend/src/symbolSetBuilder.test.js` per the spec's named test file.
+
+### WP6.5 — effective palette consumer surface
+
+**Confirmed with Chris (2026-09-01): Workspace only.** A palette view inside Workspace (operator/processing visibility), consistent with where WP5.5 put drafts/review. No palette-aware symbol picker elsewhere in the product for this stage — do not add one to Standards View, Reviews, or the Builder's own search results beyond what WP6.4 already needs.
+
+### WP6.6 — whole-stage audit
+
+Re-run WP5.6-equivalent rigor: every new reader added in WP6.1/WP6.2 proven to exclude cross-org private symbols, unapproved organization symbols, and non-active-set public symbols, under the same disposable-Postgres regression standard, then Contract Review and Security Review on identical final bytes.
+
+---
+
+## 3. `frontend/src/effectivePalette.test.js` and `symbolSetBuilder.test.js`
+
+Per spec: use a fixture matrix with two organizations, a set shared across multiple projects, public symbols in/out of the active set, organization-wide private symbols, set-only symbols, drafts, defaults vs. explicit overrides, duplicate union paths, ordering/group metadata, and unavailable references. These are frontend unit tests (Node's `node --test` runner, no DOM/browser harness available per the existing `frontend/src/*.test.js` pattern) — they should test the palette-shaping/badge-assignment/ordering logic as pure functions (mirroring how `symbolSetMutationPayload`/`projectMutationPayload` in `projectContext.js` are tested in isolation today), not attempt to simulate a live backend.
+
+---
+
+## 4. Decisions confirmed with Chris (2026-09-01)
+
+1. **Effective palette consumer surface (WP6.5): Workspace only.** No palette-aware symbol picker elsewhere in the product for this stage. WP6.5 is scoped to a palette view inside Workspace, consistent with where WP5.5 put drafts/review.
+2. **Organization-wide toggle capability (WP6.3): Organization Admin + `symbol_reviewer`.** Treat the toggle as reachable by both roles, following the existing `canReviewOrganizationSymbols`-style gate pattern in `projectContext.js` (admin-or-capability, not admin-only).
+3. **Item-mutation API shape (WP6.2): full-replace, as recommended.** Reuse `PUT /org/me/symbol-sets/{setId}/items` (`symbol_set_service.replace_items`) unchanged; no new incremental add/remove/reorder endpoints for Stage 6.
+4. **Drag/drop dependency (WP6.4): no new npm dependency, as recommended.** Implement natively — HTML5 drag events plus explicit keyboard-accessible move-up/move-down controls.
+5. **Activation status: still not activated anywhere.** No real/shared environment has `organizations_enabled`/`organization_symbols_enabled` live. Stage 6 code must work correctly with zero live organization-wide symbols and must not implicitly assume any exist; re-verify again before any future stage that touches a real/shared environment, since this can change without this session being told.
+
+---
+
+## 5. Global prohibited side effects (applies to every package above)
+
+No commit, staging, push, shared/real migration, deployment, service/gateway restart, feature activation, first live palette computation against a real/shared database, publication, withdrawal, demotion, external messaging, credential change, new npm dependency, or unrelated edit, unless a specific step above and the human authorizing it says otherwise.

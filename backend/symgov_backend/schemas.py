@@ -303,6 +303,30 @@ class SymbolContextResponse(BaseModel):
     reason: Literal["explicit", "user_preference", "project_default", "organization_default", "none"]
 
 
+class EffectivePaletteEntryResponse(BaseModel):
+    governedSymbolId: uuid.UUID
+    source: Literal["set", "organization_wide"]
+    canonicalName: str
+    category: str
+    discipline: str
+    sortOrder: int
+    groupName: str | None
+    displayLabel: str | None
+    preferredFormat: str | None
+    notes: str | None
+    provenance: dict[str, Any]
+    currentRevisionId: uuid.UUID | None
+
+
+class EffectivePaletteResponse(BaseModel):
+    activeSet: SymbolSetSummary | None
+    reason: Literal["explicit", "user_preference", "project_default", "organization_default", "none"]
+    items: list[EffectivePaletteEntryResponse]
+    page: int
+    pageSize: int
+    total: int
+
+
 class ProfileUpgradeOptionResponse(BaseModel):
     years: int
     totalPricePence: int
