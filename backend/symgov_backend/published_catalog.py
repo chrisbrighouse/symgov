@@ -35,6 +35,12 @@ PUBLISHED_SYMBOLS_SQL = """
         AND pe.symbol_revision_id = pp.current_symbol_revision_id
     JOIN symbol_revisions sr ON sr.id = pp.current_symbol_revision_id
     JOIN governed_symbols gs ON gs.id = sr.symbol_id
+    JOIN active_public_symbol_projections app
+        ON app.governed_symbol_id = gs.id
+       AND app.symbol_revision_id = sr.id
+       AND app.published_page_id = pp.id
+       AND app.pack_entry_id = pe.id
+       AND app.publication_pack_id = pk.id
     WHERE pk.status = 'published'
         AND pk.audience = 'public'
         AND sr.lifecycle_state = 'published'

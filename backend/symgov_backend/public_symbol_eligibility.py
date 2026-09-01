@@ -14,6 +14,12 @@ PUBLIC_SYMBOL_ELIGIBILITY_SQL = text("""
     JOIN pack_entries pe ON pe.pack_id = pk.id
         AND pe.published_page_id = pp.id
         AND pe.symbol_revision_id = sr.id
+    JOIN active_public_symbol_projections app
+        ON app.governed_symbol_id = gs.id
+       AND app.symbol_revision_id = sr.id
+       AND app.published_page_id = pp.id
+       AND app.pack_entry_id = pe.id
+       AND app.publication_pack_id = pk.id
     WHERE gs.id = ANY(:symbol_ids)
       AND pk.status = 'published'
       AND pk.audience = 'public'

@@ -259,6 +259,12 @@ def load_eligible_symbols(db_env_file: str | None, limit: int = 200) -> list[dic
                     AND pe.symbol_revision_id = pp.current_symbol_revision_id
                 JOIN symbol_revisions sr ON sr.id = pp.current_symbol_revision_id
                 JOIN governed_symbols gs ON gs.id = sr.symbol_id
+                JOIN active_public_symbol_projections app
+                    ON app.governed_symbol_id = gs.id
+                   AND app.symbol_revision_id = sr.id
+                   AND app.published_page_id = pp.id
+                   AND app.pack_entry_id = pe.id
+                   AND app.publication_pack_id = pk.id
                 LEFT JOIN hannah_symbol_curation_states hs ON hs.symbol_id = gs.id
                 LEFT JOIN hannah_photo_candidates hp ON hp.symbol_id = gs.id
                 WHERE pk.status = 'published'
