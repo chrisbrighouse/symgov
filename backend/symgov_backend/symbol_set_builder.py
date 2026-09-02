@@ -21,7 +21,13 @@ a Set, or mark organization-wide" — the union it returns is:
     draft/rejected/unapproved revision. Visible only to an Organization
     Admin or an active `symbol_reviewer`, mirroring who is authorized to
     actually decide the toggle (WP6.3's authorization decision), since
-    this half of the search exists to serve that action.
+    this half of the search exists to serve that action. Also gated on
+    `settings.organization_symbols_enabled` (WP6.6 audit fix), matching
+    `effective_palette.py`'s equivalent gate on the same flag — this
+    surface is reachable behind only `symbol_sets_enabled` (see
+    `app.py`'s `stage4_route_guard`), so without this check any residual
+    organization-private data from a previous enablement window would
+    stay visible here even after the feature was turned back off.
 
 The two halves are disjoint by the same structural argument as
 `effective_palette.py`: `GovernedSymbol.visibility` is immutable after
@@ -146,7 +152,7 @@ def search_symbol_set_builder(
     principal = get_principal(session, request, settings)
 
     entries = _search_public_symbols(session, query_text=query_text)
-    if _has_organization_wide_toggle_authority(session, principal):
+    if settings.organization_symbols_enabled and _has_organization_wide_toggle_authority(session, principal):
         entries.extend(_search_organization_symbols(session, principal.organization.id, query_text=query_text))
 
     entries.sort(key=lambda entry: (entry["canonicalName"], str(entry["governedSymbolId"])))

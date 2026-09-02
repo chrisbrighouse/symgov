@@ -196,6 +196,37 @@ def test_builder_search_excludes_draft_organization_symbols(monkeypatch):
     assert response.json()["total"] == 0
 
 
+def test_builder_search_hides_organization_half_when_organization_symbols_disabled(monkeypatch):
+    """WP6.6 audit fix: `organization_symbols_enabled=False` must hide the
+    organization half of Builder search from an otherwise-authorized admin,
+    mirroring `effective_palette.py`'s `test_palette_respects_organization_symbols_enabled_flag`.
+    Proves a stale organization-private symbol from a previous enablement
+    window cannot leak back into view just because the flag was turned off."""
+    from dataclasses import replace as dataclass_replace
+
+    from symgov_backend.settings import get_settings
+
+    client, Session = _stage4_client(role="admin")
+    _ensure_symbol_tables(Session)
+    _ensure_review_tables(Session)
+    organization_id = _organization_id(Session)
+    public_id = uuid.uuid4()
+    monkeypatch.setattr(symbol_set_builder_module, "_search_public_symbols", _fake_public_entries([
+        {"governedSymbolId": public_id, "source": "public", "canonicalName": "Public Fire Alarm", "category": "fire",
+         "discipline": "fire-safety", "slug": "public-fire-alarm", "organizationWide": None, "currentRevisionId": uuid.uuid4()},
+    ]))
+    _approved_organization_symbol(Session, organization_id, "Org Approved Symbol")
+
+    with_flag_on = client.get("/api/v1/org/me/symbol-sets/builder-search").json()
+    assert with_flag_on["total"] == 2
+
+    flag_off_settings = dataclass_replace(client._stage4_settings, organization_symbols_enabled=False)
+    client.app.dependency_overrides[get_settings] = lambda: flag_off_settings
+    with_flag_off = client.get("/api/v1/org/me/symbol-sets/builder-search").json()
+    assert with_flag_off["total"] == 1
+    assert with_flag_off["items"][0]["source"] == "public"
+
+
 def test_builder_search_query_filters_organization_half(monkeypatch):
     client, Session = _stage4_client(role="admin")
     _ensure_symbol_tables(Session)
