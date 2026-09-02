@@ -1452,3 +1452,27 @@ class PromotionRequestListResponse(BaseModel):
 class PromotionRequestWithdrawRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     note: str | None = Field(default=None, max_length=2000)
+
+
+# --- Stage 7 WP7.4: demotion ---
+
+class DemotionImpactPreviewResponse(BaseModel):
+    governedSymbolId: str
+    eligible: bool
+    reasons: list[str]
+    blockingOrganizationIds: list[str]
+    favouritesCount: int
+
+
+class DemotionExecuteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class DemotionResponse(BaseModel):
+    governedSymbolId: str
+    visibility: str
+    symbolRevisionIds: list[str]
+    publishedPageIds: list[str]
+    packEntryIds: list[str]
+    retiredPackIds: list[str]
