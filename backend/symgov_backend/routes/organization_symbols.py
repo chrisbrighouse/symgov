@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import AuthenticatedUser
-from ..dependencies import get_db_session, require_organization_session
+from ..dependencies import get_db_session, require_organization_admin, require_organization_session
 from ..models import OrganizationSymbolReviewSubmission, SymbolRevision
 from ..organization_symbol_drafts import (
     OrganizationSymbolDraftError,
@@ -38,6 +38,15 @@ from ..organization_symbol_review import (
     decide_submission,
     set_organization_wide,
 )
+from ..promotion_requests import (
+    PromotionRequestConflict,
+    PromotionRequestError,
+    PromotionRequestNotVisible,
+    get_promotion_request,
+    list_promotion_requests,
+    submit_promotion_request,
+    withdraw_promotion_request,
+)
 from ..schemas import (
     OrganizationSymbolAssetResponse,
     OrganizationSymbolAssetUploadRequest,
@@ -50,6 +59,10 @@ from ..schemas import (
     OrganizationSymbolRevisionResponse,
     OrganizationSymbolSubmissionRequest,
     OrganizationSymbolSubmissionResponse,
+    PromotionRequestListResponse,
+    PromotionRequestResponse,
+    PromotionRequestSubmitRequest,
+    PromotionRequestWithdrawRequest,
 )
 from ..settings import SymgovAPISettings, get_settings
 
@@ -366,3 +379,125 @@ def set_organization_symbol_organization_wide(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
     return _draft_response(symbol)
+
+
+# --- Stage 7 WP7.2: promotion requests ---
+
+def _promotion_request_response(request) -> PromotionRequestResponse:
+    return PromotionRequestResponse(
+        id=str(request.id),
+        governedSymbolId=str(request.governed_symbol_id),
+        organizationId=str(request.organization_id),
+        symbolRevisionId=str(request.symbol_revision_id),
+        status=request.status,
+        proposedMetadata=dict(request.proposed_metadata_json or {}),
+        reason=request.reason,
+        sharingAcknowledgment=bool(request.sharing_acknowledgment),
+        submittedByUserId=str(request.submitted_by_user_id),
+        submittedAt=request.submitted_at,
+        closedAt=request.closed_at,
+        traceId=request.trace_id,
+    )
+
+
+@router.post(
+    "/{symbol_id}/promotion-requests",
+    response_model=PromotionRequestResponse,
+)
+def submit_organization_symbol_promotion_request(
+    symbol_id: str,
+    body: PromotionRequestSubmitRequest,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_admin),
+) -> PromotionRequestResponse:
+    parsed_symbol_id = _parse_uuid(symbol_id)
+    try:
+        request = submit_promotion_request(
+            session,
+            current_user,
+            symbol_id=parsed_symbol_id,
+            reason=body.reason,
+            sharing_acknowledgment=body.sharingAcknowledgment,
+            proposed_metadata=body.proposedMetadata,
+            trace_id=body.traceId,
+        )
+    except PromotionRequestNotVisible as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail="Organization symbol was not found.") from exc
+    except PromotionRequestConflict as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PromotionRequestError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.commit()
+    return _promotion_request_response(request)
+
+
+@router.get(
+    "/{symbol_id}/promotion-requests",
+    response_model=PromotionRequestListResponse,
+)
+def list_organization_symbol_promotion_requests(
+    symbol_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_admin),
+) -> PromotionRequestListResponse:
+    parsed_symbol_id = _parse_uuid(symbol_id)
+    try:
+        requests = list_promotion_requests(session, current_user, symbol_id=parsed_symbol_id)
+    except PromotionRequestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PromotionRequestListResponse(items=[_promotion_request_response(r) for r in requests])
+
+
+@router.get(
+    "/{symbol_id}/promotion-requests/{request_id}",
+    response_model=PromotionRequestResponse,
+)
+def get_organization_symbol_promotion_request(
+    symbol_id: str,
+    request_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_admin),
+) -> PromotionRequestResponse:
+    parsed_request_id = _parse_uuid(request_id)
+    try:
+        request = get_promotion_request(session, current_user, parsed_request_id)
+    except PromotionRequestNotVisible as exc:
+        raise HTTPException(status_code=404, detail="Promotion request was not found.") from exc
+    except PromotionRequestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if str(request.governed_symbol_id) != symbol_id:
+        raise HTTPException(status_code=404, detail="Promotion request was not found.")
+    return _promotion_request_response(request)
+
+
+@router.post(
+    "/{symbol_id}/promotion-requests/{request_id}/withdraw",
+    response_model=PromotionRequestResponse,
+)
+def withdraw_organization_symbol_promotion_request(
+    symbol_id: str,
+    request_id: str,
+    body: PromotionRequestWithdrawRequest,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_admin),
+) -> PromotionRequestResponse:
+    parsed_request_id = _parse_uuid(request_id)
+    try:
+        request = withdraw_promotion_request(session, current_user, request_id=parsed_request_id, note=body.note)
+    except PromotionRequestNotVisible as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail="Promotion request was not found.") from exc
+    except PromotionRequestConflict as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PromotionRequestError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if str(request.governed_symbol_id) != symbol_id:
+        session.rollback()
+        raise HTTPException(status_code=404, detail="Promotion request was not found.")
+    session.commit()
+    return _promotion_request_response(request)

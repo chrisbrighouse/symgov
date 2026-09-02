@@ -39,29 +39,47 @@ from test_organization_symbol_postgresql import (  # noqa: E402
     _user,
 )
 
-NEW_MIGRATION_HEAD = "20260902_0035"
+THIS_MIGRATION = "20260902_0035"
 PRE_STAGE7_RELEASE = "20260901_0034"
+CURRENT_GLOBAL_HEAD = "20260902_0036"  # bump alongside every later migration; see the note below.
 
 psycopg = pytest.importorskip("psycopg")
 
 
-def test_new_migration_is_the_sole_alembic_head():
+def test_this_migration_is_present_and_correctly_chained():
+    """Proves `THIS_MIGRATION` (the migration this file's fixtures actually
+    exercise) exists and chains from the pre-Stage-7 release -- independent
+    of whatever the *current* global head is, so this assertion does not
+    need updating every time a later migration lands on top of it (unlike
+    `test_new_migration_is_the_sole_alembic_head` below, which does)."""
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
     cfg = Config("backend/alembic.ini")
     cfg.set_main_option("script_location", "backend/alembic")
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == [NEW_MIGRATION_HEAD]
-    revision = script.get_revision(NEW_MIGRATION_HEAD)
+    revision = script.get_revision(THIS_MIGRATION)
     assert revision is not None
     assert revision.down_revision == PRE_STAGE7_RELEASE
+
+
+def test_new_migration_is_the_sole_alembic_head():
+    """Update `CURRENT_GLOBAL_HEAD` (the one-line stale-head correction
+    this repository's migration tests each carry) whenever a later
+    migration is added on top of this one."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    cfg = Config("backend/alembic.ini")
+    cfg.set_main_option("script_location", "backend/alembic")
+    script = ScriptDirectory.from_config(cfg)
+    assert script.get_heads() == [CURRENT_GLOBAL_HEAD]
 
 
 @pytest.fixture(scope="module")
 def wp71_database():
     with _database("symgov-wp71") as (engine, url, raw_url):
-        _alembic(url, "upgrade", NEW_MIGRATION_HEAD)
+        _alembic(url, "upgrade", CURRENT_GLOBAL_HEAD)
         with psycopg.connect(raw_url, autocommit=True) as connection:
             connection.execute(
                 "GRANT SELECT ON governed_symbols, symbol_revisions, "
@@ -319,7 +337,7 @@ def test_downgrade_to_pre_stage7_release_restores_old_schema_and_view():
     module-scoped `wp71_database` fixture, since it mutates schema state
     other tests in this module depend on."""
     with _database("symgov-wp71-downgrade") as (engine, url, raw_url):
-        _alembic(url, "upgrade", NEW_MIGRATION_HEAD)
+        _alembic(url, "upgrade", THIS_MIGRATION)
         assert "publication_state" in {c["name"] for c in inspect(engine).get_columns("published_pages")}
 
         _alembic(url, "downgrade", PRE_STAGE7_RELEASE)
@@ -338,6 +356,6 @@ def test_downgrade_to_pre_stage7_release_restores_old_schema_and_view():
             }
             assert constraint_names == {"ck_symbol_revisions_ck_symbol_revisions_lifecycle_state"}
 
-        _alembic(url, "upgrade", NEW_MIGRATION_HEAD)
+        _alembic(url, "upgrade", THIS_MIGRATION)
         columns_after_reupgrade = {c["name"] for c in inspect(engine).get_columns("published_pages")}
         assert "publication_state" in columns_after_reupgrade

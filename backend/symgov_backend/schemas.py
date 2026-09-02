@@ -1417,3 +1417,37 @@ class OrganizationSymbolReviewDecisionResponse(BaseModel):
 class OrganizationSymbolOrganizationWideRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool
+
+
+# --- Stage 7 WP7.2: promotion requests ---
+
+class PromotionRequestSubmitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=1, max_length=2000)
+    sharingAcknowledgment: bool
+    proposedMetadata: dict = Field(default_factory=dict)
+    traceId: str | None = Field(default=None, max_length=200)
+
+
+class PromotionRequestResponse(BaseModel):
+    id: str
+    governedSymbolId: str
+    organizationId: str
+    symbolRevisionId: str
+    status: str
+    proposedMetadata: dict
+    reason: str
+    sharingAcknowledgment: bool
+    submittedByUserId: str
+    submittedAt: datetime
+    closedAt: datetime | None
+    traceId: str | None
+
+
+class PromotionRequestListResponse(BaseModel):
+    items: list[PromotionRequestResponse]
+
+
+class PromotionRequestWithdrawRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    note: str | None = Field(default=None, max_length=2000)

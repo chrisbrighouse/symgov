@@ -918,6 +918,80 @@ class OrganizationSymbolReviewDecision(Base):
     decided_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class PromotionRequest(Base):
+    """Stage 7 WP7.2 -- dedicated organization-side public-promotion
+    submission record (programme plan §13, decision addendum I-10). Snapshots
+    the organization-approved revision at submission time; does not overload
+    `SymbolRevision.lifecycle_state` or public `ReviewCase`."""
+
+    __tablename__ = "promotion_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('submitted', 'triage', 'in_review', 'changes_requested', 'accepted', 'rejected', 'withdrawn')",
+            name="status",
+        ),
+        CheckConstraint(
+            "(status in ('submitted', 'triage', 'in_review', 'changes_requested') and closed_at is null) "
+            "or (status in ('accepted', 'rejected', 'withdrawn') and closed_at is not null)",
+            name="closed_state",
+        ),
+        CheckConstraint("btrim(reason) <> '' and char_length(reason) <= 2000", name="reason"),
+        CheckConstraint("sharing_acknowledgment = true", name="sharing_acknowledgment"),
+        Index(
+            "uq_promotion_requests_active_symbol",
+            "governed_symbol_id",
+            unique=True,
+            postgresql_where=text("status in ('submitted', 'triage', 'in_review', 'changes_requested')"),
+        ),
+        Index("ix_promotion_requests_organization_symbol", "organization_id", "governed_symbol_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    governed_symbol_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("governed_symbols.id", ondelete="RESTRICT"), nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=False)
+    symbol_revision_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_revisions.id", ondelete="RESTRICT"), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    proposed_metadata_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    sharing_acknowledgment: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    submitted_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    submitted_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    closed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_case_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("review_cases.id", ondelete="RESTRICT"), nullable=True)
+    trace_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PromotionRequestDecision(Base):
+    """Append-only transition log for a `PromotionRequest` -- one row per
+    state transition (unlike Stage 5's 1:1 submission/decision pair, a
+    promotion request can move through several transitions over its
+    lifetime). WP7.2 only ever writes a `withdrawn` transition; later work
+    packages add the reviewer-facing transitions on this same table."""
+
+    __tablename__ = "promotion_request_decisions"
+    __table_args__ = (
+        CheckConstraint(
+            "decision_code in ('triage', 'in_review', 'changes_requested', 'accepted', 'rejected', 'withdrawn')",
+            name="decision_code",
+        ),
+        CheckConstraint("note is null or (btrim(note) <> '' and char_length(note) <= 2000)", name="note"),
+        Index("ix_promotion_request_decisions_request_created_at", "promotion_request_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    promotion_request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("promotion_requests.id", ondelete="RESTRICT"), nullable=False)
+    decision_code: Mapped[str] = mapped_column(Text, nullable=False)
+    from_status: Mapped[str] = mapped_column(Text, nullable=False)
+    to_status: Mapped[str] = mapped_column(Text, nullable=False)
+    decided_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=True)
+    decider_name: Mapped[str] = mapped_column(Text, nullable=False)
+    decider_role: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class SourcePackage(Base):
     __tablename__ = "source_packages"
 
