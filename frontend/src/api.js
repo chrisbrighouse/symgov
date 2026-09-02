@@ -343,6 +343,22 @@ export async function updateOrganizationProject(projectId, payload) {
   return requireOk(result, 'Project update failed.');
 }
 
+export async function fetchEffectivePalette(projectId, { page = 1, pageSize = 50, setCode = '' } = {}) {
+  const result = await requestJson(
+    withQuery(`/org/me/projects/${encodeURIComponent(projectId)}/effective-palette`, { page, pageSize, setCode }),
+    { cache: 'no-store' }
+  );
+  const payload = requireOk(result, 'Effective palette load failed.');
+  return {
+    activeSet: payload?.activeSet || null,
+    reason: payload?.reason || 'none',
+    items: Array.isArray(payload?.items) ? payload.items : [],
+    page: Number(payload?.page || page),
+    pageSize: Number(payload?.pageSize || pageSize),
+    total: Number(payload?.total || 0)
+  };
+}
+
 export async function listOrganizationSymbolSets({ page = 1, pageSize = 50, status = '', projectId = '' } = {}) {
   const result = await requestJson(withQuery('/org/me/symbol-sets', {
     page,

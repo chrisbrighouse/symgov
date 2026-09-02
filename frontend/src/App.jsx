@@ -65,7 +65,8 @@ import OrganizationSelectionPage from './OrganizationSelectionPage.js';
 import { adminRouteElements } from './adminRoutes.js';
 import { canAccessOrganizationAdmin, canAccessPlatformAdmin } from './adminJourneys.js';
 import { ProjectContextBar } from './ProjectContextBar.js';
-import { canMountOrganizationSymbolDrafts, canMountProjectContext, canReviewOrganizationSymbols } from './projectContext.js';
+import { EffectivePalettePanel } from './EffectivePalettePanel.js';
+import { canMountEffectivePalette, canMountOrganizationSymbolDrafts, canMountProjectContext, canReviewOrganizationSymbols } from './projectContext.js';
 import { OrganizationSymbolDraftsPage } from './OrganizationSymbolDraftsPage.js';
 import { OrganizationSymbolReviewsPage } from './OrganizationSymbolReviewsPage.js';
 import { Header } from './Header.js';
@@ -514,6 +515,7 @@ function AppContent() {
   const isStandardsRoute = location.pathname.startsWith('/standards');
   const showRail = Boolean(auth.user) && location.pathname !== '/login' && location.pathname !== '/change-pin';
   const showMemberProjectContext = canMountProjectContext(auth) && auth.user.organization.baseRole !== 'admin';
+  const showMemberEffectivePalette = canMountEffectivePalette(auth) && auth.user.organization.baseRole !== 'admin';
 
   return (
     <div className={`app-shell ${isStandardsRoute ? 'mode-standards' : 'mode-workspace'} ${showRail ? 'has-side-rail' : ''}`}>
@@ -522,6 +524,7 @@ function AppContent() {
       {showRail ? <SideRail /> : null}
       <main className="page-frame">
         {showMemberProjectContext ? <ProjectContextBar auth={auth} /> : null}
+        {showMemberEffectivePalette ? <EffectivePalettePanel auth={auth} /> : null}
         <Routes>
           <Route path="/" element={<HomeRedirect />} />
           <Route path="/login" element={<LoginPage />} />

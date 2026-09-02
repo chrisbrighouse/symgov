@@ -42,6 +42,10 @@ export function canMountProjectContext(auth) {
   return user?.capabilities?.symbolSetsEnabled === true;
 }
 
+export function canMountEffectivePalette(auth) {
+  return canMountProjectContext(auth);
+}
+
 export function canMountOrganizationSymbolDrafts(auth) {
   const user = auth?.user;
   if (!user) return false;

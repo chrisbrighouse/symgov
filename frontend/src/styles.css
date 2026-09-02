@@ -2983,6 +2983,7 @@ a {
 }
 
 .project-context-bar,
+.effective-palette-panel,
 .organization-projects-panel,
 .organization-symbol-sets-panel {
   border: 1px solid #dbe2ea;
@@ -3123,6 +3124,11 @@ a {
   border-color: #17685d;
   background: #17685d;
   color: #fff;
+}
+
+.symbol-set-builder-badge.set-item {
+  border-color: rgba(107, 33, 168, 0.35);
+  color: #6b21a8;
 }
 
 .symbol-set-builder-badge.unavailable {
