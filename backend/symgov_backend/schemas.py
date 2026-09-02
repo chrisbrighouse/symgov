@@ -243,6 +243,10 @@ class SymbolSetItemResponse(BaseModel):
     currentRevisionId: uuid.UUID | None
     availabilityStatus: str
     availabilityReason: str | None
+    canonicalName: str | None = None
+    category: str | None = None
+    discipline: str | None = None
+    slug: str | None = None
     createdAt: datetime
     updatedAt: datetime
 

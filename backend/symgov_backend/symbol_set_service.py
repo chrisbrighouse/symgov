@@ -247,22 +247,31 @@ def _admin_set(session, request, settings, set_id):
     return principal, row
 
 
-def _item_dict(row, current_revision_id=None, available=True):
+def _item_dict(row, current_revision_id=None, available=True, governed=None):
     return {"id": row.id, "governedSymbolId": row.governed_symbol_id, "sortOrder": row.sort_order,
             "groupName": row.group_name, "displayLabel": row.display_label, "notes": row.notes,
             "preferredFormat": row.preferred_format, "provenance": row.provenance_json or {},
             "currentRevisionId": current_revision_id, "availabilityStatus": "active" if available else "unavailable",
             "availabilityReason": None if available else (row.availability_reason or "Public Catalog eligibility is no longer current."),
+            "canonicalName": governed.canonical_name if governed is not None else None,
+            "category": governed.category if governed is not None else None,
+            "discipline": governed.discipline if governed is not None else None,
+            "slug": governed.slug if governed is not None else None,
             "createdAt": row.created_at, "updatedAt": row.updated_at}
 
 
 def list_items(session, request, settings, set_id, *, page, page_size):
     principal, row = get_set(session, request, settings, set_id)
-    q = session.query(SymbolSetItem).filter(SymbolSetItem.symbol_set_id == row.id)
+    q = session.query(SymbolSetItem, GovernedSymbol).join(
+        GovernedSymbol, GovernedSymbol.id == SymbolSetItem.governed_symbol_id,
+    ).filter(SymbolSetItem.symbol_set_id == row.id)
     total = q.count()
-    items = q.order_by(SymbolSetItem.sort_order, SymbolSetItem.governed_symbol_id).offset((page - 1) * page_size).limit(page_size).all()
-    current = current_public_symbols(session, [item.governed_symbol_id for item in items])
-    return principal, {"items": [_item_dict(item, current.get(item.governed_symbol_id), item.governed_symbol_id in current) for item in items],
+    rows = q.order_by(SymbolSetItem.sort_order, SymbolSetItem.governed_symbol_id).offset((page - 1) * page_size).limit(page_size).all()
+    current = current_public_symbols(session, [item.governed_symbol_id for item, _ in rows])
+    return principal, {"items": [
+        _item_dict(item, current.get(item.governed_symbol_id), item.governed_symbol_id in current, governed)
+        for item, governed in rows
+    ],
                        "page": page, "pageSize": page_size, "total": total}
 
 

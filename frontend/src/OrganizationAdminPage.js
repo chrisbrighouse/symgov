@@ -5,6 +5,7 @@ import { canMountProjectContext } from './projectContext.js';
 import { ProjectContextBar } from './ProjectContextBar.js';
 import { OrganizationProjectsPanel } from './OrganizationProjectsPanel.js';
 import { OrganizationSymbolSetsPanel } from './OrganizationSymbolSetsPanel.js';
+import { SymbolSetBuilderPanel } from './SymbolSetBuilderPanel.js';
 
 function resultValue(result) {
   if (!result.ok) {
@@ -713,6 +714,9 @@ export function OrganizationAdminPage({ auth }) {
           isAdmin,
           onContextChanged: notifyContextChange,
         })
+      : null,
+    symbolSetsUiEnabled
+      ? createElement(SymbolSetBuilderPanel, { isAdmin })
       : null,
     createElement(MemberListSection, { isAdmin, protect })
   );

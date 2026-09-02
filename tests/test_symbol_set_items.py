@@ -330,3 +330,26 @@ def test_new_item_must_be_currently_public_and_failure_writes_nothing(monkeypatc
     assert response.status_code == 409
     with Session() as session:
         assert session.query(SymbolSetItem).filter_by(symbol_set_id=uuid.UUID(set_id)).count() == 0
+
+
+def test_items_carry_human_readable_governed_symbol_identity(monkeypatch):
+    """Stage 6 WP6.4 needs a human-readable name/category/discipline per
+    item so the Symbol Set Builder never has to show a bare UUID
+    (CLAUDE.md: keep human-readable symbol IDs prominent)."""
+    client, Session = _stage4_client()
+    _ensure_symbol_tables(Session)
+    set_id = _active_set(client)
+    symbol_id = _symbol(Session, "fire-hydrant")
+    _eligibility(monkeypatch, {symbol_id: uuid.uuid4()})
+
+    put_response = client.put(
+        f"/api/v1/org/me/symbol-sets/{set_id}/items",
+        json={"items": [{"governedSymbolId": str(symbol_id), "sortOrder": 1}]},
+    )
+    assert put_response.status_code == 200
+    for payload in (put_response.json(), client.get(f"/api/v1/org/me/symbol-sets/{set_id}/items").json()):
+        item = payload["items"][0]
+        assert item["canonicalName"] == "fire-hydrant"
+        assert item["category"] == "test"
+        assert item["discipline"] == "test"
+        assert item["slug"] == "fire-hydrant"
