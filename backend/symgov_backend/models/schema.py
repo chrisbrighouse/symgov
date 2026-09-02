@@ -835,8 +835,8 @@ class SymbolRevision(Base):
     __tablename__ = "symbol_revisions"
     __table_args__ = (
         CheckConstraint(
-            "lifecycle_state in ('draft', 'review', 'approved', 'published', 'deprecated')",
-            name="symbol_revisions_lifecycle_state",
+            "lifecycle_state in ('draft', 'review', 'approved', 'published', 'deprecated', 'withdrawn')",
+            name="lifecycle_state",
         ),
         Index("uq_symbol_revisions_symbol_revision_label", "symbol_id", "revision_label", unique=True),
         Index("ix_symbol_revisions_symbol_created_at", "symbol_id", "created_at"),
@@ -1013,6 +1013,17 @@ class PublicationPack(Base):
 
 class PublishedPage(Base):
     __tablename__ = "published_pages"
+    __table_args__ = (
+        CheckConstraint(
+            "publication_state in ('active', 'retired')",
+            name="publication_state",
+        ),
+        CheckConstraint(
+            "(publication_state = 'active' and retired_by is null and retired_at is null) "
+            "or (publication_state = 'retired' and retired_at is not null)",
+            name="retirement_metadata",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     page_code: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
@@ -1020,6 +1031,10 @@ class PublishedPage(Base):
     pack_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("publication_packs.id"), nullable=False)
     current_symbol_revision_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_revisions.id"), nullable=False)
     effective_date: Mapped[object] = mapped_column(Date, nullable=False)
+    publication_state: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    retired_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    retired_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retirement_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -1064,6 +1079,15 @@ class PackEntry(Base):
     __table_args__ = (
         Index("uq_pack_entries_pack_revision_page", "pack_id", "symbol_revision_id", "published_page_id", unique=True),
         Index("ix_pack_entries_pack_sort_order", "pack_id", "sort_order"),
+        CheckConstraint(
+            "publication_state in ('active', 'retired')",
+            name="publication_state",
+        ),
+        CheckConstraint(
+            "(publication_state = 'active' and retired_by is null and retired_at is null) "
+            "or (publication_state = 'retired' and retired_at is not null)",
+            name="retirement_metadata",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1071,6 +1095,10 @@ class PackEntry(Base):
     symbol_revision_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_revisions.id"), nullable=False)
     published_page_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("published_pages.id"), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    publication_state: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    retired_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    retired_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retirement_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
