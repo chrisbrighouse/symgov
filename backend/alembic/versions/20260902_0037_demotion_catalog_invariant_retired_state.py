@@ -192,4 +192,52 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Visibility rollback floor (decision addendum, Stage 7 plan §5): the
+    # old (stricter) trigger requires a canonical catalog identifier for
+    # *any* existing published_pages/pack_entries row, active or retired.
+    # A demoted symbol's retired rows deliberately have no canonical
+    # identifier (WP7.4 releases it on demotion) -- reverting to the old
+    # trigger wouldn't fail immediately (triggers don't re-validate
+    # existing rows), but would leave a latent landmine: the next ordinary
+    # UPDATE to any of these tables would then fail against data this
+    # release itself produced. Refuse explicitly instead.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1
+                FROM published_pages pp
+                JOIN symbol_revisions sr ON sr.id = pp.current_symbol_revision_id
+                JOIN governed_symbols gs ON gs.id = sr.symbol_id
+                WHERE pp.publication_state = 'retired'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM catalog_symbol_identifiers csi
+                    WHERE csi.identifier = gs.catalog_symbol_id
+                      AND csi.role = 'canonical'
+                      AND csi.governed_symbol_id = gs.id
+                  )
+            ) OR EXISTS (
+                SELECT 1
+                FROM pack_entries pe
+                JOIN symbol_revisions sr ON sr.id = pe.symbol_revision_id
+                JOIN governed_symbols gs ON gs.id = sr.symbol_id
+                WHERE pe.publication_state = 'retired'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM catalog_symbol_identifiers csi
+                    WHERE csi.identifier = gs.catalog_symbol_id
+                      AND csi.role = 'canonical'
+                      AND csi.governed_symbol_id = gs.id
+                  )
+            ) THEN
+                RAISE EXCEPTION 'visibility rollback floor: downgrade refused because a retired '
+                    'page/entry row exists whose governed symbol has no canonical catalog '
+                    'identifier (decision addendum, Stage 7 plan section 5) -- '
+                    'roll forward or redeploy at/above this release instead'
+                    USING ERRCODE = '23514';
+            END IF;
+        END;
+        $$
+        """
+    )
     op.execute(_OLD_FUNCTION)

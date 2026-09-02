@@ -858,7 +858,7 @@ def list_published_packs(session: Session = Depends(get_db_session)) -> dict:
                 pk.status,
                 count(pe.id)::int AS symbol_count
             FROM publication_packs pk
-            LEFT JOIN pack_entries pe ON pe.pack_id = pk.id
+            LEFT JOIN pack_entries pe ON pe.pack_id = pk.id AND pe.publication_state = 'active'
             WHERE pk.status = 'published'
                 AND pk.audience = 'public'
             GROUP BY pk.id, pk.pack_code, pk.title, pk.audience, pk.effective_date, pk.status

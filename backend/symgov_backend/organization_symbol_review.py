@@ -184,10 +184,17 @@ def create_new_draft_revision(
         raise OrganizationSymbolReviewNotVisible()
 
     base_revision = session.get(SymbolRevision, symbol.current_revision_id) if symbol.current_revision_id else None
-    if base_revision is not None and base_revision.lifecycle_state not in ("approved", "draft"):
+    if base_revision is not None and base_revision.lifecycle_state not in ("approved", "draft", "withdrawn"):
         # 'review' means an active submission still exists for the current
         # revision — creating a parallel draft would orphan it. 'published'
-        # and 'deprecated' are not organization-private lifecycle states.
+        # is not an organization-private lifecycle state (a currently
+        # public revision cannot be the symbol's own base for a new
+        # organization-private draft). 'withdrawn' *is* allowed: Stage 7
+        # demotion (symbol_demotion.py) sets the formerly published
+        # revision's lifecycle_state to 'withdrawn' while flipping the
+        # symbol back to organization_private in the same transaction --
+        # re-promotion (programme plan §13) requires starting a fresh draft
+        # revision from that point, not editing the withdrawn one in place.
         raise OrganizationSymbolReviewError(
             "Cannot start a new draft revision while the current revision is still under review."
         )

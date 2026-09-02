@@ -183,6 +183,33 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Visibility rollback floor (decision addendum, Stage 7 plan §5): once
+    # demotion has produced withdrawn revisions or retired page/entry rows,
+    # downgrading past this migration would silently destroy that evidence
+    # (dropping publication_state/retired_by/retired_at/retirement_reason)
+    # rather than merely feature-disabling. Refuse explicitly with a clear
+    # message rather than relying on the incidental CHECK-constraint
+    # violation this would otherwise hit further down.
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM symbol_revisions WHERE lifecycle_state = 'withdrawn'
+            ) OR EXISTS (
+                SELECT 1 FROM published_pages WHERE publication_state = 'retired'
+            ) OR EXISTS (
+                SELECT 1 FROM pack_entries WHERE publication_state = 'retired'
+            ) THEN
+                RAISE EXCEPTION 'visibility rollback floor: downgrade refused because withdrawn/retired '
+                    'demotion data exists (decision addendum, Stage 7 plan section 5) -- '
+                    'roll forward or redeploy at/above this release instead'
+                    USING ERRCODE = '23514';
+            END IF;
+        END;
+        $$
+        """
+    )
     op.execute("REVOKE SELECT ON active_public_symbol_projections FROM symgov_app")
     op.execute("DROP VIEW active_public_symbol_projections")
     op.execute(
