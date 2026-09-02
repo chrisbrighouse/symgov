@@ -4162,6 +4162,18 @@ def create_workspace_review_decision(
     review_case = session.get(ReviewCase, parsed_case_id)
     if review_case is None:
         raise HTTPException(status_code=404, detail="Review case not found.")
+    if review_case.source_entity_type == "organization_symbol_promotion" and decision_code != "approve":
+        # Stage 7 WP7.3: every non-"approve" transition in DECISION_TRANSITIONS
+        # routes to Libby's drawing-intake follow-up pipeline
+        # (route_review_follow_up_to_libby), which is the wrong domain for an
+        # organization-promotion case and would queue a real external agent
+        # job with drawing-intake-shaped semantics. Reviewer-facing
+        # reject/changes-requested handling for promotion requests is a
+        # later work package; block it here rather than let it misfire.
+        raise HTTPException(
+            status_code=422,
+            detail="Only 'approve' is supported for an organization-symbol-promotion review case at this stage.",
+        )
 
     now = datetime.now(timezone.utc).replace(microsecond=0)
     previous_decisions = (

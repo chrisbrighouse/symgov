@@ -1442,6 +1442,7 @@ class PromotionRequestResponse(BaseModel):
     submittedAt: datetime
     closedAt: datetime | None
     traceId: str | None
+    reviewCaseId: str | None = None
 
 
 class PromotionRequestListResponse(BaseModel):

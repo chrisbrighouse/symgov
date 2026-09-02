@@ -1,11 +1,20 @@
-"""Stage 7 WP7.2 -- public promotion request submission and withdrawal.
+"""Stage 7 WP7.2/WP7.3 -- public promotion request submission, review-case
+opening, and withdrawal.
 
 Per the programme plan §13 tasks 1-2/6 and the Stage 7 plan's §4 decisions:
 
-- Q1: promotion later drives the existing `ReviewCase`/
-  `execute_publication_handoff` pipeline (WP7.3); this module only owns the
-  dedicated submission/decision-log model and the submission/withdrawal
-  actions, per I-10's "does not overload public `ReviewCase`" instruction.
+- Q1: promotion drives the existing `ReviewCase`/`execute_publication_handoff`
+  pipeline. WP7.2 built the dedicated submission/decision-log model, per
+  I-10's "does not overload public `ReviewCase`" instruction; WP7.3 adds
+  `open_promotion_review_case`, the one point where a `ReviewCase` actually
+  gets opened for a submitted request (research during WP7.3 found the
+  `ReviewCase` machine has no ordered stage sequence to "adapt" -- see
+  `organization_promotion_handoff.py`'s module docstring for the full
+  finding -- so this module only opens the case at a single fixed stage;
+  the existing generic `POST /workspace/review-cases/{id}/decisions`
+  endpoint, gated by the existing `require_workspace_access` role check,
+  is reused unmodified to decide it, per FR-PUB-003's "use the existing
+  Symgov review model").
 - Q2: only an Organization Admin may submit a promotion request.
 - Q3: one active (non-terminal) promotion request per governed symbol,
   enforced by the DB-level unique partial index
@@ -45,6 +54,7 @@ from .models import (
     OrganizationSymbolReviewSubmission,
     PromotionRequest,
     PromotionRequestDecision,
+    ReviewCase,
 )
 
 OPEN_STATUSES = ("submitted", "triage", "in_review", "changes_requested")
@@ -242,3 +252,71 @@ def withdraw_promotion_request(
     request.updated_at = now
     session.flush()
     return request
+
+
+def _require_reviewer_authority(current_user: AuthenticatedUser) -> None:
+    """The existing Symgov review model (FR-PUB-003): whoever can decide any
+    other `ReviewCase` today -- a global `admin` or `reviewer` role, per
+    `dependencies.require_workspace_access` -- may also open (triage) a
+    promotion request's review case. Deliberately not organization-scoped:
+    this is public-governance review, not the submitting organization's own
+    authority."""
+    if "admin" not in current_user.roles and "reviewer" not in current_user.roles:
+        raise PromotionRequestError("The 'admin' or 'reviewer' role is required to review a promotion request.")
+
+
+def open_promotion_review_case(
+    session: Session,
+    current_user: AuthenticatedUser,
+    *,
+    request_id: uuid.UUID,
+) -> ReviewCase:
+    """Opens the `ReviewCase` a reviewer will decide via the existing,
+    unmodified `POST /workspace/review-cases/{id}/decisions` endpoint. Moves
+    the promotion request from `submitted` to `triage` and records that
+    transition in the decision log; the stage the case opens at is purely
+    informational (`DECISION_TRANSITIONS["approve"]` transitions any current
+    stage straight to `ready_for_publication_handoff` -- see
+    `organization_promotion_handoff.py`'s module docstring)."""
+    _require_reviewer_authority(current_user)
+
+    request = session.get(PromotionRequest, request_id, with_for_update=True)
+    if request is None:
+        raise PromotionRequestNotVisible()
+    if request.status != "submitted":
+        raise PromotionRequestConflict("Only a freshly submitted promotion request can be opened for review.")
+
+    now = _utc_now()
+    review_case = ReviewCase(
+        id=uuid.uuid4(),
+        source_entity_type="organization_symbol_promotion",
+        source_entity_id=request.id,
+        current_stage="public_promotion_review",
+        owner_id=uuid.UUID(current_user.id),
+        escalation_level="standard",
+        opened_at=now,
+        closed_at=None,
+    )
+    session.add(review_case)
+    session.flush()
+
+    session.add(
+        PromotionRequestDecision(
+            id=uuid.uuid4(),
+            promotion_request_id=request.id,
+            decision_code="triage",
+            from_status="submitted",
+            to_status="triage",
+            decided_by_user_id=uuid.UUID(current_user.id),
+            decider_name=current_user.display_name,
+            decider_role="reviewer" if "reviewer" in current_user.roles else "admin",
+            note=None,
+            created_at=now,
+        )
+    )
+
+    request.status = "triage"
+    request.review_case_id = review_case.id
+    request.updated_at = now
+    session.flush()
+    return review_case

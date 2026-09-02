@@ -36,6 +36,7 @@ from .models import (
 )
 from .service_users import enforce_noninteractive_service_account, new_service_pin_hash
 from .settings import get_settings
+from .organization_promotion_handoff import execute_organization_promotion_handoff
 from .publication_authority import lock_review_case_decision_authority
 from .runtime import (
     coerce_uuid,
@@ -1087,6 +1088,22 @@ def execute_publication_handoff(
         )
     except RuntimeError as exc:
         return {"status": "failed", "detail": str(exc)}
+
+    if review_case.source_entity_type == "organization_symbol_promotion":
+        # Stage 7 WP7.3 -- an organization-symbol promotion never touches
+        # Rupert/duplicate-detection/raster-split; see
+        # organization_promotion_handoff.py's module docstring for why
+        # reusing the rest of this function unmodified would silently
+        # create a duplicate phantom governed symbol.
+        return execute_organization_promotion_handoff(
+            session,
+            review_case=review_case,
+            decision=decision,
+            action=action,
+            approval_actor=approval_actor,
+            close_review_case=close_review_case,
+            commit_transaction=commit_transaction,
+        )
 
     rupert_definition = session.query(AgentDefinition).filter_by(slug="rupert").one_or_none()
     if rupert_definition is None:

@@ -18,8 +18,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import AuthenticatedUser
-from ..dependencies import get_db_session, require_organization_admin, require_organization_session
-from ..models import OrganizationSymbolReviewSubmission, SymbolRevision
+from ..dependencies import get_db_session, require_organization_admin, require_organization_session, require_user
+from ..models import OrganizationSymbolReviewSubmission, PromotionRequest, SymbolRevision
 from ..organization_symbol_drafts import (
     OrganizationSymbolDraftError,
     OrganizationSymbolDraftNotVisible,
@@ -44,6 +44,7 @@ from ..promotion_requests import (
     PromotionRequestNotVisible,
     get_promotion_request,
     list_promotion_requests,
+    open_promotion_review_case,
     submit_promotion_request,
     withdraw_promotion_request,
 )
@@ -381,7 +382,7 @@ def set_organization_symbol_organization_wide(
     return _draft_response(symbol)
 
 
-# --- Stage 7 WP7.2: promotion requests ---
+# --- Stage 7 WP7.2/WP7.3: promotion requests ---
 
 def _promotion_request_response(request) -> PromotionRequestResponse:
     return PromotionRequestResponse(
@@ -397,6 +398,7 @@ def _promotion_request_response(request) -> PromotionRequestResponse:
         submittedAt=request.submitted_at,
         closedAt=request.closed_at,
         traceId=request.trace_id,
+        reviewCaseId=str(request.review_case_id) if request.review_case_id else None,
     )
 
 
@@ -497,6 +499,40 @@ def withdraw_organization_symbol_promotion_request(
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if str(request.governed_symbol_id) != symbol_id:
+        session.rollback()
+        raise HTTPException(status_code=404, detail="Promotion request was not found.")
+    session.commit()
+    return _promotion_request_response(request)
+
+
+@router.post(
+    "/{symbol_id}/promotion-requests/{request_id}/open-review",
+    response_model=PromotionRequestResponse,
+)
+def open_organization_symbol_promotion_review(
+    symbol_id: str,
+    request_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> PromotionRequestResponse:
+    """Reviewer-facing (global `admin`/`reviewer` role, not organization
+    membership -- see `promotion_requests._require_reviewer_authority`):
+    opens the `ReviewCase` a reviewer then decides via the existing
+    `POST /workspace/review-cases/{id}/decisions` endpoint."""
+    parsed_request_id = _parse_uuid(request_id)
+    try:
+        review_case = open_promotion_review_case(session, current_user, request_id=parsed_request_id)
+    except PromotionRequestNotVisible as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail="Promotion request was not found.") from exc
+    except PromotionRequestConflict as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PromotionRequestError as exc:
+        session.rollback()
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    request = session.get(PromotionRequest, review_case.source_entity_id)
+    if request is None or str(request.governed_symbol_id) != symbol_id:
         session.rollback()
         raise HTTPException(status_code=404, detail="Promotion request was not found.")
     session.commit()
