@@ -23,6 +23,7 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import text
@@ -44,8 +45,39 @@ BACKEND = Path(__file__).resolve().parents[1] / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
+from fastapi.testclient import TestClient  # noqa: E402
+from symgov_backend.app import create_app  # noqa: E402
 from symgov_backend.catalog_symbol_resolution import resolve_catalog_symbol  # noqa: E402
+from symgov_backend.dependencies import get_db_session  # noqa: E402
 from symgov_backend.models import HannahPhotoCandidate, WhitneyDemandSignal  # noqa: E402
+from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E402
+
+
+def _client_with_symbol_sets(engine):
+    """Like `_client`, but also enables `symbol_sets_enabled` -- needed only by
+    the effective-palette test below, which is the sole reader in this file
+    that exercises the Stage 4/6 project/symbol-set surface rather than the
+    published/workspace routes the rest of this matrix covers."""
+    app = create_app()
+    TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    settings = SymgovAPISettings(
+        organizations_enabled=True,
+        organization_symbols_enabled=True,
+        symbol_sets_enabled=True,
+        platform_admin_enabled=True,
+        organization_pilot_codes=("acme", "other", "symgov"),
+    )
+
+    def override_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db_session] = override_db
+    app.dependency_overrides[get_settings] = lambda: settings
+    return TestClient(app, headers={"origin": "http://testserver"}), TestingSessionLocal
 
 NEW_MIGRATION_HEAD = "20260902_0037"
 
@@ -292,3 +324,103 @@ def test_hannah_and_whitney_background_readers_exclude_the_demoted_symbol(wp75_d
         ).scalar_one()
         assert hannah_count == 1
         assert whitney_count == 1
+
+
+def test_effective_palette_excludes_the_demoted_symbol(wp75_database):
+    """WP7.7 audit finding: `GET /org/me/projects/{projectId}/effective-palette`
+    (`effective_palette.py`, via `public_symbol_eligibility.current_public_symbols`)
+    was not in WP7.5's original reader list. Reasoning from the code showed it
+    reuses the same `active_public_symbol_projections`-gated eligibility check
+    WP7.5 already validated elsewhere, so it should be safe -- this proves it
+    empirically rather than leaving it as an unverified inference.
+    """
+    engine, _, _ = wp75_database
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    admin_client, _ = _client_with_symbol_sets(engine)
+
+    admin_id = _create_user_with_global_roles(Session, email="wp75palette@example.test", display_name="PaletteAdmin", roles=[])
+    _add_membership(Session, admin_id, code="acme", base_role="admin", capabilities=("contributor", "symbol_reviewer"))
+    admin_client.post("/api/v1/auth/login", json={"email": "wp75palette@example.test", "pin": "1234"})
+
+    reviewer_client, _ = _client(engine)
+    _create_user_with_global_roles(Session, email="wp75palettereviewer@example.test", display_name="PaletteReviewer", roles=["reviewer"])
+    reviewer_client.post("/api/v1/auth/login", json={"email": "wp75palettereviewer@example.test", "pin": "1234"})
+
+    symbol_id = _promote_symbol(admin_client, reviewer_client, name="WP7.5 Palette Symbol")
+
+    project = admin_client.post("/api/v1/org/me/projects", json={"code": "WP75-PAL", "name": "Palette Project"})
+    assert project.status_code == 201, project.text
+    project_id = project.json()["id"]
+
+    symbol_set = admin_client.post("/api/v1/org/me/symbol-sets", json={"code": "WP75-PAL-SET", "name": "Palette Set"})
+    assert symbol_set.status_code == 201, symbol_set.text
+    set_id = symbol_set.json()["id"]
+    activated = admin_client.patch(f"/api/v1/org/me/symbol-sets/{set_id}", json={"status": "active"})
+    assert activated.status_code == 200, activated.text
+
+    linked = admin_client.put(
+        f"/api/v1/org/me/symbol-sets/{set_id}/projects",
+        json={"projects": [{"projectId": project_id, "isDefault": True}]},
+    )
+    assert linked.status_code == 200, linked.text
+
+    item_added = admin_client.put(
+        f"/api/v1/org/me/symbol-sets/{set_id}/items",
+        json={"items": [{"governedSymbolId": symbol_id, "sortOrder": 0}]},
+    )
+    assert item_added.status_code == 200, item_added.text
+
+    palette_before = admin_client.get(f"/api/v1/org/me/projects/{project_id}/effective-palette")
+    assert palette_before.status_code == 200, palette_before.text
+    assert any(entry["governedSymbolId"] == symbol_id for entry in palette_before.json()["items"])
+
+    _demote(engine, Session, symbol_id, suffix="palette")
+
+    palette_after = admin_client.get(f"/api/v1/org/me/projects/{project_id}/effective-palette")
+    assert palette_after.status_code == 200, palette_after.text
+    assert not any(entry["governedSymbolId"] == symbol_id for entry in palette_after.json()["items"]), (
+        "effective-palette must exclude a demoted symbol -- it reuses the same "
+        "active_public_symbol_projections-gated eligibility check other readers do"
+    )
+
+
+def test_rupert_published_metadata_excludes_the_demoted_symbol(wp75_database):
+    """WP7.7 audit finding: `rupert_published_metadata` (routes/workspace.py,
+    backs the Vlad agent-queue `toolSummary`/`publishedSymbolId` fields) is an
+    independent hand-rolled visibility/lifecycle_state filter, not routed
+    through `active_public_symbol_projections`/`current_public_symbols` like
+    every other reader in this file. `test_wp56_defense_in_depth_hardening.py`
+    already proves it excludes an organization-private symbol; this proves
+    the demotion-specific shape empirically (a symbol that was actually
+    `published`/`public` and is now `withdrawn`/`organization_private` with a
+    residual `retired` `published_pages` row), rather than assuming Stage 5's
+    coverage of a merely-never-public symbol generalizes to it.
+    """
+    from symgov_backend.routes import workspace as routes_workspace
+
+    engine, _, _ = wp75_database
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+
+    symbol_id = _setup_promoted_symbol(engine, Session, suffix="rupert")
+
+    with Session() as session:
+        revision_id = session.execute(
+            text("SELECT current_revision_id FROM governed_symbols WHERE id = :id"),
+            {"id": symbol_id},
+        ).scalar_one()
+
+        before = routes_workspace.rupert_published_metadata(
+            session, SimpleNamespace(payload_json={"symbol_revision_ids": [str(revision_id)]})
+        )
+        assert before.get("published_symbol_id"), before
+
+    _demote(engine, Session, symbol_id, suffix="rupert")
+
+    with Session() as session:
+        after = routes_workspace.rupert_published_metadata(
+            session, SimpleNamespace(payload_json={"symbol_revision_ids": [str(revision_id)]})
+        )
+        assert after == {}, (
+            "rupert_published_metadata must exclude a demoted symbol's revision -- "
+            f"got {after!r}"
+        )
