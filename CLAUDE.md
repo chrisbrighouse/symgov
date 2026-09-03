@@ -10,7 +10,7 @@
 ## UI work
 
 - Inspect the existing route, components, tokens, and styles before changing composition.
-- Preserve the product split: Workspace is operator/processing visibility, Reviews is SME review ergonomics, Standards is published-only consumption.
+- Preserve the product split: Workspace is operator/processing visibility, Reviews is SME review ergonomics, Standards (the Catalog nav item) is Catalog consumption — public Catalog for every session, plus the signed-in organization's own organization-wide private symbols for organization-bound sessions.
 - Prefer the existing visual language and responsive behavior unless the task explicitly requests a redesign.
 - Keep human-readable symbol IDs and operator-readable timestamps prominent; do not replace them with UUIDs in compact UI.
 - Use accessible controls, visible focus states, semantic labels, and keyboard-friendly interactions.

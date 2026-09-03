@@ -17,6 +17,10 @@ from ..catalog_favourites import (
     load_favourite_symbol_ids,
     remove_catalog_favourite,
 )
+from ..catalog_organization_context import (
+    list_organization_wide_catalog_symbols,
+    resolve_organization_wide_catalog_symbol,
+)
 from ..catalog_symbol_resolution import (
     CatalogSymbolLookupUnavailable,
     resolve_catalog_symbol,
@@ -34,6 +38,7 @@ from ..models import (
     ClarificationRecord,
     GovernedSymbol,
     HannahPhotoCandidate,
+    SymbolRevision,
     User,
 )
 from ..published_feedback_gate import (
@@ -62,7 +67,7 @@ from ..services.published_feedback import (
     submit_published_feedback,
     validate_published_feedback_review_case,
 )
-from ..settings import get_settings
+from ..settings import get_settings, SymgovAPISettings
 
 
 router = APIRouter(prefix="/published", tags=["published"])
@@ -148,6 +153,89 @@ def published_symbol_row(
         "isFavourite": symbol_uuid is not None and symbol_uuid in (favourite_symbol_ids or set()),
         "payload": payload,
         "links": {"web": f"/#/s/{symbol_display_id}"},
+        "source": "public",
+    }
+
+
+def organization_private_symbol_row(
+    governed_symbol: GovernedSymbol,
+    revision: SymbolRevision | None,
+    favourite_symbol_ids: set[uuid.UUID] | None = None,
+) -> dict:
+    """Stage 8 WP8.1 -- the organization-wide-private counterpart of
+    `published_symbol_row`, for a `source: "organization_private"` Catalog
+    entry. See `catalog_organization_context.py`'s module docstring for why
+    this cannot reuse `published_symbol_row`/`PUBLISHED_SYMBOLS_SQL`: an
+    organization-private symbol has no `PublishedPage`/`PackEntry`/
+    `catalog_symbol_id`, so every page/pack field here is `None` rather than
+    fabricated. `status` reports the real `SymbolRevision.lifecycle_state`
+    (e.g. "Approved") rather than the hardcoded "Published" the public row
+    uses, per CLAUDE.md's "do not invent... workflow states."
+
+    Preview asset *metadata* (`previewAsset`/`previewAssets`) is included --
+    it is read directly from `payload_json`, same as the public path -- but
+    `previewUrl` stays `None` here: serving the actual asset bytes for an
+    organization-private symbol needs its own org-scoped resolution route,
+    which is WP8.2's scope, not WP8.1's. Comments and supplemental photos
+    are likewise left empty; per the Stage 8 plan §1.10 these are proposed
+    (pending Chris's confirmation) to stay public-symbol-only.
+    """
+    payload = (revision.payload_json if revision is not None else None) or {}
+    keywords = payload.get("keywords") or payload.get("search_terms") or []
+    if not isinstance(keywords, list):
+        keywords = []
+    downloads = payload.get("downloads") or []
+    if not isinstance(downloads, list):
+        downloads = []
+
+    preview_asset = choose_published_preview_asset(payload)
+    preview_assets = list_published_preview_assets(payload)
+    display_name = payload.get("name") or payload.get("canonical_name") or governed_symbol.canonical_name
+    status = (
+        revision.lifecycle_state.replace("_", " ").title()
+        if revision is not None
+        else "Draft"
+    )
+
+    return {
+        "id": governed_symbol.slug,
+        "symbolId": str(governed_symbol.id),
+        "catalogSymbolId": None,
+        "displayName": display_name,
+        "packageDisplayId": payload.get("package_display_id"),
+        "packageSymbolSequence": payload.get("package_symbol_sequence"),
+        "slug": governed_symbol.slug,
+        "name": display_name,
+        "category": governed_symbol.category,
+        "discipline": governed_symbol.discipline,
+        "revisionId": str(revision.id) if revision is not None else None,
+        "revision": revision.revision_label if revision is not None else None,
+        "revisionCreatedAt": revision.created_at.isoformat() if revision is not None and revision.created_at else None,
+        "status": status,
+        "summary": payload.get("summary") or payload.get("description") or governed_symbol.canonical_name,
+        "rationale": (revision.rationale or "") if revision is not None else "",
+        "effectiveDate": None,
+        "lastUpdatedAt": governed_symbol.updated_at.isoformat() if governed_symbol.updated_at else None,
+        "pageId": None,
+        "pageCode": None,
+        "pageTitle": None,
+        "packId": None,
+        "packCode": None,
+        "pack": None,
+        "keywords": keywords,
+        "downloads": published_download_labels(downloads),
+        "downloadAssets": list_download_assets(payload, fallback_source_asset=published_fallback_source_asset(payload)),
+        "sortOrder": None,
+        "previewUrl": None,
+        "previewAsset": preview_asset,
+        "previewAssets": preview_assets,
+        "supplementalPhotos": [],
+        "hasComments": False,
+        "commentCount": 0,
+        "isFavourite": governed_symbol.id in (favourite_symbol_ids or set()),
+        "payload": payload,
+        "links": {},
+        "source": "organization_private",
     }
 
 
@@ -380,6 +468,48 @@ def _load_published_symbol_row(session: Session, symbol_ref: str):
     return rows[0], getattr(resolved, "matched_by", "canonical")
 
 
+def _load_symbol_for_detail(
+    session: Session,
+    symbol_ref: str,
+    current_user: AuthenticatedUser,
+    settings: SymgovAPISettings,
+):
+    """Stage 8 WP8.2: resolve a Catalog detail/preview/asset lookup as
+    either a public symbol (the existing, unmodified `_load_published_symbol_row`
+    path) or -- additively, tried only once that path 404s -- an
+    organization-bound session's own organization-wide private symbol, by
+    raw governed-symbol UUID (plan §1.6/§4 Q3). A non-404 error from the
+    public path (e.g. the 503 lookup-unavailable case) is never swallowed
+    or retried against the organization-private path.
+
+    Returns `("public", row, resolved_by)` or
+    `("organization_private", (governed_symbol, revision), "organization_private")`.
+    Raises the same 404 `_load_published_symbol_row` would if neither path
+    resolves.
+    """
+    try:
+        row, resolved_by = _load_published_symbol_row(session, symbol_ref)
+        return "public", row, resolved_by
+    except HTTPException as exc:
+        if exc.status_code != 404:
+            raise
+        public_not_found = exc
+
+    if (
+        settings.organizations_enabled
+        and settings.organization_symbols_enabled
+        and current_user.session_mode == "organization"
+        and current_user.active_organization_id
+    ):
+        resolved = resolve_organization_wide_catalog_symbol(
+            session, symbol_ref, uuid.UUID(current_user.active_organization_id)
+        )
+        if resolved is not None:
+            return "organization_private", resolved, "organization_private"
+
+    raise public_not_found
+
+
 @router.get("/favourites")
 def list_catalog_favourites(
     current_user: AuthenticatedUser = Depends(require_user),
@@ -394,9 +524,20 @@ def add_current_user_catalog_favourite(
     symbol_ref: str,
     current_user: AuthenticatedUser = Depends(require_user),
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> dict:
-    row, _resolved_by = _load_published_symbol_row(session, symbol_ref)
-    symbol_id = uuid.UUID(str(row.symbol_id))
+    # Stage 8 WP8.3: before this, an organization-private symbol could never
+    # be favourited at all -- this route only ever resolved via
+    # `_load_published_symbol_row` (public-only). Routing through the same
+    # `_load_symbol_for_detail` helper WP8.2 built makes favouriting an
+    # organization-wide private symbol possible for its own organization's
+    # session, exactly as scoped as detail lookup already is (plan §1.6).
+    source, resolved, _resolved_by = _load_symbol_for_detail(session, symbol_ref, current_user, settings)
+    if source == "public":
+        symbol_id = uuid.UUID(str(resolved.symbol_id))
+    else:
+        governed_symbol, _revision = resolved
+        symbol_id = governed_symbol.id
     add_catalog_favourite(session, current_user.id, symbol_id)
     return {"symbolId": str(symbol_id), "isFavourite": True}
 
@@ -406,7 +547,15 @@ def remove_current_user_catalog_favourite(
     symbol_ref: str,
     current_user: AuthenticatedUser = Depends(require_user),
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> dict:
+    # Stage 8 WP8.3: this fast path -- remove-by-raw-UUID when it's already
+    # a favourite -- is deliberately *unscoped* by session/organization
+    # (plan SS1.3/SS4 Q4-adjacent): "historical rows... may be safely
+    # removed by their owning user without exposing hidden symbol details."
+    # A user must be able to remove a stale/hidden favourite (organization-
+    # private-outside-current-org, or previously demoted) regardless of
+    # which session they're currently in. This is intentional, not a gap.
     try:
         requested_symbol_id = uuid.UUID(symbol_ref)
     except ValueError:
@@ -418,8 +567,17 @@ def remove_current_user_catalog_favourite(
     ):
         symbol_id = requested_symbol_id
     else:
-        row, _resolved_by = _load_published_symbol_row(session, symbol_ref)
-        symbol_id = uuid.UUID(str(row.symbol_id))
+        # Only reached for a symbol_ref that is not already a favourite (or
+        # not UUID-shaped) -- resolution here only needs to establish a
+        # canonical symbol_id for the (no-op) removal response, so it may
+        # as well cover organization-private symbols too, via the same
+        # `_load_symbol_for_detail` helper the add route uses.
+        source, resolved, _resolved_by = _load_symbol_for_detail(session, symbol_ref, current_user, settings)
+        if source == "public":
+            symbol_id = uuid.UUID(str(resolved.symbol_id))
+        else:
+            governed_symbol, _revision = resolved
+            symbol_id = governed_symbol.id
     remove_catalog_favourite(session, current_user.id, symbol_id)
     return {"symbolId": str(symbol_id), "isFavourite": False}
 
@@ -431,6 +589,7 @@ def list_published_symbols(
     pack: str | None = Query(default=None),
     current_user: AuthenticatedUser = Depends(require_user),
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> dict:
     filters = []
     params = {}
@@ -464,15 +623,43 @@ def list_published_symbols(
     ).all()
     supplemental = load_supplemental_photos(session, rows)
     comment_counts = load_comment_counts(session, rows)
+
+    # Stage 8 WP8.1: an organization-bound session additionally sees its own
+    # organization-wide private symbols, merged in with a `source`
+    # discriminator (plan §1.2/§1.4/§4 Q2/Q3). Personal-mode and API-key
+    # sessions are untouched -- `session_mode` defaults to "personal" and
+    # `/catalog/*` (routes/catalog.py) never sets it to "organization" at
+    # all, so this branch is structurally unreachable for either. A `pack`
+    # filter is public-only by construction (organization-private symbols
+    # have no pack), so the organization-private branch is skipped entirely
+    # when one is supplied, rather than always returning zero matches.
+    organization_private_rows: list[tuple[GovernedSymbol, SymbolRevision | None]] = []
+    if (
+        settings.organizations_enabled
+        and settings.organization_symbols_enabled
+        and current_user.session_mode == "organization"
+        and current_user.active_organization_id
+        and not pack
+    ):
+        organization_private_rows = list_organization_wide_catalog_symbols(
+            session,
+            uuid.UUID(current_user.active_organization_id),
+            query=q,
+        )
+
     favourite_ids = load_favourite_symbol_ids(
         session,
         current_user.id,
-        [uuid.UUID(str(row.symbol_id)) for row in rows],
+        [uuid.UUID(str(row.symbol_id)) for row in rows]
+        + [governed_symbol.id for governed_symbol, _ in organization_private_rows],
     )
     return {
         "items": [
             published_symbol_row(row, supplemental, comment_counts, favourite_ids)
             for row in rows
+        ] + [
+            organization_private_symbol_row(governed_symbol, revision, favourite_ids)
+            for governed_symbol, revision in organization_private_rows
         ]
     }
 
@@ -483,18 +670,27 @@ def get_published_symbol(
     symbol_id: str,
     current_user: AuthenticatedUser = Depends(require_user),
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> dict:
-    row, resolved_by = _load_published_symbol_row(session, symbol_id)
-    rows = [row]
-    supplemental = load_supplemental_photos(session, rows)
-    comment_counts = load_comment_counts(session, rows)
-    favourite_ids = load_favourite_symbol_ids(
-        session,
-        current_user.id,
-        [uuid.UUID(str(row.symbol_id))],
-    )
+    source, resolved, resolved_by = _load_symbol_for_detail(session, symbol_id, current_user, settings)
+    if source == "public":
+        row = resolved
+        rows = [row]
+        supplemental = load_supplemental_photos(session, rows)
+        comment_counts = load_comment_counts(session, rows)
+        favourite_ids = load_favourite_symbol_ids(
+            session,
+            current_user.id,
+            [uuid.UUID(str(row.symbol_id))],
+        )
+        return {
+            "item": published_symbol_row(row, supplemental, comment_counts, favourite_ids),
+            "resolvedBy": resolved_by,
+        }
+    governed_symbol, revision = resolved
+    favourite_ids = load_favourite_symbol_ids(session, current_user.id, [governed_symbol.id])
     return {
-        "item": published_symbol_row(row, supplemental, comment_counts, favourite_ids),
+        "item": organization_private_symbol_row(governed_symbol, revision, favourite_ids),
         "resolvedBy": resolved_by,
     }
 
@@ -733,18 +929,31 @@ def get_published_symbol_preview(
     format: str | None = Query(default=None),
     current_user: AuthenticatedUser = Depends(require_user),
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> Response:
-    row, _resolved_by = _load_published_symbol_row(session, symbol_id)
-    payload_json = row.payload_json or {}
+    # Stage 8 WP8.2: an organization-bound session can also preview its own
+    # organization-wide private symbol's asset, via the same additive
+    # `_load_symbol_for_detail` resolution the detail route uses (plan §1.6).
+    source, resolved, _resolved_by = _load_symbol_for_detail(session, symbol_id, current_user, settings)
+    if source == "public":
+        row = resolved
+        payload_json = row.payload_json or {}
+        try:
+            revision_id = uuid.UUID(str(row.symbol_revision_id))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=404, detail="Published symbol preview was not found.") from exc
+    else:
+        _governed_symbol, revision = resolved
+        payload_json = (revision.payload_json if revision is not None else None) or {}
+        if revision is None:
+            raise HTTPException(status_code=404, detail="Published symbol preview was not found.")
+        revision_id = revision.id
+
     preview_asset = choose_published_preview_asset(payload_json, requested_format=format)
     object_key = preview_asset.get("object_key") if preview_asset else None
     if not object_key:
         raise HTTPException(status_code=404, detail="Published symbol preview was not found.")
 
-    try:
-        revision_id = uuid.UUID(str(row.symbol_revision_id))
-    except (AttributeError, TypeError, ValueError) as exc:
-        raise HTTPException(status_code=404, detail="Published symbol preview was not found.") from exc
     attachment = (
         session.query(Attachment)
         .filter(
@@ -779,13 +988,30 @@ def get_published_symbol_supplemental_photo_preview(
     photo_id: str,
     current_user: AuthenticatedUser = Depends(require_user),
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> Response:
-    published_row, _resolved_by = _load_published_symbol_row(session, symbol_id)
+    # Stage 8 WP8.2: resolved the same way the detail/preview routes are.
+    # In practice an organization-private symbol has no `HannahPhotoCandidate`
+    # rows -- that pipeline only ever runs on symbols going through Stage
+    # 1-7's drawing-intake/promotion flow (plan §1.10's "supplementalPhotos: []"
+    # for WP8.1's organization-private list entries reflects the same fact)
+    # -- so extending resolution here costs nothing today and keeps this
+    # route consistent with the other two rather than silently diverging.
+    source, resolved, _resolved_by = _load_symbol_for_detail(session, symbol_id, current_user, settings)
+    if source == "public":
+        published_row = resolved
+        candidate_symbol_id = published_row.symbol_id
+        candidate_revision_id = published_row.symbol_revision_id
+    else:
+        governed_symbol, revision = resolved
+        candidate_symbol_id = governed_symbol.id
+        candidate_revision_id = revision.id if revision is not None else None
+
     candidate = (
         session.query(HannahPhotoCandidate)
         .filter(HannahPhotoCandidate.id == photo_id)
-        .filter(HannahPhotoCandidate.symbol_id == published_row.symbol_id)
-        .filter(HannahPhotoCandidate.symbol_revision_id == published_row.symbol_revision_id)
+        .filter(HannahPhotoCandidate.symbol_id == candidate_symbol_id)
+        .filter(HannahPhotoCandidate.symbol_revision_id == candidate_revision_id)
         .filter(HannahPhotoCandidate.status == "attached")
         .filter(HannahPhotoCandidate.attachment_id.isnot(None))
         .filter(HannahPhotoCandidate.object_key.isnot(None))
@@ -799,7 +1025,7 @@ def get_published_symbol_supplemental_photo_preview(
         .filter(Attachment.id == candidate.attachment_id)
         .filter(Attachment.object_key == candidate.object_key)
         .filter(Attachment.parent_type == "symbol_revision")
-        .filter(Attachment.parent_id == published_row.symbol_revision_id)
+        .filter(Attachment.parent_id == candidate_revision_id)
         .one_or_none()
     )
     if attachment is None:
