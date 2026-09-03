@@ -2,7 +2,7 @@
 
 > **For Hermes / OpenClaw orchestration and Claude Code:** this is the one committed, controlling plan for Product Stage 7. Ephemeral `/tmp` manifests, restart prompts, and review verdicts produced by either orchestration layer are session-scoped evidence, not sources of truth — reconcile against this file and the current repository state (`git log`, `git status`, Alembic head) before resuming or dispatching a Stage 7 work package. If a `/tmp` artifact and this file disagree, this file wins; update this file rather than trusting a stale scratch manifest.
 
-**Status:** IMPLEMENTATION IN PROGRESS — WP7.1 (`1ecd2d3`), WP7.2 (`5a9f756`), WP7.3 (`979ca44`), WP7.4 (`1cf18c4`), and WP7.5 (`6530ef5`) are committed. WP7.6 is implemented and tested, **not yet committed** (per §6, commits require Chris's separate go-ahead). WP7.7–WP7.8 have not been started.
+**Status:** IMPLEMENTATION IN PROGRESS — WP7.1 (`1ecd2d3`), WP7.2 (`5a9f756`), WP7.3 (`979ca44`), WP7.4 (`1cf18c4`), WP7.5 (`6530ef5`), and WP7.6 (`bcf581c`) are all committed. **Correction to an earlier draft of this status line:** WP7.6 was recorded above as "not yet committed" in the version of this file written during its own implementation session; it has since been committed as `bcf581c` — confirmed against live `git log`, which is authoritative over this file's own prior text per this file's own header instruction. WP7.7 and WP7.8 are scoped (2026-09-03, §7–§8) but not started.
 
 **WP7.1 implementation note (2026-09-02):** `backend/alembic/versions/20260902_0035_public_projection_withdrawal_and_publication_state.py` (new) plus matching `models/schema.py` updates (`SymbolRevision.lifecycle_state` gains `withdrawn`; `PublishedPage`/`PackEntry` gain `publication_state`/`retired_by`/`retired_at`/`retirement_reason` and their check constraints).
 - **Pre-existing naming-convention bug found and fixed in passing:** the real, deployed `symbol_revisions.lifecycle_state` check constraint was `ck_symbol_revisions_ck_symbol_revisions_lifecycle_state` (double-prefixed) — confirmed empirically against a disposable Postgres instance migrated to `20260901_0034`, not merely inferred from the ORM model, which declared a different, non-matching name (`name="symbol_revisions_lifecycle_state"`) that was never the source of truth. Root cause: this project's `ck_%(table_name)s_%(constraint_name)s` Alembic naming convention re-applies even to an explicitly-prefixed literal name (confirmed by direct experimentation with `alembic.operations.Operations`/`MigrationContext`, both for `op.create_check_constraint` and `op.drop_constraint`). Since this migration necessarily drops and recreates this exact constraint to add `withdrawn`, it takes the opportunity to recreate it with a short name (`"lifecycle_state"`) that the same convention resolves to the correct single-prefixed `ck_symbol_revisions_lifecycle_state`, and updates the ORM model to match. Downgrade restores the original double-prefixed name exactly (via `op.f()` to bypass re-application), verified bit-for-bit against the pre-migration `pg_get_constraintdef` output. This does not touch `governed_symbols`' two similarly-double-prefixed constraints (`visibility`, `organization_wide_scope`) — out of Stage 7's scope.
@@ -191,6 +191,12 @@ All eight open product decisions below were presented and answered in this sessi
 7. **Q7 — Impact preview: separate `GET .../demotion-impact-preview` endpoint.** Returns eligibility plus best-effort usage counts (Favorites, project use, views, downloads); a distinct `POST` executes the demotion after the admin has reviewed the preview. Clean look/act separation, matches the minimal admin console from Q6.
 8. **Q8 — Flag status and gating: still not live anywhere; gate Stage 7 under `organization_symbols_enabled` only.** No new Stage 7-specific flag. Promotion/demotion only apply to organization-owned symbols, which that existing flag already governs. **Still re-verify live activation state again before any future stage touches a real/shared environment** — this can change without a session being told, per the standing caveat carried since Stage 5.
 
+### 4.1 Decisions confirmed with Chris (2026-09-03, scoping WP7.7/WP7.8)
+
+9. **Q9 — Promotion-request review UI (WP7.8 piece 3) surface: new panel in `PlatformAdminPage`.** Not folded into `/reviews` (Reviews is SME ergonomics for the raster/provenance pipeline, not admin promotion-governance) and not a new standalone surface. Bundled with the WP7.8 demotion console under the same platform-governance admin, in the same file/mounting pattern as the rest of `PlatformAdminPage.js`.
+10. **Q10 — Reject/changes-requested handling for promotion requests: explicitly deferred, accept-only for WP7.8.** WP7.8 ships only the accept decision path (consistent with WP7.3's own deferral, §3 above). Reviewer-facing reject/changes-requested transitions remain a known, tracked gap for a future work package — not built now, and not silently dropped.
+11. **Q11 — Flag activation re-confirmed: still inactive everywhere.** `organizations_enabled`/`organization_symbols_enabled` remain not activated in any real/shared environment as of 2026-09-03 — no change from Stage 5/6/7's standing status. **This must still be re-verified again before any future session touches a real/shared environment**; it is not a permanent fact, per the same standing caveat as Q8.
+
 ---
 
 ## 5. Regression standard
@@ -202,3 +208,38 @@ Per the kickoff prompt's explicit requirement: demotion/promotion races, multi-s
 ## 6. Global prohibited side effects (applies to every package above)
 
 No commit, staging, push, shared/real migration, deployment, service/gateway restart, feature activation, first live promotion/demotion against a real/shared database, publication, withdrawal, external messaging, credential change, new npm dependency, or unrelated edit, unless a specific work package above and the human authorizing it says otherwise. This explicitly includes: no organization-side or Platform-Admin-side demotion of any real public symbol, no migration applied to any shared database, and no flag flipped in any live environment, under any circumstance, without Chris's separate explicit approval for that exact action.
+
+---
+
+## 7. WP7.7 scope — Whole-stage audit (scoped 2026-09-03)
+
+Documentation/process work package, not new feature code — mirrors WP5.6 (`87c2b24`) and WP6.6 (`764a7fb`) exactly. No dedicated script or `.claude/` skill implements "Contract Review"/"Security Review"; both are named review levels from the programme plan's §0.7 risk-tier table, not tools. Stage 7 (private-symbol visibility transitions, tenant authorization, new migrations/triggers) is L3, which requires both, sequentially, on frozen/identical bytes — Contract Review first, Security Review second, never concurrently with fixes.
+
+1. **Re-verification pass.** Re-read every reader/route touched across WP7.1–7.6 against §13's acceptance bar, independently of what WP7.5/7.6 already proved — actively look for a reader WP7.5's matrix missed, don't just re-read WP7.5's own list.
+2. **Full regression run, both modes, with counts reported:**
+   - Portable: `SYMGOV_BACKEND_TIMEOUT_SECONDS=1200 ./scripts/test-backend.sh`
+   - External/full: `./scripts/test-backend.sh --full` (the 5 excluded slow/external files plus `test_published_symbol_review_workflow.py`/`test_vlad_hardening.py`, under the disposable-Postgres harness)
+   - `npm run test:frontend`
+   - Any pre-existing failure must be independently reproduced against pre-Stage-7 `main` before being attributed away, per §5's standing rule — never assumed.
+3. **Fix any confirmed gap**, each with its own new regression test proving the fix — same standard as WP5.6's DB CHECK constraint fix and WP6.6's missing feature-flag gate. A gap requiring more than a narrow fix becomes its own new work package rather than silently expanding WP7.7's scope.
+4. **Contract Review** — cross-check response schemas, route registrations, and feature-flag gating against `schemas.py`/routers for drift across everything WP7.1–7.6 touched.
+5. **Security Review** — adversarial/cross-tenant pass on the identical, frozen bytes the Contract Review passed.
+
+**Depends on:** WP7.1–7.6 (all committed).
+**Out of scope:** any feature work beyond narrow gap fixes discovered during the audit itself.
+
+## 8. WP7.8 scope — Frontend surface (scoped 2026-09-03)
+
+No generic reviewer-triage widget exists to reuse — `ReviewsPage` (`frontend/src/App.jsx`, ~line 4482 onward) is a large monolithic component hard-coupled to the raster/provenance/Daisy review-case shape, usable only as an API-call reference (`submitWorkspaceReviewDecision`, `fetchWorkspaceReviewCases` in `api.js`), not as a reusable component. WP7.8 is therefore "build small, from scratch," not "wire into existing UI." Three independently small pieces, all using the existing plain-`createElement` (no JSX), `apiGet`/`apiPost`/`apiPatch`/`apiDelete` + `runWithStepUp` conventions already established in `PlatformAdminPage.js`/`OrganizationAdminPage.js`:
+
+1. **Demotion console** → new panel inside `frontend/src/PlatformAdminPage.js` (not a new route), alongside its existing Organizations section pattern (impact-preview-then-confirm UX, same shape as `OrganizationRow`'s suspend/reactivate confirm dialogs).
+   - Calls `GET /platform/governed-symbols/{symbol_id}/demotion-impact-preview`, then `POST .../demote` with `runWithStepUp` (PIN step-up, matching the page's existing pattern).
+   - Gated on `organizations_enabled && organization_symbols_enabled && platform_admin_enabled`, `require_platform_admin` + `require_recent_step_up` on execute.
+
+2. **Promotion-submission affordance** → extends `frontend/src/OrganizationAdminPage.js`, following the WP6.4 inline-conditional-panel pattern (like `SymbolSetBuilderPanel`) rather than WP5.5's separate-route pattern — submission on an already-eligible symbol is a lightweight action, not a full review queue.
+   - Calls the WP7.2 routes under `.../{symbol_id}/promotion-requests` (submit/list/get/withdraw).
+
+3. **Promotion-request review panel** → new minimal panel inside `PlatformAdminPage.js`, per Q9 (§4.1). List pending requests → open one → call `open-review` (WP7.3) → submit an **accept-only** decision via the existing `submitWorkspaceReviewDecision`, per Q10 (§4.1). Reject/changes-requested is explicitly out of scope for this package.
+
+**Depends on:** WP7.2, WP7.3, WP7.4 (all committed) — no backend blocker.
+**Out of scope:** reject/changes-requested decisioning (Q10); any new frontend route/surface beyond `PlatformAdminPage`/`OrganizationAdminPage` (Q9).
