@@ -68,6 +68,25 @@ test('Header: organization mode shows both switch and sign out', () => {
   assert.match(orgMarkup, /Sign out/);
 });
 
+test('Header: renders the organization logo image when logoUrl is set', () => {
+  const authWithLogo = {
+    ...mockOrgAuth,
+    user: {
+      ...mockOrgAuth.user,
+      organization: { ...mockOrgAuth.user.organization, logoUrl: 'https://logo.test/acme' }
+    }
+  };
+  const markup = renderHeader(authWithLogo);
+  assert.match(markup, /src="https:\/\/logo\.test\/acme"/);
+  assert.doesNotMatch(markup, /org-selection-fallback/);
+});
+
+test('Header: renders no organization context when signed out', () => {
+  const markup = renderHeader({ type: 'personal', user: null, logout: async () => {} });
+  assert.doesNotMatch(markup, /header-org-context/);
+  assert.match(markup, /Sign in/);
+});
+
 test('Header switch handler keeps the current session and route when revocation fails', async () => {
   assert.equal(typeof headerModule.logoutAndNavigate, 'function');
   const navigations = [];
