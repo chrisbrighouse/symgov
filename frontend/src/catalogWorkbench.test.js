@@ -11,6 +11,8 @@ import {
   buildCatalogFacetValues,
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
+  catalogScopeBadge,
+  catalogStatusBadge,
   catalogTaxonomyForSymbol,
   normalizeCatalogCategory,
   normalizeCatalogDiscipline,
@@ -140,8 +142,28 @@ test('builds compact card summaries for symbol browsing', () => {
     formats: ['DXF', 'PNG'],
     useCases: ['Insert into CAD drawing', 'Mark up / annotate drawing', 'Use in PDF/report'],
     hasPhotos: false,
-    commentCount: 0
+    commentCount: 0,
+    scopeBadge: { label: 'Public', modifier: 'public' },
+    statusBadge: null
   });
+});
+
+test('catalogScopeBadge labels public and organization-private symbols (WP8.6)', () => {
+  assert.deepEqual(catalogScopeBadge(fireAlarmSymbol), { label: 'Public', modifier: 'public' });
+  assert.deepEqual(catalogScopeBadge({ ...fireAlarmSymbol, source: 'organization_private' }), {
+    label: 'Organization Private',
+    modifier: 'organization-private'
+  });
+});
+
+test('catalogStatusBadge only surfaces a non-default lifecycle status (WP8.6)', () => {
+  assert.equal(catalogStatusBadge(fireAlarmSymbol), null);
+  assert.equal(catalogStatusBadge({ ...fireAlarmSymbol, status: 'Published' }), null);
+  assert.equal(catalogStatusBadge({ ...fireAlarmSymbol, source: 'organization_private', status: 'Approved' }), null);
+  assert.deepEqual(
+    catalogStatusBadge({ ...fireAlarmSymbol, source: 'organization_private', status: 'Deprecated' }),
+    { label: 'Deprecated', modifier: 'status' }
+  );
 });
 
 test('builds format badges that identify the active preview and only enable browser-previewable formats', () => {

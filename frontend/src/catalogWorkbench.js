@@ -384,8 +384,26 @@ export function buildCatalogCardSummary(symbol = {}) {
     formats: taxonomy.availableFormats,
     useCases: taxonomy.useCases,
     hasPhotos: Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length > 0,
-    commentCount: Number(symbol.commentCount || 0) || (symbol.hasComments ? 1 : 0)
+    commentCount: Number(symbol.commentCount || 0) || (symbol.hasComments ? 1 : 0),
+    scopeBadge: catalogScopeBadge(symbol),
+    statusBadge: catalogStatusBadge(symbol)
   };
+}
+
+const CATALOG_DEFAULT_STATUSES = new Set(['published', 'approved']);
+
+export function catalogScopeBadge(symbol = {}) {
+  return symbol.source === 'organization_private'
+    ? { label: 'Organization Private', modifier: 'organization-private' }
+    : { label: 'Public', modifier: 'public' };
+}
+
+export function catalogStatusBadge(symbol = {}) {
+  const status = String(symbol.status || '').trim();
+  if (!status || CATALOG_DEFAULT_STATUSES.has(status.toLowerCase())) {
+    return null;
+  }
+  return { label: status, modifier: 'status' };
 }
 
 export function buildCatalogPreviewOptions(symbol = {}, selectedFormat = '') {

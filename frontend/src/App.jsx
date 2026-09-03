@@ -92,6 +92,8 @@ import {
   buildReviewPreviewUrl,
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
+  catalogScopeBadge,
+  catalogStatusBadge,
   catalogTaxonomyForSymbol,
   interpretEdCatalogPrompt,
   removeSymbolFromClipboard,
@@ -1004,6 +1006,7 @@ function StandardsPage() {
   const standardsColumns = [
     ['id', 'ID'],
     ['name', 'Name'],
+    ['scope', 'Scope'],
     ['lastUpdatedAt', 'Last update'],
     ['photoStatus', 'Photos'],
     ['commentStatus', 'Comments'],
@@ -1933,6 +1936,7 @@ function StandardsPage() {
                           </span>
                         </div>
                         <h4>{card.name || 'Unnamed symbol'}</h4>
+                        <CatalogBadgeRow symbol={symbol} />
                         <p>{card.categories.slice(0, 2).join(' · ') || 'Category pending'}</p>
                         <div className="catalog-card-chip-row" aria-label="Disciplines">
                           {card.disciplines.slice(0, 2).map((value) => <span key={`${symbol.id}-discipline-${value}`}>{value}</span>)}
@@ -2016,7 +2020,9 @@ function StandardsPage() {
                       </td>
                       {standardsColumns.map(([key]) => (
                         <td key={`${symbol.id}-${key}`}>
-                          {key === 'photoStatus' ? (
+                          {key === 'scope' ? (
+                            <CatalogBadgeRow symbol={symbol} />
+                          ) : key === 'photoStatus' ? (
                             <span
                               className={`table-icon-indicator ${Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? 'positive' : 'muted'}`}
                               title={Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length ? `${symbol.supplementalPhotos.length} photo(s)` : 'No photos yet'}
@@ -2090,6 +2096,7 @@ function StandardsPage() {
                 </div>
                 <SupplementalPhotoStrip photos={activeSymbol.supplementalPhotos || []} />
                 <div className="fact-grid detail-list">
+                  <Fact label="Scope" value={<CatalogBadgeRow symbol={activeSymbol} />} />
                   <Fact label="Status" value={activeSymbol.status || 'Published'} />
                   <Fact label="Revision" value={activeSymbol.revision} />
                   <Fact label="Last update" value={formatPublishedDate(activeSymbol.lastUpdatedAt || activeSymbol.revisionCreatedAt)} />
@@ -2204,6 +2211,9 @@ function getSymbolField(symbol, key) {
   }
   if (key === 'symbolFamily') {
     return symbol.symbolFamily || symbol.family || symbol.category || '';
+  }
+  if (key === 'scope') {
+    return catalogScopeBadge(symbol).label;
   }
   const value = symbol[key];
   if (Array.isArray(value)) {
@@ -7531,6 +7541,22 @@ function Fact({ label, value }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function CatalogBadge({ badge }) {
+  if (!badge) {
+    return null;
+  }
+  return <span className={`catalog-scope-badge ${badge.modifier}`}>{badge.label}</span>;
+}
+
+function CatalogBadgeRow({ symbol }) {
+  return (
+    <span className="catalog-badge-row">
+      <CatalogBadge badge={catalogScopeBadge(symbol)} />
+      <CatalogBadge badge={catalogStatusBadge(symbol)} />
+    </span>
   );
 }
 
