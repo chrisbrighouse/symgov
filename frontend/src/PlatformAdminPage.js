@@ -1,6 +1,13 @@
 import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { runWithStepUp } from './adminJourneys.js';
-import { requestJson } from './api.js';
+import {
+  demoteGovernedSymbol,
+  fetchDemotionImpactPreview,
+  openOrganizationSymbolPromotionReview,
+  requestJson,
+  submitWorkspaceReviewDecision,
+} from './api.js';
+import { canMountOrganizationSymbolDrafts } from './projectContext.js';
 
 function resultValue(result) {
   if (!result.ok) {
@@ -431,6 +438,213 @@ export function GrantAdminForm({ onGrant }) {
   );
 }
 
+function DemotionConsole({ protect }) {
+  const [symbolId, setSymbolId] = useState('');
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [reason, setReason] = useState('');
+  const [demoting, setDemoting] = useState(false);
+  const [demoteError, setDemoteError] = useState('');
+  const [demoteResult, setDemoteResult] = useState(null);
+
+  async function loadPreview(event) {
+    event.preventDefault();
+    const trimmed = symbolId.trim();
+    if (!trimmed) return;
+    setPreviewLoading(true);
+    setPreviewError('');
+    setPreview(null);
+    setDemoteResult(null);
+    setDemoteError('');
+    try {
+      const data = await fetchDemotionImpactPreview(trimmed);
+      setPreview(data);
+    } catch (err) {
+      setPreviewError(err.message);
+    } finally {
+      setPreviewLoading(false);
+    }
+  }
+
+  async function handleDemote() {
+    if (!preview || !preview.eligible) return;
+    if (!window.confirm(`Demote governed symbol ${preview.governedSymbolId} from public visibility? This withdraws it from every public reader.`)) return;
+    setDemoting(true);
+    setDemoteError('');
+    try {
+      const result = await protect(() => demoteGovernedSymbol(preview.governedSymbolId, { reason: reason.trim() }));
+      setDemoteResult(result);
+      setPreview(null);
+      setReason('');
+    } catch (err) {
+      setDemoteError(err.message);
+    } finally {
+      setDemoting(false);
+    }
+  }
+
+  const validReason = reason.trim().length > 0;
+
+  return createElement(
+    'section',
+    { 'aria-labelledby': 'demotion-console-heading', style: { marginBottom: '32px' } },
+    createElement('h2', { id: 'demotion-console-heading', style: { marginBottom: '16px' } }, 'Demote a public symbol'),
+    createElement('form', { onSubmit: loadPreview, style: { display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '16px' } },
+      createElement('label', { htmlFor: 'demotion-symbol-id' },
+        'Governed symbol ID',
+        createElement('input', {
+          id: 'demotion-symbol-id',
+          type: 'text',
+          value: symbolId,
+          onChange: (event) => setSymbolId(event.target.value),
+          required: true,
+          style: { display: 'block', marginTop: '4px' },
+        })
+      ),
+      createElement('button', { type: 'submit', disabled: previewLoading || !symbolId.trim() }, previewLoading ? 'Loading…' : 'Preview demotion impact')
+    ),
+    ErrorMessage({ message: previewError }),
+    preview
+      ? createElement(
+          'div',
+          { role: 'group', 'aria-labelledby': 'demotion-preview-heading', style: { border: '1px solid #e5e7eb', borderRadius: '6px', padding: '12px', marginBottom: '16px' } },
+          createElement('h3', { id: 'demotion-preview-heading', style: { marginTop: 0 } }, `Impact preview: ${preview.governedSymbolId}`),
+          createElement('p', null, preview.eligible ? 'Eligible for demotion.' : 'Not eligible for demotion.'),
+          preview.reasons.length > 0
+            ? createElement('ul', null, preview.reasons.map((r, i) => createElement('li', { key: i }, r)))
+            : null,
+          createElement('p', null, `Favourites referencing this symbol: ${preview.favouritesCount}`),
+          preview.blockingOrganizationIds.length > 0
+            ? createElement('p', null, `Blocked by references from ${preview.blockingOrganizationIds.length} other organization(s).`)
+            : null,
+          preview.eligible
+            ? createElement(
+                'div',
+                { style: { marginTop: '12px' } },
+                createElement('label', { htmlFor: 'demotion-reason' },
+                  'Reason for demotion',
+                  createElement('textarea', {
+                    id: 'demotion-reason',
+                    value: reason,
+                    onChange: (event) => setReason(event.target.value),
+                    required: true,
+                    rows: 2,
+                    style: { display: 'block', width: '100%', marginTop: '4px' },
+                  })
+                ),
+                ErrorMessage({ message: demoteError }),
+                createElement('button', {
+                  type: 'button',
+                  onClick: handleDemote,
+                  disabled: demoting || !validReason,
+                  style: { color: '#dc2626', marginTop: '8px' },
+                  'aria-label': `Demote governed symbol ${preview.governedSymbolId}`,
+                }, demoting ? 'Demoting…' : 'Demote symbol')
+              )
+            : null
+        )
+      : null,
+    demoteResult
+      ? createElement('p', { role: 'status' },
+          `Demoted. Visibility is now "${demoteResult.visibility}". ${demoteResult.symbolRevisionIds.length} revision(s) withdrawn, ${demoteResult.publishedPageIds.length} page(s) retired, ${demoteResult.retiredPackIds.length} pack(s) retired.`)
+      : null
+  );
+}
+
+function PromotionReviewPanel() {
+  const [symbolId, setSymbolId] = useState('');
+  const [requestId, setRequestId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [request, setRequest] = useState(null);
+  const [decided, setDecided] = useState(false);
+
+  async function handleOpenReview(event) {
+    event.preventDefault();
+    const trimmedSymbolId = symbolId.trim();
+    const trimmedRequestId = requestId.trim();
+    if (!trimmedSymbolId || !trimmedRequestId) return;
+    setBusy(true);
+    setError('');
+    setDecided(false);
+    try {
+      const opened = await openOrganizationSymbolPromotionReview(trimmedSymbolId, trimmedRequestId);
+      setRequest(opened);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAccept() {
+    if (!request?.reviewCaseId) return;
+    if (!window.confirm('Accept this promotion request and publish the symbol?')) return;
+    setBusy(true);
+    setError('');
+    try {
+      await submitWorkspaceReviewDecision(request.reviewCaseId, { decisionCode: 'approve' });
+      setDecided(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return createElement(
+    'section',
+    { 'aria-labelledby': 'promotion-review-heading', style: { marginBottom: '32px' } },
+    createElement('h2', { id: 'promotion-review-heading', style: { marginBottom: '8px' } }, 'Review a promotion request'),
+    createElement('p', { style: { color: '#6b7280', fontSize: '0.875rem' } },
+      'Enter the governed symbol ID and promotion request ID provided by the submitting organization’s admin. Accept-only: reject/changes-requested handling is not yet built.'),
+    createElement('form', { onSubmit: handleOpenReview, style: { display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '16px' } },
+      createElement('label', { htmlFor: 'promotion-review-symbol-id' },
+        'Governed symbol ID',
+        createElement('input', {
+          id: 'promotion-review-symbol-id',
+          type: 'text',
+          value: symbolId,
+          onChange: (event) => setSymbolId(event.target.value),
+          required: true,
+          style: { display: 'block', marginTop: '4px' },
+        })
+      ),
+      createElement('label', { htmlFor: 'promotion-review-request-id' },
+        'Promotion request ID',
+        createElement('input', {
+          id: 'promotion-review-request-id',
+          type: 'text',
+          value: requestId,
+          onChange: (event) => setRequestId(event.target.value),
+          required: true,
+          style: { display: 'block', marginTop: '4px' },
+        })
+      ),
+      createElement('button', { type: 'submit', disabled: busy || !symbolId.trim() || !requestId.trim() }, busy ? 'Working…' : 'Open for review')
+    ),
+    ErrorMessage({ message: error }),
+    request
+      ? createElement(
+          'div',
+          { role: 'group', 'aria-labelledby': 'promotion-review-request-heading', style: { border: '1px solid #e5e7eb', borderRadius: '6px', padding: '12px' } },
+          createElement('h3', { id: 'promotion-review-request-heading', style: { marginTop: 0 } }, `Promotion request: ${request.id}`),
+          createElement('p', null, `Status: ${request.status}`),
+          createElement('p', null, `Reason given: ${request.reason}`),
+          decided
+            ? createElement('p', { role: 'status' }, 'Accepted. The symbol has been published.')
+            : createElement('button', {
+                type: 'button',
+                onClick: handleAccept,
+                disabled: busy || !request.reviewCaseId,
+                'aria-label': `Accept promotion request ${request.id}`,
+              }, busy ? 'Working…' : 'Accept')
+        )
+      : null
+  );
+}
+
 export function PlatformAdminPage({ auth }) {
   const [admins, setAdmins] = useState(null);
   const [total, setTotal] = useState(0);
@@ -586,6 +800,7 @@ export function PlatformAdminPage({ auth }) {
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const orgTotalPages = Math.ceil(orgTotal / ORG_PAGE_SIZE);
+  const symbolPromotionUiEnabled = canMountOrganizationSymbolDrafts(auth) && auth?.user?.capabilities?.platformAdminEnabled === true;
 
   return createElement(
     'section',
@@ -648,6 +863,8 @@ export function PlatformAdminPage({ auth }) {
         onReactivate: handleReactivateMembership,
       })
     ),
+    symbolPromotionUiEnabled ? createElement(DemotionConsole, { protect }) : null,
+    symbolPromotionUiEnabled ? createElement(PromotionReviewPanel, null) : null,
     createElement(GrantAdminForm, { onGrant: handleGrant }),
     ErrorMessage({ message: error }),
     createElement(

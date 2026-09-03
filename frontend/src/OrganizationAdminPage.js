@@ -1,11 +1,12 @@
 import { createElement, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { runWithStepUp } from './adminJourneys.js';
 import { requestJson } from './api.js';
-import { canMountProjectContext } from './projectContext.js';
+import { canMountOrganizationSymbolDrafts, canMountProjectContext } from './projectContext.js';
 import { ProjectContextBar } from './ProjectContextBar.js';
 import { OrganizationProjectsPanel } from './OrganizationProjectsPanel.js';
 import { OrganizationSymbolSetsPanel } from './OrganizationSymbolSetsPanel.js';
 import { SymbolSetBuilderPanel } from './SymbolSetBuilderPanel.js';
+import { PromotionSubmissionPanel } from './PromotionSubmissionPanel.js';
 
 function resultValue(result) {
   if (!result.ok) {
@@ -659,6 +660,7 @@ export function OrganizationAdminPage({ auth }) {
     clearPin: () => setStepUpPin(''),
   }), [auth, stepUpPin]);
   const symbolSetsUiEnabled = canMountProjectContext(auth);
+  const symbolPromotionUiEnabled = canMountOrganizationSymbolDrafts(auth);
   const notifyContextChange = useCallback(() => {
     setContextRefreshToken((current) => current + 1);
   }, []);
@@ -717,6 +719,9 @@ export function OrganizationAdminPage({ auth }) {
       : null,
     symbolSetsUiEnabled
       ? createElement(SymbolSetBuilderPanel, { isAdmin })
+      : null,
+    symbolPromotionUiEnabled
+      ? createElement(PromotionSubmissionPanel, { isAdmin })
       : null,
     createElement(MemberListSection, { isAdmin, protect })
   );

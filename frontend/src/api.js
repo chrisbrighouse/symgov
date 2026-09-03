@@ -434,6 +434,59 @@ export async function setOrganizationSymbolOrganizationWide(symbolId, enabled) {
   return requireOk(result, 'Organization-wide scope update failed.');
 }
 
+// --- Stage 7 WP7.2/7.3: promotion requests ---
+
+export async function listOrganizationSymbolPromotionRequests(symbolId) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/promotion-requests`,
+    { cache: 'no-store' }
+  );
+  const payload = requireOk(result, 'Promotion request list load failed.');
+  return { items: Array.isArray(payload?.items) ? payload.items : [] };
+}
+
+export async function submitOrganizationSymbolPromotionRequest(symbolId, payload) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/promotion-requests`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+  return requireOk(result, 'Promotion request submission failed.');
+}
+
+export async function withdrawOrganizationSymbolPromotionRequest(symbolId, requestId, payload = {}) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/promotion-requests/${encodeURIComponent(requestId)}/withdraw`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+  return requireOk(result, 'Promotion request withdrawal failed.');
+}
+
+export async function openOrganizationSymbolPromotionReview(symbolId, requestId) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/promotion-requests/${encodeURIComponent(requestId)}/open-review`,
+    { method: 'POST', body: JSON.stringify({}) }
+  );
+  return requireOk(result, 'Opening the promotion request for review failed.');
+}
+
+// --- Stage 7 WP7.4: demotion ---
+
+export async function fetchDemotionImpactPreview(symbolId) {
+  const result = await requestJson(
+    `/platform/governed-symbols/${encodeURIComponent(symbolId)}/demotion-impact-preview`,
+    { cache: 'no-store' }
+  );
+  return requireOk(result, 'Demotion impact preview load failed.');
+}
+
+export async function demoteGovernedSymbol(symbolId, payload) {
+  const result = await requestJson(
+    `/platform/governed-symbols/${encodeURIComponent(symbolId)}/demote`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+  return requireOk(result, 'Demotion failed.');
+}
+
 export async function listSymbolSetItems(setId, { page = 1, pageSize = 200 } = {}) {
   const result = await requestJson(
     withQuery(`/org/me/symbol-sets/${encodeURIComponent(setId)}/items`, { page, pageSize }),

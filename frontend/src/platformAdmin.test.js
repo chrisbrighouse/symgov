@@ -407,3 +407,161 @@ describe('PlatformOrganizationListResponse schema', () => {
     assert.ok(Array.isArray(mockOrganizationsResponse.items));
   });
 });
+
+// --- WP7.8: demotion console and promotion-request review panel ---
+
+const platformAdminUser = {
+  session: { purpose: 'application', mode: 'organization', activeOrganizationId: 'org-symgov' },
+  organization: { id: 'org-symgov', code: 'symgov', baseRole: 'admin', capabilities: [] },
+  capabilities: { organizationsEnabled: true, organizationSymbolsEnabled: true, platformAdminEnabled: true },
+};
+
+async function mountPlatformAdminWithUser(fetchImpl, user, createNodeMock) {
+  globalThis.fetch = fetchImpl;
+  let renderer;
+  await act(async () => {
+    renderer = create(createElement(PlatformAdminPage, {
+      auth: {
+        user,
+        reauthenticate: async ({ pin }) => {
+          const response = await globalThis.fetch('/api/v1/auth/reauthenticate', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin }),
+          });
+          if (!response.ok) {
+            const error = new Error((await response.json()).detail || response.statusText);
+            error.status = response.status;
+            throw error;
+          }
+        },
+      },
+    }), { createNodeMock });
+  });
+  return renderer;
+}
+
+function baselineFetch(overrides = {}) {
+  return async (url, options = {}) => {
+    const path = new URL(url, 'http://test').pathname;
+    if (path === '/api/v1/platform/admins' && !options.method) return jsonResponse(mockAdminsResponse);
+    if (path === '/api/v1/platform/organizations' && !options.method) return jsonResponse(mockOrganizationsResponse);
+    if (path === '/api/v1/platform/organizations/symgov/members' && !options.method) return jsonResponse(mockSymgovMembersResponse);
+    const override = overrides[path];
+    if (override) return override(options);
+    return jsonResponse({ detail: `Unexpected request: ${path} ${options.method || 'GET'}` }, 404);
+  };
+}
+
+describe('demotion console (WP7.8)', () => {
+  it('is not rendered when the organizationSymbolsEnabled/platformAdminEnabled capabilities are absent', async () => {
+    const renderer = await mountPlatformAdminWithUser(baselineFetch(), null);
+    assert.doesNotMatch(JSON.stringify(renderer.toJSON()), /Demote a public symbol/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('previews impact, then demotes only after a reason is given, without leaking the PIN', async () => {
+    const preview = {
+      governedSymbolId: 'sym-1', eligible: true, reasons: [], blockingOrganizationIds: [], favouritesCount: 3,
+    };
+    const demoteResult = {
+      governedSymbolId: 'sym-1', visibility: 'organization_private',
+      symbolRevisionIds: ['rev-1'], publishedPageIds: ['page-1'], packEntryIds: ['entry-1'], retiredPackIds: ['pack-1'],
+    };
+    const requests = [];
+    const renderer = await mountPlatformAdminWithUser(baselineFetch({
+      '/api/v1/platform/governed-symbols/sym-1/demotion-impact-preview': () => jsonResponse(preview),
+      '/api/v1/platform/governed-symbols/sym-1/demote': (options) => {
+        requests.push(JSON.parse(options.body));
+        return jsonResponse(demoteResult);
+      },
+    }), platformAdminUser);
+
+    await act(async () => {
+      renderer.root.findByProps({ id: 'demotion-symbol-id' }).props.onChange({ target: { value: 'sym-1' } });
+    });
+    await act(async () => {
+      await renderer.root.findByProps({ id: 'demotion-symbol-id' }).parent.parent.props.onSubmit({ preventDefault() {} });
+    });
+    assert.match(JSON.stringify(renderer.toJSON()), /Eligible for demotion/);
+
+    const demoteButton = renderer.root.findByProps({ 'aria-label': 'Demote governed symbol sym-1' });
+    assert.equal(demoteButton.props.disabled, true, 'must stay disabled until a reason is entered');
+
+    await act(async () => {
+      renderer.root.findByProps({ id: 'demotion-reason' }).props.onChange({ target: { value: 'Superseded by a newer symbol.' } });
+    });
+    globalThis.window = globalThis.window || {};
+    const originalConfirm = globalThis.window.confirm;
+    globalThis.window.confirm = () => true;
+    await act(async () => {
+      await renderer.root.findByProps({ 'aria-label': 'Demote governed symbol sym-1' }).props.onClick();
+    });
+    globalThis.window.confirm = originalConfirm;
+
+    assert.deepEqual(requests, [{ reason: 'Superseded by a newer symbol.' }]);
+    assert.match(JSON.stringify(renderer.toJSON()), /Demoted\. Visibility is now \\"organization_private\\"/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('does not offer a demote action when the symbol is ineligible', async () => {
+    const preview = {
+      governedSymbolId: 'sym-2', eligible: false, reasons: ['Referenced by another organization’s Symbol Set.'],
+      blockingOrganizationIds: ['org-acme'], favouritesCount: 0,
+    };
+    const renderer = await mountPlatformAdminWithUser(baselineFetch({
+      '/api/v1/platform/governed-symbols/sym-2/demotion-impact-preview': () => jsonResponse(preview),
+    }), platformAdminUser);
+
+    await act(async () => {
+      renderer.root.findByProps({ id: 'demotion-symbol-id' }).props.onChange({ target: { value: 'sym-2' } });
+    });
+    await act(async () => {
+      await renderer.root.findByProps({ id: 'demotion-symbol-id' }).parent.parent.props.onSubmit({ preventDefault() {} });
+    });
+
+    assert.match(JSON.stringify(renderer.toJSON()), /Not eligible for demotion/);
+    assert.throws(() => renderer.root.findByProps({ id: 'demotion-reason' }));
+    await act(async () => renderer.unmount());
+  });
+});
+
+describe('promotion-request review panel (WP7.8)', () => {
+  it('opens a promotion request for review, then accepts it with an accept-only decision', async () => {
+    const opened = {
+      id: 'req-1', governedSymbolId: 'sym-1', organizationId: 'org-acme', symbolRevisionId: 'rev-1',
+      status: 'triage', proposedMetadata: {}, reason: 'Widely used.', sharingAcknowledgment: true,
+      submittedByUserId: 'user-9', submittedAt: '2026-09-03T00:00:00Z', closedAt: null, traceId: null,
+      reviewCaseId: 'case-1',
+    };
+    const decisionRequests = [];
+    const renderer = await mountPlatformAdminWithUser(baselineFetch({
+      '/api/v1/organization-symbols/sym-1/promotion-requests/req-1/open-review': () => jsonResponse(opened),
+      '/api/v1/workspace/review-cases/case-1/decisions': (options) => {
+        decisionRequests.push(JSON.parse(options.body));
+        return jsonResponse({ id: 'case-1', status: 'closed' });
+      },
+    }), platformAdminUser);
+
+    await act(async () => {
+      renderer.root.findByProps({ id: 'promotion-review-symbol-id' }).props.onChange({ target: { value: 'sym-1' } });
+    });
+    await act(async () => {
+      renderer.root.findByProps({ id: 'promotion-review-request-id' }).props.onChange({ target: { value: 'req-1' } });
+    });
+    await act(async () => {
+      await renderer.root.findByProps({ id: 'promotion-review-symbol-id' }).parent.parent.props.onSubmit({ preventDefault() {} });
+    });
+    assert.match(JSON.stringify(renderer.toJSON()), /Status: triage/);
+
+    globalThis.window = globalThis.window || {};
+    const originalConfirm = globalThis.window.confirm;
+    globalThis.window.confirm = () => true;
+    await act(async () => {
+      await renderer.root.findByProps({ 'aria-label': 'Accept promotion request req-1' }).props.onClick();
+    });
+    globalThis.window.confirm = originalConfirm;
+
+    assert.deepEqual(decisionRequests, [{ decisionCode: 'approve' }]);
+    assert.match(JSON.stringify(renderer.toJSON()), /Accepted\. The symbol has been published\./);
+    await act(async () => renderer.unmount());
+  });
+});
