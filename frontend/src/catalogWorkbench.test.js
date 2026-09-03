@@ -142,9 +142,7 @@ test('builds compact card summaries for symbol browsing', () => {
     formats: ['DXF', 'PNG'],
     useCases: ['Insert into CAD drawing', 'Mark up / annotate drawing', 'Use in PDF/report'],
     hasPhotos: false,
-    commentCount: 0,
-    scopeBadge: { label: 'Public', modifier: 'public' },
-    statusBadge: null
+    commentCount: 0
   });
 });
 

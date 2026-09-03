@@ -17,12 +17,28 @@ Organization-private symbols never have a `PublishedPage`/`PackEntry`/
 `catalog_symbol_id` (only Stage 7's promotion pipeline ever creates those),
 so this is a separate, additive query -- not a WHERE-clause change to
 `PUBLISHED_SYMBOLS_SQL`. The predicate mirrors `effective_palette.py`'s
-`_organization_wide_entries` exactly: owner organization,
+`_organization_wide_entries`: owner organization,
 `visibility='organization_private'`, `organization_wide=true`. Per the
 Stage 8 plan §4 Q2, this is deliberately narrower than the decision
 addendum's I-09 "set-only private symbol" category -- that category was
 never implemented (`symbol_set_service.py` structurally rejects adding any
 non-public symbol to a Symbol Set) and is treated as superseded.
+
+WP8.7 addition: unlike `effective_palette.py`'s own `_organization_wide_entries`
+(Stage 6, unchanged, out of scope here), this query also requires the
+current revision's `lifecycle_state == 'approved'`. `organization_wide` is
+only ever validated at the moment `set_organization_wide` toggles it on
+(`organization_symbol_review.py`) and is never re-validated or cleared by
+`symbol_demotion.py` -- a symbol that was `organization_wide=true` before
+promotion keeps that flag through promotion (`visibility='public'`, so this
+query never matches it) and through demotion (`visibility` flips back to
+`organization_private`, but the just-demoted revision's `lifecycle_state`
+is `'withdrawn'`, and `organization_wide` is not reset until a fresh draft
+revision is later started via `create_new_draft_revision`). Without this
+extra filter, a demoted symbol could resurface in its owning organization's
+own Catalog list/detail between demotion and that next draft -- not a
+cross-tenant leak (still scoped to the owning organization), but a symbol
+that should not be browsable at all in that window.
 """
 
 from __future__ import annotations
@@ -51,8 +67,13 @@ def list_organization_wide_catalog_symbols(
         GovernedSymbol.owner_organization_id == organization_id,
         GovernedSymbol.visibility == "organization_private",
         GovernedSymbol.organization_wide.is_(True),
+        SymbolRevision.lifecycle_state == "approved",
     ]
-    symbol_query = session.query(GovernedSymbol).filter(*filters)
+    symbol_query = (
+        session.query(GovernedSymbol)
+        .join(SymbolRevision, SymbolRevision.id == GovernedSymbol.current_revision_id)
+        .filter(*filters)
+    )
     if query:
         like = f"%{query}%"
         symbol_query = symbol_query.filter(
@@ -95,12 +116,18 @@ def resolve_organization_wide_catalog_symbol(
         symbol_id = uuid.UUID(symbol_ref)
     except (TypeError, ValueError):
         return None
-    symbol = session.query(GovernedSymbol).filter(
-        GovernedSymbol.id == symbol_id,
-        GovernedSymbol.owner_organization_id == organization_id,
-        GovernedSymbol.visibility == "organization_private",
-        GovernedSymbol.organization_wide.is_(True),
-    ).one_or_none()
+    symbol = (
+        session.query(GovernedSymbol)
+        .join(SymbolRevision, SymbolRevision.id == GovernedSymbol.current_revision_id)
+        .filter(
+            GovernedSymbol.id == symbol_id,
+            GovernedSymbol.owner_organization_id == organization_id,
+            GovernedSymbol.visibility == "organization_private",
+            GovernedSymbol.organization_wide.is_(True),
+            SymbolRevision.lifecycle_state == "approved",
+        )
+        .one_or_none()
+    )
     if symbol is None:
         return None
     revision = (

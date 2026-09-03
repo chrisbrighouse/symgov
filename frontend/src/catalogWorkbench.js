@@ -384,9 +384,7 @@ export function buildCatalogCardSummary(symbol = {}) {
     formats: taxonomy.availableFormats,
     useCases: taxonomy.useCases,
     hasPhotos: Array.isArray(symbol.supplementalPhotos) && symbol.supplementalPhotos.length > 0,
-    commentCount: Number(symbol.commentCount || 0) || (symbol.hasComments ? 1 : 0),
-    scopeBadge: catalogScopeBadge(symbol),
-    statusBadge: catalogStatusBadge(symbol)
+    commentCount: Number(symbol.commentCount || 0) || (symbol.hasComments ? 1 : 0)
   };
 }
 
