@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -42,7 +42,9 @@ from ..schemas import (
     OrgMemberCapabilityItem,
     OrgMemberListResponse,
     OrgMemberResponse,
+    OrganizationUsageSummaryResponse,
 )
+from ..product_usage_rollups import get_organization_usage_summary
 from ..settings import SymgovAPISettings, get_settings
 from ..models import (
     Organization,
@@ -262,6 +264,24 @@ def list_organizations_route(
         pageSize=page_size,
         total=total,
     )
+
+
+@router.get(
+    "/platform/organizations/{organization_id}/usage-summary",
+    response_model=OrganizationUsageSummaryResponse,
+    dependencies=[Depends(_require_platform_admin_enabled)],
+)
+def get_organization_usage_summary_route(
+    organization_id: str,
+    since: date | None = Query(default=None),
+    until: date | None = Query(default=None),
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_platform_admin),
+) -> OrganizationUsageSummaryResponse:
+    org_id = _parse_organization_id(organization_id)
+    if get_organization_detail(session, org_id) is None:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    return get_organization_usage_summary(session, org_id, since=since, until=until)
 
 
 @router.post(

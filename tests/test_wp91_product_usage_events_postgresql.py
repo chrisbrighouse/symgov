@@ -49,7 +49,7 @@ if str(BACKEND) not in sys.path:
 from symgov_backend.models import ProductUsageEvent  # noqa: E402
 from symgov_backend.product_usage_retention import purge_expired_product_usage_events  # noqa: E402
 
-NEW_MIGRATION_HEAD = "20260904_0038"
+NEW_MIGRATION_HEAD = "20260904_0040"
 
 psycopg = pytest.importorskip("psycopg")
 

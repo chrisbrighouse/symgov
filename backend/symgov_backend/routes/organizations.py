@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import uuid
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
@@ -35,6 +36,7 @@ from ..organization_service import (
     revoke_member_capability,
     update_organization,
 )
+from ..product_usage_rollups import get_organization_usage_summary
 from ..runtime import RuntimePersistenceBridge, download_object_bytes
 from ..schemas import (
     OrgAddMemberRequest,
@@ -44,6 +46,7 @@ from ..schemas import (
     OrgMemberListResponse,
     OrgMemberResponse,
     OrgPatchMemberRequest,
+    OrganizationUsageSummaryResponse,
     OrgUpdateRequest,
 )
 from ..settings import SymgovAPISettings, get_settings
@@ -513,6 +516,21 @@ def upload_org_icon(
         cleanup_written_object()
         raise
     return _org_detail_response(org, custom_icon_enabled=True)
+
+
+@router.get(
+    "/org/me/usage-summary",
+    response_model=OrganizationUsageSummaryResponse,
+    dependencies=[Depends(_require_org_admin_enabled)],
+)
+def get_org_usage_summary(
+    since: date | None = Query(default=None),
+    until: date | None = Query(default=None),
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_admin),
+) -> OrganizationUsageSummaryResponse:
+    org_id = _active_org_id(current_user)
+    return get_organization_usage_summary(session, org_id, since=since, until=until)
 
 
 @router.delete(

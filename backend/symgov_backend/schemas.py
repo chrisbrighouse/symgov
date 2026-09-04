@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -1179,6 +1179,26 @@ class OrgDetailResponse(BaseModel):
     iconUrl: str
     hasCustomIcon: bool
     customIconEnabled: bool = False
+
+
+class ProductUsageDayItem(BaseModel):
+    date: date
+    eventCount: int
+    distinctUserCount: int
+
+
+class ProductUsageEventTypeSummary(BaseModel):
+    eventType: str
+    days: list[ProductUsageDayItem]
+    suppressedDayCount: int
+    totalEventCount: int
+
+
+class OrganizationUsageSummaryResponse(BaseModel):
+    organizationId: str
+    since: date
+    until: date
+    eventTypes: list[ProductUsageEventTypeSummary]
 
 
 class OrgIconUploadRequest(BaseModel):

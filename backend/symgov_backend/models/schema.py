@@ -891,6 +891,59 @@ class ProductUsageEvent(Base):
     context_resolution_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class ProductUsageDailyRollup(Base):
+    """Stage 9 WP9.4 -- indefinitely-retained daily aggregate rollup of
+    `ProductUsageEvent` rows, one row per (organization, event_type, day).
+    Built by `product_usage_rollups.refresh_product_usage_rollups`, a
+    standalone callable -- not wired to any scheduler, mirroring
+    `product_usage_retention.purge_expired_product_usage_events`'s own
+    precedent -- that re-aggregates raw rows on demand. WP9.4's own
+    aggregate-read endpoints query only this table, never the raw
+    `product_usage_events` table directly, so dashboard history survives
+    the confirmed 90-day raw-row retention purge (Stage 9 plan §4 Q7).
+
+    Only organization-scoped activity (`organization_id is not null` on the
+    source row) is rolled up: WP9.4's endpoints are inherently per-
+    organization dashboards (an Organization Admin's own org, or a Platform
+    Admin's chosen org), and a `'personal'`-mode event with no organization
+    has no per-org dashboard to appear on.
+
+    `distinct_user_count` is stored per cell (not just `event_count`) so the
+    confirmed 3-distinct-user minimum aggregation threshold (§4 Q7) can be
+    enforced at read time without ever re-touching raw rows -- a dashboard
+    must suppress any cell whose `distinct_user_count < 3`."""
+
+    __tablename__ = "product_usage_daily_rollups"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "event_type", "occurred_on", name="uq_product_usage_daily_rollups_cell"),
+        CheckConstraint(
+            "event_type in ("
+            "'personal_session_started', 'organization_selected', 'context_resolved', "
+            "'set_selected', 'symbol_previewed', 'symbol_downloaded', 'favorite_changed', "
+            "'organization_review_submitted', 'organization_review_decided', 'organization_wide_changed', "
+            "'publication_submitted', 'publication_decided', 'public_symbol_demoted', "
+            "'project_created', 'project_updated', 'project_archived', 'project_selected', "
+            "'set_created', 'set_updated', 'set_archived', 'set_project_availability_changed', "
+            "'organization_role_changed', 'platform_admin_assigned', 'platform_admin_removed', "
+            "'organization_icon_uploaded', 'organization_icon_removed'"
+            ")",
+            name="ck_product_usage_daily_rollups_event_type",
+        ),
+        CheckConstraint("event_count >= 0", name="ck_product_usage_daily_rollups_event_count_non_negative"),
+        CheckConstraint("distinct_user_count >= 0", name="ck_product_usage_daily_rollups_distinct_user_count_non_negative"),
+        CheckConstraint("distinct_user_count <= event_count", name="ck_product_usage_daily_rollups_distinct_le_event_count"),
+        Index("ix_product_usage_daily_rollups_org_occurred", "organization_id", "occurred_on"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_on: Mapped[object] = mapped_column(Date, nullable=False)
+    event_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    distinct_user_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ExternalIdentity(Base):
     __tablename__ = "external_identities"
     __table_args__ = (
