@@ -805,6 +805,84 @@ class AuditEvent(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ProductUsageEvent(Base):
+    """Stage 9 WP9.1 -- append-only, server-derived authenticated browser/
+    product-usage event ledger, kept as a domain separate from `AuditEvent`
+    (governance-mutation audit trail), `CatalogApiUsageEvent` (API-key
+    traffic only) and future contribution-reputation events, per the
+    Stage 9 plan §1.1/§4 Q1 and decision addendum I-13. `event_type` is
+    deliberately scoped to the browse-facing core subset only (session
+    start, context resolution, set selection, preview, download, Favorite
+    change) -- governance-lifecycle event types are added later, additively,
+    by WP9.2, not guessed here. Rows are immutable once inserted (an
+    `UPDATE` trigger enforces this in Postgres); `DELETE` remains permitted
+    at the database level for the 90-day retention purge
+    (`product_usage_retention.purge_expired_product_usage_events`), which is
+    the one intentional way this table differs from `LLMUsageEvent`'s own
+    fully append-only (UPDATE-or-DELETE-blocking) trigger."""
+
+    __tablename__ = "product_usage_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type in ("
+            "'personal_session_started', 'organization_selected', 'context_resolved', "
+            "'set_selected', 'symbol_previewed', 'symbol_downloaded', 'favorite_changed'"
+            ")",
+            name="ck_product_usage_events_event_type",
+        ),
+        CheckConstraint("session_mode in ('personal', 'organization')", name="ck_product_usage_events_session_mode"),
+        CheckConstraint(
+            "(session_mode = 'personal' and organization_id is null) or (session_mode = 'organization' and organization_id is not null)",
+            name="ck_product_usage_events_session_mode_organization",
+        ),
+        CheckConstraint(
+            "symbol_source is null or symbol_source in ('public', 'organization_private')",
+            name="ck_product_usage_events_symbol_source",
+        ),
+        CheckConstraint(
+            "favourite_action is null or favourite_action in ('added', 'removed')",
+            name="ck_product_usage_events_favourite_action",
+        ),
+        CheckConstraint(
+            "context_resolution_basis is null or context_resolution_basis in "
+            "('explicit', 'user_preference', 'project_default', 'organization_default', 'none')",
+            name="ck_product_usage_events_context_resolution_basis",
+        ),
+        CheckConstraint(
+            "(event_type = 'symbol_downloaded') = (format is not null)",
+            name="ck_product_usage_events_format_only_on_download",
+        ),
+        CheckConstraint(
+            "(event_type = 'favorite_changed') = (favourite_action is not null)",
+            name="ck_product_usage_events_favourite_action_only_on_favorite_changed",
+        ),
+        CheckConstraint(
+            "(event_type in ('context_resolved', 'set_selected')) = (context_resolution_basis is not null)",
+            name="ck_product_usage_events_context_basis_only_on_context_events",
+        ),
+        Index("ix_product_usage_events_occurred_at", "occurred_at"),
+        Index("ix_product_usage_events_org_event_occurred", "organization_id", "event_type", "occurred_at"),
+        Index("ix_product_usage_events_event_occurred", "event_type", "occurred_at"),
+        Index("ix_product_usage_events_user_occurred", "user_id", "occurred_at"),
+        Index("ix_product_usage_events_governed_symbol_occurred", "governed_symbol_id", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    session_mode: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True)
+    symbol_set_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_sets.id"), nullable=True)
+    governed_symbol_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("governed_symbols.id"), nullable=True)
+    symbol_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_revisions.id"), nullable=True)
+    symbol_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    format: Mapped[str | None] = mapped_column(Text, nullable=True)
+    favourite_action: Mapped[str | None] = mapped_column(Text, nullable=True)
+    context_resolution_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class ExternalIdentity(Base):
     __tablename__ = "external_identities"
     __table_args__ = (
