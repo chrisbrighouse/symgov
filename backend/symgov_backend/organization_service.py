@@ -23,6 +23,7 @@ from symgov_backend.organization_icons import (
     ICON_UPLOAD_MIN_INTERVAL_SECONDS,
     generate_organization_fallback_icon,
 )
+from symgov_backend.product_usage_events import record_governance_usage_event
 from symgov_backend.subscriptions import PROTECTED_OWNER_EMAIL
 
 if TYPE_CHECKING:
@@ -872,6 +873,9 @@ def replace_membership_base_role(
             details={"membership_id": str(membership_id)},
         ),
     )
+    record_governance_usage_event(
+        session, event_type="organization_role_changed", user_id=actor_user_id, organization_id=membership.organization_id
+    )
     return replacement
 
 
@@ -1011,6 +1015,12 @@ def assign_platform_admin(
             details={"user_id": str(user_id)},
         ),
     )
+    record_governance_usage_event(
+        session,
+        event_type="platform_admin_assigned",
+        user_id=actor_user_id,
+        organization_id=candidate_membership.organization_id,
+    )
     return assignment
 
 
@@ -1098,6 +1108,9 @@ def revoke_platform_admin(
             recent_step_up_at=recent_step_up_at,
             details={"user_id": str(user_id)},
         ),
+    )
+    record_governance_usage_event(
+        session, event_type="platform_admin_removed", user_id=actor_user_id, organization_id=symgov_organization_id
     )
 
 
@@ -1480,6 +1493,9 @@ def finalize_organization_icon_upload(
             details={"content_type": content_type},
         ),
     )
+    record_governance_usage_event(
+        session, event_type="organization_icon_uploaded", user_id=actor_user_id, organization_id=organization_id
+    )
     return org
 
 
@@ -1527,6 +1543,9 @@ def remove_organization_icon(
             source=audit_source,
             recent_step_up_at=recent_step_up_at,
         ),
+    )
+    record_governance_usage_event(
+        session, event_type="organization_icon_removed", user_id=actor_user_id, organization_id=organization_id
     )
     return org
 
@@ -1790,6 +1809,9 @@ def grant_member_capability(
             details={"membership_id": str(membership_id)},
         ),
     )
+    record_governance_usage_event(
+        session, event_type="organization_role_changed", user_id=actor_user_id, organization_id=organization_id
+    )
     return cap
 
 
@@ -1860,6 +1882,9 @@ def revoke_member_capability(
             recent_step_up_at=recent_step_up_at,
             details={"membership_id": str(membership_id)},
         ),
+    )
+    record_governance_usage_event(
+        session, event_type="organization_role_changed", user_id=actor_user_id, organization_id=organization_id
     )
 
 def _require_active_organization_admin(

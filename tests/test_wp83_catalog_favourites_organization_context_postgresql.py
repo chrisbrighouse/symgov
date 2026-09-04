@@ -45,7 +45,7 @@ BACKEND = Path(__file__).resolve().parents[1] / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-NEW_MIGRATION_HEAD = "20260902_0037"
+NEW_MIGRATION_HEAD = "20260904_0039"
 
 psycopg = pytest.importorskip("psycopg")
 

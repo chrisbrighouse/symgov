@@ -35,7 +35,7 @@ from sqlalchemy.orm import Session
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from test_organization_symbol_postgresql import _organization, _user, stage5_database  # noqa: E402
+from test_organization_symbol_postgresql import _alembic, _organization, _user, stage5_database  # noqa: E402
 from test_wp53_organization_symbol_drafts import _actor, _membership  # noqa: E402
 
 BACKEND = Path(__file__).resolve().parents[1] / "backend"
@@ -51,7 +51,14 @@ from symgov_backend.organization_symbol_review import (  # noqa: E402
 
 @pytest.fixture()
 def race_fixtures(stage5_database):
-    engine, _, _ = stage5_database
+    engine, url, _ = stage5_database
+    # Stage 9 WP9.2 added ProductUsageEvent emission inside decide_submission
+    # (a shared, widely-tested function this file exercises directly) -- that
+    # call now unconditionally needs `product_usage_events` to exist. Applied
+    # locally here, not by bumping the shared `stage5_database` fixture
+    # itself, since that fixture is also used by several other Stage 5 test
+    # files that must stay pinned to their own original schema snapshot.
+    _alembic(url, "upgrade", "20260904_0039")
     with engine.begin() as connection:
         organization = _organization(connection, "wp56race")
         contributor_user = _user(connection, "wp56race-contributor")

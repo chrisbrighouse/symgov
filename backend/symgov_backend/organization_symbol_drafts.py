@@ -35,6 +35,7 @@ from .models import (
     OrganizationSymbolReviewSubmission,
     SymbolRevision,
 )
+from .product_usage_events import record_governance_usage_event
 from .runtime import RuntimePersistenceBridge
 
 
@@ -345,5 +346,14 @@ def submit_for_review(
         ) from exc
 
     revision.lifecycle_state = "review"
+    record_governance_usage_event(
+        session,
+        event_type="organization_review_submitted",
+        user_id=uuid.UUID(current_user.id),
+        organization_id=symbol.owner_organization_id,
+        governed_symbol_id=symbol.id,
+        symbol_revision_id=revision.id,
+        symbol_source="organization_private",
+    )
     session.flush()
     return submission

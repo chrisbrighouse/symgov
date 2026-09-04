@@ -17,14 +17,14 @@ from symgov_backend.project_service import normalize_code, normalize_text, valid
 
 def _stage4_client(*, enabled=True, role="admin", pilots=("acme",), bind=True):
     from sqlalchemy import JSON
-    from symgov_backend.models import AuditEvent, Project, ProjectSymbolSet, SymbolSet, UserProjectSetSelection, UserSessionProjectContext
+    from symgov_backend.models import AuditEvent, Project, ProductUsageEvent, ProjectSymbolSet, SymbolSet, UserProjectSetSelection, UserSessionProjectContext
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent))
     from test_organization_auth_context import _add_membership, _build_client, _login
 
     client, Session, user_id, settings = _build_client(enabled=enabled, pilots=pilots)
-    for model in (SymbolSet, Project, ProjectSymbolSet, UserProjectSetSelection, UserSessionProjectContext, AuditEvent):
+    for model in (SymbolSet, Project, ProjectSymbolSet, UserProjectSetSelection, UserSessionProjectContext, AuditEvent, ProductUsageEvent):
         table = model.__table__
         original = table.constraints
         original_types = {column.name: column.type for column in table.columns}
@@ -98,10 +98,15 @@ def test_project_patch_applies_other_fields_when_status_is_unchanged(monkeypatch
     organization = SimpleNamespace(id="organization-id")
     row = SimpleNamespace(status="active", name="Old", id="project-id", organization_id=organization.id, closed_at=None, updated_at="before")
     audits = []
-    principal = SimpleNamespace(is_admin=True, organization=organization)
+    principal = SimpleNamespace(is_admin=True, organization=organization, user=SimpleNamespace(id="user-id"))
     monkeypatch.setattr(project_service, "get_project", lambda *args, **kwargs: (principal, row))
     monkeypatch.setattr(project_service, "audit", lambda *args, **kwargs: audits.append(args))
     monkeypatch.setattr(project_service, "now", lambda: "after")
+    # This deliberately minimal principal double has no `.user` (unlike the
+    # real Stage4Principal) -- record_governance_usage_event (Stage 9 WP9.2)
+    # is stubbed here too, mirroring the `audit` stub above, since this test
+    # only cares about the "other fields still apply" behavior.
+    monkeypatch.setattr(project_service, "record_governance_usage_event", lambda *args, **kwargs: None)
     class Query:
         def filter(self, *args): return self
         def with_for_update(self): return self

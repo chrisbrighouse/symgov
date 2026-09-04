@@ -56,6 +56,7 @@ from .models import (
     PromotionRequestDecision,
     ReviewCase,
 )
+from .product_usage_events import record_governance_usage_event
 
 OPEN_STATUSES = ("submitted", "triage", "in_review", "changes_requested")
 TERMINAL_STATUSES = ("accepted", "rejected", "withdrawn")
@@ -193,6 +194,16 @@ def submit_promotion_request(
         raise PromotionRequestConflict(
             "This symbol already has an active public promotion request."
         ) from exc
+    record_governance_usage_event(
+        session,
+        event_type="publication_submitted",
+        user_id=uuid.UUID(current_user.id),
+        organization_id=organization_id,
+        governed_symbol_id=symbol.id,
+        symbol_revision_id=revision_id,
+        symbol_source="organization_private",
+    )
+    session.flush()
     return request
 
 

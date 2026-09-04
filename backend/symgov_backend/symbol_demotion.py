@@ -76,6 +76,7 @@ from .models import (
     SymbolSet,
     SymbolSetItem,
 )
+from .product_usage_events import record_governance_usage_event
 
 
 class DemotionError(ValueError):
@@ -339,6 +340,15 @@ def execute_demotion(
             payload_json={"note": "No CDN/edge-cache integration is configured in this environment."},
             created_at=now,
         )
+    )
+    record_governance_usage_event(
+        session,
+        event_type="public_symbol_demoted",
+        user_id=actor_id,
+        organization_id=symbol.owner_organization_id,
+        governed_symbol_id=symbol.id,
+        symbol_source="organization_private",
+        occurred_at=now,
     )
     session.flush()
 

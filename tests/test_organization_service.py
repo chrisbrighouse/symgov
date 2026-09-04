@@ -33,6 +33,7 @@ from symgov_backend.models import (
     OrganizationRoleAssignment,
     PlatformRoleAssignment,
     OrganizationMemberCapability,
+    ProductUsageEvent,
     User,
     UserRole,
     UserSession,
@@ -61,6 +62,7 @@ def _session_factory():
         PlatformRoleAssignment.__table__,
         UserSession.__table__,
         OrganizationMemberCapability.__table__,
+        ProductUsageEvent.__table__,
     ):
         original_constraints = table.constraints
         try:

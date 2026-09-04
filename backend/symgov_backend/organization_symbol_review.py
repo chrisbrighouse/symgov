@@ -37,6 +37,7 @@ from sqlalchemy.orm import Session
 
 from .auth import AuthenticatedUser
 from .models import GovernedSymbol, OrganizationSymbolReviewDecision, OrganizationSymbolReviewSubmission, SymbolRevision
+from .product_usage_events import record_governance_usage_event
 
 DECISIONS = ("approved", "rejected", "changes_requested")
 
@@ -154,6 +155,15 @@ def decide_submission(
     revision = session.get(SymbolRevision, submission.symbol_revision_id)
     if revision is not None:
         revision.lifecycle_state = "approved" if decision == "approved" else "draft"
+    record_governance_usage_event(
+        session,
+        event_type="organization_review_decided",
+        user_id=uuid.UUID(current_user.id),
+        organization_id=submission.organization_id,
+        governed_symbol_id=submission.governed_symbol_id,
+        symbol_revision_id=submission.symbol_revision_id,
+        symbol_source="organization_private",
+    )
     session.flush()
     return decision_row
 
@@ -254,4 +264,13 @@ def set_organization_wide(
         raise OrganizationSymbolReviewError(
             "Organization-wide scope requires the current revision to have an approved, closed organization review decision."
         ) from exc
+    record_governance_usage_event(
+        session,
+        event_type="organization_wide_changed",
+        user_id=uuid.UUID(current_user.id),
+        organization_id=organization_id,
+        governed_symbol_id=symbol.id,
+        symbol_revision_id=symbol.current_revision_id,
+        symbol_source="organization_private",
+    )
     return symbol

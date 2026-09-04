@@ -34,6 +34,7 @@ from starlette.requests import Request
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_organization_symbol_postgresql import (  # noqa: E402
+    _alembic,
     _organization,
     _user,
     stage5_database,
@@ -145,7 +146,12 @@ def _bound_session_request(engine, user_id, organization_id) -> Request:
 
 @pytest.fixture()
 def two_organizations(stage5_database):
-    engine, _, _ = stage5_database
+    engine, url, _ = stage5_database
+    # Stage 9 WP9.2 added ProductUsageEvent emission inside submit_for_review /
+    # decide_submission / set_organization_wide (shared, widely-tested
+    # functions this file exercises directly). Applied locally, not by
+    # bumping the shared `stage5_database` fixture itself.
+    _alembic(url, "upgrade", "20260904_0039")
     with engine.begin() as connection:
         user_a = _user(connection, "tenant-a")
         user_b = _user(connection, "tenant-b")

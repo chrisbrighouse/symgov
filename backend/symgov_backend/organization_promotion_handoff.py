@@ -69,6 +69,7 @@ from .models import (
     ReviewCaseAction,
     SymbolRevision,
 )
+from .product_usage_events import record_governance_usage_event
 
 OPEN_PROMOTION_STATUSES = ("submitted", "triage", "in_review", "changes_requested")
 
@@ -296,6 +297,16 @@ def execute_organization_promotion_handoff(
             },
             created_at=now,
         )
+    )
+    record_governance_usage_event(
+        session,
+        event_type="publication_decided",
+        user_id=decision.decided_by,
+        organization_id=promotion_request.organization_id,
+        governed_symbol_id=symbol.id,
+        symbol_revision_id=revision.id,
+        symbol_source="public",
+        occurred_at=now,
     )
 
     if commit_transaction:

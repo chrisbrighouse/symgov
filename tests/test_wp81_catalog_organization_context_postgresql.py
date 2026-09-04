@@ -50,7 +50,7 @@ if str(BACKEND) not in sys.path:
 
 from symgov_backend.settings import SymgovAPISettings  # noqa: E402
 
-NEW_MIGRATION_HEAD = "20260902_0037"
+NEW_MIGRATION_HEAD = "20260904_0039"
 
 psycopg = pytest.importorskip("psycopg")
 

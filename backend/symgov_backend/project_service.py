@@ -11,6 +11,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
 from .models import AuditEvent, Project, ProjectSymbolSet, SymbolSet, UserProjectSetSelection, UserSessionProjectContext
+from .product_usage_events import record_governance_usage_event
 from .stage4_authorization import Stage4Principal, require_stage4_principal
 
 CODE_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{0,31}$")
@@ -120,7 +121,9 @@ def create_project(session: Session, request: Request, settings, data):
     row = Project(id=uuid.uuid4(), organization_id=principal.organization.id, code=code, normalized_code=normalized, name=name,
                   short_description=short, status="active", external_reference=ext, normalized_external_reference=normalized_ext,
                   metadata_json=validate_json(data.metadata or {}), created_by_user_id=principal.user.id, created_at=stamp, updated_at=stamp)
-    session.add(row); session.flush(); audit(session, principal, "project", row.id, "project.created", {"projectId": str(row.id)}); return row
+    session.add(row); session.flush(); audit(session, principal, "project", row.id, "project.created", {"projectId": str(row.id)})
+    record_governance_usage_event(session, event_type="project_created", user_id=principal.user.id, organization_id=principal.organization.id, project_id=row.id)
+    return row
 
 
 def get_project(session: Session, request: Request, settings, project_id: uuid.UUID, *, admin=False):
@@ -210,4 +213,11 @@ def patch_project(session: Session, request: Request, settings, project_id: uuid
                 "afterAvailableSymbolSetCount": after_available_symbol_set_count,
             })
         audit(session, principal, "project", row.id, "project.closed" if row.status == "closed" else "project.updated", details)
+        record_governance_usage_event(
+            session,
+            event_type="project_archived" if row.status == "closed" else "project_updated",
+            user_id=principal.user.id,
+            organization_id=principal.organization.id,
+            project_id=row.id,
+        )
     return row

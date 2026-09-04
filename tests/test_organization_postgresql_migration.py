@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import time
 from threading import Barrier, Event, Thread
+from unittest.mock import patch
 import uuid
 
 import pytest
@@ -36,6 +37,23 @@ AUDIT_IMMUTABILITY_MIGRATION = (
     BACKEND / "alembic" / "versions" / "20260821_0029_audit_event_immutability.py"
 )
 LEGACY_SESSION_ID: uuid.UUID | None = None
+
+
+@pytest.fixture(autouse=True)
+def _stub_record_governance_usage_event():
+    """This module deliberately pins `organization_database` to an old,
+    fixed migration snapshot ("20260822_0030") shared across every test in
+    this file, several of which test behavior specific to that historical
+    point (legacy-session handling, audit-event immutability) -- it must not
+    be bumped forward just to satisfy Stage 9 WP9.2's later
+    `record_governance_usage_event` call (added inside
+    `replace_membership_base_role`/`create_organization_with_initial_admin`/
+    etc., which several tests here exercise). Since `product_usage_events`
+    doesn't exist at this snapshot, that call is stubbed out file-wide,
+    mirroring the `_stub_emit_audit` pattern already used by
+    `test_organization_admin_api.py` for the same reason."""
+    with patch("symgov_backend.organization_service.record_governance_usage_event"):
+        yield
 
 
 def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:

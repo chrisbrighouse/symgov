@@ -9,6 +9,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from .models import AuditEvent, GovernedSymbol, Organization, Project, ProjectSymbolSet, SymbolSet, SymbolSetItem, UserProjectSetSelection
+from .product_usage_events import record_governance_usage_event
 from .project_service import audit, get_principal, json_values_equal, normalize_code, normalize_optional_text, normalize_text, project_dict, validate_json
 from .public_symbol_eligibility import current_public_symbols
 
@@ -64,7 +65,9 @@ def create_set(session: Session, request: Request, settings, data):
                     name=normalize_text(data.name, "Name", 200), description=normalize_optional_text(data.description, 2000),
                     disciplines_json=labels(data.disciplines), use_cases_json=labels(data.useCases), status="draft",
                     created_by_user_id=principal.user.id, created_at=stamp_now, updated_at=stamp_now)
-    session.add(row); session.flush(); audit(session, principal, "symbol_set", row.id, "symbol_set.created", {"symbolSetId": str(row.id)}); return row
+    session.add(row); session.flush(); audit(session, principal, "symbol_set", row.id, "symbol_set.created", {"symbolSetId": str(row.id)})
+    record_governance_usage_event(session, event_type="set_created", user_id=principal.user.id, organization_id=principal.organization.id, symbol_set_id=row.id)
+    return row
 
 
 def get_set(session: Session, request: Request, settings, set_id: uuid.UUID, *, admin=False):
@@ -197,6 +200,13 @@ def patch_set(session: Session, request: Request, settings, set_id: uuid.UUID, d
                 "afterAvailableProjectCount": after_available_project_count,
             })
         audit(session, principal, "symbol_set", row.id, action, details)
+        record_governance_usage_event(
+            session,
+            event_type="set_archived" if row.status == "archived" else "set_updated",
+            user_id=principal.user.id,
+            organization_id=principal.organization.id,
+            symbol_set_id=row.id,
+        )
     return row
 
 
@@ -457,6 +467,13 @@ def replace_projects(session, request, settings, set_id, data):
         "beforeProjectCount": len(active_existing),
         "afterProjectCount": len(desired),
     })
+    record_governance_usage_event(
+        session,
+        event_type="set_project_availability_changed",
+        user_id=principal.user.id,
+        organization_id=principal.organization.id,
+        symbol_set_id=row.id,
+    )
     return list_projects_for_set(session, row.id, principal, page=1, page_size=50)
 
 

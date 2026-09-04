@@ -806,17 +806,19 @@ class AuditEvent(Base):
 
 
 class ProductUsageEvent(Base):
-    """Stage 9 WP9.1 -- append-only, server-derived authenticated browser/
-    product-usage event ledger, kept as a domain separate from `AuditEvent`
-    (governance-mutation audit trail), `CatalogApiUsageEvent` (API-key
-    traffic only) and future contribution-reputation events, per the
-    Stage 9 plan §1.1/§4 Q1 and decision addendum I-13. `event_type` is
-    deliberately scoped to the browse-facing core subset only (session
-    start, context resolution, set selection, preview, download, Favorite
-    change) -- governance-lifecycle event types are added later, additively,
-    by WP9.2, not guessed here. Rows are immutable once inserted (an
-    `UPDATE` trigger enforces this in Postgres); `DELETE` remains permitted
-    at the database level for the 90-day retention purge
+    """Stage 9 WP9.1/WP9.2 -- append-only, server-derived authenticated
+    browser/product-usage event ledger, kept as a domain separate from
+    `AuditEvent` (governance-mutation audit trail), `CatalogApiUsageEvent`
+    (API-key traffic only) and future contribution-reputation events, per
+    the Stage 9 plan §1.1/§4 Q1 and decision addendum I-13. `event_type`
+    covers WP9.1's browse-facing core subset (session start, context
+    resolution, set selection, preview, download, Favorite change) plus
+    WP9.2's governance-lifecycle additions (organization review, promotion,
+    demotion, project/set lifecycle and selection, organization icon/role/
+    capability/platform-admin changes) -- Stage 10's agent-finding events are
+    not present, that stage's own concern. Rows are immutable once inserted
+    (an `UPDATE` trigger enforces this in Postgres); `DELETE` remains
+    permitted at the database level for the 90-day retention purge
     (`product_usage_retention.purge_expired_product_usage_events`), which is
     the one intentional way this table differs from `LLMUsageEvent`'s own
     fully append-only (UPDATE-or-DELETE-blocking) trigger."""
@@ -826,7 +828,13 @@ class ProductUsageEvent(Base):
         CheckConstraint(
             "event_type in ("
             "'personal_session_started', 'organization_selected', 'context_resolved', "
-            "'set_selected', 'symbol_previewed', 'symbol_downloaded', 'favorite_changed'"
+            "'set_selected', 'symbol_previewed', 'symbol_downloaded', 'favorite_changed', "
+            "'organization_review_submitted', 'organization_review_decided', 'organization_wide_changed', "
+            "'publication_submitted', 'publication_decided', 'public_symbol_demoted', "
+            "'project_created', 'project_updated', 'project_archived', 'project_selected', "
+            "'set_created', 'set_updated', 'set_archived', 'set_project_availability_changed', "
+            "'organization_role_changed', 'platform_admin_assigned', 'platform_admin_removed', "
+            "'organization_icon_uploaded', 'organization_icon_removed'"
             ")",
             name="ck_product_usage_events_event_type",
         ),

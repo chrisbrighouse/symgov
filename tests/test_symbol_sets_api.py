@@ -36,10 +36,15 @@ def test_symbol_set_patch_applies_other_fields_when_status_is_unchanged(monkeypa
     organization = SimpleNamespace(id="organization-id")
     row = SimpleNamespace(status="active", name="Old", id="set-id", owner_organization_id=organization.id, superseded_at=None, archived_at=None, updated_at="before")
     audits = []
-    principal = SimpleNamespace(is_admin=True, organization=organization)
+    principal = SimpleNamespace(is_admin=True, organization=organization, user=SimpleNamespace(id="user-id"))
     monkeypatch.setattr(symbol_set_service, "get_set", lambda *args, **kwargs: (principal, row))
     monkeypatch.setattr(symbol_set_service, "audit", lambda *args, **kwargs: audits.append(args))
     monkeypatch.setattr(symbol_set_service, "stamp", lambda: "after")
+    # This deliberately minimal principal double has no `.user` (unlike the
+    # real Stage4Principal) -- record_governance_usage_event (Stage 9 WP9.2)
+    # is stubbed here too, mirroring the `audit` stub above, since this test
+    # only cares about the "other fields still apply" behavior.
+    monkeypatch.setattr(symbol_set_service, "record_governance_usage_event", lambda *args, **kwargs: None)
     class Query:
         def filter(self, *args): return self
         def with_for_update(self): return self

@@ -29,6 +29,7 @@ from sqlalchemy import text
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from test_organization_symbol_postgresql import (  # noqa: E402
+    _alembic,
     _organization,
     _user,
     stage5_database,
@@ -156,7 +157,17 @@ def _actor(user_id, organization_id, *, base_role="user", capabilities=()):
 
 @pytest.fixture()
 def wp53_fixtures(stage5_database):
-    engine, _, _ = stage5_database
+    engine, url, _ = stage5_database
+    # Stage 9 WP9.2 added ProductUsageEvent emission inside
+    # organization_symbol_drafts.submit_for_review /
+    # organization_symbol_review.decide_submission / set_organization_wide
+    # (shared, widely-tested functions this file exercises directly) --
+    # those calls now unconditionally need `product_usage_events` to
+    # exist. Applied locally here, not by bumping the shared
+    # `stage5_database` fixture itself, since that fixture is also used
+    # by several other Stage 5 test files that must stay pinned to their
+    # own original schema snapshot.
+    _alembic(url, "upgrade", "20260904_0039")
     with engine.begin() as connection:
         organization = _organization(connection, "wp53")
         other_organization = _organization(connection, "wp53other")

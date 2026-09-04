@@ -10,6 +10,7 @@ import threading
 import time
 import uuid
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from fastapi import HTTPException
 from starlette.requests import Request
@@ -30,6 +31,25 @@ from symgov_backend.symbol_set_service import clear_organization_default, patch_
 from symgov_backend.symbol_context_service import select_active_set, select_project
 
 psycopg = pytest.importorskip("psycopg")
+
+
+@pytest.fixture(autouse=True)
+def _stub_record_governance_usage_event():
+    """`wp1_database`/`empty_wp1_database` are deliberately pinned to old,
+    fixed migration snapshots that several tests here test the exact
+    behavior of (upgrade/downgrade rehearsal, revision assertions) -- they
+    must not be bumped forward just to satisfy Stage 9 WP9.2's later
+    `record_governance_usage_event` call (added inside
+    create_project/patch_project/create_set/patch_set/replace_projects/
+    select_project/select_active_set, which this file exercises directly).
+    Since `product_usage_events` doesn't exist at these snapshots, the call
+    is stubbed out file-wide across all three modules it's imported into
+    here."""
+    with patch.object(project_service, "record_governance_usage_event"), \
+         patch.object(symbol_set_service, "record_governance_usage_event"), \
+         patch.object(symbol_context_service, "record_governance_usage_event"):
+        yield
+
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"

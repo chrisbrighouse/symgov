@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from unittest.mock import patch
 import pytest
 from sqlalchemy import select, func
 from sqlalchemy.orm import sessionmaker
@@ -35,6 +36,21 @@ from symgov_backend.auth import upsert_user
 
 # Reuse pg database fixture
 from test_organization_postgresql_migration import organization_database
+
+
+@pytest.fixture(autouse=True)
+def _stub_record_governance_usage_event():
+    """This module's fixture (`organization_database`, imported from
+    `test_organization_postgresql_migration.py`) is deliberately pinned to
+    an old migration snapshot shared across many tests there; the
+    `product_usage_events` table Stage 9 WP9.2 added does not exist at that
+    snapshot. This file only tests AuditEvent integrity, not product-usage-
+    event behavior, so the call is stubbed here -- mirroring
+    `test_organization_admin_api.py`'s own `_stub_emit_audit` pattern for
+    the same reason."""
+    with patch("symgov_backend.organization_service.record_governance_usage_event"):
+        yield
+
 
 def _seed_minimal_context_pg(session, suffix: str):
     now = datetime.now(timezone.utc).replace(microsecond=0)

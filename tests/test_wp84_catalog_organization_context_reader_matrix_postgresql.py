@@ -53,7 +53,7 @@ if str(BACKEND) not in sys.path:
 from symgov_backend.catalog_api_auth import hash_api_key  # noqa: E402
 from symgov_backend.models import CatalogApiKey  # noqa: E402
 
-NEW_MIGRATION_HEAD = "20260902_0037"
+NEW_MIGRATION_HEAD = "20260904_0039"
 
 psycopg = pytest.importorskip("psycopg")
 

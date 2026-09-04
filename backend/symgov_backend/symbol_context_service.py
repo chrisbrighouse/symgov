@@ -7,6 +7,7 @@ from sqlalchemy import and_, case, or_
 from sqlalchemy.orm import Session
 
 from .models import Project, ProjectSymbolSet, SymbolSet, UserProjectSetSelection, UserSessionProjectContext
+from .product_usage_events import record_governance_usage_event
 from .project_service import audit, normalize_code, now
 from .stage4_authorization import Stage4Principal, require_stage4_principal
 
@@ -181,6 +182,13 @@ def select_project(session: Session, request: Request, settings, project_id: uui
         audit(session, principal, "project", project.id, "project.selected", {
             "projectId": str(project.id), "reason": "explicit"
         })
+        record_governance_usage_event(
+            session,
+            event_type="project_selected",
+            user_id=principal.user.id,
+            organization_id=principal.organization.id,
+            project_id=project.id,
+        )
         session.flush()
     return _response(session, principal, project, cleanup_stale=False)
 
@@ -247,6 +255,15 @@ def select_active_set(session: Session, request: Request, settings, set_code: st
         audit(session, principal, "symbol_set", symbol_set.id, "symbol_set.selected", {
             "projectId": str(project.id), "symbolSetId": str(symbol_set.id), "reason": "explicit"
         })
+        record_governance_usage_event(
+            session,
+            event_type="set_selected",
+            user_id=principal.user.id,
+            organization_id=principal.organization.id,
+            project_id=project.id,
+            symbol_set_id=symbol_set.id,
+            context_resolution_basis="explicit",
+        )
         session.flush()
     return _response(session, principal, project, explicit=symbol_set)
 
