@@ -1201,6 +1201,18 @@ class OrganizationUsageSummaryResponse(BaseModel):
     eventTypes: list[ProductUsageEventTypeSummary]
 
 
+class OrganizationBadgeItem(BaseModel):
+    badgeType: str
+    awardedAt: str
+
+
+class OrganizationContributionsResponse(BaseModel):
+    organizationId: str
+    acceptedContributionCount: int
+    reversedContributionCount: int
+    badges: list[OrganizationBadgeItem]
+
+
 class OrgIconUploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

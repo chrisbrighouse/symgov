@@ -55,6 +55,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from .catalog_symbol_ids import ensure_catalog_symbol_id
+from .contribution_events import record_contribution_awarded
 from .models import (
     AuditEvent,
     GovernedSymbol,
@@ -306,6 +307,20 @@ def execute_organization_promotion_handoff(
         governed_symbol_id=symbol.id,
         symbol_revision_id=revision.id,
         symbol_source="public",
+        occurred_at=now,
+    )
+    # Stage 9 WP9.5: a symbol's public promotion being accepted is this
+    # package's only wired trigger for a `contribution_awarded` ledger row
+    # (Q3/Q7-confirmed scope). Attributed to the organization that
+    # submitted it and to the real contributor (not the deciding
+    # reviewer), per contribution_events.py's own module docstring.
+    record_contribution_awarded(
+        session,
+        organization_id=promotion_request.organization_id,
+        submission_id=promotion_request.id,
+        user_id=promotion_request.submitted_by_user_id,
+        governed_symbol_id=symbol.id,
+        symbol_revision_id=revision.id,
         occurred_at=now,
     )
 

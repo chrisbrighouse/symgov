@@ -60,7 +60,7 @@ from symgov_backend.models import (  # noqa: E402
 )
 from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E402
 
-NEW_MIGRATION_HEAD = "20260904_0039"
+NEW_MIGRATION_HEAD = "20260904_0041"
 
 psycopg = pytest.importorskip("psycopg")
 

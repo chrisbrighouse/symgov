@@ -944,6 +944,152 @@ class ProductUsageDailyRollup(Base):
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ContributionEvent(Base):
+    """Stage 9 WP9.5 -- append-only contribution/reputation ledger, a
+    structurally separate table/domain from `ProductUsageEvent` (spec §8
+    line 411, Stage 9 plan §2 item 5), imitating WP9.1's own frozen-
+    `CheckConstraint`-vocabulary/immutable-row pattern rather than being
+    built on top of WP9.2-9.4. Per Q2 there is deliberately no `points`
+    column -- counts and badges only, pending a later versioned scoring
+    policy. `event_type` uses the exact two names spec Appendix B's own
+    event catalog gives this domain (`contribution_awarded` /
+    `contribution_reversed`), not an invented category vocabulary --
+    today's only wired trigger for `contribution_awarded` is a symbol's
+    public promotion being accepted (`organization_promotion_handoff.
+    execute_organization_promotion_handoff`); more categories (accepted
+    significant revision, format/accessibility improvement, etc. -- spec
+    §12.1's illustrative, not-yet-built list) can extend this
+    `CheckConstraint` additively later exactly as WP9.2 extended WP9.1's own
+    `event_type` vocabulary, without redesigning this table.
+
+    Corrections use reversal entries (spec §12.4/§12.2's "demotion or
+    invalidation may reverse contribution events"), never in-place
+    mutation: a `contribution_reversed` row carries `reversed_event_id`
+    pointing back at the original award row, which itself stays immutable
+    (an `UPDATE`-blocking trigger, mirroring WP9.1's own). `reversed_event_id`
+    is deliberately a plain UUID column with no foreign-key constraint --
+    both rows already carry independent copies of every dimension column
+    (`organization_id`/`user_id`/`submission_id`/`governed_symbol_id`/
+    `symbol_revision_id`), so `reversed_event_id` is traceability only, not
+    load-bearing for any query. This is also why it is safe for it to point
+    at an id that no longer exists once the original award row ages past
+    this table's own 90-day retention purge (Q7, mirroring WP9.1's) --
+    an enforced `ON DELETE SET NULL` foreign key here would instead collide
+    with the immutability trigger, which must reject that in-place `UPDATE`
+    on every other row.
+
+    Badge state (`OrganizationBadge`) and lifetime accepted/reversed
+    counters (`OrganizationContributionTotal`) are both written
+    synchronously, in the same transaction as the row that triggers them,
+    and are never re-derived from this (purgeable) ledger afterward --
+    mirroring WP9.4's own "an aggregate must outlive the raw-row purge"
+    precedent (Q10), scaled down to a running counter/one-shot badge shape
+    since contribution volume needs no daily-granularity/distinct-user
+    tracking the way browse-event dashboards do.
+
+    Badges are not revoked when a contribution is reversed -- deciding
+    whether/how to do that is left to WP9.6's own anti-gaming scope, not
+    decided here, per `CLAUDE.md`'s prohibition on inventing an
+    invalidation policy without confirmation."""
+
+    __tablename__ = "contribution_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type in ('contribution_awarded', 'contribution_reversed')",
+            name="ck_contribution_events_event_type",
+        ),
+        CheckConstraint(
+            "(event_type = 'contribution_reversed') = (reason is not null)",
+            name="ck_contribution_events_reason_only_on_reversal",
+        ),
+        Index("ix_contribution_events_organization_occurred", "organization_id", "occurred_at"),
+        Index("ix_contribution_events_occurred_at", "occurred_at"),
+        Index("ix_contribution_events_submission_id", "submission_id"),
+        Index("ix_contribution_events_governed_symbol_occurred", "governed_symbol_id", "occurred_at"),
+        Index("ix_contribution_events_reversed_event_id", "reversed_event_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    submission_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("promotion_requests.id"), nullable=False)
+    governed_symbol_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("governed_symbols.id"), nullable=True)
+    symbol_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_revisions.id"), nullable=True)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    reversed_event_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    occurred_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OrganizationBadge(Base):
+    """Stage 9 WP9.5 -- indefinitely-retained badge-award record, mirroring
+    `ProductUsageDailyRollup`'s own "outlive the raw ledger's purge" design
+    (Q10 precedent). Once an organization's `ContributionEvent` rows age
+    out at 90 days, this is the only place the fact "this organization
+    earned badge X" survives -- each row is written once, when the
+    organization first meets a badge's trigger, and never re-derived from
+    the ledger afterward.
+
+    `badge_type` is deliberately scoped to only the two badges this
+    package actually computes (Q3: First Contribution, Contributor
+    Organization -- both share the identical trigger, an organization's
+    first-ever `contribution_awarded` row, so both rows are always written
+    together). Community Partner and the two already-deferred badges
+    (Multi-Discipline Contributor, Metadata Improver) are not in this
+    vocabulary yet; each can be added additively, exactly as WP9.2
+    additively extended WP9.1's own `event_type` `CheckConstraint`, once its
+    own trigger is defined.
+
+    `source_event_id` is traceability only (which ledger row triggered the
+    award) and is nulled out (`ondelete="SET NULL"`) rather than blocking
+    that row's own retention purge -- unlike `ContributionEvent.
+    reversed_event_id`, this is safe as a real foreign key because this
+    table carries no immutability trigger of its own to collide with the
+    resulting `UPDATE`."""
+
+    __tablename__ = "organization_badges"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "badge_type", name="uq_organization_badges_org_badge"),
+        CheckConstraint(
+            "badge_type in ('first_contribution', 'contributor_organization')",
+            name="ck_organization_badges_badge_type",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False)
+    badge_type: Mapped[str] = mapped_column(Text, nullable=False)
+    awarded_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("contribution_events.id", ondelete="SET NULL"), nullable=True
+    )
+
+
+class OrganizationContributionTotal(Base):
+    """Stage 9 WP9.5 -- one row per organization, a lifetime running total
+    of accepted/reversed `ContributionEvent` rows that survives this
+    ledger's own 90-day retention purge (see `ContributionEvent`'s own
+    docstring). Incremented synchronously in the same transaction as the
+    ledger row that causes it (`contribution_events.record_contribution_
+    awarded`/`reverse_contributions_for_symbol`) via `INSERT ... ON
+    CONFLICT ... DO UPDATE`, never recomputed by re-scanning the (purgeable)
+    raw ledger -- the counter itself is this package's read model for
+    `GET /org/me/contributions` / `GET /platform/organizations/{id}/
+    contributions`'s own count fields."""
+
+    __tablename__ = "organization_contribution_totals"
+    __table_args__ = (
+        CheckConstraint("accepted_count >= 0", name="ck_organization_contribution_totals_accepted_non_negative"),
+        CheckConstraint("reversed_count >= 0", name="ck_organization_contribution_totals_reversed_non_negative"),
+        CheckConstraint("reversed_count <= accepted_count", name="ck_organization_contribution_totals_reversed_le_accepted"),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), primary_key=True)
+    accepted_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    reversed_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ExternalIdentity(Base):
     __tablename__ = "external_identities"
     __table_args__ = (

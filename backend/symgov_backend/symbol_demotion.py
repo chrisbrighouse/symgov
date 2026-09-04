@@ -76,6 +76,7 @@ from .models import (
     SymbolSet,
     SymbolSetItem,
 )
+from .contribution_events import reverse_contributions_for_symbol
 from .product_usage_events import record_governance_usage_event
 
 
@@ -348,6 +349,17 @@ def execute_demotion(
         organization_id=symbol.owner_organization_id,
         governed_symbol_id=symbol.id,
         symbol_source="organization_private",
+        occurred_at=now,
+    )
+    # Stage 9 WP9.5, spec §12.2: "Demotion or invalidation may reverse
+    # contribution events through append-only correction records." Does
+    # not revoke any already-awarded badge -- see contribution_events.py's
+    # own module docstring; a no-op if this symbol never had an active
+    # accepted contribution (e.g. a legacy ownerless public symbol).
+    reverse_contributions_for_symbol(
+        session,
+        governed_symbol_id=symbol.id,
+        reason=clean_reason,
         occurred_at=now,
     )
     session.flush()

@@ -36,6 +36,7 @@ from ..organization_service import (
     revoke_member_capability,
     update_organization,
 )
+from ..contribution_events import get_organization_contributions
 from ..product_usage_rollups import get_organization_usage_summary
 from ..runtime import RuntimePersistenceBridge, download_object_bytes
 from ..schemas import (
@@ -46,6 +47,7 @@ from ..schemas import (
     OrgMemberListResponse,
     OrgMemberResponse,
     OrgPatchMemberRequest,
+    OrganizationContributionsResponse,
     OrganizationUsageSummaryResponse,
     OrgUpdateRequest,
 )
@@ -531,6 +533,19 @@ def get_org_usage_summary(
 ) -> OrganizationUsageSummaryResponse:
     org_id = _active_org_id(current_user)
     return get_organization_usage_summary(session, org_id, since=since, until=until)
+
+
+@router.get(
+    "/org/me/contributions",
+    response_model=OrganizationContributionsResponse,
+    dependencies=[Depends(_require_org_admin_enabled)],
+)
+def get_org_contributions(
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_admin),
+) -> OrganizationContributionsResponse:
+    org_id = _active_org_id(current_user)
+    return get_organization_contributions(session, org_id)
 
 
 @router.delete(

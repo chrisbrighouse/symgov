@@ -9,6 +9,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.orm import Session
 
 from ..auth import AuthenticatedUser
+from ..contribution_events import get_organization_contributions
 from ..dependencies import get_db_session, require_platform_admin, require_recent_step_up
 from ..organization_service import (
     add_protected_organization_member,
@@ -42,6 +43,7 @@ from ..schemas import (
     OrgMemberCapabilityItem,
     OrgMemberListResponse,
     OrgMemberResponse,
+    OrganizationContributionsResponse,
     OrganizationUsageSummaryResponse,
 )
 from ..product_usage_rollups import get_organization_usage_summary
@@ -282,6 +284,22 @@ def get_organization_usage_summary_route(
     if get_organization_detail(session, org_id) is None:
         raise HTTPException(status_code=404, detail="Organization not found.")
     return get_organization_usage_summary(session, org_id, since=since, until=until)
+
+
+@router.get(
+    "/platform/organizations/{organization_id}/contributions",
+    response_model=OrganizationContributionsResponse,
+    dependencies=[Depends(_require_platform_admin_enabled)],
+)
+def get_organization_contributions_route(
+    organization_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_platform_admin),
+) -> OrganizationContributionsResponse:
+    org_id = _parse_organization_id(organization_id)
+    if get_organization_detail(session, org_id) is None:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    return get_organization_contributions(session, org_id)
 
 
 @router.post(
