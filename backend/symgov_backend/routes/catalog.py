@@ -77,6 +77,7 @@ from ..published_catalog import (
     published_fallback_source_asset,
     published_symbol_display_id,
 )
+from ..product_usage_events import record_browse_usage_event_best_effort
 from ..runtime import download_object_bytes
 from ..services.published_feedback import (
     canonical_request_fingerprint,
@@ -1331,6 +1332,20 @@ async def download_catalog_symbols(
                 ),
             )
         )
+        if isinstance(auth_context, AuthenticatedUser):
+            # This route's own `PUBLISHED_SYMBOLS_SQL` join means every row
+            # here is a currently-public symbol -- `symbol_source` is always
+            # `"public"`, never `"organization_private"` (unlike the
+            # organization-bound preview/Favorite routes in `published.py`).
+            record_browse_usage_event_best_effort(
+                session,
+                event_type="symbol_downloaded",
+                current_user=auth_context,
+                governed_symbol_id=uuid.UUID(str(row.symbol_id)),
+                symbol_revision_id=uuid.UUID(str(row.symbol_revision_id)),
+                symbol_source="public",
+                format=requested_format,
+            )
 
     if not selected:
         raise HTTPException(status_code=422, detail="The selected format is not available for any selected symbol.")

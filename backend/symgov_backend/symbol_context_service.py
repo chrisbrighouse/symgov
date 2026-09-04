@@ -7,7 +7,7 @@ from sqlalchemy import and_, case, or_
 from sqlalchemy.orm import Session
 
 from .models import Project, ProjectSymbolSet, SymbolSet, UserProjectSetSelection, UserSessionProjectContext
-from .product_usage_events import record_governance_usage_event
+from .product_usage_events import record_browse_usage_event_for_session_best_effort, record_governance_usage_event
 from .project_service import audit, normalize_code, now
 from .stage4_authorization import Stage4Principal, require_stage4_principal
 
@@ -147,13 +147,23 @@ def get_context(session: Session, request: Request, settings):
         UserSessionProjectContext.user_session_id == principal.session.id
     ).one_or_none()
     if result is None:
-        return _response(session, principal, None)
-    context, project = result
-    if project is None:
-        session.delete(context)
-        session.flush()
-        return _response(session, principal, None)
-    return _response(session, principal, project)
+        project = None
+    else:
+        context, project = result
+        if project is None:
+            session.delete(context)
+            session.flush()
+    response = _response(session, principal, project)
+    record_browse_usage_event_for_session_best_effort(
+        session,
+        event_type="context_resolved",
+        user_id=principal.user.id,
+        session_mode="organization",
+        organization_id=principal.organization.id,
+        project_id=project.id if project is not None else None,
+        context_resolution_basis=response["reason"],
+    )
+    return response
 
 
 def select_project(session: Session, request: Request, settings, project_id: uuid.UUID):

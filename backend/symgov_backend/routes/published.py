@@ -41,6 +41,7 @@ from ..models import (
     SymbolRevision,
     User,
 )
+from ..product_usage_events import record_browse_usage_event_best_effort
 from ..published_feedback_gate import (
     published_feedback_claims_paused,
     published_feedback_paused_response_body,
@@ -539,6 +540,14 @@ def add_current_user_catalog_favourite(
         governed_symbol, _revision = resolved
         symbol_id = governed_symbol.id
     add_catalog_favourite(session, current_user.id, symbol_id)
+    record_browse_usage_event_best_effort(
+        session,
+        event_type="favorite_changed",
+        current_user=current_user,
+        governed_symbol_id=symbol_id,
+        symbol_source=source,
+        favourite_action="added",
+    )
     return {"symbolId": str(symbol_id), "isFavourite": True}
 
 
@@ -560,6 +569,7 @@ def remove_current_user_catalog_favourite(
         requested_symbol_id = uuid.UUID(symbol_ref)
     except ValueError:
         requested_symbol_id = None
+    source: str | None = None
     if requested_symbol_id is not None and requested_symbol_id in load_favourite_symbol_ids(
         session,
         current_user.id,
@@ -579,6 +589,18 @@ def remove_current_user_catalog_favourite(
             governed_symbol, _revision = resolved
             symbol_id = governed_symbol.id
     remove_catalog_favourite(session, current_user.id, symbol_id)
+    # `source` stays None for the fast, unscoped-by-visibility raw-UUID path
+    # above (deliberately not resolved there, per that path's own comment) --
+    # `symbol_source` is a nullable dimension, so recording "unknown" here is
+    # correct rather than paying for a resolution this route intentionally skips.
+    record_browse_usage_event_best_effort(
+        session,
+        event_type="favorite_changed",
+        current_user=current_user,
+        governed_symbol_id=symbol_id,
+        symbol_source=source,
+        favourite_action="removed",
+    )
     return {"symbolId": str(symbol_id), "isFavourite": False}
 
 
@@ -942,12 +964,14 @@ def get_published_symbol_preview(
             revision_id = uuid.UUID(str(row.symbol_revision_id))
         except (AttributeError, TypeError, ValueError) as exc:
             raise HTTPException(status_code=404, detail="Published symbol preview was not found.") from exc
+        governed_symbol_id = uuid.UUID(str(row.symbol_id))
     else:
-        _governed_symbol, revision = resolved
+        governed_symbol, revision = resolved
         payload_json = (revision.payload_json if revision is not None else None) or {}
         if revision is None:
             raise HTTPException(status_code=404, detail="Published symbol preview was not found.")
         revision_id = revision.id
+        governed_symbol_id = governed_symbol.id
 
     preview_asset = choose_published_preview_asset(payload_json, requested_format=format)
     object_key = preview_asset.get("object_key") if preview_asset else None
@@ -974,6 +998,14 @@ def get_published_symbol_preview(
         )
     except UnsafeImageContentError as exc:
         raise HTTPException(status_code=404, detail="Published symbol preview was not found.") from exc
+    record_browse_usage_event_best_effort(
+        session,
+        event_type="symbol_previewed",
+        current_user=current_user,
+        governed_symbol_id=governed_symbol_id,
+        symbol_revision_id=revision_id,
+        symbol_source=source,
+    )
     return Response(
         content=payload["payload"],
         media_type=media_type,

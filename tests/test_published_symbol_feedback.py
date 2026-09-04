@@ -311,6 +311,7 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         class Session:
             def execute(self, *_args, **_kwargs):
                 return SimpleNamespace(all=lambda: [SimpleNamespace(
+                    symbol_id="11111111-1111-1111-1111-111111111111",
                     symbol_revision_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                     payload_json=payload_json,
                 )])
@@ -354,6 +355,7 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         class Session:
             def execute(self, *_args, **_kwargs):
                 return SimpleNamespace(all=lambda: [SimpleNamespace(
+                    symbol_id="11111111-1111-1111-1111-111111111111",
                     symbol_revision_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                     payload_json=payload_json,
                 )])
@@ -402,6 +404,7 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
 
             def execute(self, *_args, **_kwargs):
                 return SimpleNamespace(all=lambda: [SimpleNamespace(
+                    symbol_id="11111111-1111-1111-1111-111111111111",
                     symbol_revision_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
                     payload_json=payload_json,
                 )])
@@ -463,6 +466,7 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
                 return SimpleNamespace(
                     all=lambda: [
                         SimpleNamespace(
+                            symbol_id="11111111-1111-1111-1111-111111111111",
                             symbol_revision_id=str(target_revision_id),
                             payload_json=payload_json,
                         )

@@ -46,7 +46,11 @@ def test_context_get_query_count_is_constant_and_bounded():
 
     assert response.status_code == 200
     assert response.json()["reason"] == "project_default"
-    assert len(statements) <= 16
+    # Bumped 16 -> 17 for Stage 9 WP9.3: `get_context` now records one
+    # `context_resolved` `ProductUsageEvent` row per call (best-effort,
+    # `record_browse_usage_event_for_session_best_effort`) -- a single
+    # additional INSERT, still bounded and constant, not a per-row scan.
+    assert len(statements) <= 17
     assert not any("symbol_set_items" in statement.lower() for statement in statements)
 
 
