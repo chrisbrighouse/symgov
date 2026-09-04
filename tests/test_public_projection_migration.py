@@ -41,7 +41,7 @@ from test_organization_symbol_postgresql import (  # noqa: E402
 
 THIS_MIGRATION = "20260902_0035"
 PRE_STAGE7_RELEASE = "20260901_0034"
-CURRENT_GLOBAL_HEAD = "20260904_0041"  # bump alongside every later migration; see the note below.
+CURRENT_GLOBAL_HEAD = "20260904_0042"  # bump alongside every later migration; see the note below.
 
 psycopg = pytest.importorskip("psycopg")
 

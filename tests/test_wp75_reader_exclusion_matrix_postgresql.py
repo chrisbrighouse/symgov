@@ -79,7 +79,7 @@ def _client_with_symbol_sets(engine):
     app.dependency_overrides[get_settings] = lambda: settings
     return TestClient(app, headers={"origin": "http://testserver"}), TestingSessionLocal
 
-NEW_MIGRATION_HEAD = "20260904_0041"
+NEW_MIGRATION_HEAD = "20260904_0042"
 
 psycopg = pytest.importorskip("psycopg")
 

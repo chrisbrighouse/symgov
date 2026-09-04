@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import AuthenticatedUser
 from ..dependencies import get_db_session, require_organization_admin, require_organization_session, require_user
-from ..models import OrganizationSymbolReviewSubmission, PromotionRequest, SymbolRevision
+from ..models import GovernedSymbol, OrganizationSymbolReviewSubmission, PromotionRequest, SymbolRevision
 from ..organization_symbol_drafts import (
     OrganizationSymbolDraftError,
     OrganizationSymbolDraftNotVisible,
@@ -384,7 +384,16 @@ def set_organization_symbol_organization_wide(
 
 # --- Stage 7 WP7.2/WP7.3: promotion requests ---
 
-def _promotion_request_response(request) -> PromotionRequestResponse:
+def _promotion_request_response(request, session: Session | None = None) -> PromotionRequestResponse:
+    # Stage 9 WP9.6: this is the one existing surface a reviewer actually
+    # sees a promotion request's own detail through today (via
+    # open_organization_symbol_promotion_review) -- there is no separate
+    # workspace review-case renderer for organization_symbol_promotion
+    # cases (see organization_promotion_handoff.py's own module docstring).
+    possible_duplicate_slug = None
+    if session is not None and request.possible_duplicate_governed_symbol_id is not None:
+        duplicate_symbol = session.get(GovernedSymbol, request.possible_duplicate_governed_symbol_id)
+        possible_duplicate_slug = duplicate_symbol.slug if duplicate_symbol is not None else None
     return PromotionRequestResponse(
         id=str(request.id),
         governedSymbolId=str(request.governed_symbol_id),
@@ -399,6 +408,10 @@ def _promotion_request_response(request) -> PromotionRequestResponse:
         closedAt=request.closed_at,
         traceId=request.trace_id,
         reviewCaseId=str(request.review_case_id) if request.review_case_id else None,
+        possibleDuplicateOfGovernedSymbolId=(
+            str(request.possible_duplicate_governed_symbol_id) if request.possible_duplicate_governed_symbol_id else None
+        ),
+        possibleDuplicateOfSlug=possible_duplicate_slug,
     )
 
 
@@ -433,7 +446,7 @@ def submit_organization_symbol_promotion_request(
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
-    return _promotion_request_response(request)
+    return _promotion_request_response(request, session=session)
 
 
 @router.get(
@@ -450,7 +463,7 @@ def list_organization_symbol_promotion_requests(
         requests = list_promotion_requests(session, current_user, symbol_id=parsed_symbol_id)
     except PromotionRequestError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return PromotionRequestListResponse(items=[_promotion_request_response(r) for r in requests])
+    return PromotionRequestListResponse(items=[_promotion_request_response(r, session=session) for r in requests])
 
 
 @router.get(
@@ -472,7 +485,7 @@ def get_organization_symbol_promotion_request(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if str(request.governed_symbol_id) != symbol_id:
         raise HTTPException(status_code=404, detail="Promotion request was not found.")
-    return _promotion_request_response(request)
+    return _promotion_request_response(request, session=session)
 
 
 @router.post(
@@ -502,7 +515,7 @@ def withdraw_organization_symbol_promotion_request(
         session.rollback()
         raise HTTPException(status_code=404, detail="Promotion request was not found.")
     session.commit()
-    return _promotion_request_response(request)
+    return _promotion_request_response(request, session=session)
 
 
 @router.post(
@@ -536,4 +549,4 @@ def open_organization_symbol_promotion_review(
         session.rollback()
         raise HTTPException(status_code=404, detail="Promotion request was not found.")
     session.commit()
-    return _promotion_request_response(request)
+    return _promotion_request_response(request, session=session)

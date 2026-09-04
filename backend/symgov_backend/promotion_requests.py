@@ -36,6 +36,16 @@ before mutating `SymbolSetItem` rows -- this is the shared serialization
 boundary the Stage 7 plan's §1.4 identifies as already existing and
 required for WP7.4's demotion eligibility check to be race-safe against a
 concurrent submission.
+
+Stage 9 WP9.6 (spec §12.4 anti-gaming) adds two checks to
+`submit_promotion_request`, both Chris-confirmed rather than invented
+(per `CLAUDE.md`'s "do not invent production metrics, workflow states, or
+backend contracts"): a per-organization rolling-window submission rate
+limit (`_check_submission_rate_limit`), and a pre-review duplicate flag
+against existing public symbols on canonical_name/category/discipline
+(`_find_possible_duplicate`) -- informational only, does not block
+submission, surfaced to the reviewer via
+`PromotionRequestResponse.possibleDuplicateOfGovernedSymbolId`.
 """
 
 from __future__ import annotations
@@ -43,7 +53,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from datetime import timedelta
+
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -60,6 +72,15 @@ from .product_usage_events import record_governance_usage_event
 
 OPEN_STATUSES = ("submitted", "triage", "in_review", "changes_requested")
 TERMINAL_STATUSES = ("accepted", "rejected", "withdrawn")
+
+# Stage 9 WP9.6, spec §12.4 "rate-limit repeated submissions" -- Chris
+# confirmed this exact number and window (no number existed anywhere in the
+# spec/decision addendum/plan doc; per CLAUDE.md this could not be invented).
+# Counts every real submitted PromotionRequest row for the organization
+# (any status -- a rejected/withdrawn request still consumed a real review
+# cycle), not just currently-open ones.
+PROMOTION_RATE_LIMIT_MAX_SUBMISSIONS = 10
+PROMOTION_RATE_LIMIT_WINDOW = timedelta(days=7)
 
 
 class PromotionRequestError(ValueError):
@@ -140,6 +161,47 @@ def _has_approved_closed_decision(session: Session, *, organization_id: uuid.UUI
     )
 
 
+def _check_submission_rate_limit(session: Session, *, organization_id: uuid.UUID, now: datetime) -> None:
+    """Stage 9 WP9.6, spec §12.4 -- Chris-confirmed threshold (see module
+    top). Counts real submissions only; a symbol already blocked by
+    `uq_promotion_requests_active_symbol` never reaches this far."""
+    window_start = now - PROMOTION_RATE_LIMIT_WINDOW
+    recent_count = session.execute(
+        select(func.count())
+        .select_from(PromotionRequest)
+        .where(
+            PromotionRequest.organization_id == organization_id,
+            PromotionRequest.submitted_at >= window_start,
+        )
+    ).scalar_one()
+    if recent_count >= PROMOTION_RATE_LIMIT_MAX_SUBMISSIONS:
+        raise PromotionRequestConflict(
+            f"This organization has reached the limit of {PROMOTION_RATE_LIMIT_MAX_SUBMISSIONS} public promotion "
+            f"submissions per rolling {PROMOTION_RATE_LIMIT_WINDOW.days}-day period. Try again later."
+        )
+
+
+def _find_possible_duplicate(session: Session, symbol: GovernedSymbol) -> uuid.UUID | None:
+    """Stage 9 WP9.6, spec §12.4 "deduplicate submissions before review" --
+    Chris confirmed comparing canonical_name/category/discipline against
+    existing *public* symbols (not organization-private ones, which are
+    each organization's own separate copy). Informational only -- per
+    Chris's confirmed design, a match flags the request for the reviewer
+    rather than blocking submission."""
+    match = session.execute(
+        select(GovernedSymbol.id)
+        .where(
+            GovernedSymbol.visibility == "public",
+            GovernedSymbol.id != symbol.id,
+            func.lower(func.trim(GovernedSymbol.canonical_name)) == func.lower(func.trim(symbol.canonical_name)),
+            GovernedSymbol.category == symbol.category,
+            GovernedSymbol.discipline == symbol.discipline,
+        )
+        .limit(1)
+    ).scalar_one_or_none()
+    return match
+
+
 def submit_promotion_request(
     session: Session,
     current_user: AuthenticatedUser,
@@ -172,6 +234,8 @@ def submit_promotion_request(
         )
 
     now = _utc_now()
+    _check_submission_rate_limit(session, organization_id=organization_id, now=now)
+    possible_duplicate_governed_symbol_id = _find_possible_duplicate(session, symbol)
     request = PromotionRequest(
         id=uuid.uuid4(),
         governed_symbol_id=symbol.id,
@@ -184,6 +248,7 @@ def submit_promotion_request(
         submitted_by_user_id=uuid.UUID(current_user.id),
         submitted_at=now,
         trace_id=trace_id,
+        possible_duplicate_governed_symbol_id=possible_duplicate_governed_symbol_id,
         created_at=now,
         updated_at=now,
     )

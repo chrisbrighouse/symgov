@@ -1244,6 +1244,15 @@ class PromotionRequest(Base):
     closed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
     review_case_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("review_cases.id", ondelete="RESTRICT"), nullable=True)
     trace_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Stage 9 WP9.6 -- populated at submission time (submit_promotion_request)
+    # when an existing *different* public GovernedSymbol shares this
+    # symbol's canonical_name/category/discipline (spec §12.4's "deduplicate
+    # submissions before review"). Informational only -- per Chris's
+    # confirmed design the submission is still accepted, not blocked; the
+    # reviewer sees this flag via PromotionRequestResponse.
+    possible_duplicate_governed_symbol_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("governed_symbols.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 

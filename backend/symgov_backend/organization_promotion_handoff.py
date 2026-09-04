@@ -42,6 +42,12 @@ later demoted and re-promoted through a fresh `PromotionRequest` gets a
 fresh pack/page rather than colliding with the (still globally unique)
 prior one -- consistent with the spec's "never reactivate older
 projections during re-promotion" requirement WP7.4/WP7.6 will need to hold.
+
+Stage 9 WP9.6 (spec §12.4 anti-gaming, Chris-confirmed) adds one more
+eligibility check here, before any mutation: a same-organization
+self-review block -- see the check's own inline comment for why this is a
+narrow anti-gaming carve-out on top of, not a reversal of, Stage 7's
+deliberately organization-agnostic reviewer-authority model.
 """
 
 from __future__ import annotations
@@ -52,6 +58,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .catalog_symbol_ids import ensure_catalog_symbol_id
@@ -60,6 +67,7 @@ from .models import (
     AuditEvent,
     GovernedSymbol,
     HumanReviewDecision,
+    OrganizationMembership,
     PackEntry,
     PromotionRequest,
     PromotionRequestDecision,
@@ -170,6 +178,33 @@ def execute_organization_promotion_handoff(
         return _fail("Promotion request not found or does not match this review case.")
     if promotion_request.status not in OPEN_PROMOTION_STATUSES:
         return _fail("Promotion request is not in an open state.")
+
+    # Stage 9 WP9.6, spec §12.4 "no credit for... activity within the
+    # submitting organization alone." `_require_reviewer_authority`
+    # (promotion_requests.py) deliberately checks only the global
+    # admin/reviewer role, not organization membership -- that is an
+    # existing, documented public-governance policy from Stage 7, not a
+    # bug WP9.6 revisits. What WP9.6 adds is narrower: a reviewer who is
+    # also an active member of the very organization that submitted this
+    # promotion may not be the one to accept it. Checked here (defense in
+    # depth, mirroring `symbol_demotion._require_platform_admin`), not
+    # only at the route layer.
+    if decision.decided_by is not None:
+        deciding_reviewer_is_org_member = (
+            session.execute(
+                select(OrganizationMembership.id).where(
+                    OrganizationMembership.organization_id == promotion_request.organization_id,
+                    OrganizationMembership.user_id == decision.decided_by,
+                    OrganizationMembership.status == "active",
+                )
+            ).first()
+            is not None
+        )
+        if deciding_reviewer_is_org_member:
+            return _fail(
+                "The deciding reviewer is an active member of the submitting organization; "
+                "a reviewer from a different organization must decide this promotion request."
+            )
 
     # Lock the governed-symbol row -- the same shared serialization boundary
     # `symbol_set_service.py`'s set-item writers and `submit_promotion_request`

@@ -1475,6 +1475,8 @@ class PromotionRequestResponse(BaseModel):
     closedAt: datetime | None
     traceId: str | None
     reviewCaseId: str | None = None
+    possibleDuplicateOfGovernedSymbolId: str | None = None
+    possibleDuplicateOfSlug: str | None = None
 
 
 class PromotionRequestListResponse(BaseModel):

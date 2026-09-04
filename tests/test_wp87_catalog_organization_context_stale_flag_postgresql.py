@@ -36,7 +36,7 @@ from test_wp74_symbol_demotion_postgresql import (  # noqa: E402
     _make_platform_admin,
 )
 
-NEW_MIGRATION_HEAD = "20260904_0041"
+NEW_MIGRATION_HEAD = "20260904_0042"
 
 psycopg = pytest.importorskip("psycopg")
 
