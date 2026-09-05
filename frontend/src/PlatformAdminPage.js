@@ -10,6 +10,8 @@ import {
 import { canMountOrganizationSymbolDrafts } from './projectContext.js';
 import { PlatformOrganizationUsageDashboardSection } from './UsageDashboardSection.js';
 import { PlatformOrganizationContributionSection } from './ContributionSection.js';
+import { PlatformAgentFindingsDashboardSection } from './AgentFindingsDashboardSection.js';
+import { AgentConfigurationSection } from './AgentConfigurationSection.js';
 
 function resultValue(result) {
   if (!result.ok) {
@@ -127,7 +129,7 @@ function AdminRow({ admin, onRevoke }) {
   );
 }
 
-function OrganizationRow({ organization, onSuspend, onReactivate, onViewMembers, onViewUsage, onViewContributions }) {
+function OrganizationRow({ organization, onSuspend, onReactivate, onViewMembers, onViewUsage, onViewContributions, onViewAgentFindings, agentOversightUiEnabled }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const suspended = organization.entitlementStatus === 'suspended';
@@ -213,7 +215,14 @@ function OrganizationRow({ organization, onSuspend, onReactivate, onViewMembers,
       type: 'button',
       onClick: () => onViewContributions(organization),
       'aria-label': `View contributions for ${organization.displayName}`,
-    }, 'View contributions')
+    }, 'View contributions'),
+    agentOversightUiEnabled
+      ? createElement('button', {
+          type: 'button',
+          onClick: () => onViewAgentFindings(organization),
+          'aria-label': `View Organization Steward findings for ${organization.displayName}`,
+        }, 'View agent findings')
+      : null
   );
 }
 
@@ -678,6 +687,7 @@ export function PlatformAdminPage({ auth }) {
   const [diagnosticError, setDiagnosticError] = useState('');
   const [usageOrganization, setUsageOrganization] = useState(null);
   const [contributionOrganization, setContributionOrganization] = useState(null);
+  const [agentFindingsOrganization, setAgentFindingsOrganization] = useState(null);
   const [protectedMembers, setProtectedMembers] = useState(null);
   const [protectedMemberTotal, setProtectedMemberTotal] = useState(0);
   const [protectedMemberLoading, setProtectedMemberLoading] = useState(false);
@@ -787,6 +797,10 @@ export function PlatformAdminPage({ auth }) {
     setContributionOrganization(organization);
   }
 
+  function loadAgentFindingsDashboard(organization) {
+    setAgentFindingsOrganization(organization);
+  }
+
   async function handleReactivateMembership(membershipId, reason) {
     await protect(() => apiPost(`/platform/memberships/${membershipId}/reactivate`, { reason }));
     await loadMemberDiagnostics(diagnosticOrganization);
@@ -823,6 +837,7 @@ export function PlatformAdminPage({ auth }) {
   const totalPages = Math.ceil(total / PAGE_SIZE);
   const orgTotalPages = Math.ceil(orgTotal / ORG_PAGE_SIZE);
   const symbolPromotionUiEnabled = canMountOrganizationSymbolDrafts(auth) && auth?.user?.capabilities?.platformAdminEnabled === true;
+  const agentOversightUiEnabled = auth?.user?.capabilities?.organizationAgentsEnabled === true;
 
   return createElement(
     'section',
@@ -860,6 +875,8 @@ export function PlatformAdminPage({ auth }) {
               createElement(OrganizationRow, {
                 key: o.id,
                 organization: o,
+                onViewAgentFindings: loadAgentFindingsDashboard,
+                agentOversightUiEnabled,
                 onSuspend: handleSuspendOrganization,
                 onReactivate: handleReactivateOrganization,
                 onViewMembers: loadMemberDiagnostics,
@@ -897,8 +914,16 @@ export function PlatformAdminPage({ auth }) {
             organizationId: contributionOrganization.id,
             organizationLabel: contributionOrganization.displayName,
           })
+        : null,
+      agentOversightUiEnabled && agentFindingsOrganization
+        ? createElement(PlatformAgentFindingsDashboardSection, {
+            organizationId: agentFindingsOrganization.id,
+            organizationLabel: agentFindingsOrganization.displayName,
+          })
         : null
     ),
+    agentOversightUiEnabled ? createElement(AgentConfigurationSection, { protect, organizations: organizations || [] }) : null,
+    agentOversightUiEnabled ? createElement(PlatformAgentFindingsDashboardSection, {}) : null,
     symbolPromotionUiEnabled ? createElement(DemotionConsole, { protect }) : null,
     symbolPromotionUiEnabled ? createElement(PromotionReviewPanel, null) : null,
     createElement(GrantAdminForm, { onGrant: handleGrant }),

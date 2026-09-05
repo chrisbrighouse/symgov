@@ -1515,3 +1515,77 @@ class DemotionResponse(BaseModel):
     publishedPageIds: list[str]
     packEntryIds: list[str]
     retiredPackIds: list[str]
+
+
+# --- Stage 10 WP10.4: agent oversight (Organization Steward / Platform Governance) ---
+
+class AgentConfigurationItem(BaseModel):
+    id: str
+    logicalAgentName: str
+    scopeType: str
+    scopeId: str | None
+    enabled: bool
+    modelAlias: str | None
+    allowedCapabilities: list[str]
+    updatedAt: datetime
+
+
+class AgentConfigurationListResponse(BaseModel):
+    items: list[AgentConfigurationItem]
+
+
+class CreateAgentConfigurationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    logicalAgentName: Literal["organization_steward", "platform_governance"]
+    scopeType: Literal["platform", "organization"]
+    scopeId: str | None = None
+    enabled: bool = False
+
+
+class UpdateAgentConfigurationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool | None = None
+    modelAlias: str | None = None
+    allowedCapabilities: list[str] | None = None
+
+
+class AgentFindingItem(BaseModel):
+    id: str
+    agentConfigId: str
+    logicalAgentName: str
+    severity: str
+    findingType: str
+    entityType: str
+    entityId: str
+    summary: str
+    evidence: dict[str, Any]
+    policyVersion: str
+    status: str
+    firstSeenAt: datetime
+    lastSeenAt: datetime
+    acknowledgedAt: datetime | None
+    dismissedAt: datetime | None
+    dismissReason: str | None
+    resolvedAt: datetime | None
+    supersededByFindingId: str | None
+    assigneeUserId: str | None
+    issueReference: str | None
+
+
+class AgentFindingListResponse(BaseModel):
+    items: list[AgentFindingItem]
+
+
+class DismissAgentFindingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    reason: str = Field(min_length=1, max_length=2000)
+
+
+class EscalateAgentFindingRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    issueReference: str | None = Field(default=None, max_length=200)
+    assigneeUserId: str | None = None
+
+
+class RunAgentResponse(BaseModel):
+    touchedFindingIds: list[str]

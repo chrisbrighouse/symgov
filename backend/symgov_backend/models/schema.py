@@ -2074,3 +2074,181 @@ class ControlException(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AgentConfiguration(Base):
+    """Stage 10 WP10.1 -- spec §8's "Future-compatible Hermes agent binding
+    and scope policy" entity. `logical_agent_name` is frozen to the two O4
+    logical capability names Stage 10 defines (`organization_steward`,
+    `platform_governance`); per O4 these are deliberately not final Hermes
+    agent/persona identities and this repository must not invent one.
+
+    `model_alias` is an allowlisted-shape column only -- per Stage 10's own
+    confirmed Q3, no `llm_router.py` resolution wiring exists yet, since v1
+    finding-generation is entirely deterministic (Q4) and never depends on a
+    model. It carries a format constraint, not a fixed enum, since a real
+    Hermes-profile-backed alias vocabulary does not exist in this repository
+    (I-21: the active Hermes `symgov` profile is the only future resolver).
+
+    Exactly one configuration row may exist per (capability, scope): a
+    partial unique index covers the single platform-scoped row per
+    capability, a second covers at most one row per (capability,
+    organization) pair. `scope_id` is null iff `scope_type = 'platform'` --
+    platform scope is a distinct concept from the reserved `symgov`
+    Organization row (mirroring `PlatformRoleAssignment`, which is likewise
+    not organization-scoped), not an alias for it."""
+
+    __tablename__ = "agent_configurations"
+    __table_args__ = (
+        CheckConstraint(
+            "logical_agent_name in ('organization_steward', 'platform_governance')",
+            name="ck_agent_configurations_logical_agent_name",
+        ),
+        CheckConstraint("scope_type in ('platform', 'organization')", name="ck_agent_configurations_scope_type"),
+        CheckConstraint(
+            "(scope_type = 'organization' and scope_id is not null) or (scope_type = 'platform' and scope_id is null)",
+            name="ck_agent_configurations_scope_id_matches_type",
+        ),
+        CheckConstraint(
+            "model_alias is null or model_alias ~ '^[a-z][a-z0-9_]{1,63}$'",
+            name="ck_agent_configurations_model_alias_format",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(allowed_capabilities_json) = 'array'",
+            name="ck_agent_configurations_allowed_capabilities_array",
+        ),
+        CheckConstraint(
+            "octet_length(convert_to(allowed_capabilities_json::text, 'UTF8')) <= 8192",
+            name="ck_agent_configurations_allowed_capabilities_size",
+        ),
+        Index(
+            "uq_agent_configurations_platform_scope",
+            "logical_agent_name",
+            unique=True,
+            postgresql_where=text("scope_type = 'platform'"),
+        ),
+        Index(
+            "uq_agent_configurations_org_scope",
+            "logical_agent_name",
+            "scope_id",
+            unique=True,
+            postgresql_where=text("scope_type = 'organization'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    logical_agent_name: Mapped[str] = mapped_column(Text, nullable=False)
+    scope_type: Mapped[str] = mapped_column(Text, nullable=False)
+    scope_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="RESTRICT"), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+    model_alias: Mapped[str | None] = mapped_column(Text, nullable=True)
+    allowed_capabilities_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class AgentFinding(Base):
+    """Stage 10 WP10.1 -- spec §8's "Auditable advisory finding or issue;
+    not a governed decision" entity. `finding_type` is frozen to exactly
+    seven slugs: five of Organization Steward's six in-scope categories
+    plus Platform Governance's two, per Stage 10's confirmed I-22
+    vocabulary round -- `cross_tenant_authorization_failure` and
+    `unresolved_governance_exception` are deliberately absent, not
+    included-but-unpopulated, since neither has a durable data source
+    (auth failures are raised as HTTP 403s today but never durably logged)
+    or a defined meaning anywhere in the spec/addendum. `icon_generation_
+    missing` is likewise absent -- `Organization.fallback_icon_svg` is
+    never null and no icon-generation-attempt/failure tracking exists
+    anywhere in the repository, confirmed during WP10.2's own design round,
+    so this category has no data source either. Extending this
+    `CheckConstraint` additively is a follow-up once each is separately
+    resolved, mirroring WP9.2's own additive extension of WP9.1's
+    `event_type` vocabulary.
+
+    `fingerprint` is a deterministic hash over (capability scope, finding
+    type, target entity, policy version) computed by the generating
+    service, not by this table -- a partial unique index enforces I-22's
+    one-active-finding rule (`status in ('open', 'acknowledged')`) so a
+    repeated detection re-touches the existing row's `last_seen_at` via
+    `INSERT ... ON CONFLICT` rather than creating a duplicate. `policy_version`
+    versions the deterministic detection rule itself (there is no live model
+    in v1 per Q4), giving the dashboard's "model/policy version" display
+    (programme plan §16 UI requirement) a real, meaningful value even
+    though no LLM is invoked.
+
+    Findings are advisory only (FR-AGT-005/007): resolution requires a
+    human actor and never itself performs a governed mutation. No
+    retention/purge policy exists yet for this table -- unlike
+    `ProductUsageEvent`/`ContributionEvent`, no number was confirmed this
+    round, so no DELETE grant is issued and no purge job exists; this is a
+    deliberately deferred follow-up, not an oversight."""
+
+    __tablename__ = "agent_findings"
+    __table_args__ = (
+        CheckConstraint(
+            "finding_type in ("
+            "'reviewer_coverage_gap', 'review_backlog_stale', "
+            "'project_health_issue', 'symbol_set_health_issue', 'unresolved_reference', "
+            "'platform_admin_continuity_risk', 'duplicate_organization_suspected'"
+            ")",
+            name="ck_agent_findings_finding_type",
+        ),
+        CheckConstraint("severity in ('low', 'medium', 'high', 'critical')", name="ck_agent_findings_severity"),
+        CheckConstraint(
+            "status in ('open', 'acknowledged', 'dismissed', 'resolved', 'superseded')",
+            name="ck_agent_findings_status",
+        ),
+        CheckConstraint("fingerprint ~ '^[0-9a-f]{64}$'", name="ck_agent_findings_fingerprint_format"),
+        CheckConstraint("btrim(summary) <> '' and char_length(summary) <= 2000", name="ck_agent_findings_summary_bounds"),
+        CheckConstraint("jsonb_typeof(evidence_json) = 'object'", name="ck_agent_findings_evidence_object"),
+        CheckConstraint(
+            "octet_length(convert_to(evidence_json::text, 'UTF8')) <= 16384",
+            name="ck_agent_findings_evidence_size",
+        ),
+        CheckConstraint("(acknowledged_at is null) = (acknowledged_by_user_id is null)", name="ck_agent_findings_acknowledged_pair"),
+        CheckConstraint("(dismissed_at is null) = (dismissed_by_user_id is null)", name="ck_agent_findings_dismissed_pair"),
+        CheckConstraint("(resolved_at is null) = (resolved_by_user_id is null)", name="ck_agent_findings_resolved_pair"),
+        CheckConstraint(
+            "(status = 'open' and dismissed_at is null and resolved_at is null and superseded_by_finding_id is null) or "
+            "(status = 'acknowledged' and acknowledged_at is not null and dismissed_at is null and resolved_at is null and superseded_by_finding_id is null) or "
+            "(status = 'dismissed' and dismissed_at is not null) or "
+            "(status = 'resolved' and resolved_at is not null) or "
+            "(status = 'superseded' and superseded_by_finding_id is not null)",
+            name="ck_agent_findings_status_consistency",
+        ),
+        Index(
+            "uq_agent_findings_active_fingerprint",
+            "fingerprint",
+            unique=True,
+            postgresql_where=text("status in ('open', 'acknowledged')"),
+        ),
+        Index("ix_agent_findings_agent_config_status", "agent_config_id", "status"),
+        Index("ix_agent_findings_entity", "entity_type", "entity_id"),
+        Index("ix_agent_findings_last_seen_at", "last_seen_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    agent_config_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_configurations.id", ondelete="RESTRICT"), nullable=False)
+    severity: Mapped[str] = mapped_column(Text, nullable=False)
+    finding_type: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    policy_version: Mapped[str] = mapped_column(Text, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'open'"))
+    first_seen_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    acknowledged_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acknowledged_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    dismissed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dismissed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    dismiss_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    superseded_by_finding_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_findings.id", ondelete="SET NULL"), nullable=True)
+    assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    issue_reference: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -56,6 +56,16 @@ export function canMountOrganizationSymbolDrafts(auth) {
   return user?.capabilities?.organizationSymbolsEnabled === true;
 }
 
+export function canMountAgentOversight(auth) {
+  const user = auth?.user;
+  if (!user) return false;
+  if (user?.session?.purpose !== 'application') return false;
+  if (user?.session?.mode !== 'organization') return false;
+  if (!user?.session?.activeOrganizationId) return false;
+  if (!user?.organization?.id || user.organization.id !== user.session.activeOrganizationId) return false;
+  return user?.capabilities?.organizationAgentsEnabled === true;
+}
+
 function hasOrganizationCapability(auth, capability) {
   const user = auth?.user;
   if (!user?.organization) return false;

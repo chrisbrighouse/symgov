@@ -318,6 +318,103 @@ export async function fetchPlatformOrganizationContributions(organizationId) {
   return requireOkWithStatus(result, 'Contribution stats load failed.');
 }
 
+// --- Stage 10 WP10.4-10.6: Organization Steward / Platform Governance ---
+
+export async function fetchOrganizationAgentFindings() {
+  const result = await requestJson('/org/me/agent-findings', { cache: 'no-store' });
+  return requireOk(result, 'Agent findings load failed.');
+}
+
+export async function runOrganizationSteward() {
+  const result = await requestJson('/org/me/agents/organization-steward/run', { method: 'POST' });
+  return requireOkWithStatus(result, 'Organization Steward is not enabled for this organization.');
+}
+
+export async function acknowledgeOrganizationAgentFinding(findingId) {
+  const result = await requestJson(`/org/me/agent-findings/${encodeURIComponent(findingId)}/acknowledge`, { method: 'POST' });
+  return requireOk(result, 'Acknowledge finding failed.');
+}
+
+export async function dismissOrganizationAgentFinding(findingId, reason) {
+  const result = await requestJson(`/org/me/agent-findings/${encodeURIComponent(findingId)}/dismiss`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+  return requireOk(result, 'Dismiss finding failed.');
+}
+
+export async function resolveOrganizationAgentFinding(findingId) {
+  const result = await requestJson(`/org/me/agent-findings/${encodeURIComponent(findingId)}/resolve`, { method: 'POST' });
+  return requireOk(result, 'Resolve finding failed.');
+}
+
+export async function fetchPlatformAgentConfigurations() {
+  const result = await requestJson('/platform/agent-configurations', { cache: 'no-store' });
+  return requireOk(result, 'Agent configuration load failed.');
+}
+
+export async function createPlatformAgentConfiguration(payload) {
+  const result = await requestJson('/platform/agent-configurations', { method: 'POST', body: JSON.stringify(payload) });
+  return requireOk(result, 'Agent configuration create failed.');
+}
+
+export async function updatePlatformAgentConfiguration(configId, payload) {
+  const result = await requestJson(`/platform/agent-configurations/${encodeURIComponent(configId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+  return requireOk(result, 'Agent configuration update failed.');
+}
+
+export async function fetchPlatformAgentFindings(params = {}) {
+  const query = new URLSearchParams();
+  if (params.organizationId) query.set('organizationId', params.organizationId);
+  if (params.logicalAgentName) query.set('logicalAgentName', params.logicalAgentName);
+  if (params.status) query.set('status', params.status);
+  const suffix = query.toString() ? `?${query.toString()}` : '';
+  const result = await requestJson(`/platform/agent-findings${suffix}`, { cache: 'no-store' });
+  return requireOk(result, 'Agent findings load failed.');
+}
+
+export async function runPlatformOrganizationSteward(organizationId) {
+  const result = await requestJson(
+    `/platform/organizations/${encodeURIComponent(organizationId)}/agents/organization-steward/run`,
+    { method: 'POST' }
+  );
+  return requireOkWithStatus(result, 'Organization Steward is not enabled for this organization.');
+}
+
+export async function runPlatformGovernance() {
+  const result = await requestJson('/platform/agents/platform-governance/run', { method: 'POST' });
+  return requireOkWithStatus(result, 'Platform Governance is not enabled.');
+}
+
+export async function acknowledgePlatformAgentFinding(findingId) {
+  const result = await requestJson(`/platform/agent-findings/${encodeURIComponent(findingId)}/acknowledge`, { method: 'POST' });
+  return requireOk(result, 'Acknowledge finding failed.');
+}
+
+export async function dismissPlatformAgentFinding(findingId, reason) {
+  const result = await requestJson(`/platform/agent-findings/${encodeURIComponent(findingId)}/dismiss`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+  return requireOk(result, 'Dismiss finding failed.');
+}
+
+export async function resolvePlatformAgentFinding(findingId) {
+  const result = await requestJson(`/platform/agent-findings/${encodeURIComponent(findingId)}/resolve`, { method: 'POST' });
+  return requireOk(result, 'Resolve finding failed.');
+}
+
+export async function escalatePlatformAgentFinding(findingId, payload) {
+  const result = await requestJson(`/platform/agent-findings/${encodeURIComponent(findingId)}/escalate`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+  return requireOk(result, 'Escalate finding failed.');
+}
+
 export async function fetchSymbolContext() {
   const result = await requestJson('/org/me/symbol-context', { cache: 'no-store' });
   return requireOk(result, 'Project context load failed.');

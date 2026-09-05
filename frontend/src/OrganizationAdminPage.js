@@ -1,7 +1,7 @@
 import { createElement, useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { runWithStepUp } from './adminJourneys.js';
 import { requestJson } from './api.js';
-import { canMountOrganizationSymbolDrafts, canMountProjectContext } from './projectContext.js';
+import { canMountAgentOversight, canMountOrganizationSymbolDrafts, canMountProjectContext } from './projectContext.js';
 import { ProjectContextBar } from './ProjectContextBar.js';
 import { OrganizationProjectsPanel } from './OrganizationProjectsPanel.js';
 import { OrganizationSymbolSetsPanel } from './OrganizationSymbolSetsPanel.js';
@@ -9,6 +9,7 @@ import { SymbolSetBuilderPanel } from './SymbolSetBuilderPanel.js';
 import { PromotionSubmissionPanel } from './PromotionSubmissionPanel.js';
 import { OrgUsageDashboardSection } from './UsageDashboardSection.js';
 import { OrgContributionSection } from './ContributionSection.js';
+import { OrgAgentFindingsDashboardSection } from './AgentFindingsDashboardSection.js';
 
 function resultValue(result) {
   if (!result.ok) {
@@ -663,6 +664,7 @@ export function OrganizationAdminPage({ auth }) {
   }), [auth, stepUpPin]);
   const symbolSetsUiEnabled = canMountProjectContext(auth);
   const symbolPromotionUiEnabled = canMountOrganizationSymbolDrafts(auth);
+  const agentOversightUiEnabled = canMountAgentOversight(auth);
   const notifyContextChange = useCallback(() => {
     setContextRefreshToken((current) => current + 1);
   }, []);
@@ -709,6 +711,7 @@ export function OrganizationAdminPage({ auth }) {
     }),
     createElement(OrgUsageDashboardSection, {}),
     createElement(OrgContributionSection, {}),
+    agentOversightUiEnabled ? createElement(OrgAgentFindingsDashboardSection, {}) : null,
     symbolSetsUiEnabled
       ? createElement(OrganizationProjectsPanel, {
           isAdmin,

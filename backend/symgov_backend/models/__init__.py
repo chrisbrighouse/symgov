@@ -1,7 +1,9 @@
 from .base import Base
 from .schema import (
+    AgentConfiguration,
     AgentDefinition,
     AgentFeedbackEvent,
+    AgentFinding,
     AgentOutputArtifact,
     AgentQueueItem,
     AgentRun,
@@ -80,8 +82,10 @@ from .schema import (
 )
 
 __all__ = [
+    "AgentConfiguration",
     "AgentDefinition",
     "AgentFeedbackEvent",
+    "AgentFinding",
     "AgentOutputArtifact",
     "AgentQueueItem",
     "AgentRun",
