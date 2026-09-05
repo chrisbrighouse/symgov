@@ -136,7 +136,7 @@ def _create_user_with_global_roles(Session, *, email: str, display_name: str, ro
         session.commit()
     return user_id
 
-NEW_MIGRATION_HEAD = "20260904_0042"
+NEW_MIGRATION_HEAD = "20260904_0043"
 
 psycopg = pytest.importorskip("psycopg")
 

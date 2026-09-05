@@ -59,7 +59,7 @@ from symgov_backend.app import create_app  # noqa: E402
 from symgov_backend.dependencies import get_db_session  # noqa: E402
 from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E402
 
-NEW_MIGRATION_HEAD = "20260904_0042"
+NEW_MIGRATION_HEAD = "20260904_0043"
 PRE_STAGE7_RELEASE = "20260901_0034"
 
 

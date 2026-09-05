@@ -17,6 +17,7 @@ import {
   grantExistingPlatformAdmin,
 } from './PlatformAdminPage.js';
 import { PlatformOrganizationUsageDashboardSection } from './UsageDashboardSection.js';
+import { PlatformOrganizationContributionSection } from './ContributionSection.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -667,6 +668,88 @@ describe('PlatformAdminPage organization row usage dashboard trigger', () => {
     const markup = JSON.stringify(renderer.toJSON());
     assert.match(markup, /Symbol downloads/);
     assert.match(markup, /Days suppressed/);
+    await act(async () => renderer.unmount());
+  });
+});
+
+describe('PlatformOrganizationContributionSection (WP9.8)', () => {
+  async function mountDashboard(fetchSummary) {
+    let renderer;
+    await act(async () => {
+      renderer = create(createElement(PlatformOrganizationContributionSection, {
+        organizationId: 'org-9',
+        organizationLabel: 'ACME Corp',
+        fetchSummary,
+      }));
+    });
+    return renderer;
+  }
+
+  it('calls the injected fetchSummary with the given organizationId', async () => {
+    const seenOrganizationIds = [];
+    const renderer = await mountDashboard(async (organizationId) => {
+      seenOrganizationIds.push(organizationId);
+      return { organizationId, acceptedContributionCount: 0, reversedContributionCount: 0, badges: [] };
+    });
+    assert.deepEqual(seenOrganizationIds, ['org-9']);
+    assert.match(JSON.stringify(renderer.toJSON()), /ACME Corp/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('renders counts and badges', async () => {
+    const renderer = await mountDashboard(async (organizationId) => ({
+      organizationId,
+      acceptedContributionCount: 2,
+      reversedContributionCount: 0,
+      badges: [{ badgeType: 'first_contribution', awardedAt: '2026-08-01T00:00:00Z' }],
+    }));
+    const markup = JSON.stringify(renderer.toJSON());
+    assert.match(markup, /2/);
+    assert.match(markup, /First Contribution/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('renders a friendly message (not a crash) when the endpoint 404s (flag disabled)', async () => {
+    const renderer = await mountDashboard(async () => {
+      const error = new Error('Not found');
+      error.status = 404;
+      throw error;
+    });
+    assert.match(renderer.root.findByProps({ role: 'alert' }).children.join(''), /not available/i);
+    await act(async () => renderer.unmount());
+  });
+});
+
+describe('PlatformAdminPage organization row contributions trigger', () => {
+  it('does not fetch contributions until "View contributions" is clicked, then renders it for the selected organization', async () => {
+    const contributionRequests = [];
+    const renderer = await mountPlatformAdmin(async (url, options = {}) => {
+      const path = new URL(url, 'http://test').pathname;
+      if (path === '/api/v1/platform/admins') return jsonResponse(mockAdminsResponse);
+      if (path === '/api/v1/platform/organizations') return jsonResponse(mockOrganizationsResponse);
+      if (path === '/api/v1/platform/organizations/symgov/members') return jsonResponse(mockSymgovMembersResponse);
+      if (path === '/api/v1/platform/organizations/org-2/contributions') {
+        contributionRequests.push(path);
+        return jsonResponse({
+          organizationId: 'org-2',
+          acceptedContributionCount: 5,
+          reversedContributionCount: 1,
+          badges: [{ badgeType: 'first_contribution', awardedAt: '2026-08-01T00:00:00Z' }],
+        });
+      }
+      return jsonResponse({ detail: `Unexpected request: ${path}` }, 404);
+    });
+    const root = renderer.root;
+
+    assert.equal(contributionRequests.length, 0, 'contributions must not be fetched before the admin asks for them');
+
+    await act(async () => {
+      await root.findByProps({ 'aria-label': 'View contributions for Acme Inc' }).props.onClick();
+    });
+
+    assert.deepEqual(contributionRequests, ['/api/v1/platform/organizations/org-2/contributions']);
+    const markup = JSON.stringify(renderer.toJSON());
+    assert.match(markup, /First Contribution/);
     await act(async () => renderer.unmount());
   });
 });

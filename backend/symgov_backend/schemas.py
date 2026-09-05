@@ -1213,6 +1213,11 @@ class OrganizationContributionsResponse(BaseModel):
     badges: list[OrganizationBadgeItem]
 
 
+class UserContributionsResponse(BaseModel):
+    acceptedContributionCount: int
+    reversedContributionCount: int
+
+
 class OrgIconUploadRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

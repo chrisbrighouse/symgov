@@ -1090,6 +1090,38 @@ class OrganizationContributionTotal(Base):
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class UserContributionTotal(Base):
+    """Stage 9 WP9.8 -- one row per user, a lifetime running total of
+    accepted/reversed `ContributionEvent` rows attributed to that user
+    (`ContributionEvent.user_id`), mirroring `OrganizationContributionTotal`'s
+    own "must outlive the ledger's 90-day retention purge" design exactly.
+    Incremented synchronously in the same transaction as the ledger row that
+    causes it (`contribution_events.record_contribution_awarded`/
+    `reverse_contributions_for_symbol`), never recomputed by re-scanning the
+    (purgeable) raw ledger.
+
+    This is the read model behind `GET /profile/contributions` -- spec
+    §12.2's "individual users may see private contribution/activity
+    statistics in their profile" -- which is deliberately self-service
+    (any authenticated user reads only their own row via their own session
+    identity) rather than gated behind Organization/Platform Admin the way
+    `organization_contribution_totals` is. Only accepted/reversed counts are
+    exposed here, not badges -- §12.2 lists badges under "Organization
+    badges", a separate, already-shipped organization-level concept."""
+
+    __tablename__ = "user_contribution_totals"
+    __table_args__ = (
+        CheckConstraint("accepted_count >= 0", name="ck_user_contribution_totals_accepted_non_negative"),
+        CheckConstraint("reversed_count >= 0", name="ck_user_contribution_totals_reversed_non_negative"),
+        CheckConstraint("reversed_count <= accepted_count", name="ck_user_contribution_totals_reversed_le_accepted"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), primary_key=True)
+    accepted_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    reversed_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ExternalIdentity(Base):
     __tablename__ = "external_identities"
     __table_args__ = (

@@ -298,6 +298,26 @@ export async function fetchPlatformOrganizationUsageSummary(organizationId) {
   return requireOkWithStatus(result, 'Usage summary load failed.');
 }
 
+// --- Stage 9 WP9.8: contribution/reputation ---
+
+export async function fetchMyContributions() {
+  const result = await requestJson('/profile/contributions', { cache: 'no-store' });
+  return requireOkWithStatus(result, 'Contribution stats load failed.');
+}
+
+export async function fetchOrganizationContributions() {
+  const result = await requestJson('/org/me/contributions', { cache: 'no-store' });
+  return requireOkWithStatus(result, 'Contribution stats load failed.');
+}
+
+export async function fetchPlatformOrganizationContributions(organizationId) {
+  const result = await requestJson(
+    `/platform/organizations/${encodeURIComponent(organizationId)}/contributions`,
+    { cache: 'no-store' }
+  );
+  return requireOkWithStatus(result, 'Contribution stats load failed.');
+}
+
 export async function fetchSymbolContext() {
   const result = await requestJson('/org/me/symbol-context', { cache: 'no-store' });
   return requireOk(result, 'Project context load failed.');

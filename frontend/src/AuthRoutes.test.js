@@ -501,6 +501,9 @@ test('a stale authenticated refresh cannot restore the session after successful 
         : staleRefresh.promise;
     }
     if (url.endsWith('/profile') && method === 'GET') return response(200, profilePayload(currentUser));
+    if (url.endsWith('/profile/contributions') && method === 'GET') {
+      return response(200, { acceptedContributionCount: 0, reversedContributionCount: 0 });
+    }
     if (url.endsWith('/profile/subscription/upgrade') && method === 'POST') {
       return response(200, profilePayload({
         ...currentUser,
@@ -555,6 +558,9 @@ test('a stale unauthenticated refresh cannot overwrite a newer successful login'
         : staleRefresh.promise;
     }
     if (url.endsWith('/profile') && method === 'GET') return response(200, profilePayload(currentUser));
+    if (url.endsWith('/profile/contributions') && method === 'GET') {
+      return response(200, { acceptedContributionCount: 0, reversedContributionCount: 0 });
+    }
     if (url.endsWith('/profile/subscription/upgrade') && method === 'POST') {
       return response(200, profilePayload(currentUser));
     }

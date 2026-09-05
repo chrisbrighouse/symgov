@@ -16,6 +16,7 @@ import {
   addExistingOrganizationMember,
 } from './OrganizationAdminPage.js';
 import { OrgUsageDashboardSection } from './UsageDashboardSection.js';
+import { OrgContributionSection } from './ContributionSection.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -69,6 +70,13 @@ const mockUsageSummaryResponse = {
   since: '2026-08-05',
   until: '2026-09-04',
   eventTypes: [],
+};
+
+const mockContributionsResponse = {
+  organizationId: 'org-1',
+  acceptedContributionCount: 0,
+  reversedContributionCount: 0,
+  badges: [],
 };
 
 function setupFetchMock(overrides = {}) {
@@ -197,6 +205,7 @@ describe('existing-user member mutation', () => {
       requests.push({ path, options });
       if (path === '/api/v1/org/me') return jsonResponse(mockOrg);
       if (path === '/api/v1/org/me/usage-summary') return jsonResponse(mockUsageSummaryResponse);
+      if (path === '/api/v1/org/me/contributions') return jsonResponse(mockContributionsResponse);
       if (path === '/api/v1/org/me/members' && !options.method) return jsonResponse(mockMembersResponse);
       if (path === '/api/v1/org/me/members' && options.method === 'POST') {
         memberAttempts += 1;
@@ -241,6 +250,7 @@ describe('existing-user member mutation', () => {
       const path = new URL(url, 'http://test').pathname;
       if (path === '/api/v1/org/me') return jsonResponse(mockOrg);
       if (path === '/api/v1/org/me/usage-summary') return jsonResponse(mockUsageSummaryResponse);
+      if (path === '/api/v1/org/me/contributions') return jsonResponse(mockContributionsResponse);
       if (path === '/api/v1/org/me/members' && !options.method) return jsonResponse(mockMembersResponse);
       if (path === '/api/v1/org/me/members' && options.method === 'POST') {
         return jsonResponse({ detail: 'Organization admin access is required.' }, 403);
@@ -446,6 +456,68 @@ describe('OrgUsageDashboardSection (WP9.7)', () => {
     }));
     const markup = JSON.stringify(renderer.toJSON());
     assert.match(markup, /No usage recorded/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('renders a friendly message (not a crash) when the endpoint 404s (flag disabled)', async () => {
+    const renderer = await mountDashboard(async () => {
+      const error = new Error('Not found');
+      error.status = 404;
+      throw error;
+    });
+    assert.match(renderer.root.findByProps({ role: 'alert' }).children.join(''), /not available/i);
+    await act(async () => renderer.unmount());
+  });
+});
+
+describe('OrgContributionSection (WP9.8)', () => {
+  async function mountDashboard(fetchSummary) {
+    let renderer;
+    await act(async () => {
+      renderer = create(createElement(OrgContributionSection, { fetchSummary }));
+    });
+    return renderer;
+  }
+
+  it('shows a loading state before the summary resolves', async () => {
+    let resolveFetch;
+    const pending = new Promise((resolve) => { resolveFetch = resolve; });
+    let renderer;
+    await act(async () => {
+      renderer = create(createElement(OrgContributionSection, { fetchSummary: () => pending }));
+    });
+    assert.match(renderer.root.findByProps({ role: 'status' }).children.join(''), /Loading contribution stats/);
+    await act(async () => {
+      resolveFetch({ organizationId: 'org-1', acceptedContributionCount: 0, reversedContributionCount: 0, badges: [] });
+      await pending;
+    });
+    await act(async () => renderer.unmount());
+  });
+
+  it('renders counts and badges', async () => {
+    const renderer = await mountDashboard(async () => ({
+      organizationId: 'org-1',
+      acceptedContributionCount: 3,
+      reversedContributionCount: 1,
+      badges: [
+        { badgeType: 'first_contribution', awardedAt: '2026-08-01T00:00:00Z' },
+        { badgeType: 'contributor_organization', awardedAt: '2026-08-01T00:00:00Z' },
+      ],
+    }));
+    const markup = JSON.stringify(renderer.toJSON());
+    assert.match(markup, /3/);
+    assert.match(markup, /1/);
+    assert.match(markup, /First Contribution/);
+    assert.match(markup, /Contributor Organization/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('renders an explicit no-badges state when none have been earned', async () => {
+    const renderer = await mountDashboard(async () => ({
+      organizationId: 'org-1', acceptedContributionCount: 0, reversedContributionCount: 0, badges: [],
+    }));
+    const markup = JSON.stringify(renderer.toJSON());
+    assert.match(markup, /No badges earned yet/);
     await act(async () => renderer.unmount());
   });
 

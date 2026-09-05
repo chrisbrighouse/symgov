@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from ..auth import AuthenticatedUser, user_roles
+from ..contribution_events import get_user_contributions
 from ..dependencies import get_db_session, require_user
 from ..email_outbox import queue_subscription_change_emails
 from ..models import SubscriptionEvent, User, UserSubscription
@@ -20,6 +21,7 @@ from ..schemas import (
     ProfileUpgradeOptionResponse,
     SelfServiceDowngradeRequest,
     SelfServiceUpgradeRequest,
+    UserContributionsResponse,
 )
 from ..settings import SymgovAPISettings, get_settings
 from ..subscriptions import add_calendar_months, cancel_plus, ensure_subscription, today_utc, upgrade_to_plus
@@ -107,6 +109,20 @@ def get_profile(
     subscription = ensure_subscription(session, user)
     session.commit()
     return ProfileResponse(user=_current_user_response(session, user, subscription), plan=_plan())
+
+
+@router.get("/contributions", response_model=UserContributionsResponse)
+def get_my_contributions(
+    session: Session = Depends(get_db_session),
+    current: AuthenticatedUser = Depends(require_user),
+) -> UserContributionsResponse:
+    """Stage 9 WP9.8 -- self-service individual contribution stats (spec
+    §12.2). Any authenticated user may read only their own row here; there
+    is no organizationId/userId parameter to spoof, and this does not
+    require any admin capability, unlike the organization-level
+    `GET /org/me/contributions`."""
+    summary = get_user_contributions(session, uuid.UUID(current.id))
+    return UserContributionsResponse(**summary)
 
 
 @router.post("/subscription/upgrade", response_model=ProfileSubscriptionMutationResponse)

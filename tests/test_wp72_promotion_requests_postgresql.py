@@ -65,7 +65,7 @@ def wp72_database(stage5_database):
     engine, url, raw_url = stage5_database
     from test_organization_symbol_postgresql import _alembic  # noqa: E402
 
-    _alembic(url, "upgrade", "20260904_0042")
+    _alembic(url, "upgrade", "20260904_0043")
     import psycopg  # noqa: E402
 
     with psycopg.connect(raw_url, autocommit=True) as connection:

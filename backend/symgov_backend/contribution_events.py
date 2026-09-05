@@ -31,6 +31,14 @@ Organization share one trigger (an organization's first-ever accepted
 contribution) and are always awarded together; Community Partner and the
 two badges Q3 already deferred are not computed by this module.
 Reversal never revokes an already-awarded badge -- left to WP9.6.
+
+Stage 9 WP9.8 additionally maintains `UserContributionTotal`, a per-user
+mirror of `OrganizationContributionTotal`, whenever a ledger row carries a
+non-null `user_id` -- both writers update it synchronously in the same
+transaction as the organization-level counter. `get_user_contributions` is
+the read model behind the self-service `GET /profile/contributions`
+endpoint (spec §12.2's "individual users may see private
+contribution/activity statistics in their profile").
 """
 
 from __future__ import annotations
@@ -74,6 +82,8 @@ def record_contribution_awarded(
     session.add(event)
     session.flush()
     _increment_accepted_total(session, organization_id=organization_id, now=now)
+    if user_id is not None:
+        _increment_user_accepted_total(session, user_id=user_id, now=now)
     _award_badges_if_needed(session, organization_id=organization_id, source_event_id=event.id, awarded_at=now)
     return event
 
@@ -117,6 +127,8 @@ def reverse_contributions_for_symbol(
         session.add(reversal)
         reversals.append(reversal)
         _increment_reversed_total(session, organization_id=award.organization_id, now=now)
+        if award.user_id is not None:
+            _increment_user_reversed_total(session, user_id=award.user_id, now=now)
     if reversals:
         session.flush()
     return reversals
@@ -163,6 +175,36 @@ def _increment_reversed_total(session: Session, *, organization_id: uuid.UUID, n
             "updated_at = EXCLUDED.updated_at"
         ),
         {"organization_id": organization_id, "updated_at": now},
+    )
+
+
+def _increment_user_accepted_total(session: Session, *, user_id: uuid.UUID, now: datetime) -> None:
+    session.execute(
+        text(
+            "INSERT INTO user_contribution_totals (user_id, accepted_count, reversed_count, updated_at) "
+            "VALUES (:user_id, 1, 0, :updated_at) "
+            "ON CONFLICT (user_id) DO UPDATE SET "
+            "accepted_count = user_contribution_totals.accepted_count + 1, "
+            "updated_at = EXCLUDED.updated_at"
+        ),
+        {"user_id": user_id, "updated_at": now},
+    )
+
+
+def _increment_user_reversed_total(session: Session, *, user_id: uuid.UUID, now: datetime) -> None:
+    # Same a-priori CHECK-constraint-on-the-candidate-row caveat as
+    # _increment_reversed_total above: the (1, 1) candidate is a
+    # self-consistent placeholder, never the real final value -- the real
+    # counts always come from the ON CONFLICT DO UPDATE SET clause below.
+    session.execute(
+        text(
+            "INSERT INTO user_contribution_totals (user_id, accepted_count, reversed_count, updated_at) "
+            "VALUES (:user_id, 1, 1, :updated_at) "
+            "ON CONFLICT (user_id) DO UPDATE SET "
+            "reversed_count = user_contribution_totals.reversed_count + 1, "
+            "updated_at = EXCLUDED.updated_at"
+        ),
+        {"user_id": user_id, "updated_at": now},
     )
 
 
@@ -219,4 +261,28 @@ def get_organization_contributions(session: Session, organization_id: uuid.UUID)
         "badges": [
             {"badgeType": badge.badge_type, "awardedAt": badge.awarded_at.isoformat()} for badge in badges
         ],
+    }
+
+
+def get_user_contributions(session: Session, user_id: uuid.UUID) -> dict:
+    """Read model for the self-service `GET /profile/contributions`
+    (Stage 9 WP9.8, spec §12.2). Reads only `user_contribution_totals` --
+    never the raw `ContributionEvent` ledger -- so the response survives
+    that ledger's own 90-day retention purge unchanged, mirroring
+    `get_organization_contributions`'s own design. No badges here: §12.2
+    lists badges under "Organization badges", a separate organization-level
+    concept already served by `GET /org/me/contributions`."""
+    totals = session.execute(
+        text(
+            "SELECT accepted_count, reversed_count FROM user_contribution_totals "
+            "WHERE user_id = :user_id"
+        ),
+        {"user_id": user_id},
+    ).mappings().one_or_none()
+    accepted_count = totals["accepted_count"] if totals else 0
+    reversed_count = totals["reversed_count"] if totals else 0
+
+    return {
+        "acceptedContributionCount": accepted_count,
+        "reversedContributionCount": reversed_count,
     }

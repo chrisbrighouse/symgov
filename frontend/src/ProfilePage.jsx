@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { downgradeCurrentSubscription, fetchProfile, upgradeCurrentSubscription } from './api.js';
+import { downgradeCurrentSubscription, fetchMyContributions, fetchProfile, upgradeCurrentSubscription } from './api.js';
 
 function formatDate(value) {
   if (!value) return '—';
@@ -8,6 +8,36 @@ function formatDate(value) {
 
 function formatMoney(pence, currency = 'GBP') {
   return new Intl.NumberFormat('en-GB', { style: 'currency', currency }).format((pence || 0) / 100);
+}
+
+function ContributionStatsCard() {
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    fetchMyContributions()
+      .then((data) => { if (active) setStats(data); })
+      .catch((err) => { if (active) setError(err.message || 'Your contribution stats could not be loaded.'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  return (
+    <article className="profile-card">
+      <p className="eyebrow">Contributions</p>
+      <h3>Your contribution activity</h3>
+      {loading ? <p role="status">Loading your contribution stats…</p> : null}
+      {error ? <p className="form-message error" role="alert">{error}</p> : null}
+      {!loading && !error && stats ? (
+        <dl className="profile-details">
+          <div><dt>Accepted contributions</dt><dd>{stats.acceptedContributionCount}</dd></div>
+          <div><dt>Reversed contributions</dt><dd>{stats.reversedContributionCount}</dd></div>
+        </dl>
+      ) : null}
+    </article>
+  );
 }
 
 export default function ProfilePage({ auth }) {
@@ -162,6 +192,8 @@ export default function ProfilePage({ auth }) {
           {message ? <p className="form-message success" role="status">{message}</p> : null}
           {error ? <p className="form-message error" role="alert">{error}</p> : null}
         </article>
+
+        <ContributionStatsCard />
       </div>
     </section>
   );
