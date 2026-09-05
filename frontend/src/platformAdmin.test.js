@@ -16,6 +16,7 @@ import {
   PlatformAdminPage,
   grantExistingPlatformAdmin,
 } from './PlatformAdminPage.js';
+import { PlatformOrganizationUsageDashboardSection } from './UsageDashboardSection.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -562,6 +563,110 @@ describe('promotion-request review panel (WP7.8)', () => {
 
     assert.deepEqual(decisionRequests, [{ decisionCode: 'approve' }]);
     assert.match(JSON.stringify(renderer.toJSON()), /Accepted\. The symbol has been published\./);
+    await act(async () => renderer.unmount());
+  });
+});
+
+describe('PlatformOrganizationUsageDashboardSection (WP9.7)', () => {
+  async function mountDashboard(fetchSummary) {
+    let renderer;
+    await act(async () => {
+      renderer = create(createElement(PlatformOrganizationUsageDashboardSection, {
+        organizationId: 'org-9',
+        organizationLabel: 'ACME Corp',
+        fetchSummary,
+      }));
+    });
+    return renderer;
+  }
+
+  it('calls the injected fetchSummary with the given organizationId', async () => {
+    const seenOrganizationIds = [];
+    const renderer = await mountDashboard(async (organizationId) => {
+      seenOrganizationIds.push(organizationId);
+      return { organizationId, since: '2026-08-05', until: '2026-09-04', eventTypes: [] };
+    });
+    assert.deepEqual(seenOrganizationIds, ['org-9']);
+    assert.match(JSON.stringify(renderer.toJSON()), /ACME Corp/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('renders stat tiles with totals and visibly surfaces suppressedDayCount', async () => {
+    const renderer = await mountDashboard(async (organizationId) => ({
+      organizationId,
+      since: '2026-08-05',
+      until: '2026-09-04',
+      eventTypes: [
+        {
+          eventType: 'symbol_downloaded',
+          days: [{ date: '2026-09-02', eventCount: 7, distinctUserCount: 5 }],
+          suppressedDayCount: 2,
+          totalEventCount: 7,
+        },
+      ],
+    }));
+    const markup = JSON.stringify(renderer.toJSON());
+    assert.match(markup, /Symbol downloads/);
+    assert.match(markup, /2026-09-02/);
+    assert.match(markup, /Days suppressed/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('renders an explicit empty state when there is no activity in the window', async () => {
+    const renderer = await mountDashboard(async (organizationId) => ({
+      organizationId, since: '2026-08-05', until: '2026-09-04', eventTypes: [],
+    }));
+    assert.match(JSON.stringify(renderer.toJSON()), /No usage recorded/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('renders a friendly message (not a crash) when the endpoint 404s (flag disabled)', async () => {
+    const renderer = await mountDashboard(async () => {
+      const error = new Error('Not found');
+      error.status = 404;
+      throw error;
+    });
+    assert.match(renderer.root.findByProps({ role: 'alert' }).children.join(''), /not available/i);
+    await act(async () => renderer.unmount());
+  });
+});
+
+describe('PlatformAdminPage organization row usage dashboard trigger', () => {
+  it('does not fetch a usage summary until "View usage" is clicked, then renders it for the selected organization', async () => {
+    const usageRequests = [];
+    const renderer = await mountPlatformAdmin(async (url, options = {}) => {
+      const path = new URL(url, 'http://test').pathname;
+      if (path === '/api/v1/platform/admins') return jsonResponse(mockAdminsResponse);
+      if (path === '/api/v1/platform/organizations') return jsonResponse(mockOrganizationsResponse);
+      if (path === '/api/v1/platform/organizations/symgov/members') return jsonResponse(mockSymgovMembersResponse);
+      if (path === '/api/v1/platform/organizations/org-2/usage-summary') {
+        usageRequests.push(path);
+        return jsonResponse({
+          organizationId: 'org-2',
+          since: '2026-08-05',
+          until: '2026-09-04',
+          eventTypes: [{
+            eventType: 'symbol_downloaded',
+            days: [{ date: '2026-09-01', eventCount: 4, distinctUserCount: 3 }],
+            suppressedDayCount: 1,
+            totalEventCount: 4,
+          }],
+        });
+      }
+      return jsonResponse({ detail: `Unexpected request: ${path}` }, 404);
+    });
+    const root = renderer.root;
+
+    assert.equal(usageRequests.length, 0, 'usage summary must not be fetched before the admin asks for it');
+
+    await act(async () => {
+      await root.findByProps({ 'aria-label': 'View usage dashboard for Acme Inc' }).props.onClick();
+    });
+
+    assert.deepEqual(usageRequests, ['/api/v1/platform/organizations/org-2/usage-summary']);
+    const markup = JSON.stringify(renderer.toJSON());
+    assert.match(markup, /Symbol downloads/);
+    assert.match(markup, /Days suppressed/);
     await act(async () => renderer.unmount());
   });
 });

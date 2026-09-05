@@ -7,6 +7,7 @@ import { OrganizationProjectsPanel } from './OrganizationProjectsPanel.js';
 import { OrganizationSymbolSetsPanel } from './OrganizationSymbolSetsPanel.js';
 import { SymbolSetBuilderPanel } from './SymbolSetBuilderPanel.js';
 import { PromotionSubmissionPanel } from './PromotionSubmissionPanel.js';
+import { OrgUsageDashboardSection } from './UsageDashboardSection.js';
 
 function resultValue(result) {
   if (!result.ok) {
@@ -705,6 +706,7 @@ export function OrganizationAdminPage({ auth }) {
       onUpdate: setOrg,
       protect,
     }),
+    createElement(OrgUsageDashboardSection, {}),
     symbolSetsUiEnabled
       ? createElement(OrganizationProjectsPanel, {
           isAdmin,

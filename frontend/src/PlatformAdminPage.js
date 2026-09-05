@@ -8,6 +8,7 @@ import {
   submitWorkspaceReviewDecision,
 } from './api.js';
 import { canMountOrganizationSymbolDrafts } from './projectContext.js';
+import { PlatformOrganizationUsageDashboardSection } from './UsageDashboardSection.js';
 
 function resultValue(result) {
   if (!result.ok) {
@@ -125,7 +126,7 @@ function AdminRow({ admin, onRevoke }) {
   );
 }
 
-function OrganizationRow({ organization, onSuspend, onReactivate, onViewMembers }) {
+function OrganizationRow({ organization, onSuspend, onReactivate, onViewMembers, onViewUsage }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const suspended = organization.entitlementStatus === 'suspended';
@@ -201,7 +202,12 @@ function OrganizationRow({ organization, onSuspend, onReactivate, onViewMembers 
       type: 'button',
       onClick: () => onViewMembers(organization),
       'aria-label': `View members for ${organization.displayName}`,
-    }, 'View members')
+    }, 'View members'),
+    createElement('button', {
+      type: 'button',
+      onClick: () => onViewUsage(organization),
+      'aria-label': `View usage dashboard for ${organization.displayName}`,
+    }, 'View usage')
   );
 }
 
@@ -664,6 +670,7 @@ export function PlatformAdminPage({ auth }) {
   const [diagnosticMembers, setDiagnosticMembers] = useState(null);
   const [diagnosticLoading, setDiagnosticLoading] = useState(false);
   const [diagnosticError, setDiagnosticError] = useState('');
+  const [usageOrganization, setUsageOrganization] = useState(null);
   const [protectedMembers, setProtectedMembers] = useState(null);
   const [protectedMemberTotal, setProtectedMemberTotal] = useState(0);
   const [protectedMemberLoading, setProtectedMemberLoading] = useState(false);
@@ -765,6 +772,10 @@ export function PlatformAdminPage({ auth }) {
     }
   }
 
+  function loadUsageDashboard(organization) {
+    setUsageOrganization(organization);
+  }
+
   async function handleReactivateMembership(membershipId, reason) {
     await protect(() => apiPost(`/platform/memberships/${membershipId}/reactivate`, { reason }));
     await loadMemberDiagnostics(diagnosticOrganization);
@@ -841,6 +852,7 @@ export function PlatformAdminPage({ auth }) {
                 onSuspend: handleSuspendOrganization,
                 onReactivate: handleReactivateOrganization,
                 onViewMembers: loadMemberDiagnostics,
+                onViewUsage: loadUsageDashboard,
               })
             )
           )
@@ -861,7 +873,13 @@ export function PlatformAdminPage({ auth }) {
         loading: diagnosticLoading,
         error: diagnosticError,
         onReactivate: handleReactivateMembership,
-      })
+      }),
+      usageOrganization
+        ? createElement(PlatformOrganizationUsageDashboardSection, {
+            organizationId: usageOrganization.id,
+            organizationLabel: usageOrganization.displayName,
+          })
+        : null
     ),
     symbolPromotionUiEnabled ? createElement(DemotionConsole, { protect }) : null,
     symbolPromotionUiEnabled ? createElement(PromotionReviewPanel, null) : null,

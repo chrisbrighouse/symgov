@@ -274,6 +274,30 @@ function requireOk(result, fallbackMessage) {
   return result.payload;
 }
 
+function requireOkWithStatus(result, fallbackMessage) {
+  if (!result.ok) {
+    const error = new Error(result.message || fallbackMessage);
+    error.status = result.status;
+    throw error;
+  }
+  return result.payload;
+}
+
+// --- Stage 9 WP9.7: usage dashboards ---
+
+export async function fetchOrganizationUsageSummary() {
+  const result = await requestJson('/org/me/usage-summary', { cache: 'no-store' });
+  return requireOkWithStatus(result, 'Usage summary load failed.');
+}
+
+export async function fetchPlatformOrganizationUsageSummary(organizationId) {
+  const result = await requestJson(
+    `/platform/organizations/${encodeURIComponent(organizationId)}/usage-summary`,
+    { cache: 'no-store' }
+  );
+  return requireOkWithStatus(result, 'Usage summary load failed.');
+}
+
 export async function fetchSymbolContext() {
   const result = await requestJson('/org/me/symbol-context', { cache: 'no-store' });
   return requireOk(result, 'Project context load failed.');

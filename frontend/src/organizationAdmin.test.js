@@ -15,6 +15,7 @@ import {
   OrganizationMemberAddForm,
   addExistingOrganizationMember,
 } from './OrganizationAdminPage.js';
+import { OrgUsageDashboardSection } from './UsageDashboardSection.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -61,6 +62,13 @@ const mockMembersResponse = {
   page: 1,
   pageSize: 25,
   total: 2,
+};
+
+const mockUsageSummaryResponse = {
+  organizationId: 'org-1',
+  since: '2026-08-05',
+  until: '2026-09-04',
+  eventTypes: [],
 };
 
 function setupFetchMock(overrides = {}) {
@@ -188,6 +196,7 @@ describe('existing-user member mutation', () => {
       const path = new URL(url, 'http://test').pathname;
       requests.push({ path, options });
       if (path === '/api/v1/org/me') return jsonResponse(mockOrg);
+      if (path === '/api/v1/org/me/usage-summary') return jsonResponse(mockUsageSummaryResponse);
       if (path === '/api/v1/org/me/members' && !options.method) return jsonResponse(mockMembersResponse);
       if (path === '/api/v1/org/me/members' && options.method === 'POST') {
         memberAttempts += 1;
@@ -231,6 +240,7 @@ describe('existing-user member mutation', () => {
     const renderer = await mountOrganizationAdmin(async (url, options = {}) => {
       const path = new URL(url, 'http://test').pathname;
       if (path === '/api/v1/org/me') return jsonResponse(mockOrg);
+      if (path === '/api/v1/org/me/usage-summary') return jsonResponse(mockUsageSummaryResponse);
       if (path === '/api/v1/org/me/members' && !options.method) return jsonResponse(mockMembersResponse);
       if (path === '/api/v1/org/me/members' && options.method === 'POST') {
         return jsonResponse({ detail: 'Organization admin access is required.' }, 403);
@@ -376,5 +386,76 @@ describe('OrgMemberResponse schema', () => {
       assert.ok(field in member, `member missing field: ${field}`);
     }
     assert.ok(Array.isArray(member.capabilities));
+  });
+});
+
+describe('OrgUsageDashboardSection (WP9.7)', () => {
+  async function mountDashboard(fetchSummary) {
+    let renderer;
+    await act(async () => {
+      renderer = create(createElement(OrgUsageDashboardSection, { fetchSummary }));
+    });
+    return renderer;
+  }
+
+  it('shows a loading state before the summary resolves', async () => {
+    let resolveFetch;
+    const pending = new Promise((resolve) => { resolveFetch = resolve; });
+    let renderer;
+    await act(async () => {
+      renderer = create(createElement(OrgUsageDashboardSection, { fetchSummary: () => pending }));
+    });
+    assert.match(renderer.root.findByProps({ role: 'status' }).children.join(''), /Loading usage summary/);
+    await act(async () => {
+      resolveFetch({ organizationId: 'org-1', since: '2026-08-05', until: '2026-09-04', eventTypes: [] });
+      await pending;
+    });
+    await act(async () => renderer.unmount());
+  });
+
+  it('renders stat tiles with totals and visibly surfaces suppressedDayCount', async () => {
+    const renderer = await mountDashboard(async () => ({
+      organizationId: 'org-1',
+      since: '2026-08-05',
+      until: '2026-09-04',
+      eventTypes: [
+        {
+          eventType: 'symbol_previewed',
+          days: [{ date: '2026-09-03', eventCount: 12, distinctUserCount: 4 }],
+          suppressedDayCount: 3,
+          totalEventCount: 12,
+        },
+      ],
+    }));
+    const markup = JSON.stringify(renderer.toJSON());
+    assert.match(markup, /Symbol previews/);
+    assert.match(markup, /12/);
+    assert.match(markup, /2026-09-03/);
+    // suppressedDayCount must be visibly surfaced, not silently omitted
+    assert.match(markup, /Days suppressed/);
+    assert.match(markup, /3/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('renders an explicit empty state when there is no activity in the window', async () => {
+    const renderer = await mountDashboard(async () => ({
+      organizationId: 'org-1',
+      since: '2026-08-05',
+      until: '2026-09-04',
+      eventTypes: [],
+    }));
+    const markup = JSON.stringify(renderer.toJSON());
+    assert.match(markup, /No usage recorded/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('renders a friendly message (not a crash) when the endpoint 404s (flag disabled)', async () => {
+    const renderer = await mountDashboard(async () => {
+      const error = new Error('Not found');
+      error.status = 404;
+      throw error;
+    });
+    assert.match(renderer.root.findByProps({ role: 'alert' }).children.join(''), /not available/i);
+    await act(async () => renderer.unmount());
   });
 });
