@@ -2,7 +2,7 @@
 
 > **For Hermes / OpenClaw orchestration and Claude Code:** this is the one committed, controlling plan for Product Stage 10. Ephemeral `/tmp` manifests, restart prompts, and review verdicts produced by either orchestration layer are session-scoped evidence, not sources of truth — reconcile against this file and the current repository state (`git log`, `git status`, Alembic head) before resuming or dispatching a Stage 10 work package. If a `/tmp` artifact and this file disagree, this file wins; update this file rather than trusting a stale scratch manifest.
 
-**Status:** COMPLETE — WP10.1-10.7 are all done (see §2's implementation notes) plus WP10.8's own closing whole-stage audit (§7). Nothing has been committed; the working tree holds all changes pending Chris's explicit go-ahead for commit/push. This document records the baseline evidence, the confirmed work-package sequence, and the seven product decisions Chris confirmed this session (§4), plus this stage's own closing audit.
+**Status:** COMPLETE — WP10.1-10.7 are all done (see §2's implementation notes) plus WP10.8's own closing whole-stage audit (§7). Committed as `575e5c6` ("feat: add Stage 10 organization agent oversight (WP10.1-10.7)") and pushed to `origin/main` on 2026-09-05, per Chris's explicit go-ahead. This document records the baseline evidence, the confirmed work-package sequence, and the seven product decisions Chris confirmed this session (§4), plus this stage's own closing audit.
 
 **Controlling product sources:**
 
