@@ -297,7 +297,7 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
             }),
             createElement('button', { type: 'submit', disabled: searchLoading }, searchLoading ? 'Searching…' : 'Search'),
           ),
-          createElement('div', { className: 'symbol-set-builder-filters', 'aria-label': 'Symbol Set Builder filters' },
+          createElement('div', { className: 'symbol-set-builder-filters', role: 'group', 'aria-label': 'Symbol Set Builder filters' },
             createElement('label', { htmlFor: 'symbol-set-builder-category-filter' },
               'Category',
               createElement('input', {
