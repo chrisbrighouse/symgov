@@ -27,7 +27,11 @@ resulting gap list. This file:
    an inactive organization membership being rejected at the real HTTP
    login/session layer (not just the service layer some Stage 5/9 tests
    already cover); and the API-key principal being confined to the public
-   Catalog and rejected by every organization-scoped route.
+   Catalog -- genuinely proven by exercising the real API-key-gated
+   `/catalog/symbols` route, not merely by an organization-scoped route
+   401ing a session-less client for an unrelated, structural reason (see
+   Gap 5's corrected framing below, added after WP11.6's independent
+   review caught the original test's misleading claim).
 
 Every unauthorized cross-tenant access attempt must 404 (not 403),
 consistent with the precedent Stage 10's own tests set
@@ -366,10 +370,26 @@ def test_inactive_organization_membership_falls_back_to_a_personal_session_and_c
 
 
 # --- Gap 5: the API-key principal is confined to the public Catalog and
-# rejected by every organization-scoped route -- the acceptance-checklist
+# never reaches any organization-scoped route -- the acceptance-checklist
 # claim "API-key Catalog behavior remains public-only unless separately
 # specified" (programme plan line 1052), proven at the route layer rather
-# than assumed. ---
+# than assumed.
+#
+# Correction from WP11.6's independent review: every organization-scoped
+# route (`stage4_authorization.require_stage4_principal`, used by
+# `/org/me/*`/`/organization-symbols/*`) authenticates *only* from
+# `request.cookies["symgov_session"]` -- it never inspects an
+# `Authorization` header at all, so `test_..._never_reaches_...` below
+# passes for the structural reason that this session-only client never
+# logged in, not because of any API-key-specific discrimination logic (it
+# would 401 identically with the Authorization header removed entirely).
+# The genuinely API-key-specific proof is the positive-control test:
+# `/api/v1/catalog/symbols` is gated by
+# `catalog_api_auth.require_catalog_scope`, which *does* look up the
+# `CatalogApiKey` row by hashed bearer token -- confirmed directly (a
+# request with no Authorization header 401s; one with a syntactically
+# valid but unknown bearer token is rejected by the same lookup) before
+# writing this test, not assumed from the route's name. ---
 
 @pytest.mark.parametrize("method,path", [
     ("GET", "/api/v1/org/me"),
@@ -377,12 +397,25 @@ def test_inactive_organization_membership_falls_back_to_a_personal_session_and_c
     ("GET", "/api/v1/org/me/projects"),
     ("GET", "/api/v1/organization-symbols"),
 ])
-def test_api_key_principal_is_rejected_by_every_organization_scoped_route(adversarial, method, path):
+def test_a_session_less_api_key_client_never_reaches_any_organization_scoped_route(adversarial, method, path):
+    """Structural, not API-key-specific: these routes authenticate only
+    from the session cookie and never inspect the Authorization header at
+    all, so an API-key client (which never logs in) is indistinguishable
+    here from any other caller with no session. Real proof that the
+    Catalog API-key mechanism itself is confined to the Catalog surface is
+    the positive-control test below, which does exercise the CatalogApiKey
+    row this fixture creates."""
     response = adversarial.clients["api_key"].request(method, path)
     assert response.status_code in (401, 403), response.text
 
 
-def test_api_key_principal_can_still_reach_the_public_catalog(adversarial):
-    """Positive control for the denial above."""
+def test_the_seeded_api_key_actually_authenticates_the_catalog_route_it_is_scoped_for(adversarial):
+    """Genuinely exercises the `CatalogApiKey` row `_api_key()` creates:
+    `/api/v1/catalog/symbols` is gated by
+    `catalog_api_auth.require_catalog_scope`, which looks up the key by
+    hashed bearer token -- confirmed to actually require a valid key
+    (not merely open) by checking, outside this fixture, that the same
+    route 401s with no Authorization header and is rejected with an
+    unknown bearer token."""
     response = adversarial.clients["api_key"].get("/api/v1/catalog/symbols")
     assert response.status_code == 200, response.text

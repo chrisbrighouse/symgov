@@ -31,7 +31,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -117,9 +117,35 @@ def _seed_dataset(engine, *, code):
             ), {"id": uuid.uuid4(), "pack": pack_id, "revision": revision_id, "page": page_id, "now": now})
 
 
-def _explain_uses_index(engine, sql: str, params: dict) -> tuple[bool, str]:
+def _explain_last_statement_uses_index(engine, Session, organization_id) -> tuple[bool, str]:
+    """Captures the *actual* SQL `eligible_organization_private_symbols`
+    compiles and executes (via a `before_cursor_execute` event), rather
+    than a hand-duplicated SQL string that could drift from the real
+    query shape if the function is edited later without updating a
+    duplicated string in lockstep (WP11.6 independent-review finding)."""
+    from symgov_backend.symbol_eligibility import eligible_organization_private_symbols
+
+    captured: list[tuple[str, object]] = []
+
+    def _capture(conn, cursor, statement, parameters, context, executemany):
+        if "governed_symbols" in statement and "organization_symbol_review_decisions" in statement:
+            captured.append((statement, parameters))
+
+    event.listen(engine, "before_cursor_execute", _capture)
+    try:
+        with Session() as session:
+            eligible_organization_private_symbols(session, organization_id)
+    finally:
+        event.remove(engine, "before_cursor_execute", _capture)
+
+    assert captured, "eligible_organization_private_symbols did not execute the expected query shape."
+    statement, parameters = captured[-1]
+    # The captured statement/parameters are already in the DBAPI driver's
+    # native paramstyle (psycopg's `%(name)s`), not SQLAlchemy's `:name`
+    # textual style, so this must go through `exec_driver_sql` (bypasses
+    # the text()/compiler layer) rather than `text()`.
     with engine.begin() as connection:
-        plan_rows = connection.execute(text(f"EXPLAIN {sql}"), params).all()
+        plan_rows = connection.exec_driver_sql(f"EXPLAIN {statement}", parameters).all()
     plan_text = "\n".join(row[0] for row in plan_rows)
     return ("Seq Scan on governed_symbols" not in plan_text and "Seq Scan on organization_symbol_review_decisions" not in plan_text), plan_text
 
@@ -144,21 +170,7 @@ def test_widened_eligibility_query_uses_indexes_and_is_representatively_fast(sta
             text("SELECT id FROM organizations WHERE normalized_code = 'wp115org'"),
         ).scalar_one()
 
-    uses_index, plan_text = _explain_uses_index(
-        engine,
-        """
-        SELECT gs.id, gs.current_revision_id
-        FROM governed_symbols gs
-        JOIN symbol_revisions sr ON sr.id = gs.current_revision_id AND sr.symbol_id = gs.id AND sr.lifecycle_state = 'approved'
-        JOIN organization_symbol_review_decisions d ON d.organization_id = :org AND d.governed_symbol_id = gs.id
-            AND d.symbol_revision_id = sr.id AND d.decision = 'approved'
-        JOIN organization_symbol_review_submissions s ON s.id = d.submission_id AND s.organization_id = :org
-            AND s.governed_symbol_id = gs.id AND s.symbol_revision_id = sr.id AND s.status = 'closed'
-        WHERE gs.owner_organization_id = :org AND gs.visibility = 'organization_private'
-        ORDER BY gs.canonical_name, gs.id
-        """,
-        {"org": organization_id},
-    )
+    uses_index, plan_text = _explain_last_statement_uses_index(engine, Session, organization_id)
     assert uses_index, f"Expected an index-backed plan, got:\n{plan_text}"
 
     _login(client, admin_email)
