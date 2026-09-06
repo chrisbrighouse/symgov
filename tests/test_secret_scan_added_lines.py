@@ -83,6 +83,20 @@ def test_clean_diff_has_no_findings():
     assert scan_diff_text(diff_text) == []
 
 
+def test_this_scans_own_fixture_file_is_excluded_from_scanning():
+    """This file's entire purpose is synthetic secret-shaped fixture data
+    for the tests above -- it must be excluded from the scan itself, or
+    every future edit to this file would fail its own gate."""
+    diff_text = (
+        "diff --git a/tests/test_secret_scan_added_lines.py b/tests/test_secret_scan_added_lines.py\n"
+        "--- a/tests/test_secret_scan_added_lines.py\n"
+        "+++ b/tests/test_secret_scan_added_lines.py\n"
+        "@@ -0,0 +1,1 @@\n"
+        "+AWS_ACCESS_KEY_ID = \"AKIAABCDEFGHIJKLMNOP\"\n"
+    )
+    assert scan_diff_text(diff_text) == []
+
+
 def test_cli_end_to_end_exit_codes_against_a_disposable_git_repository(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()

@@ -90,7 +90,7 @@ Dependencies run top to bottom; later packages assume earlier ones are green.
 python3 scripts/secret_scan_added_lines.py --base origin/main
 ```
 
-(`--base` accepts any ref; `--candidate` defaults to the current working tree and also accepts a ref, for checking a specific commit instead of the working tree.) Exit code `0` = clean, `1` = at least one finding, each printed as `<path>:<line>: <pattern name>: <redacted excerpt>` on stderr. Only lines a diff actually *adds* are checked — never a whole-tree scan. Pattern list (AWS access/secret keys, Google API keys, GitHub/Slack tokens, private-key PEM headers, JWTs, database URLs with embedded credentials, a generic key/token/password assignment pattern with a placeholder-value allowlist) lives at the top of the script itself, reviewable and extensible in one place.
+(`--base` accepts any ref; `--candidate` defaults to the current working tree and also accepts a ref, for checking a specific commit instead of the working tree.) Exit code `0` = clean, `1` = at least one finding, each printed as `<path>:<line>: <pattern name>: <redacted excerpt>` on stderr. Only lines a diff actually *adds* are checked — never a whole-tree scan. Pattern list (AWS access/secret keys, Google API keys, GitHub/Slack tokens, private-key PEM headers, JWTs, database URLs with embedded credentials, a generic key/token/password assignment pattern with a placeholder-value allowlist) lives at the top of the script itself, reviewable and extensible in one place. A small, reviewable `EXCLUDED_PATHS` set (added once WP11.3's own tests hit this exact case) excludes only this scan's own test-fixture file, whose entire purpose is synthetic secret-shaped data — never used to silence a real finding elsewhere.
 
 Proof it actually detects a real secret and passes clean on the real candidate: `tests/test_secret_scan_added_lines.py` — seven tests, including one true end-to-end CLI invocation against a disposable git repository (proves the exit-code contract, not just the internal function) and one that runs the actual script against this repository's real `origin/main` diff and asserts a clean exit. Run against the WP11.1 release candidate (`python3 scripts/secret_scan_added_lines.py --base origin/main` from repo root, 2026-09-06): **clean, exit 0** — no findings.
 
@@ -99,6 +99,8 @@ Proof it actually detects a real secret and passes clean on the real candidate: 
 - Build a fixture covering every principal type named in §17: personal, Organization User/Admin/reviewer (per org), Platform Admin, inactive/suspended accounts, and API-key principals, across two organizations.
 - Run a route-policy inventory and tenant-isolation matrix for every list/detail/search/count/asset/download/mutation endpoint touched by any stage 1–10 feature, including the WP11.1-widened private-set-item path.
 - Every unauthorized cross-tenant access attempt must 404 (not 403), consistent with the precedent Stage 10's own tests set (`test_organization_findings_are_not_visible_to_a_different_organizations_admin`).
+
+**Done (2026-09-06).** Full audit: `docs/plans/2026-09-06-stage11-wp11.3-route-policy-tenant-isolation-matrix.md` — every one of the 161 unique `/api/v1/*` routes, grouped by tag family, with policy classification, tenant-scope note, and citation of the Stage 1–10 test file(s) that already prove it (this package does not rebuild what already passes). Five genuine gaps were found and closed by the new consolidated fixture, `tests/test_stage11_wp11_3_adversarial_fixture.py` (13 tests, real disposable Postgres): non-admin `symbol_reviewer`-capability write-denial under the WP11.1 widened path; a plain Organization User (not just Admin) 404s on cross-org Symbol Set by-ID/items/projects; Platform Admin's org-scoped `symgov` session cannot reach another organization's org-scoped routes (with a positive control proving the same principal's actual platform-level routes still work); an inactive membership resolves login to a personal session rather than a 401 or a bind into that organization; an API-key principal is rejected by every organization-scoped route tried and still reaches the public Catalog.
 
 ### WP11.4 — full end-to-end journey exercises
 
@@ -150,7 +152,8 @@ Scoped now, executed at actual closeout, mirroring the Stage 9 (WP9.9) and Stage
 
 - WP11.1: updates to `tests/test_symbol_set_tenant_isolation.py`, `tests/test_symbol_set_items.py`, `tests/test_symbol_set_builder_api.py`, `tests/test_effective_palette.py`; new/updated `frontend/src/symbolSetApi.test.js`, `effectivePalette.test.js`, `symbolSetBuilder.test.js`.
 - WP11.2: `tests/test_secret_scan_added_lines.py` (done) — proves the gate detects an injected fixture secret (including one true CLI end-to-end invocation) and passes clean on the real candidate.
-- WP11.3/WP11.4: a new integrated fixture module (two-organization, all principal types) referenced across multiple new or extended test files — name and location to be fixed when the package starts, not guessed here.
+- WP11.3: `tests/test_stage11_wp11_3_adversarial_fixture.py` (done) — the two-organization, all-principal-types fixture, reusable for WP11.4's journey exercises.
+- WP11.4: to be added when that package starts.
 - WP11.7: disposable-Postgres rehearsal evidence (redacted), likely as a new `docs/plans/*-migration-rehearsal-evidence.md` or similar, following the redaction precedent of `docs/plans/2026-07-29-f0-4-*-evidence-redacted.json`.
 
 ## 4. Decisions confirmed with Chris (2026-09-06)

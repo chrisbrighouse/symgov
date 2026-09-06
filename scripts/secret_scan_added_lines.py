@@ -75,6 +75,14 @@ _PLACEHOLDER_VALUES = re.compile(
     r"your[_-]?(api[_-]?key|secret|token|password)|secret[_-]?value)$"
 )
 
+# Paths this scan never checks, because their entire, reviewed purpose is to
+# contain synthetic secret-shaped fixture data (this scan's own tests).
+# Add a path here only for that exact reason -- never to silence a real
+# finding elsewhere.
+EXCLUDED_PATHS = frozenset({
+    "tests/test_secret_scan_added_lines.py",
+})
+
 
 def _is_added_line(diff_line: str) -> bool:
     return diff_line.startswith("+") and not diff_line.startswith("+++")
@@ -104,6 +112,9 @@ def scan_diff_text(diff_text: str) -> list[Finding]:
             current_line = int(hunk_match.group(1))
             continue
         if raw_line.startswith("+") and not raw_line.startswith("+++"):
+            if current_path in EXCLUDED_PATHS:
+                current_line += 1
+                continue
             content = raw_line[1:]
             for pattern_name, pattern in PATTERNS:
                 match = pattern.search(content)
