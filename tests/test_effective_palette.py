@@ -19,9 +19,17 @@ import uuid
 from symgov_backend.settings import get_settings
 
 from test_projects_api import _stage4_client
+from test_symbol_set_builder_api import _ensure_review_tables
 from test_symbol_set_availability import _active_set, _project
-from test_symbol_set_items import _ensure_symbol_tables
-from symgov_backend.models import GovernedSymbol, Organization, User
+from test_symbol_set_items import _ensure_symbol_tables, _replace_items
+from symgov_backend.models import (
+    GovernedSymbol,
+    Organization,
+    OrganizationSymbolReviewDecision,
+    OrganizationSymbolReviewSubmission,
+    SymbolRevision,
+    User,
+)
 import symgov_backend.effective_palette as effective_palette_module
 import symgov_backend.symbol_set_service as symbol_set_service
 
@@ -39,24 +47,76 @@ def _organization_id(Session) -> uuid.UUID:
         return session.query(Organization).one().id
 
 
-def _symbol(Session, slug, *, owner_organization_id=None, visibility="public", organization_wide=False, identifier=None):
+def _symbol(
+    Session,
+    slug,
+    *,
+    owner_organization_id=None,
+    visibility="public",
+    organization_wide=False,
+    identifier=None,
+    catalog_symbol_id=None,
+    revision_payload=None,
+):
+    """`organization_private` symbols get a real approved
+    revision/submission/decision chain (Stage 11 WP11.1's
+    `symbol_eligibility.eligible_organization_private_symbols` join now
+    backs the organization-wide palette half too, so a bare
+    `organization_wide=True` flag with no approval trail is no longer
+    enough)."""
     now = datetime.now(timezone.utc).replace(microsecond=0)
+    revision_id = uuid.uuid4() if visibility == "organization_private" else None
+    submission_id = uuid.uuid4() if revision_id is not None else None
     with Session() as session:
         owner = session.query(User).first()
+        if revision_id is not None:
+            _ensure_review_tables(Session)
         row = GovernedSymbol(
             id=identifier or uuid.uuid4(),
             slug=slug,
             canonical_name=slug,
             category="test",
             discipline="test",
+            catalog_symbol_id=catalog_symbol_id,
             owner_id=owner.id,
             owner_organization_id=owner_organization_id,
             visibility=visibility,
             organization_wide=organization_wide,
+            current_revision_id=revision_id,
             created_at=now,
             updated_at=now,
         )
         session.add(row)
+        if revision_id is not None:
+            session.add(SymbolRevision(
+                id=revision_id,
+                symbol_id=row.id,
+                revision_label="1",
+                lifecycle_state="approved",
+                payload_json=revision_payload or {},
+                author_id=owner.id,
+                created_at=now,
+            ))
+            session.add(OrganizationSymbolReviewSubmission(
+                id=submission_id,
+                organization_id=owner_organization_id,
+                governed_symbol_id=row.id,
+                symbol_revision_id=revision_id,
+                submitted_by_user_id=owner.id,
+                submitted_at=now,
+                status="closed",
+                closed_at=now,
+            ))
+            session.add(OrganizationSymbolReviewDecision(
+                id=uuid.uuid4(),
+                submission_id=submission_id,
+                organization_id=owner_organization_id,
+                governed_symbol_id=row.id,
+                symbol_revision_id=revision_id,
+                decided_by_user_id=owner.id,
+                decision="approved",
+                decided_at=now,
+            ))
         session.commit()
         return row.id
 
@@ -77,20 +137,29 @@ def test_palette_unions_set_items_and_organization_wide_symbols_deduplicated_and
     project_id, set_id = _make_default_set(client, Session)
     organization_id = _organization_id(Session)
 
-    set_symbol_a = _symbol(Session, "set-symbol-a")
-    set_symbol_b = _symbol(Session, "set-symbol-b")
+    set_symbol_a = _symbol(Session, "set-symbol-a", catalog_symbol_id="S-000001")
+    set_symbol_b = _symbol(Session, "set-symbol-b", catalog_symbol_id="S-000002")
     _eligibility(monkeypatch, {set_symbol_a: uuid.uuid4(), set_symbol_b: uuid.uuid4()})
-    put_items = client.put(
-        f"/api/v1/org/me/symbol-sets/{set_id}/items",
-        json={"items": [
+    put_items = _replace_items(
+        client,
+        set_id,
+        {"items": [
             {"governedSymbolId": str(set_symbol_a), "sortOrder": 5},
             {"governedSymbolId": str(set_symbol_b), "sortOrder": 1},
         ]},
     )
     assert put_items.status_code == 200
 
-    org_wide_z = _symbol(Session, "org-wide-zeta", owner_organization_id=organization_id, visibility="organization_private", organization_wide=True)
-    org_wide_a = _symbol(Session, "org-wide-alpha", owner_organization_id=organization_id, visibility="organization_private", organization_wide=True)
+    org_wide_z = _symbol(
+        Session, "org-wide-zeta", owner_organization_id=organization_id,
+        visibility="organization_private", organization_wide=True,
+        revision_payload={"package_display_id": "ABCD", "package_symbol_sequence": 8},
+    )
+    org_wide_a = _symbol(
+        Session, "org-wide-alpha", owner_organization_id=organization_id,
+        visibility="organization_private", organization_wide=True,
+        revision_payload={"package_display_id": "ABCD", "package_symbol_sequence": 7},
+    )
 
     response = client.get(f"/api/v1/org/me/projects/{project_id}/effective-palette")
     assert response.status_code == 200
@@ -108,6 +177,10 @@ def test_palette_unions_set_items_and_organization_wide_symbols_deduplicated_and
     assert by_id[str(org_wide_a)]["groupName"] == "Organization-wide"
     assert by_id[str(org_wide_a)]["sortOrder"] > by_id[str(set_symbol_a)]["sortOrder"]
     assert by_id[str(org_wide_z)]["sortOrder"] > by_id[str(org_wide_a)]["sortOrder"]
+    assert by_id[str(set_symbol_a)]["displayId"] == "S-000001"
+    assert by_id[str(set_symbol_a)]["catalogSymbolId"] == "S-000001"
+    assert by_id[str(org_wide_a)]["displayId"] == "ABCD-7"
+    assert by_id[str(org_wide_a)]["catalogSymbolId"] is None
     assert body["total"] == 4
 
 
@@ -119,9 +192,10 @@ def test_palette_excludes_ineligible_set_items_but_they_remain_visible_to_builde
     eligible_id = _symbol(Session, "eligible")
     stale_id = _symbol(Session, "stale")
     _eligibility(monkeypatch, {eligible_id: uuid.uuid4(), stale_id: uuid.uuid4()})
-    assert client.put(
-        f"/api/v1/org/me/symbol-sets/{set_id}/items",
-        json={"items": [
+    assert _replace_items(
+        client,
+        set_id,
+        {"items": [
             {"governedSymbolId": str(eligible_id), "sortOrder": 1},
             {"governedSymbolId": str(stale_id), "sortOrder": 2},
         ]},
@@ -216,9 +290,10 @@ def test_palette_pagination_is_bounded_and_deterministic(monkeypatch):
 
     symbol_ids = [_symbol(Session, f"symbol-{index:02d}") for index in range(5)]
     _eligibility(monkeypatch, {symbol_id: uuid.uuid4() for symbol_id in symbol_ids})
-    assert client.put(
-        f"/api/v1/org/me/symbol-sets/{set_id}/items",
-        json={"items": [
+    assert _replace_items(
+        client,
+        set_id,
+        {"items": [
             {"governedSymbolId": str(symbol_id), "sortOrder": index}
             for index, symbol_id in enumerate(symbol_ids)
         ]},

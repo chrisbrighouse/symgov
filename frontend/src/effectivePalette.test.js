@@ -22,6 +22,8 @@ function baseAuth(overrides = {}) {
 function baseItem(overrides = {}) {
   return {
     governedSymbolId: 'sym-1',
+    catalogSymbolId: 'S-000001',
+    displayId: 'S-000001',
     source: 'set',
     canonicalName: 'Fire Extinguisher',
     category: 'fire',
@@ -84,7 +86,7 @@ describe('EffectivePalettePanel', () => {
         reason: 'project_default',
         items: [
           baseItem({ groupName: 'Electrical' }),
-          baseItem({ governedSymbolId: 'sym-2', source: 'organization_wide', canonicalName: 'Org Beacon', groupName: 'Organization-wide' }),
+          baseItem({ governedSymbolId: 'sym-2', catalogSymbolId: null, displayId: 'ABCD-7', source: 'organization_wide', canonicalName: 'Org Beacon', groupName: 'Organization-wide' }),
         ],
         page: 1,
         pageSize: 50,
@@ -96,6 +98,8 @@ describe('EffectivePalettePanel', () => {
     const text = JSON.stringify(renderer.toJSON());
     assert.match(text, /Fire Extinguisher/);
     assert.match(text, /Org Beacon/);
+    assert.match(text, /S-000001/);
+    assert.match(text, /ABCD-7/);
     assert.match(text, /Using the Project default Symbol Set \(SET-01\)/);
     assert.match(text, /Organization-wide/);
     const groupHeadings = renderer.root.findAllByType('h3').map((node) => node.children.join(''));

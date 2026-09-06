@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 import uuid
 
@@ -12,6 +13,8 @@ from .models import AuditEvent, GovernedSymbol, Organization, Project, ProjectSy
 from .product_usage_events import record_governance_usage_event
 from .project_service import audit, get_principal, json_values_equal, normalize_code, normalize_optional_text, normalize_text, project_dict, validate_json
 from .public_symbol_eligibility import current_public_symbols
+from .symbol_eligibility import current_symbol_revisions
+from .symbol_identity import governed_symbol_human_readable_id
 
 TRANSITIONS = {"draft": {"active", "archived"}, "active": {"superseded", "archived"}, "superseded": {"archived"}, "archived": set()}
 
@@ -257,8 +260,10 @@ def _admin_set(session, request, settings, set_id):
     return principal, row
 
 
-def _item_dict(row, current_revision_id=None, available=True, governed=None):
+def _item_dict(session, row, current_revision_id=None, available=True, governed=None):
     return {"id": row.id, "governedSymbolId": row.governed_symbol_id, "sortOrder": row.sort_order,
+            "catalogSymbolId": governed.catalog_symbol_id if governed is not None else None,
+            "displayId": governed_symbol_human_readable_id(session, governed) if governed is not None else None,
             "groupName": row.group_name, "displayLabel": row.display_label, "notes": row.notes,
             "preferredFormat": row.preferred_format, "provenance": row.provenance_json or {},
             "currentRevisionId": current_revision_id, "availabilityStatus": "active" if available else "unavailable",
@@ -270,6 +275,29 @@ def _item_dict(row, current_revision_id=None, available=True, governed=None):
             "createdAt": row.created_at, "updatedAt": row.updated_at}
 
 
+def items_etag(session, set_id: uuid.UUID) -> str:
+    rows = session.query(SymbolSetItem).filter(
+        SymbolSetItem.symbol_set_id == set_id,
+    ).order_by(SymbolSetItem.governed_symbol_id).all()
+    snapshot = [
+        {
+            "id": str(row.id),
+            "governedSymbolId": str(row.governed_symbol_id),
+            "sortOrder": row.sort_order,
+            "groupName": row.group_name,
+            "displayLabel": row.display_label,
+            "notes": row.notes,
+            "preferredFormat": row.preferred_format,
+            "provenance": row.provenance_json or {},
+            "availabilityStatus": row.availability_status,
+            "availabilityReason": row.availability_reason,
+        }
+        for row in rows
+    ]
+    encoded = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return f'"{sha256(encoded).hexdigest()}"'
+
+
 def list_items(session, request, settings, set_id, *, page, page_size):
     principal, row = get_set(session, request, settings, set_id)
     q = session.query(SymbolSetItem, GovernedSymbol).join(
@@ -277,12 +305,17 @@ def list_items(session, request, settings, set_id, *, page, page_size):
     ).filter(SymbolSetItem.symbol_set_id == row.id)
     total = q.count()
     rows = q.order_by(SymbolSetItem.sort_order, SymbolSetItem.governed_symbol_id).offset((page - 1) * page_size).limit(page_size).all()
-    current = current_public_symbols(session, [item.governed_symbol_id for item, _ in rows])
+    current = current_symbol_revisions(
+        session, [item.governed_symbol_id for item, _ in rows], principal.organization.id,
+        organization_symbols_enabled=bool(getattr(settings, "organization_symbols_enabled", False)),
+        public_resolver=current_public_symbols,
+    )
     return principal, {"items": [
-        _item_dict(item, current.get(item.governed_symbol_id), item.governed_symbol_id in current, governed)
+        _item_dict(session, item, current.get(item.governed_symbol_id), item.governed_symbol_id in current, governed)
         for item, governed in rows
     ],
-                       "page": page, "pageSize": page_size, "total": total}
+                       "page": page, "pageSize": page_size, "total": total,
+                       "etag": items_etag(session, row.id)}
 
 
 def replace_items(session, request, settings, set_id, data):
@@ -292,6 +325,11 @@ def replace_items(session, request, settings, set_id, data):
         raise HTTPException(404, "Not found.")
     if row.status in {"superseded", "archived"}:
         raise HTTPException(409, "Symbol Set items cannot be changed in this lifecycle state.")
+    expected_etag = getattr(data, "etag", None) or request.headers.get("if-match")
+    if expected_etag is None:
+        raise HTTPException(428, "A current Symbol Set item ETag is required; reload before saving.")
+    if expected_etag != items_etag(session, row.id):
+        raise HTTPException(409, "Symbol Set changed since it was loaded; reload before saving.")
     values = data.items
     ids = [item.governedSymbolId for item in values]
     if len(ids) != len(set(ids)):
@@ -306,7 +344,11 @@ def replace_items(session, request, settings, set_id, data):
     for symbol_id in sorted(set(ids) | set(existing), key=str):
         if session.get(GovernedSymbol, symbol_id, with_for_update=True) is None:
             raise HTTPException(404, "Not found.")
-    current = current_public_symbols(session, ids)
+    current = current_symbol_revisions(
+        session, ids, principal.organization.id,
+        organization_symbols_enabled=bool(getattr(settings, "organization_symbols_enabled", False)),
+        public_resolver=current_public_symbols,
+    )
     prepared = []
     for item in values:
         provenance = validate_json(item.provenance)
@@ -338,7 +380,7 @@ def replace_items(session, request, settings, set_id, data):
     for item, provenance in prepared:
         old = existing.get(item.governedSymbolId)
         if old is None and item.governedSymbolId not in current:
-            raise HTTPException(409, "Every new item must be currently eligible in the public Catalog.")
+            raise HTTPException(409, "Every new item must be currently eligible for this organization's Symbol Set.")
         if old is None:
             old = SymbolSetItem(id=uuid.uuid4(), symbol_set_id=row.id, governed_symbol_id=item.governedSymbolId, created_at=now)
             session.add(old)
@@ -536,7 +578,11 @@ def copy_set(session, request, settings, set_id, data):
     for symbol_id in ids:
         if session.get(GovernedSymbol, symbol_id, with_for_update=True) is None:
             raise HTTPException(409, "Source contains an unavailable item.")
-    current = current_public_symbols(session, ids)
+    current = current_symbol_revisions(
+        session, ids, principal.organization.id,
+        organization_symbols_enabled=bool(getattr(settings, "organization_symbols_enabled", False)),
+        public_resolver=current_public_symbols,
+    )
     if len(current) != len(ids):
         raise HTTPException(409, "Source contains an unavailable item.")
     now = stamp()

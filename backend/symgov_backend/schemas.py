@@ -229,11 +229,14 @@ class SymbolSetItemInput(BaseModel):
 class SymbolSetItemsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     items: list[SymbolSetItemInput] = Field(max_length=1000)
+    etag: str | None = Field(default=None, min_length=3, max_length=200)
 
 
 class SymbolSetItemResponse(BaseModel):
     id: uuid.UUID
     governedSymbolId: uuid.UUID
+    catalogSymbolId: str | None = None
+    displayId: str | None = None
     sortOrder: int
     groupName: str | None
     displayLabel: str | None
@@ -256,6 +259,7 @@ class SymbolSetItemsResponse(BaseModel):
     page: int
     pageSize: int
     total: int
+    etag: str
 
 
 class SymbolSetProjectInput(BaseModel):
@@ -309,6 +313,8 @@ class SymbolContextResponse(BaseModel):
 
 class EffectivePaletteEntryResponse(BaseModel):
     governedSymbolId: uuid.UUID
+    catalogSymbolId: str | None = None
+    displayId: str | None = None
     source: Literal["set", "organization_wide"]
     canonicalName: str
     category: str
@@ -333,6 +339,8 @@ class EffectivePaletteResponse(BaseModel):
 
 class SymbolSetBuilderSearchEntryResponse(BaseModel):
     governedSymbolId: uuid.UUID
+    catalogSymbolId: str | None = None
+    displayId: str | None = None
     source: Literal["public", "organization"]
     canonicalName: str
     category: str

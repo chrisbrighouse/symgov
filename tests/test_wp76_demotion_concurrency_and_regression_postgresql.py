@@ -220,9 +220,10 @@ def test_adding_a_cross_organization_set_item_to_an_already_demoted_symbol_is_re
     assert create_set.status_code == 201, create_set.text
     set_id = create_set.json()["id"]
 
+    current_etag = other_client.get(f"/api/v1/org/me/symbol-sets/{set_id}/items").json()["etag"]
     add_item = other_client.put(
         f"/api/v1/org/me/symbol-sets/{set_id}/items",
-        json={"items": [{"governedSymbolId": symbol_id, "sortOrder": 0}]},
+        json={"items": [{"governedSymbolId": symbol_id, "sortOrder": 0}], "etag": current_etag},
     )
     assert add_item.status_code == 409, add_item.text
 

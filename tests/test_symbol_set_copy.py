@@ -6,6 +6,7 @@ import uuid
 from sqlalchemy import CheckConstraint, JSON
 
 from test_projects_api import _stage4_client
+from test_symbol_set_items import _replace_items
 from symgov_backend.models import GovernedSymbol, ProjectSymbolSet, SymbolSet, SymbolSetItem, User
 import symgov_backend.symbol_set_service as symbol_set_service
 
@@ -84,9 +85,10 @@ def test_copy_preserves_lineage_and_items_without_copying_projects_or_symbols(mo
     source_id = _set(client, "SOURCE")
     symbol_id = _symbol(Session, "copy-symbol")
     _eligible(monkeypatch, {symbol_id: uuid.uuid4()})
-    inserted = client.put(
-        f"/api/v1/org/me/symbol-sets/{source_id}/items",
-        json={
+    inserted = _replace_items(
+        client,
+        source_id,
+        {
             "items": [
                 {
                     "governedSymbolId": str(symbol_id),
@@ -144,9 +146,10 @@ def test_copy_fails_atomically_when_a_source_item_is_no_longer_public(monkeypatc
     source_id = _set(client, "UNAVAILABLE")
     symbol_id = _symbol(Session, "unavailable-copy-symbol")
     _eligible(monkeypatch, {symbol_id: uuid.uuid4()})
-    assert client.put(
-        f"/api/v1/org/me/symbol-sets/{source_id}/items",
-        json={"items": [{"governedSymbolId": str(symbol_id), "sortOrder": 1}]},
+    assert _replace_items(
+        client,
+        source_id,
+        {"items": [{"governedSymbolId": str(symbol_id), "sortOrder": 1}]},
     ).status_code == 200
     _eligible(monkeypatch, {})
     with Session() as session:

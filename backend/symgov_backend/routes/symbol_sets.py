@@ -32,9 +32,21 @@ def sets(request: Request, page_data=Depends(page_args), status: str | None = No
 # Registered ahead of `/{setId}` (below) so a literal "builder-search"
 # path segment is never captured as a `setId` path parameter.
 @router.get("/builder-search", response_model=SymbolSetBuilderSearchResponse, responses={401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}})
-def builder_search(request: Request, page_data=Depends(page_args), q: str | None = Query(None), session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
+def builder_search(
+    request: Request,
+    page_data=Depends(page_args),
+    q: str | None = Query(None),
+    category: str | None = Query(None),
+    discipline: str | None = Query(None),
+    format_: str | None = Query(None, alias="format"),
+    session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
+):
     page, page_size = page_data
-    _, result = search_symbol_set_builder(session, request, settings, query_text=q, page=page, page_size=page_size)
+    _, result = search_symbol_set_builder(
+        session, request, settings, query_text=q, page=page, page_size=page_size,
+        category=category, discipline=discipline, format_=format_,
+    )
     return result
 
 
@@ -61,7 +73,7 @@ def items(setId: uuid.UUID, request: Request, page_data=Depends(page_args), sess
     _, result = list_items(session, request, settings, setId, page=page, page_size=page_size); return result
 
 
-@router.put("/{setId}/items", response_model=SymbolSetItemsResponse, responses={401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 409: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}})
+@router.put("/{setId}/items", response_model=SymbolSetItemsResponse, responses={401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 409: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}, 428: {"model": APIErrorResponse}})
 def replace_set_items(setId: uuid.UUID, data: SymbolSetItemsRequest, request: Request, session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
     try:
         result = replace_items(session, request, settings, setId, data); session.commit(); return result

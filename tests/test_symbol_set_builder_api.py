@@ -39,14 +39,21 @@ def _organization_id(Session) -> uuid.UUID:
 
 
 def _fake_public_entries(entries):
-    def fake(session, *, query_text):
+    def fake(session, *, query_text, **_filters):
         if query_text:
             return [entry for entry in entries if query_text.lower() in entry["canonicalName"].lower()]
         return list(entries)
     return fake
 
 
-def _approved_organization_symbol(Session, organization_id, canonical_name, *, organization_wide=False):
+def _approved_organization_symbol(
+    Session,
+    organization_id,
+    canonical_name,
+    *,
+    organization_wide=False,
+    revision_payload=None,
+):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     with Session() as session:
         owner = session.query(User).first()
@@ -63,7 +70,7 @@ def _approved_organization_symbol(Session, organization_id, canonical_name, *, o
         ))
         session.add(SymbolRevision(
             id=revision_id, symbol_id=symbol_id, revision_label="1", lifecycle_state="approved",
-            payload_json={}, author_id=owner.id, created_at=now,
+            payload_json=revision_payload or {}, author_id=owner.id, created_at=now,
         ))
         session.add(OrganizationSymbolReviewSubmission(
             id=submission_id, organization_id=organization_id, governed_symbol_id=symbol_id,
@@ -151,7 +158,12 @@ def test_builder_search_shows_organization_symbols_to_admin(monkeypatch):
     _ensure_review_tables(Session)
     organization_id = _organization_id(Session)
     monkeypatch.setattr(symbol_set_builder_module, "_search_public_symbols", _fake_public_entries([]))
-    org_symbol_id = _approved_organization_symbol(Session, organization_id, "Org Approved Symbol")
+    org_symbol_id = _approved_organization_symbol(
+        Session,
+        organization_id,
+        "Org Approved Symbol",
+        revision_payload={"package_display_id": "ABCD", "package_symbol_sequence": 7},
+    )
 
     response = client.get("/api/v1/org/me/symbol-sets/builder-search")
     assert response.status_code == 200
@@ -160,6 +172,8 @@ def test_builder_search_shows_organization_symbols_to_admin(monkeypatch):
     assert body["items"][0]["source"] == "organization"
     assert body["items"][0]["governedSymbolId"] == str(org_symbol_id)
     assert body["items"][0]["organizationWide"] is False
+    assert body["items"][0]["catalogSymbolId"] is None
+    assert body["items"][0]["displayId"] == "ABCD-7"
 
 
 def test_builder_search_shows_organization_symbols_to_symbol_reviewer_non_admin(monkeypatch):
@@ -273,3 +287,33 @@ def test_builder_search_pagination_is_bounded(monkeypatch):
     first_page = client.get("/api/v1/org/me/symbol-sets/builder-search", params={"pageSize": 2}).json()
     assert first_page["total"] == 5
     assert len(first_page["items"]) == 2
+
+
+def test_builder_search_paginates_all_unique_public_matches_beyond_500(monkeypatch):
+    client, Session = _stage4_client(role="admin")
+    _ensure_symbol_tables(Session)
+    _ensure_review_tables(Session)
+    public_entries = [
+        {
+            "governedSymbolId": uuid.uuid4(),
+            "source": "public",
+            "canonicalName": f"Public Symbol {index:04d}",
+            "category": "fire",
+            "discipline": "fire-safety",
+            "slug": f"public-symbol-{index:04d}",
+            "organizationWide": None,
+            "currentRevisionId": uuid.uuid4(),
+        }
+        for index in range(501)
+    ]
+    monkeypatch.setattr(symbol_set_builder_module, "_search_public_symbols", _fake_public_entries(public_entries))
+
+    first_page = client.get("/api/v1/org/me/symbol-sets/builder-search", params={"pageSize": 200})
+    last_page = client.get("/api/v1/org/me/symbol-sets/builder-search", params={"page": 3, "pageSize": 200})
+
+    assert first_page.status_code == 200
+    assert last_page.status_code == 200
+    assert first_page.json()["total"] == 501
+    assert len(first_page.json()["items"]) == 200
+    assert len(last_page.json()["items"]) == 101
+    assert last_page.json()["items"][0]["canonicalName"] == "Public Symbol 0400"

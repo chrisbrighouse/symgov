@@ -364,9 +364,10 @@ def test_effective_palette_excludes_the_demoted_symbol(wp75_database):
     )
     assert linked.status_code == 200, linked.text
 
+    current_etag = admin_client.get(f"/api/v1/org/me/symbol-sets/{set_id}/items").json()["etag"]
     item_added = admin_client.put(
         f"/api/v1/org/me/symbol-sets/{set_id}/items",
-        json={"items": [{"governedSymbolId": symbol_id, "sortOrder": 0}]},
+        json={"items": [{"governedSymbolId": symbol_id, "sortOrder": 0}], "etag": current_etag},
     )
     assert item_added.status_code == 200, item_added.text
 

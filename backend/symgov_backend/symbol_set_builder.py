@@ -40,13 +40,15 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import and_, or_, text
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .catalog_search import catalog_symbol_filters
-from .models import GovernedSymbol, OrganizationMemberCapability, OrganizationSymbolReviewDecision, OrganizationSymbolReviewSubmission, SymbolRevision
+from .models import OrganizationMemberCapability
 from .project_service import get_principal
 from .published_catalog import PUBLISHED_SYMBOLS_SQL
+from .symbol_eligibility import eligible_organization_private_symbols
+from .symbol_identity import governed_symbol_human_readable_id
 
 PUBLIC_SEARCH_ROW_LIMIT = 500
 
@@ -61,10 +63,17 @@ def _has_organization_wide_toggle_authority(session: Session, principal) -> bool
     ).first() is not None
 
 
-def _search_public_symbols(session: Session, *, query_text: str | None) -> list[dict]:
+def _search_public_symbols(
+    session: Session,
+    *,
+    query_text: str | None,
+    category: str | None = None,
+    discipline: str | None = None,
+    format_: str | None = None,
+) -> list[dict]:
     filters, params, _ = catalog_symbol_filters(
-        q=query_text, discipline=None, category=None, use_case=None,
-        format_=None, pack=None, symbol_family=None, has_preview=None, updated_since=None,
+        q=query_text, discipline=discipline, category=category, use_case=None,
+        format_=format_, pack=None, symbol_family=None, has_preview=None, updated_since=None,
     )
     where_extension = (" AND " + " AND ".join(filters)) if filters else ""
     params["limit"] = PUBLIC_SEARCH_ROW_LIMIT
@@ -83,6 +92,8 @@ def _search_public_symbols(session: Session, *, query_text: str | None) -> list[
         seen.add(row.symbol_id)
         entries.append({
             "governedSymbolId": uuid.UUID(row.symbol_id),
+            "catalogSymbolId": row.catalog_symbol_id,
+            "displayId": row.catalog_symbol_id,
             "source": "public",
             "canonicalName": row.canonical_name,
             "category": row.category,
@@ -94,40 +105,32 @@ def _search_public_symbols(session: Session, *, query_text: str | None) -> list[
     return entries
 
 
-def _search_organization_symbols(session: Session, organization_id: uuid.UUID, *, query_text: str | None) -> list[dict]:
-    query = session.query(GovernedSymbol).join(
-        SymbolRevision,
-        and_(SymbolRevision.id == GovernedSymbol.current_revision_id, SymbolRevision.symbol_id == GovernedSymbol.id),
-    ).join(
-        OrganizationSymbolReviewDecision,
-        and_(
-            OrganizationSymbolReviewDecision.organization_id == GovernedSymbol.owner_organization_id,
-            OrganizationSymbolReviewDecision.governed_symbol_id == GovernedSymbol.id,
-            OrganizationSymbolReviewDecision.symbol_revision_id == SymbolRevision.id,
-            OrganizationSymbolReviewDecision.decision == "approved",
-        ),
-    ).join(
-        OrganizationSymbolReviewSubmission,
-        and_(
-            OrganizationSymbolReviewSubmission.id == OrganizationSymbolReviewDecision.submission_id,
-            OrganizationSymbolReviewSubmission.status == "closed",
-        ),
-    ).filter(
-        GovernedSymbol.owner_organization_id == organization_id,
-        GovernedSymbol.visibility == "organization_private",
+def _search_organization_symbols(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    query_text: str | None,
+    category: str | None = None,
+    discipline: str | None = None,
+    format_: str | None = None,
+) -> list[dict]:
+    rows = eligible_organization_private_symbols(
+        session,
+        organization_id,
+        query_text=query_text,
+        format_=format_,
     )
-    if query_text:
-        like = f"%{query_text}%"
-        query = query.filter(or_(
-            GovernedSymbol.canonical_name.ilike(like),
-            GovernedSymbol.category.ilike(like),
-            GovernedSymbol.discipline.ilike(like),
-            GovernedSymbol.slug.ilike(like),
-        ))
-    rows = query.order_by(GovernedSymbol.canonical_name, GovernedSymbol.id).all()
+    if category:
+        category_key = category.casefold()
+        rows = [row for row in rows if category_key in (row.category or "").casefold()]
+    if discipline:
+        discipline_key = discipline.casefold()
+        rows = [row for row in rows if discipline_key in (row.discipline or "").casefold()]
     return [
         {
             "governedSymbolId": governed.id,
+            "catalogSymbolId": governed.catalog_symbol_id,
+            "displayId": governed_symbol_human_readable_id(session, governed),
             "source": "organization",
             "canonicalName": governed.canonical_name,
             "category": governed.category,
@@ -148,12 +151,28 @@ def search_symbol_set_builder(
     query_text: str | None,
     page: int,
     page_size: int,
+    category: str | None = None,
+    discipline: str | None = None,
+    format_: str | None = None,
 ):
     principal = get_principal(session, request, settings)
 
-    entries = _search_public_symbols(session, query_text=query_text)
+    entries = _search_public_symbols(
+        session,
+        query_text=query_text,
+        category=category,
+        discipline=discipline,
+        format_=format_,
+    )
     if settings.organization_symbols_enabled and _has_organization_wide_toggle_authority(session, principal):
-        entries.extend(_search_organization_symbols(session, principal.organization.id, query_text=query_text))
+        entries.extend(_search_organization_symbols(
+            session,
+            principal.organization.id,
+            query_text=query_text,
+            category=category,
+            discipline=discipline,
+            format_=format_,
+        ))
 
     entries.sort(key=lambda entry: (entry["canonicalName"], str(entry["governedSymbolId"])))
 

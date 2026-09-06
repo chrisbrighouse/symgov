@@ -6,7 +6,7 @@ import uuid
 from sqlalchemy import CheckConstraint, JSON
 
 from test_projects_api import _stage4_client
-from symgov_backend.models import AuditEvent, GovernedSymbol, SymbolSetItem, User
+from symgov_backend.models import AuditEvent, GovernedSymbol, SymbolRevision, SymbolSetItem, User
 import symgov_backend.symbol_set_service as symbol_set_service
 
 
@@ -25,10 +25,23 @@ def _active_set(client, code="SET-01"):
     return set_id
 
 
+def _replace_items(client, set_id, payload, *, etag=None):
+    """PUT `.../items`, attaching the item set's current ETag if the caller
+    did not already supply one (Stage 11 WP11.1's optimistic-concurrency
+    guard requires a current ETag on every full replacement)."""
+    current_etag = etag or client.get(
+        f"/api/v1/org/me/symbol-sets/{set_id}/items",
+    ).json()["etag"]
+    return client.put(
+        f"/api/v1/org/me/symbol-sets/{set_id}/items",
+        json={**payload, "etag": current_etag},
+    )
+
+
 def _ensure_symbol_tables(Session):
     bind = Session.kw["bind"]
 
-    for model in (GovernedSymbol, SymbolSetItem):
+    for model in (GovernedSymbol, SymbolRevision, SymbolSetItem):
         table = model.__table__
         original_constraints = table.constraints
         original_types = {column.name: column.type for column in table.columns}
@@ -51,12 +64,13 @@ def _ensure_symbol_tables(Session):
                 column.server_default = original_defaults[column.name]
 
 
-def _symbol(Session, slug, identifier=None):
+def _symbol(Session, slug, identifier=None, *, catalog_symbol_id=None, revision_payload=None):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     with Session() as session:
         owner = session.query(User).first()
         row = GovernedSymbol(
             id=identifier or uuid.uuid4(),
+            catalog_symbol_id=catalog_symbol_id,
             slug=slug,
             canonical_name=slug,
             category="test",
@@ -66,6 +80,20 @@ def _symbol(Session, slug, identifier=None):
             updated_at=now,
         )
         session.add(row)
+        session.flush()
+        if revision_payload is not None:
+            revision = SymbolRevision(
+                id=uuid.uuid4(),
+                symbol_id=row.id,
+                revision_label="R1",
+                lifecycle_state="approved",
+                payload_json=revision_payload,
+                rationale=None,
+                author_id=owner.id,
+                created_at=now,
+            )
+            session.add(revision)
+            row.current_revision_id = revision.id
         session.commit()
         return row.id
 
@@ -88,9 +116,10 @@ def test_item_replacement_is_ordered_and_uses_current_revision_availability(monk
     second_revision = uuid.uuid4()
     _eligibility(monkeypatch, {first_id: first_revision, second_id: second_revision})
 
-    response = client.put(
-        f"/api/v1/org/me/symbol-sets/{set_id}/items",
-        json={
+    response = _replace_items(
+        client,
+        set_id,
+        {
             "items": [
                 {"governedSymbolId": str(second_id), "sortOrder": 2},
                 {"governedSymbolId": str(first_id), "sortOrder": 1, "provenance": {"source": "test"}},
@@ -131,9 +160,10 @@ def test_item_replacement_is_ordered_and_uses_current_revision_availability(monk
     assert by_id[str(second_id)]["availabilityStatus"] == "unavailable"
     assert by_id[str(second_id)]["availabilityReason"]
 
-    removed = client.put(
-        f"/api/v1/org/me/symbol-sets/{set_id}/items",
-        json={"items": [{"governedSymbolId": str(first_id), "sortOrder": 1}]},
+    removed = _replace_items(
+        client,
+        set_id,
+        {"items": [{"governedSymbolId": str(first_id), "sortOrder": 1}]},
     )
     assert removed.status_code == 200
     with Session() as session:
@@ -152,7 +182,7 @@ def test_item_replacement_locks_requested_and_removed_symbols_in_uuid_order_befo
         {"governedSymbolId": str(removed_id), "sortOrder": 1},
         {"governedSymbolId": str(retained_id), "sortOrder": 2},
     ]}
-    assert client.put(f"/api/v1/org/me/symbol-sets/{set_id}/items", json=initial).status_code == 200
+    assert _replace_items(client, set_id, initial).status_code == 200
 
     locked_ids = []
     original_get = Session.class_.get
@@ -171,9 +201,10 @@ def test_item_replacement_locks_requested_and_removed_symbols_in_uuid_order_befo
     monkeypatch.setattr(Session.class_, "get", record_get)
     monkeypatch.setattr(Session.class_, "delete", assert_full_lock_set_before_delete)
 
-    response = client.put(
-        f"/api/v1/org/me/symbol-sets/{set_id}/items",
-        json={"items": [{"governedSymbolId": str(retained_id), "sortOrder": 2}]},
+    response = _replace_items(
+        client,
+        set_id,
+        {"items": [{"governedSymbolId": str(retained_id), "sortOrder": 2}]},
     )
 
     assert response.status_code == 200
@@ -188,17 +219,64 @@ def test_identical_item_replacement_is_a_no_op(monkeypatch):
     _eligibility(monkeypatch, {symbol_id: uuid.uuid4()})
     payload = {"items": [{"governedSymbolId": str(symbol_id), "sortOrder": 1}]}
 
-    first = client.put(f"/api/v1/org/me/symbol-sets/{set_id}/items", json=payload)
+    first = _replace_items(client, set_id, payload)
     assert first.status_code == 200
     with Session() as session:
         first_count = session.query(AuditEvent).filter(AuditEvent.action == "symbol_set.items_replaced").count()
 
-    second = client.put(f"/api/v1/org/me/symbol-sets/{set_id}/items", json=payload)
+    second = _replace_items(client, set_id, payload)
     assert second.status_code == 200
     with Session() as session:
         second_count = session.query(AuditEvent).filter(AuditEvent.action == "symbol_set.items_replaced").count()
 
     assert second_count == first_count
+
+
+def test_stale_full_replacement_returns_conflict_and_preserves_current_items(monkeypatch):
+    client, Session = _stage4_client()
+    _ensure_symbol_tables(Session)
+    set_id = _active_set(client)
+    first_id = _symbol(Session, "first-symbol")
+    second_id = _symbol(Session, "second-symbol")
+    _eligibility(monkeypatch, {first_id: uuid.uuid4(), second_id: uuid.uuid4()})
+
+    initial = client.get(f"/api/v1/org/me/symbol-sets/{set_id}/items").json()
+    first = client.put(
+        f"/api/v1/org/me/symbol-sets/{set_id}/items",
+        json={
+            "items": [{"governedSymbolId": str(first_id), "sortOrder": 0}],
+            "etag": initial["etag"],
+        },
+    )
+    assert first.status_code == 200
+
+    stale = client.put(
+        f"/api/v1/org/me/symbol-sets/{set_id}/items",
+        json={
+            "items": [{"governedSymbolId": str(second_id), "sortOrder": 0}],
+            "etag": initial["etag"],
+        },
+    )
+    assert stale.status_code == 409
+    current = client.get(f"/api/v1/org/me/symbol-sets/{set_id}/items").json()
+    assert [item["governedSymbolId"] for item in current["items"]] == [str(first_id)]
+    assert current["etag"] != initial["etag"]
+
+
+def test_item_replacement_requires_snapshot_precondition(monkeypatch):
+    client, Session = _stage4_client()
+    _ensure_symbol_tables(Session)
+    set_id = _active_set(client)
+    symbol_id = _symbol(Session, "precondition-symbol")
+    _eligibility(monkeypatch, {symbol_id: uuid.uuid4()})
+
+    response = client.put(
+        f"/api/v1/org/me/symbol-sets/{set_id}/items",
+        json={"items": [{"governedSymbolId": str(symbol_id), "sortOrder": 0}]},
+    )
+
+    assert response.status_code == 428
+    assert client.get(f"/api/v1/org/me/symbol-sets/{set_id}/items").json()["items"] == []
 
 
 def test_item_replacement_distinguishes_json_booleans_from_numbers(monkeypatch):
@@ -207,7 +285,6 @@ def test_item_replacement_distinguishes_json_booleans_from_numbers(monkeypatch):
     set_id = _active_set(client)
     symbol_id = _symbol(Session, "provenance-json-types")
     _eligibility(monkeypatch, {symbol_id: uuid.uuid4()})
-    path = f"/api/v1/org/me/symbol-sets/{set_id}/items"
     numeric = {"items": [{
         "governedSymbolId": str(symbol_id),
         "sortOrder": 1,
@@ -218,13 +295,13 @@ def test_item_replacement_distinguishes_json_booleans_from_numbers(monkeypatch):
         "sortOrder": 1,
         "provenance": {"nested": {"flag": True}},
     }]}
-    assert client.put(path, json=numeric).status_code == 200
+    assert _replace_items(client, set_id, numeric).status_code == 200
     with Session() as session:
         before_audits = session.query(AuditEvent).filter(
             AuditEvent.action == "symbol_set.items_replaced"
         ).count()
 
-    response = client.put(path, json=boolean)
+    response = _replace_items(client, set_id, boolean)
 
     assert response.status_code == 200
     assert response.json()["items"][0]["provenance"] == {"nested": {"flag": True}}
@@ -245,11 +322,11 @@ def test_multi_item_replacement_compares_each_item_to_its_own_provenance(monkeyp
         {"governedSymbolId": str(first_id), "sortOrder": 1, "provenance": {"source": "one"}},
         {"governedSymbolId": str(second_id), "sortOrder": 2, "provenance": {"source": "two"}},
     ]}
-    assert client.put(f"/api/v1/org/me/symbol-sets/{set_id}/items", json=payload).status_code == 200
+    assert _replace_items(client, set_id, payload).status_code == 200
     with Session() as session:
         before = {item.governed_symbol_id: (item.updated_at, item.provenance_json) for item in session.query(SymbolSetItem).all()}
         audit_count = session.query(AuditEvent).filter(AuditEvent.action == "symbol_set.items_replaced").count()
-    assert client.put(f"/api/v1/org/me/symbol-sets/{set_id}/items", json=payload).status_code == 200
+    assert _replace_items(client, set_id, payload).status_code == 200
     with Session() as session:
         after = {item.governed_symbol_id: (item.updated_at, item.provenance_json) for item in session.query(SymbolSetItem).all()}
         assert session.query(AuditEvent).filter(AuditEvent.action == "symbol_set.items_replaced").count() == audit_count
@@ -265,10 +342,10 @@ def test_distinct_item_replacements_have_stable_noncolliding_audit_ids(monkeypat
     _eligibility(monkeypatch, {first_id: uuid.uuid4(), second_id: uuid.uuid4()})
     first = {"items": [{"governedSymbolId": str(first_id), "sortOrder": 1, "provenance": {"source": "one"}}]}
     second = {"items": [{"governedSymbolId": str(second_id), "sortOrder": 1, "provenance": {"source": "two"}}]}
-    assert client.put(f"/api/v1/org/me/symbol-sets/{set_id}/items", json=first).status_code == 200
+    assert _replace_items(client, set_id, first).status_code == 200
     with Session() as session:
         first_event = session.query(AuditEvent).filter(AuditEvent.action == "symbol_set.items_replaced").one()
-    assert client.put(f"/api/v1/org/me/symbol-sets/{set_id}/items", json=second).status_code == 200
+    assert _replace_items(client, set_id, second).status_code == 200
     with Session() as session:
         events = session.query(AuditEvent).filter(AuditEvent.action == "symbol_set.items_replaced").order_by(AuditEvent.created_at, AuditEvent.id).all()
     assert len(events) == 2
@@ -296,10 +373,7 @@ def test_recurrent_item_replacement_records_distinct_audit_events(monkeypatch):
         "provenance": {"source": "second"},
     }]}
 
-    responses = [
-        client.put(f"/api/v1/org/me/symbol-sets/{set_id}/items", json=payload)
-        for payload in (first, second, first)
-    ]
+    responses = [_replace_items(client, set_id, payload) for payload in (first, second, first)]
 
     assert [response.status_code for response in responses] == [200, 200, 200]
     with Session() as session:
@@ -322,9 +396,10 @@ def test_new_item_must_be_currently_public_and_failure_writes_nothing(monkeypatc
     symbol_id = _symbol(Session, "ineligible-symbol")
     _eligibility(monkeypatch, {})
 
-    response = client.put(
-        f"/api/v1/org/me/symbol-sets/{set_id}/items",
-        json={"items": [{"governedSymbolId": str(symbol_id), "sortOrder": 1}]},
+    response = _replace_items(
+        client,
+        set_id,
+        {"items": [{"governedSymbolId": str(symbol_id), "sortOrder": 1}]},
     )
 
     assert response.status_code == 409
@@ -339,17 +414,44 @@ def test_items_carry_human_readable_governed_symbol_identity(monkeypatch):
     client, Session = _stage4_client()
     _ensure_symbol_tables(Session)
     set_id = _active_set(client)
-    symbol_id = _symbol(Session, "fire-hydrant")
+    symbol_id = _symbol(Session, "fire-hydrant", catalog_symbol_id="0003-12")
     _eligibility(monkeypatch, {symbol_id: uuid.uuid4()})
 
-    put_response = client.put(
-        f"/api/v1/org/me/symbol-sets/{set_id}/items",
-        json={"items": [{"governedSymbolId": str(symbol_id), "sortOrder": 1}]},
+    put_response = _replace_items(
+        client,
+        set_id,
+        {"items": [{"governedSymbolId": str(symbol_id), "sortOrder": 1}]},
     )
     assert put_response.status_code == 200
     for payload in (put_response.json(), client.get(f"/api/v1/org/me/symbol-sets/{set_id}/items").json()):
         item = payload["items"][0]
         assert item["canonicalName"] == "fire-hydrant"
+        assert item["catalogSymbolId"] == "0003-12"
+        assert item["displayId"] == "0003-12"
         assert item["category"] == "test"
         assert item["discipline"] == "test"
         assert item["slug"] == "fire-hydrant"
+
+
+def test_private_items_use_the_existing_package_revision_display_identity(monkeypatch):
+    client, Session = _stage4_client()
+    _ensure_symbol_tables(Session)
+    set_id = _active_set(client)
+    symbol_id = _symbol(
+        Session,
+        f"org-draft-{uuid.uuid4()}",
+        revision_payload={"package_display_id": "ABCD", "package_symbol_sequence": 7},
+    )
+    with Session() as session:
+        revision_id = session.get(GovernedSymbol, symbol_id).current_revision_id
+    _eligibility(monkeypatch, {symbol_id: revision_id})
+
+    response = _replace_items(
+        client,
+        set_id,
+        {"items": [{"governedSymbolId": str(symbol_id), "sortOrder": 0}]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["catalogSymbolId"] is None
+    assert response.json()["items"][0]["displayId"] == "ABCD-7"

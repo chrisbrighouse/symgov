@@ -21,18 +21,30 @@ job of `symbol_context_service.select_active_set`
 (`PUT /org/me/symbol-context/active-set`).
 
 Tenant isolation is structural, not just query-shaped: `SymbolSetItem` can
-only ever reference a `visibility='public'` governed symbol (enforced by
-`symbol_set_service.replace_items`'s `current_public_symbols` eligibility
-check on every new item), and an `organization_wide=true` governed symbol
-is always `visibility='organization_private'` scoped to exactly one
+reference either a `visibility='public'` governed symbol, or an approved,
+currently-eligible `visibility='organization_private'` symbol owned by the
+*same* organization as the Symbol Set (Stage 11 WP11.1 widened this from
+Stage 6's public-only restriction, per the original programme-plan wording
+"eligible active-set items (public/private) + organization-wide" —
+`docs/2026-08-10-symbol-set-management-implementation-plan.md:1072`).
+Every eligibility check — `symbol_set_service.replace_items`/`list_items`/
+`copy_set` and this module's `_set_entries`/`_organization_wide_entries` —
+routes through `symbol_eligibility.current_symbol_revisions`/
+`eligible_organization_private_symbols`, which always scope the private
+half to the caller's own `organization_id`; a private symbol can never
+become eligible for any other organization's Symbol Set or palette. An
+`organization_wide=true` governed symbol is always
+`visibility='organization_private'` scoped to exactly one
 `owner_organization_id` (enforced by the `organization_wide_scope` CHECK
 constraint and the `trg_governed_symbols_organization_wide_eligibility`
 deferred trigger — see WP5.1/5.4). `GovernedSymbol.visibility` is never
-reassigned after creation anywhere in this codebase, so the two halves of
-the union are disjoint by construction: a symbol cannot flow from one
-source into the other. The de-duplication step below is still applied,
-per the spec's explicit "duplicate union paths" requirement, as a
-defensive invariant rather than a currently reachable case.
+reassigned after creation anywhere in this codebase, so a symbol can never
+move between the public and private halves. The de-duplication step below
+is still applied, per the spec's explicit "duplicate union paths"
+requirement, as a defensive invariant rather than a currently reachable
+case (a private symbol can appear via `_set_entries` and, if also
+organization-wide, via `_organization_wide_entries`, so it is reachable
+here specifically for that one case).
 """
 
 from __future__ import annotations
@@ -46,6 +58,8 @@ from .models import GovernedSymbol, SymbolSet, SymbolSetItem
 from .project_service import get_project, normalize_code
 from .public_symbol_eligibility import current_public_symbols
 from .symbol_context_service import _eligible_set, _resolved_set, symbol_set_summary
+from .symbol_eligibility import current_symbol_revisions, eligible_organization_private_symbols
+from .symbol_identity import governed_symbol_human_readable_id
 
 ORGANIZATION_WIDE_GROUP = "Organization-wide"
 
@@ -65,7 +79,13 @@ def _explicit_set(session: Session, principal, project, set_code: str):
     return symbol_set
 
 
-def _set_entries(session: Session, symbol_set: SymbolSet | None) -> list[dict]:
+def _set_entries(
+    session: Session,
+    symbol_set: SymbolSet | None,
+    organization_id: uuid.UUID,
+    *,
+    organization_symbols_enabled: bool,
+) -> list[dict]:
     if symbol_set is None:
         return []
     rows = session.query(SymbolSetItem, GovernedSymbol).join(
@@ -73,7 +93,13 @@ def _set_entries(session: Session, symbol_set: SymbolSet | None) -> list[dict]:
     ).filter(
         SymbolSetItem.symbol_set_id == symbol_set.id,
     ).order_by(SymbolSetItem.sort_order, SymbolSetItem.governed_symbol_id).all()
-    eligible = current_public_symbols(session, [item.governed_symbol_id for item, _ in rows])
+    eligible = current_symbol_revisions(
+        session,
+        [item.governed_symbol_id for item, _ in rows],
+        organization_id,
+        organization_symbols_enabled=organization_symbols_enabled,
+        public_resolver=current_public_symbols,
+    )
     entries = []
     for item, governed in rows:
         if item.governed_symbol_id not in eligible:
@@ -84,6 +110,8 @@ def _set_entries(session: Session, symbol_set: SymbolSet | None) -> list[dict]:
             continue
         entries.append({
             "governedSymbolId": item.governed_symbol_id,
+            "catalogSymbolId": governed.catalog_symbol_id,
+            "displayId": governed_symbol_human_readable_id(session, governed),
             "source": "set",
             "canonicalName": governed.canonical_name,
             "category": governed.category,
@@ -100,15 +128,27 @@ def _set_entries(session: Session, symbol_set: SymbolSet | None) -> list[dict]:
 
 
 def _organization_wide_entries(session: Session, organization_id: uuid.UUID, *, start_sort_order: int) -> list[dict]:
-    rows = session.query(GovernedSymbol).filter(
+    candidate_ids = [symbol_id for symbol_id, in session.query(
+        GovernedSymbol.id,
+    ).filter(
         GovernedSymbol.owner_organization_id == organization_id,
         GovernedSymbol.visibility == "organization_private",
         GovernedSymbol.organization_wide.is_(True),
-    ).order_by(GovernedSymbol.canonical_name, GovernedSymbol.id).all()
+    ).order_by(GovernedSymbol.canonical_name, GovernedSymbol.id).all()]
+    if not candidate_ids:
+        return []
+    rows = eligible_organization_private_symbols(
+        session,
+        organization_id,
+        symbol_ids=candidate_ids,
+        organization_wide=True,
+    )
     entries = []
     for offset, governed in enumerate(rows):
         entries.append({
             "governedSymbolId": governed.id,
+            "catalogSymbolId": governed.catalog_symbol_id,
+            "displayId": governed_symbol_human_readable_id(session, governed),
             "source": "organization_wide",
             "canonicalName": governed.canonical_name,
             "category": governed.category,
@@ -147,9 +187,13 @@ def effective_palette(
         # /org/me/symbol-context`.
         symbol_set, reason = _resolved_set(session, principal, project)
 
-    entries = _set_entries(session, symbol_set)
+    organization_symbols_enabled = bool(getattr(settings, "organization_symbols_enabled", False))
+    entries = _set_entries(
+        session, symbol_set, principal.organization.id,
+        organization_symbols_enabled=organization_symbols_enabled,
+    )
 
-    if settings.organization_symbols_enabled:
+    if organization_symbols_enabled:
         seen_ids = {entry["governedSymbolId"] for entry in entries}
         next_sort_order = max((entry["sortOrder"] for entry in entries), default=-1) + 1
         for entry in _organization_wide_entries(session, principal.organization.id, start_sort_order=next_sort_order):

@@ -51,7 +51,7 @@ from symgov_backend.effective_palette import effective_palette  # noqa: E402
 from symgov_backend.organization_symbol_drafts import create_draft, submit_for_review  # noqa: E402
 from symgov_backend.organization_symbol_review import OrganizationSymbolReviewError, decide_submission, set_organization_wide  # noqa: E402
 from symgov_backend.symbol_set_builder import search_symbol_set_builder  # noqa: E402
-from symgov_backend.symbol_set_service import replace_items  # noqa: E402
+from symgov_backend.symbol_set_service import items_etag, replace_items  # noqa: E402
 
 
 def _published_public_symbol(engine, canonical_name: str) -> uuid.UUID:
@@ -209,12 +209,13 @@ def test_effective_palette_includes_the_owning_organizations_own_organization_wi
     assert result["items"][0]["source"] == "organization_wide"
 
 
-def test_a_cross_organization_private_symbol_cannot_become_a_symbol_set_item(two_organizations):
-    """Structural claim in `effective_palette.py`'s module docstring,
-    proven directly: a `SymbolSetItem` can only ever reference a
-    `visibility='public'` governed symbol, so the set-sourced half of the
-    palette union can never carry an organization-private symbol from
-    any organization, including its own."""
+def test_same_organization_approved_private_symbol_can_become_a_set_item_and_palette_entry(two_organizations):
+    """Stage 11 WP11.1: Chris decided to loosen Stage 6's public-only
+    `SymbolSetItem` restriction so a same-organization approved private
+    symbol can become a direct set item, matching the original
+    programme-plan wording ("eligible active-set items (public/private) +
+    organization-wide"). Cross-organization access must remain blocked --
+    see the companion test below."""
     fixtures = two_organizations
     actor_a = _actor(fixtures.user_a, fixtures.org_a, base_role="admin", capabilities=("contributor", "symbol_reviewer"))
     symbol_id = _organization_wide_symbol(fixtures.engine, actor_a)
@@ -225,6 +226,39 @@ def test_a_cross_organization_private_symbol_cannot_become_a_symbol_set_item(two
 
     request_a = _bound_session_request(fixtures.engine, fixtures.user_a, fixtures.org_a)
     SessionLocal = sessionmaker(bind=fixtures.engine, autoflush=False, expire_on_commit=False)
+    with SessionLocal.begin() as session:
+        current_etag = items_etag(session, set_id)
+    with SessionLocal.begin() as session:
+        replace_items(
+            session, request_a, fixtures.settings, set_id,
+            SimpleNamespace(items=[SimpleNamespace(
+                governedSymbolId=symbol_id, sortOrder=0, groupName=None, displayLabel=None,
+                notes=None, preferredFormat=None, provenance={},
+            )], etag=current_etag),
+        )
+        _, result = effective_palette(session, request_a, fixtures.settings, fixtures.project_a, page=1, page_size=50)
+
+    assert result["total"] == 1
+    assert result["items"][0]["governedSymbolId"] == symbol_id
+    assert result["items"][0]["source"] == "set"
+
+
+def test_cross_organization_private_symbol_cannot_become_a_symbol_set_item(two_organizations):
+    """Companion to the same-organization test above: the loosening must
+    never widen beyond the caller's own organization. Org A's set can
+    never carry Org B's approved private symbol as a direct item."""
+    fixtures = two_organizations
+    actor_b = _actor(fixtures.user_b, fixtures.org_b, base_role="admin", capabilities=("contributor", "symbol_reviewer"))
+    symbol_id = _organization_wide_symbol(fixtures.engine, actor_b)
+
+    with fixtures.engine.begin() as connection:
+        set_id = _symbol_set(connection, fixtures.org_a, fixtures.user_a, "SET-A")
+        _availability(connection, fixtures.project_a, set_id, fixtures.user_a, default=True)
+
+    request_a = _bound_session_request(fixtures.engine, fixtures.user_a, fixtures.org_a)
+    SessionLocal = sessionmaker(bind=fixtures.engine, autoflush=False, expire_on_commit=False)
+    with SessionLocal.begin() as session:
+        current_etag = items_etag(session, set_id)
     with pytest.raises(Exception) as caught:
         with SessionLocal.begin() as session:
             replace_items(
@@ -232,7 +266,7 @@ def test_a_cross_organization_private_symbol_cannot_become_a_symbol_set_item(two
                 SimpleNamespace(items=[SimpleNamespace(
                     governedSymbolId=symbol_id, sortOrder=0, groupName=None, displayLabel=None,
                     notes=None, preferredFormat=None, provenance={},
-                )]),
+                )], etag=current_etag),
             )
     assert "eligible" in str(caught.value).lower() or getattr(caught.value, "status_code", None) == 409
 

@@ -638,21 +638,30 @@ export async function listSymbolSetItems(setId, { page = 1, pageSize = 200 } = {
     items: Array.isArray(payload?.items) ? payload.items : [],
     page: Number(payload?.page || page),
     pageSize: Number(payload?.pageSize || pageSize),
-    total: Number(payload?.total || 0)
+    total: Number(payload?.total || 0),
+    etag: typeof payload?.etag === 'string' ? payload.etag : ''
   };
 }
 
-export async function replaceSymbolSetItems(setId, items) {
+export async function replaceSymbolSetItems(setId, items, etag = '') {
   const result = await requestJson(`/org/me/symbol-sets/${encodeURIComponent(setId)}/items`, {
     method: 'PUT',
-    body: JSON.stringify({ items })
+    headers: etag ? { 'If-Match': etag } : undefined,
+    body: JSON.stringify({ items, ...(etag ? { etag } : {}) })
   });
-  return requireOk(result, 'Symbol Set items update failed.');
+  return requireOkWithStatus(result, 'Symbol Set items update failed.');
 }
 
-export async function searchSymbolSetBuilder({ q = '', page = 1, pageSize = 50 } = {}) {
+export async function searchSymbolSetBuilder({
+  q = '',
+  category = '',
+  discipline = '',
+  format = '',
+  page = 1,
+  pageSize = 50
+} = {}) {
   const result = await requestJson(
-    withQuery('/org/me/symbol-sets/builder-search', { q, page, pageSize }),
+    withQuery('/org/me/symbol-sets/builder-search', { q, category, discipline, format, page, pageSize }),
     { cache: 'no-store' }
   );
   const payload = requireOk(result, 'Symbol Set Builder search failed.');

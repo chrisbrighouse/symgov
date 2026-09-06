@@ -75,7 +75,7 @@ describe('SymbolSetBuilderPanel', () => {
     await act(async () => renderer.unmount());
   });
 
-  it('search results distinguish public (addable) from organization (not addable) sources', async () => {
+  it('search results allow adding both public and approved organization symbols directly', async () => {
     const api = buildApi({
       searchResults: [
         { governedSymbolId: 'sym-public', source: 'public', canonicalName: 'Public Beacon', category: 'fire', discipline: 'fire-safety', slug: 'public-beacon', organizationWide: null, currentRevisionId: 'rev-2' },
@@ -85,7 +85,6 @@ describe('SymbolSetBuilderPanel', () => {
     let renderer;
     await act(async () => { renderer = create(createElement(SymbolSetBuilderPanel, { isAdmin: true, api })); });
     await act(async () => { renderer.root.findByProps({ 'aria-label': 'Search symbols to add to this Symbol Set' }).props.onChange({ target: { value: 'beacon' } }); });
-    await act(async () => { renderer.root.findByProps({ type: 'submit' }).props.onClick?.(); });
     // Submit via the form's onSubmit handler directly since react-test-renderer has no real DOM submit event.
     const form = renderer.root.findByProps({ className: 'field search-field' });
     await act(async () => { await form.props.onSubmit({ preventDefault: () => {} }); });
@@ -93,8 +92,48 @@ describe('SymbolSetBuilderPanel', () => {
     const publicCheckbox = renderer.root.findByProps({ 'aria-label': 'Select Public Beacon' });
     const orgCheckbox = renderer.root.findByProps({ 'aria-label': 'Select Org Symbol' });
     assert.equal(publicCheckbox.props.disabled, false);
-    assert.equal(orgCheckbox.props.disabled, true);
-    assert.match(JSON.stringify(renderer.toJSON()), /Toggle organization-wide instead of adding to a set/);
+    assert.equal(orgCheckbox.props.disabled, false);
+    assert.match(JSON.stringify(renderer.toJSON()), /Approved organization symbol/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('adds a selected approved organization search result to the set directly (Stage 11 loosening)', async () => {
+    const api = buildApi({
+      items: [baseItem()],
+      searchResults: [
+        { governedSymbolId: 'sym-org', source: 'organization', canonicalName: 'Org Symbol', category: 'fire', discipline: 'fire-safety', slug: 'org-symbol', displayId: 'ABCD-9', organizationWide: false, currentRevisionId: 'rev-3' },
+      ],
+    });
+    let renderer;
+    await act(async () => { renderer = create(createElement(SymbolSetBuilderPanel, { isAdmin: true, api })); });
+    const form = renderer.root.findByProps({ className: 'field search-field' });
+    await act(async () => { await form.props.onSubmit({ preventDefault: () => {} }); });
+
+    await act(async () => { renderer.root.findByProps({ 'aria-label': 'Select Org Symbol' }).props.onChange(); });
+    await act(async () => { renderer.root.findByProps({ 'aria-label': 'Add selected symbols to this Symbol Set' }).props.onClick(); });
+    assert.match(JSON.stringify(renderer.toJSON()), /Org Symbol/);
+    assert.match(JSON.stringify(renderer.toJSON()), /ABCD-9/);
+
+    await act(async () => { renderer.root.findByProps({ 'aria-label': 'Save Symbol Set changes' }).props.onClick(); });
+    const [, , payload] = api.calls.find((call) => call[0] === 'replace');
+    assert.deepEqual(payload.map((entry) => entry.governedSymbolId), ['sym-existing', 'sym-org']);
+    await act(async () => renderer.unmount());
+  });
+
+  it('search sends the category/discipline/format filters entered by the user', async () => {
+    const api = buildApi({ searchResults: [] });
+    let renderer;
+    await act(async () => { renderer = create(createElement(SymbolSetBuilderPanel, { isAdmin: true, api })); });
+    await act(async () => { renderer.root.findByProps({ id: 'symbol-set-builder-category-filter' }).props.onChange({ target: { value: 'fire detection' } }); });
+    await act(async () => { renderer.root.findByProps({ id: 'symbol-set-builder-discipline-filter' }).props.onChange({ target: { value: 'life safety' } }); });
+    await act(async () => { renderer.root.findByProps({ id: 'symbol-set-builder-format-filter' }).props.onChange({ target: { value: 'svg' } }); });
+    const form = renderer.root.findByProps({ className: 'field search-field' });
+    await act(async () => { await form.props.onSubmit({ preventDefault: () => {} }); });
+
+    const [, params] = api.calls.find((call) => call[0] === 'search');
+    assert.equal(params.category, 'fire detection');
+    assert.equal(params.discipline, 'life safety');
+    assert.equal(params.format, 'svg');
     await act(async () => renderer.unmount());
   });
 

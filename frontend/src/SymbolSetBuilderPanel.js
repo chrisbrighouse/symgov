@@ -37,6 +37,10 @@ function toInput(item) {
   };
 }
 
+function symbolDisplayId(item) {
+  return item.displayId || item.catalogSymbolId || item.slug || '';
+}
+
 function reindexed(items) {
   return items.map((item, index) => ({ ...item, sortOrder: index }));
 }
@@ -60,9 +64,13 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
   const [selectedSetId, setSelectedSetId] = useState('');
   const [itemsLoading, setItemsLoading] = useState(false);
   const [savedItems, setSavedItems] = useState([]);
+  const [savedEtag, setSavedEtag] = useState('');
   const [items, setItems] = useState([]);
 
   const [query, setQuery] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [disciplineFilter, setDisciplineFilter] = useState('');
+  const [formatFilter, setFormatFilter] = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -90,6 +98,7 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
   const loadItems = useCallback(async (setId) => {
     if (!setId) {
       setSavedItems([]);
+      setSavedEtag('');
       setItems([]);
       return;
     }
@@ -99,6 +108,7 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
       const next = await api.listItems(setId, { page: 1, pageSize: 1000 });
       const loaded = (next?.items || []).map((item) => ({ ...item }));
       setSavedItems(loaded);
+      setSavedEtag(next?.etag || '');
       setItems(loaded);
     } catch (err) {
       setStatus({ mode: 'error', message: err.message || 'Symbol Set items unavailable.' });
@@ -118,7 +128,14 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
     setSearchLoading(true);
     setSearchError('');
     try {
-      const next = await api.search({ q: query.trim(), page: 1, pageSize: 100 });
+      const next = await api.search({
+        q: query.trim(),
+        category: categoryFilter.trim(),
+        discipline: disciplineFilter.trim(),
+        format: formatFilter.trim(),
+        page: 1,
+        pageSize: 100,
+      });
       setSearchResults(next?.items || []);
     } catch (err) {
       setSearchError(err.message || 'Symbol Set Builder search failed.');
@@ -135,7 +152,8 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
 
   function addSelectedToSet() {
     const toAdd = searchResults.filter((entry) => (
-      entry.source === 'public' && selectedSearchIds[entry.governedSymbolId] && !presentIds.has(entry.governedSymbolId)
+      (entry.source === 'public' || entry.source === 'organization')
+      && selectedSearchIds[entry.governedSymbolId] && !presentIds.has(entry.governedSymbolId)
     ));
     if (toAdd.length === 0) return;
     setItems((current) => reindexed([
@@ -148,10 +166,14 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
         notes: null,
         preferredFormat: null,
         provenance: {},
+        catalogSymbolId: entry.catalogSymbolId || null,
+        displayId: entry.displayId || entry.catalogSymbolId || null,
         canonicalName: entry.canonicalName,
         category: entry.category,
         discipline: entry.discipline,
         slug: entry.slug,
+        source: entry.source,
+        organizationWide: entry.organizationWide,
         availabilityStatus: 'active',
       })),
     ]));
@@ -206,11 +228,14 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
     setSaving(true);
     setStatus({ mode: '', message: '' });
     try {
-      await api.replaceItems(selectedSetId, items.map(toInput));
+      await api.replaceItems(selectedSetId, items.map(toInput), savedEtag);
       setStatus({ mode: 'success', message: 'Symbol Set items saved.' });
       await loadItems(selectedSetId);
     } catch (err) {
       setStatus({ mode: 'error', message: err.message || 'Symbol Set items save failed.' });
+      if (err.status === 409 || err.status === 428) {
+        await loadItems(selectedSetId);
+      }
     } finally {
       setSaving(false);
     }
@@ -272,6 +297,32 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
             }),
             createElement('button', { type: 'submit', disabled: searchLoading }, searchLoading ? 'Searching…' : 'Search'),
           ),
+          createElement('div', { className: 'symbol-set-builder-filters', 'aria-label': 'Symbol Set Builder filters' },
+            createElement('label', { htmlFor: 'symbol-set-builder-category-filter' },
+              'Category',
+              createElement('input', {
+                id: 'symbol-set-builder-category-filter',
+                value: categoryFilter,
+                onChange: (event) => setCategoryFilter(event.target.value),
+              }),
+            ),
+            createElement('label', { htmlFor: 'symbol-set-builder-discipline-filter' },
+              'Discipline',
+              createElement('input', {
+                id: 'symbol-set-builder-discipline-filter',
+                value: disciplineFilter,
+                onChange: (event) => setDisciplineFilter(event.target.value),
+              }),
+            ),
+            createElement('label', { htmlFor: 'symbol-set-builder-format-filter' },
+              'Format',
+              createElement('input', {
+                id: 'symbol-set-builder-format-filter',
+                value: formatFilter,
+                onChange: (event) => setFormatFilter(event.target.value),
+              }),
+            ),
+          ),
           searchError ? createElement('p', { role: 'alert', className: 'set-admin-status error' }, searchError) : null,
           !searchLoading && !searchError && searchResults.length === 0
             ? createElement('p', { role: 'status' }, 'No matching symbols found.')
@@ -289,7 +340,7 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
               createElement('ul', { className: 'set-admin-list', 'aria-label': 'Symbol Set Builder search results' },
                 searchResults.map((entry) => {
                   const alreadyPresent = presentIds.has(entry.governedSymbolId);
-                  const addable = entry.source === 'public' && !alreadyPresent;
+                  const addable = (entry.source === 'public' || entry.source === 'organization') && !alreadyPresent;
                   return createElement('li', { key: entry.governedSymbolId, className: 'set-admin-item' },
                     createElement('label', null,
                       createElement('input', {
@@ -299,13 +350,13 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
                         onChange: () => toggleSearchSelection(entry.governedSymbolId),
                         'aria-label': `Select ${entry.canonicalName}`,
                       }),
-                      createElement('strong', null, ` ${entry.canonicalName} · ${entry.slug}`),
+                      createElement('strong', null, ` ${entry.canonicalName} · ${symbolDisplayId(entry)}`),
                       createElement(SourceBadge, { source: entry.source, organizationWide: entry.organizationWide }),
                     ),
                     createElement('p', { className: 'set-admin-muted' },
                       `Category: ${entry.category} · Discipline: ${entry.discipline}`
                       + (alreadyPresent ? ' · Already in this set' : '')
-                      + (entry.source === 'organization' ? ' · Toggle organization-wide instead of adding to a set' : '')),
+                      + (entry.source === 'organization' ? ' · Approved organization symbol' : '')),
                   );
                 }),
               ),
@@ -340,8 +391,8 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
             createElement(
               'div',
               null,
-              createElement('strong', null, `${item.canonicalName || item.governedSymbolId} · ${item.slug || ''}`),
-              createElement(SourceBadge, { source: 'public' }),
+              createElement('strong', null, `${item.canonicalName || item.governedSymbolId} · ${symbolDisplayId(item)}`),
+              createElement(SourceBadge, { source: item.source || 'public', organizationWide: item.organizationWide }),
               item.availabilityStatus === 'unavailable'
                 ? createElement('span', { className: 'symbol-set-builder-badge unavailable' }, 'Unavailable')
                 : null,
