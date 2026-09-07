@@ -144,6 +144,8 @@ Produce the 10-step rollout plan as a reviewable document (backup/restore verifi
 
 **Decided (2026-09-06): pilot-expansion targets/timing beyond the mandatory `symgov`-only first step stay intentionally open** — this is the furthest-downstream decision in the whole stage, and depends on every earlier work package being green first. Draft this package with the mandatory `symgov`-only pilot step fully specified, and explicitly mark "which organization(s) next, and when" as pending Chris's recorded go/no-go at the time WP11.8 is actually executed — do not invent a placeholder org or date.
 
+**Done (2026-09-07, drafted only — nothing executed).** Full document: `docs/plans/2026-09-06-stage11-wp11.8-rollout-plan.md`. All 10 steps drafted concretely against this repository's actual specifics (Alembic head `20260905_0044`, the real flag env-var names and pilot-allowlist mechanism `SYMGOV_ORGANIZATION_PILOT_CODES`, the real bootstrap CLI invocation — confirmed working, `python3 -m symgov_backend.management bootstrap-symgov-organization[--apply]` — the real smoke-test route list, and the real DB-level visibility-floor downgrade guard cited from WP11.7's own evidence). Step 7 (expansion beyond `symgov`) is explicitly left open per the standing decision above, not resolved.
+
 ### WP11.9 — final acceptance checklist walkthrough
 
 Walk the 20-item checklist (programme plan lines 1035–1060) against the WP11.1–WP11.8 evidence, item by item, with evidence citations — not a bare checkbox. Flag any item that cannot be closed with real evidence rather than marking it done.
