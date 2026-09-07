@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 from unittest.mock import Mock
-from urllib.request import Request
+from urllib.request import ProxyHandler, Request
 
 import pytest
 import symgov_backend.services.llm_telemetry as telemetry
@@ -28,6 +28,14 @@ class Response:
     def read(self, size):
         self.read_sizes.append(size)
         return b'{}'
+
+
+def test_ingestion_opener_ignores_ambient_proxy_configuration():
+    proxy_handlers = [
+        handler for handler in telemetry._NO_REDIRECT_OPENER.handlers
+        if isinstance(handler, ProxyHandler)
+    ]
+    assert all(getattr(handler, "proxies", None) == {} for handler in proxy_handlers)
 
 
 def configured_env(monkeypatch):
@@ -128,6 +136,13 @@ def test_basic_auth_transport_rejects_non_https_and_hostname_loopback_aliases(en
 )
 def test_isolated_poc_allows_only_exact_loopback_ip_http(endpoint):
     assert _direct_config(endpoint=endpoint).endpoint == endpoint
+
+
+def test_production_transport_allows_only_the_exact_internal_langfuse_endpoint():
+    endpoint = "http://symgov-langfuse:3000/api/public/ingestion"
+    assert _direct_config(endpoint=endpoint).endpoint == endpoint
+    with pytest.raises(ValueError, match="endpoint|configuration"):
+        _direct_config(endpoint="http://langfuse-poc-langfuse-web-1:3000/api/public/ingestion")
 
 
 @pytest.mark.parametrize(

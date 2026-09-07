@@ -50,6 +50,16 @@ def _login_hash_secret() -> str:
     return ""
 
 
+RUNTIME_ENVIRONMENTS = frozenset({"development", "test", "staging", "production"})
+
+
+def runtime_environment() -> str:
+    value = os.environ.get("SYMGOV_ENV", "")
+    if value not in RUNTIME_ENVIRONMENTS:
+        raise RuntimeError("SYMGOV_ENV must be one of the approved runtime environments")
+    return value
+
+
 def _read_env_value(path: Path, key: str) -> str:
     if not path.exists():
         return ""
