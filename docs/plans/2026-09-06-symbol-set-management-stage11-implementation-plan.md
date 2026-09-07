@@ -158,6 +158,8 @@ Walk the 20-item checklist (programme plan lines 1035–1060) against the WP11.1
 
 Scoped now, executed at actual closeout, mirroring the Stage 9 (WP9.9) and Stage 10 format: independently re-run the full regression suite, a Contract Review against every acceptance criterion, a Security Review, and an explicit list of anything still deliberately deferred beyond Stage 11 (distinct from anything accidentally missed).
 
+**Done (2026-09-07).** Full audit: `docs/plans/2026-09-06-stage11-wp11.10-closing-audit.md`. Final independent regression re-run: backend portable 2298 passed / 6 pre-existing unrelated failures / 808.53s, external-workspace all clean, frontend 250 passed, build/compile-gate/secret-scan/diff-check/Langfuse all clean. Contract Review walks all of AC-01–AC-24 against Stage 1-11 evidence; Security Review is WP11.6's own independent adversarial review (not re-run — no application code changed after it). Deferred-vs-missed list consolidated: all pre-existing Stage 1-10 deferrals reconfirmed as intentional; the three evidence-integrity defects WP11.6 caught and the Langfuse-gate gap WP11.9 found were fixed during the stage, not left open. **Stage 11 is complete: production-ready source and a drafted (not executed) rollout package, nothing pushed to `origin/main`, no production action taken.**
+
 ## 3. Test-artifact inventory (expected, not exhaustive — confirm against actual code during each package)
 
 - WP11.1: updates to `tests/test_symbol_set_tenant_isolation.py`, `tests/test_symbol_set_items.py`, `tests/test_symbol_set_builder_api.py`, `tests/test_effective_palette.py`; new/updated `frontend/src/symbolSetApi.test.js`, `effectivePalette.test.js`, `symbolSetBuilder.test.js`.
