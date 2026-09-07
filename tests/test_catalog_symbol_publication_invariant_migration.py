@@ -29,7 +29,7 @@ def test_0031_is_linear_after_live_0030_head_and_preflights_existing_publication
     assert MIGRATION.exists()
     source = MIGRATION.read_text(encoding="utf-8")
     assert re.search(r'revision(?:\s*:\s*str)?\s*=\s*"20260826_0031"', source)
-    assert re.search(r'down_revision(?:\s*:\s*[^=]+)?\s*=\s*"20260822_0030"', source)
+    assert re.search(r'down_revision(?:\s*:\s*[^=]+)?\s*=\s*"20260823_0030a"', source)
     compact = _compact(source)
     assert "catalog publication invariant preflight failed" in compact
     assert "sr.lifecycle_state = 'published'" in compact
