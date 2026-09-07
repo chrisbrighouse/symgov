@@ -32,7 +32,7 @@ def test_0026_adds_catalog_symbol_identifier_storage_contract():
     migration = MIGRATION.read_text(encoding="utf-8")
 
     assert re.search(r'revision(?:\s*:\s*str)?\s*=\s*"20260802_0026"', migration)
-    assert re.search(r'down_revision(?:\s*:\s*[^=]+)?\s*=\s*"20260730_0025"', migration)
+    assert re.search(r'down_revision(?:\s*:\s*[^=]+)?\s*=\s*"20260801_0026"', migration)
     _assert_fragments(
         migration,
         'op.create_table( "catalog_symbol_identifiers"',
