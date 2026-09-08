@@ -38,23 +38,57 @@ function buildApi({ sets = [baseSet()], items = [], searchResults = [] } = {}) {
   return {
     calls,
     listSymbolSets: async () => ({ items: sets }),
-    listItems: async () => ({ items: currentItems, page: 1, pageSize: 1000, total: currentItems.length }),
+    listItems: async () => ({ items: currentItems, page: 1, pageSize: 200, total: currentItems.length }),
     search: async (params) => {
       calls.push(['search', params]);
       return { items: searchResults, page: 1, pageSize: 100, total: searchResults.length };
     },
-    replaceItems: async (setId, payload) => {
-      calls.push(['replace', setId, payload]);
+    replaceItems: async (setId, payload, etag) => {
+      calls.push(['replace', setId, payload, etag]);
       currentItems = payload.map((entry, index) => ({
         ...baseItem({ ...entry, sortOrder: index }),
         governedSymbolId: entry.governedSymbolId,
       }));
-      return { items: currentItems, page: 1, pageSize: 1000, total: currentItems.length };
+      return { items: currentItems, page: 1, pageSize: 200, total: currentItems.length };
     },
   };
 }
 
 describe('SymbolSetBuilderPanel', () => {
+  it('pages through every item at the route maximum and keeps the last ETag', async () => {
+    // The items route caps pageSize at 200 (routes/symbol_sets.py:21). This
+    // mock enforces that cap the way the server does, so asking for more
+    // fails here exactly as it did in production.
+    const all = Array.from({ length: 250 }, (_, index) => baseItem({
+      id: `item-${index}`, governedSymbolId: `sym-${index}`, sortOrder: index,
+    }));
+    const requested = [];
+    const api = buildApi();
+    api.listItems = async (setId, { page = 1, pageSize = 200 } = {}) => {
+      if (pageSize > 200) throw new Error('Symbol Set items load failed.');
+      requested.push([page, pageSize]);
+      const start = (page - 1) * pageSize;
+      return {
+        items: all.slice(start, start + pageSize),
+        page, pageSize, total: all.length,
+        etag: `etag-page-${page}`,
+      };
+    };
+    let renderer;
+    await act(async () => { renderer = create(createElement(SymbolSetBuilderPanel, { isAdmin: true, api })); });
+
+    assert.deepEqual(requested, [[1, 200], [2, 200]]);
+
+    // Saving must send the ETag from the final page; without one the server
+    // rejects the write with 428 and nothing persists.
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Save Symbol Set changes' }).props.onClick());
+    const replace = api.calls.find((entry) => entry[0] === 'replace');
+    assert.ok(replace, 'expected a save call');
+    assert.equal(replace[3], 'etag-page-2');
+    assert.equal(replace[2].length, 250, 'every loaded item must be saved back');
+    await act(async () => renderer.unmount());
+  });
+
   it('requires Organization Admin privileges', async () => {
     const api = buildApi();
     let renderer;

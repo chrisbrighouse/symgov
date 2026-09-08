@@ -7,6 +7,9 @@ import {
   searchSymbolSetBuilder,
 } from './api.js';
 
+// The maximum the items route accepts (routes/symbol_sets.py:21, le=200).
+export const ITEMS_PAGE_SIZE = 200;
+
 const DEFAULT_API = {
   listSymbolSets: listOrganizationSymbolSets,
   listItems: listSymbolSetItems,
@@ -105,10 +108,25 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
     setItemsLoading(true);
     setStatus({ mode: '', message: '' });
     try {
-      const next = await api.listItems(setId, { page: 1, pageSize: 1000 });
-      const loaded = (next?.items || []).map((item) => ({ ...item }));
+      // Page through at the route's own maximum (pageSize is capped at 200 by
+      // routes/symbol_sets.py:21 -- asking for more is a 422, which used to
+      // leave the panel with no ETag and every save rejected with 428).
+      // Every item must be loaded before saving: PUT replaces the whole list,
+      // so saving a partial load would delete the items that were never read.
+      const loaded = [];
+      let etag = '';
+      let page = 1;
+      for (;;) {
+        const next = await api.listItems(setId, { page, pageSize: ITEMS_PAGE_SIZE });
+        const batch = (next?.items || []).map((item) => ({ ...item }));
+        loaded.push(...batch);
+        etag = next?.etag || '';
+        const total = Number(next?.total || 0);
+        if (batch.length === 0 || loaded.length >= total) break;
+        page += 1;
+      }
       setSavedItems(loaded);
-      setSavedEtag(next?.etag || '');
+      setSavedEtag(etag);
       setItems(loaded);
     } catch (err) {
       setStatus({ mode: 'error', message: err.message || 'Symbol Set items unavailable.' });
