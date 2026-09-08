@@ -112,6 +112,21 @@ export function OrganizationSymbolSetsPanel({ isAdmin, api = DEFAULT_API, onCont
     }
   }
 
+  async function activateSet(setRow) {
+    setSaving(true);
+    setStatus({ mode: '', message: '' });
+    try {
+      await api.updateSymbolSet(setRow.id, { status: 'active' });
+      await refresh();
+      setStatus({ mode: 'success', message: `Symbol Set ${setRow.code} activated.` });
+      if (typeof onContextChanged === 'function') onContextChanged();
+    } catch (err) {
+      setStatus({ mode: 'error', message: err.message || 'Symbol Set activation failed.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function archiveSet(setRow) {
     setSaving(true);
     setStatus({ mode: '', message: '' });
@@ -194,6 +209,19 @@ export function OrganizationSymbolSetsPanel({ isAdmin, api = DEFAULT_API, onCont
         ),
         isAdmin
           ? createElement('div', { className: 'set-admin-actions' },
+            // Sets are created as drafts (symbol_set_service.create_set), and
+            // draft is the only status the API lets become active
+            // (TRANSITIONS, symbol_set_service.py). A draft cannot be made the
+            // Organization default or offered to a Project, so this is the
+            // step that unblocks the rest of the panel.
+            setRow.status === 'draft'
+              ? createElement('button', {
+                type: 'button',
+                disabled: saving,
+                onClick: () => { activateSet(setRow); },
+                'aria-label': `Activate Symbol Set ${setRow.code}`,
+              }, 'Activate')
+              : null,
             createElement('button', {
               type: 'button',
               onClick: () => openEdit(setRow),

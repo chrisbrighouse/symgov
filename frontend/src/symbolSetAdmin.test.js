@@ -90,6 +90,33 @@ describe('mounted Stage 4 administration panels', () => {
     await act(async () => renderer.unmount());
   });
 
+  it('offers Activate only for draft Symbol Sets, the one transition that unblocks default and Project availability', async () => {
+    const api = setsApi();
+    // Sets are created as drafts, and draft -> active is the only route to
+    // active; a draft cannot be made default or offered to a Project.
+    api.listSymbolSets = async () => ({
+      items: [{ id: 's-9', code: 'SET-09', name: 'Draft set', description: null, disciplines: [], useCases: [], status: 'draft' }],
+      page: 1, pageSize: 50, total: 1,
+    });
+    let refreshes = 0;
+    let renderer;
+    await act(async () => { renderer = create(createElement(OrganizationSymbolSetsPanel, { isAdmin: true, api, onContextChanged() { refreshes += 1; } })); });
+
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Activate Symbol Set SET-09' }).props.onClick());
+    assert.deepEqual(api.calls[0], ['update', 's-9', { status: 'active' }]);
+    assert.equal(refreshes, 1);
+    await act(async () => renderer.unmount());
+  });
+
+  it('hides Activate once a Symbol Set is already active', async () => {
+    const api = setsApi();
+    let renderer;
+    await act(async () => { renderer = create(createElement(OrganizationSymbolSetsPanel, { isAdmin: true, api })); });
+    assert.equal(renderer.root.findAllByProps({ 'aria-label': 'Activate Symbol Set SET-01' }).length, 0);
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Archive Symbol Set SET-01' }));
+    await act(async () => renderer.unmount());
+  });
+
   it('renders empty, error, retry and archived refresh states accessibly', async () => {
     let attempt = 0;
     const api = {
