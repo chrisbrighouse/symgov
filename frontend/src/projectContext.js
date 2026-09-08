@@ -85,11 +85,11 @@ export function contextStatusMessage(context, action = '') {
   const reason = context?.reason || 'none';
   const activeCode = context?.activeSet?.code || null;
   if (action === 'set') {
-    return activeCode ? `Symbol Set ${activeCode} selected.` : 'No Symbol Set is active.';
+    return activeCode ? `Symbol Set ${activeCode} selected.` : 'Nothing selected.';
   }
   if (action === 'clear-set') {
     if (reason === 'none' || !activeCode) {
-      return 'Symbol Set preference cleared. No Symbol Set is active.';
+      return 'Symbol Set preference cleared. Nothing selected.';
     }
     const fallback = reason === 'project_default' ? 'Project default' : reason === 'organization_default' ? 'Organization default' : 'Configured';
     return `Symbol Set preference cleared. ${fallback} ${activeCode} is active.`;
@@ -103,7 +103,7 @@ export function contextStatusMessage(context, action = '') {
   if (reason === 'organization_default' && activeCode) {
     return `Using Organization default Symbol Set ${activeCode}.`;
   }
-  return activeCode ? `Using Symbol Set ${activeCode}.` : 'No Symbol Set is active.';
+  return activeCode ? `Using Symbol Set ${activeCode}.` : 'Nothing selected.';
 }
 
 export function projectMutationPayload({ code, name, shortDescription, externalReference, metadata }, isCreate) {

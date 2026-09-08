@@ -90,6 +90,56 @@ describe('mounted Stage 4 administration panels', () => {
     await act(async () => renderer.unmount());
   });
 
+  it('links a Symbol Set to Projects, sending every kept link because PUT replaces the list', async () => {
+    const api = setsApi();
+    api.listProjects = async () => ({
+      items: [
+        { id: 'p-1', code: 'P-01', name: 'Plant', status: 'active' },
+        { id: 'p-2', code: 'P-02', name: 'Depot', status: 'active' },
+        { id: 'p-3', code: 'P-03', name: 'Closed site', status: 'closed' },
+      ],
+      page: 1, pageSize: 200, total: 3,
+    });
+    // P-02 is already linked; it must survive a save that only adds P-01.
+    api.listSetProjects = async () => ({
+      items: [{ project: { id: 'p-2', code: 'P-02', name: 'Depot' }, isDefault: false }],
+      page: 1, pageSize: 200, total: 1,
+    });
+    api.replaceSetProjects = async (setId, projects) => { api.calls.push(['set-projects', setId, projects]); return { items: [] }; };
+
+    let renderer;
+    await act(async () => { renderer = create(createElement(OrganizationSymbolSetsPanel, { isAdmin: true, api })); });
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Manage Project availability for SET-01' }).props.onClick());
+
+    // Closed Projects cannot hold a link, so they are not offered.
+    assert.equal(renderer.root.findAllByProps({ 'aria-label': 'Make SET-01 available to P-03 · Closed site' }).length, 0);
+
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Make SET-01 available to P-01 · Plant' }).props.onChange());
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Make SET-01 the default Symbol Set for P-01 · Plant' }).props.onChange());
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Save Project availability for SET-01' }).props.onClick());
+
+    const [, , projects] = api.calls.find((entry) => entry[0] === 'set-projects');
+    assert.deepEqual(projects, [
+      { projectId: 'p-1', isDefault: true },
+      { projectId: 'p-2', isDefault: false },
+    ]);
+    await act(async () => renderer.unmount());
+  });
+
+  it('does not offer Project availability for a set that is not active', async () => {
+    // replace_projects rejects non-active sets with 409, so the control that
+    // could only fail is not shown.
+    const api = setsApi();
+    api.listSymbolSets = async () => ({
+      items: [{ id: 's-9', code: 'SET-09', name: 'Draft', description: null, disciplines: [], useCases: [], status: 'draft' }],
+      page: 1, pageSize: 50, total: 1,
+    });
+    let renderer;
+    await act(async () => { renderer = create(createElement(OrganizationSymbolSetsPanel, { isAdmin: true, api })); });
+    assert.equal(renderer.root.findAllByProps({ 'aria-label': 'Manage Project availability for SET-09' }).length, 0);
+    await act(async () => renderer.unmount());
+  });
+
   it('offers Activate only for draft Symbol Sets, the one transition that unblocks default and Project availability', async () => {
     const api = setsApi();
     // Sets are created as drafts, and draft -> active is the only route to

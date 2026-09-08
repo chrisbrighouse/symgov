@@ -643,6 +643,30 @@ export async function listSymbolSetItems(setId, { page = 1, pageSize = 200 } = {
   };
 }
 
+export async function listSymbolSetProjects(setId, { page = 1, pageSize = 200 } = {}) {
+  const result = await requestJson(
+    withQuery(`/org/me/symbol-sets/${encodeURIComponent(setId)}/projects`, { page, pageSize }),
+    { cache: 'no-store' }
+  );
+  const payload = requireOk(result, 'Symbol Set Projects load failed.');
+  return {
+    items: Array.isArray(payload?.items) ? payload.items : [],
+    page: Number(payload?.page || page),
+    pageSize: Number(payload?.pageSize || pageSize),
+    total: Number(payload?.total || 0)
+  };
+}
+
+// PUT replaces the whole availability list, so callers must send every link
+// they intend to keep -- not just the one being changed.
+export async function replaceSymbolSetProjects(setId, projects) {
+  const result = await requestJson(`/org/me/symbol-sets/${encodeURIComponent(setId)}/projects`, {
+    method: 'PUT',
+    body: JSON.stringify({ projects })
+  });
+  return requireOk(result, 'Symbol Set Projects update failed.');
+}
+
 export async function replaceSymbolSetItems(setId, items, etag = '') {
   const result = await requestJson(`/org/me/symbol-sets/${encodeURIComponent(setId)}/items`, {
     method: 'PUT',

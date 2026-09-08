@@ -8,7 +8,10 @@ import {
   clearOrganizationDefaultSymbolSet,
   copyOrganizationSymbolSet,
   createOrganizationSymbolSet,
+  listOrganizationProjects,
   listOrganizationSymbolSets,
+  listSymbolSetProjects,
+  replaceSymbolSetProjects,
   setOrganizationDefaultSymbolSet,
   updateOrganizationSymbolSet,
 } from './api.js';
@@ -19,12 +22,32 @@ export function symbolSetMutationPayload(input, isCreate) {
 
 const DEFAULT_API = {
   listSymbolSets: listOrganizationSymbolSets,
+  listProjects: listOrganizationProjects,
+  listSetProjects: listSymbolSetProjects,
+  replaceSetProjects: replaceSymbolSetProjects,
   createSymbolSet: createOrganizationSymbolSet,
   updateSymbolSet: updateOrganizationSymbolSet,
   copySymbolSet: copyOrganizationSymbolSet,
   setOrganizationDefaultSymbolSet,
   clearOrganizationDefaultSymbolSet,
 };
+
+// Both listings cap pageSize at 200 (routes/projects.py, routes/symbol_sets.py).
+const PROJECTS_PAGE_SIZE = 200;
+
+async function collectPages(fetchPage) {
+  const collected = [];
+  let page = 1;
+  for (;;) {
+    const result = await fetchPage(page);
+    const batch = result?.items || [];
+    collected.push(...batch);
+    const total = Number(result?.total || 0);
+    if (batch.length === 0 || collected.length >= total) break;
+    page += 1;
+  }
+  return collected;
+}
 
 function StatusMessage({ status }) {
   if (!status?.message) return null;
@@ -49,6 +72,9 @@ export function OrganizationSymbolSetsPanel({ isAdmin, api = DEFAULT_API, onCont
   const [editingSetId, setEditingSetId] = useState('');
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
+  const [projectsSetId, setProjectsSetId] = useState('');
+  const [projectRows, setProjectRows] = useState([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -137,6 +163,70 @@ export function OrganizationSymbolSetsPanel({ isAdmin, api = DEFAULT_API, onCont
       if (typeof onContextChanged === 'function') onContextChanged();
     } catch (err) {
       setStatus({ mode: 'error', message: err.message || 'Symbol Set archive failed.' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function openProjects(setRow) {
+    if (projectsSetId === setRow.id) {
+      setProjectsSetId('');
+      return;
+    }
+    setProjectsSetId(setRow.id);
+    setProjectsLoading(true);
+    setStatus({ mode: '', message: '' });
+    try {
+      const [projects, links] = await Promise.all([
+        collectPages((page) => api.listProjects({ page, pageSize: PROJECTS_PAGE_SIZE, includeClosed: false })),
+        collectPages((page) => api.listSetProjects(setRow.id, { page, pageSize: PROJECTS_PAGE_SIZE })),
+      ]);
+      // Only active Projects can hold an availability link
+      // (symbol_set_service.replace_projects rejects the rest).
+      const linked = new Map(links.map((entry) => [entry.project.id, entry.isDefault === true]));
+      setProjectRows(projects
+        .filter((project) => project.status === 'active')
+        .map((project) => ({
+          id: project.id,
+          label: `${project.code} · ${project.name}`,
+          selected: linked.has(project.id),
+          isDefault: linked.get(project.id) === true,
+        })));
+    } catch (err) {
+      setProjectsSetId('');
+      setStatus({ mode: 'error', message: err.message || 'Project availability unavailable.' });
+    } finally {
+      setProjectsLoading(false);
+    }
+  }
+
+  function toggleProject(projectId) {
+    setProjectRows((rows) => rows.map((row) => (row.id === projectId
+      ? { ...row, selected: !row.selected, isDefault: row.selected ? false : row.isDefault }
+      : row)));
+  }
+
+  function toggleProjectDefault(projectId) {
+    setProjectRows((rows) => rows.map((row) => (row.id === projectId
+      ? { ...row, isDefault: !row.isDefault, selected: true }
+      : row)));
+  }
+
+  async function saveProjects(setRow) {
+    setSaving(true);
+    setStatus({ mode: '', message: '' });
+    try {
+      // PUT replaces the entire list, so send every link that should remain --
+      // sending only the changed row would delete the others.
+      const projects = projectRows
+        .filter((row) => row.selected)
+        .map((row) => ({ projectId: row.id, isDefault: row.isDefault === true }));
+      await api.replaceSetProjects(setRow.id, projects);
+      setProjectsSetId('');
+      setStatus({ mode: 'success', message: `Project availability updated for ${setRow.code}.` });
+      if (typeof onContextChanged === 'function') onContextChanged();
+    } catch (err) {
+      setStatus({ mode: 'error', message: err.message || 'Project availability update failed.' });
     } finally {
       setSaving(false);
     }
@@ -233,6 +323,17 @@ export function OrganizationSymbolSetsPanel({ isAdmin, api = DEFAULT_API, onCont
               onClick: () => { archiveSet(setRow); },
               'aria-label': `Archive Symbol Set ${setRow.code}`,
             }, 'Archive'),
+            // Only active sets may hold Project links or be the Organization
+            // default (symbol_set_service.py:426,536), so the controls that
+            // would 409 are not offered.
+            setRow.status === 'active'
+              ? createElement('button', {
+                type: 'button',
+                disabled: saving,
+                onClick: () => { openProjects(setRow); },
+                'aria-label': `Manage Project availability for ${setRow.code}`,
+              }, projectsSetId === setRow.id ? 'Close Projects' : 'Projects')
+              : null,
             createElement('button', {
               type: 'button',
               disabled: saving,
@@ -245,6 +346,44 @@ export function OrganizationSymbolSetsPanel({ isAdmin, api = DEFAULT_API, onCont
               onClick: () => { copySet(setRow); },
               'aria-label': `Copy Symbol Set ${setRow.code}`,
             }, 'Copy'),
+          )
+          : null,
+        isAdmin && projectsSetId === setRow.id
+          ? createElement('div', { className: 'set-admin-projects' },
+            projectsLoading ? createElement('p', { role: 'status' }, 'Loading Projects…') : null,
+            !projectsLoading && projectRows.length === 0
+              ? createElement('p', { role: 'status' }, 'No active Projects to make this Symbol Set available to.')
+              : null,
+            createElement('ul', { className: 'set-admin-project-list' },
+              projectRows.map((row) => createElement('li', { key: row.id },
+                createElement('label', null,
+                  createElement('input', {
+                    type: 'checkbox',
+                    checked: row.selected,
+                    disabled: saving,
+                    onChange: () => toggleProject(row.id),
+                    'aria-label': `Make ${setRow.code} available to ${row.label}`,
+                  }),
+                  ` ${row.label}`),
+                createElement('label', null,
+                  createElement('input', {
+                    type: 'checkbox',
+                    checked: row.isDefault,
+                    disabled: saving,
+                    onChange: () => toggleProjectDefault(row.id),
+                    'aria-label': `Make ${setRow.code} the default Symbol Set for ${row.label}`,
+                  }),
+                  ' Project default'),
+              )),
+            ),
+            !projectsLoading
+              ? createElement('button', {
+                type: 'button',
+                disabled: saving,
+                onClick: () => { saveProjects(setRow); },
+                'aria-label': `Save Project availability for ${setRow.code}`,
+              }, 'Save Project availability')
+              : null,
           )
           : null,
       )),

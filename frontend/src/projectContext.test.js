@@ -61,7 +61,7 @@ describe('Project context eligibility and normalization', () => {
   it('describes exact Set selection and fallback-aware clearing responses', () => {
     assert.equal(contextStatusMessage({ activeSet: { code: 'SET-01' }, reason: 'explicit' }, 'set'), 'Symbol Set SET-01 selected.');
     assert.equal(contextStatusMessage({ activeSet: { code: 'DEFAULT' }, reason: 'project_default' }, 'clear-set'), 'Symbol Set preference cleared. Project default DEFAULT is active.');
-    assert.equal(contextStatusMessage({ activeSet: null, reason: 'none' }, 'clear-set'), 'Symbol Set preference cleared. No Symbol Set is active.');
+    assert.equal(contextStatusMessage({ activeSet: null, reason: 'none' }, 'clear-set'), 'Symbol Set preference cleared. Nothing selected.');
   });
 
   it('sends bodyless DELETE requests when clearing Project and Symbol Set selections', async () => {
