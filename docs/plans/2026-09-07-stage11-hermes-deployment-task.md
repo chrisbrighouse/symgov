@@ -407,3 +407,87 @@ Use the container's own view, as its healthcheck does:
     docker exec symgov-hermes-api curl -fsS http://127.0.0.1:8010/api/v1/health
 
 The same applies to every HTTP smoke test in step 10.
+
+## Execution record — 2026-09-08: the deployment completed
+
+Steps 1-11 ran to completion against production, gated one command at a
+time. Unlike the 2026-09-07 attempt, nothing here was blocked by a
+release defect. What was deployed:
+
+- `$DEPLOY_SHA` = `056c13c`, release directory
+  `/data/symgov-releases/stage11-056c13c`.
+- Alembic `20260905_0044` -> `20260907_0045` (`GRANT UPDATE` on the four
+  membership/role history tables, so `require_stage4_principal`'s
+  `SELECT ... FOR SHARE` is permitted; `DELETE`/`TRUNCATE` stay revoked).
+- Frontend: uppercase coercion on organization, project and symbol set
+  code inputs.
+
+Backend application code was otherwise unchanged from `stage11-87abf09`,
+so this was a migration plus a frontend rebuild rather than a code
+rollout. Verified after deploy: schema at a single head `20260907_0045`;
+grants exactly `INSERT, SELECT, UPDATE` on all four tables; API healthy
+on `symgov-hermes-api:stage11-056c13c` with a clean startup log; nginx
+serving `stage11-056c13c/dist` with `index.html` referencing the new
+`index-BhZ9JF6W.js` and that asset returning `application/javascript`.
+`stage11-87abf09` and `docker-compose.yml.pre-0045-20260908T085248Z` are
+both retained as the rollback target.
+
+### The pre-migration backup does not survive a naive restore
+
+Step 2's restore verification is not a formality — it failed. A plain
+`pg_restore` of `symgov-pre-0045-migration-20260908T083951Z.dump`
+reports three errors, exits, and leaves `projects` with **0 of 1 rows**,
+while `users` (11) and `governed_symbols` (95) restore correctly. The
+first error is the real one; the two FK failures that follow are
+consequences:
+
+    COPY failed for table "projects": ERROR:  function
+    stage4_jsonb_max_depth(jsonb) does not exist
+
+`stage4_jsonb_max_depth` (`20260822_0030_project_symbol_sets.py:20`) is
+a recursive SQL function that calls itself *unqualified* and declares no
+`SET search_path`. `pg_dump` emits
+`set_config('search_path', '', false)`, so when the
+`ck_projects_metadata_bounds` CHECK constraint evaluates during `COPY`,
+the inlined self-call cannot resolve. The same constraint guards
+`symbol_set_items` (empty in production today, which is the only reason
+it produced a single error rather than two).
+
+The data is present in the dump — this is a restore-path failure, not a
+bad backup. Verified working recovery procedure:
+
+    pg_restore ... --section=pre-data
+    psql -c "ALTER FUNCTION stage4_jsonb_max_depth(jsonb)
+             SET search_path = public, pg_catalog;"
+    pg_restore ... --section=data --section=post-data
+
+That restores exit 0 with `projects` 1/1 and `alembic_version` matching
+production. Of the 30 functions the migrations define, this is the only
+self-recursive one reached from a CHECK constraint, so the blast radius
+is this single function. **Until an in-schema fix lands, no operator
+should treat a plain `pg_restore` of a production dump as successful
+without checking row counts** — it reports only a warning line and exits
+non-zero, which is easy to miss under an emergency.
+
+### "The admin options disappeared" is a session-mode symptom
+
+Reported mid-deployment and initially read as a deployment regression.
+It was neither caused by nor related to the deploy: the Projects, Symbol
+Sets and Builder panels are gated client-side on
+`capabilities.symbolSetsEnabled` (`OrganizationAdminPage.js:665`), which
+`routes/auth.py:72-80` returns as true only for a session that is
+`purpose=application` **and** `session_mode=organization` with an
+`active_organization_id` whose code is in
+`SYMGOV_ORGANIZATION_PILOT_CODES`. Browsing with a personal-mode session
+renders all three as `null`, with no API call made at all — so the
+server logs show nothing wrong, because nothing is.
+
+`trg_user_sessions_immutable_org_context` prevents converting a live
+session's organization context, so the fix is to sign out and back in
+through the organization.
+
+Two consequences for step 10. A smoke test run from a personal-mode
+session proves nothing about organization-scoped behaviour, because the
+controls are not rendered to fail. And "the panel is missing" and "the
+panel errors" are entirely different diagnoses — only the second one
+exercises the authorization path that `20260907_0045` fixed.
