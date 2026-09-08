@@ -262,6 +262,141 @@ this.
 Resolution is planned in
 `docs/plans/2026-09-07-stage11-catalog-backfill-and-resume-plan.md`.
 
+### THE ROOT CAUSE BEHIND MOST OF THESE: `_csv_setting` is empty in production
+
+`settings.py:20-24`:
+
+    def _csv_setting(name: str, local_default: str = "") -> tuple[str, ...]:
+        raw = os.environ.get(name)
+        if raw is None and _environment() in LOCAL_SECURITY_ENVIRONMENTS:
+            raw = local_default
+        return tuple(...)
+
+**The declared default applies only in `local`/`test`.** In production an
+unset variable yields an *empty tuple*, no matter how sensible the
+default looks in the source. Three separate production failures on
+2026-09-07 came from this one rule, and reading the declaration line
+alone will mislead you every time. When auditing configuration, treat
+every `_csv_setting` as "required in production" regardless of its
+apparent default.
+
+Affected: `SYMGOV_CSRF_TRUSTED_ORIGINS`, `SYMGOV_CSRF_TRUSTED_HOSTS`,
+`SYMGOV_TRUSTED_PROXY_CIDRS`.
+
+### Step 6 — two settings are mandatory in production, and both crash-loop the API
+
+Neither exists anywhere on disk in the pre-Stage-11 deployment, neither
+is mentioned in any plan doc, and neither is covered by a test. Both
+surface only as a crash loop after `docker compose up -d --build`:
+
+1. `SYMGOV_AUTH_LOGIN_HASH_SECRET` — minimum 16 characters, and the
+   local/test placeholder values are explicitly rejected when
+   `environment` is not `local`/`test` (`auth_security.py:39,56`).
+   Failure: `ValueError: A deployment-provided login throttle hash
+   secret is required.` Stored in `/docker/symgov-hermes/.env`
+   (mode 0600). A regenerated value only resets transient login-throttle
+   counters; nothing persistent depends on it.
+2. `SYMGOV_CSRF_TRUSTED_ORIGINS` and `SYMGOV_CSRF_TRUSTED_HOSTS` — see
+   the `_csv_setting` note above. Failure: `ValueError: At least one
+   trusted CSRF origin is required.` Set literally in the compose file
+   (they are not secrets and document the deployment):
+   `https://apps.chrisbrighouse.com` and `apps.chrisbrighouse.com`.
+
+`create_app()` runs exactly two validators — `login_throttle_policy` and
+`validate_request_security_settings` — so these two are the complete set
+of startup-fatal settings. A config audit on 2026-09-07 confirmed the
+other 65 `SYMGOV_*` variables the code reads are safe unset.
+
+### Step 8 — the bootstrap command needs the migration role too
+
+`bootstrap-symgov-organization --apply` fails as the app role with
+`psycopg.errors.InsufficientPrivilege: permission denied for table
+organization_memberships`. `reconcile_symgov_organization_bootstrap`
+uses `with_for_update()`, and PostgreSQL requires `UPDATE` privilege for
+`SELECT ... FOR UPDATE`, but `20260810_0028` deliberately grants
+`symgov_app` only `INSERT, SELECT` on the membership and role tables and
+`REVOKE`s `UPDATE, DELETE, TRUNCATE` — an append-only design protecting
+membership history. The command therefore **can never work as the app
+role**. Run it with the same flag the migration uses:
+
+    docker exec -e SYMGOV_ALEMBIC_USE_MIGRATION_DB=1 \
+      -w /data/symgov-releases/<release>/backend symgov-hermes-api \
+      python3 -m symgov_backend.management bootstrap-symgov-organization --apply
+
+Despite its name, `db.py:35-38` applies that flag to *every*
+`get_database_url()` call, not just Alembic's.
+
+Note also that the **dry run under-reports**. With no organization
+present, the defensive early return at `organization_service.py:403`
+short-circuits before the membership and platform-role checks, so the
+audit lists only `create organization symgov` while `--apply` performs
+four actions (organization, membership, org admin role, platform admin
+role). The sparse dry-run output is expected, not a discrepancy.
+
+### Step 10 — authenticated mutations need the proxy to be trusted
+
+Symptom: login succeeds but **every authenticated mutation** fails with
+`403 Cross-origin request is not permitted.` — sign-out, project
+creation, symbol sets, organization creation. Login is exempt because it
+is in `UNAUTHENTICATED_LOGIN_OPERATIONS` and returns at
+`dependencies.py:361` before the origin check, which makes the fault
+look far narrower than it is.
+
+Cause: `SYMGOV_TRUSTED_PROXY_CIDRS` was empty (the `_csv_setting` rule),
+so `_peer_is_trusted()` rejected nginx and `X-Forwarded-Proto: https`
+was ignored. The API then computed `effective_origin` as
+`('http', host, 80)` against a browser `Origin` of
+`('https', host, 443)`, and `dependencies.py:399` rejected the mismatch.
+
+Fix: trust the nginx container explicitly —
+`SYMGOV_TRUSTED_PROXY_CIDRS: "127.0.0.0/8,::1/128,172.31.30.10/32"`,
+scoped to its static compose-assigned address rather than the whole
+`/24`.
+
+The three 403s carry distinct messages, which makes diagnosis fast:
+`"Cross-origin request is not permitted."` (origin mismatch or untrusted
+origin), `"Request host is not trusted."` (host not in
+`csrf_trusted_hosts`), `"Forwarded request scheme is not trusted."`
+(malformed `X-Forwarded-Proto`).
+
+Still open: `trusted_proxy_hops` is `1` against a
+Cloudflare → Traefik → nginx chain, so the client IP recorded for
+per-IP login throttling may be a proxy rather than the real client.
+
+### Production agent workers execute from the primary working tree
+
+`agent_queue_worker.py` hardcodes five of six runner paths to
+`/data/symgov/scripts/run_*.py` — the **primary repo working tree**, not
+the release directory (only `run_rupert_publication.py` uses the
+release-relative `REPOSITORY_ROOT / "scripts"`). This is identical in
+the old and new releases.
+
+Consequences: any edit under `/docker/openclaw-hz0t/data/symgov/scripts/`
+takes effect in production immediately with no release step, and those
+scripts can desync from whichever backend package is deployed. That is
+exactly what happened before this deployment — the working tree's
+scripts imported `symgov_backend.services.llm_router`, absent from the
+August release, so 5 of 6 agent runners raised `ModuleNotFoundError` on
+every attempt (~120 tracebacks per 10 minutes). Deploying this release
+fixed it incidentally, but the coupling remains and deserves its own
+work item.
+
+### nginx masks missing assets as HTML
+
+`nginx.conf:99-101` is `try_files $uri $uri/ /index.html`, so a missing
+file under `/assets/` returns `index.html` with `200 text/html` instead
+of `404`. In a browser this surfaces as `Failed to load module script:
+Expected a JavaScript-or-Wasm module script but the server responded
+with a MIME type of "text/html"` and a blank page — which reads like a
+deployment failure even when the deployment is correct (on 2026-09-07 it
+was a stale browser cache). The app uses `HashRouter`, so real routes
+never need that fallback for asset paths. Suggested hardening, ahead of
+`location /`:
+
+    location /assets/ {
+      try_files $uri =404;
+    }
+
 ### Step 6 and step 10 — health check is unreachable from the host
 
 The compose file publishes no host port for `symgov-api` (`8010/tcp`,
