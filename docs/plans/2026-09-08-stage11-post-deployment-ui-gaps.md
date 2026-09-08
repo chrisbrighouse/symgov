@@ -81,6 +81,31 @@ active sets only, while the list below renders sets of every status. With
 only draft sets present, the panel says there are none directly above a
 list of them. Cosmetic, one line.
 
+## 5. "Active" means two different things on the same page
+
+The Organization page shows both at once, and they contradict each other
+at a glance:
+
+- The Symbol Sets panel prints `Status: active` — the set's **lifecycle
+  state** (`draft → active → superseded → archived`).
+- The context bar at the top prints "No Symbol Set is active" — whether a
+  set **resolves for the selected Project** in this session
+  (`symbol_context_service.py` `_resolved_set`: explicit user preference,
+  else project default, else organization default).
+
+Both were correct when observed on 2026-09-08: `S1` was lifecycle-active
+but linked to no Project, so nothing resolved. The reader has no way to
+know the same word carries two meanings.
+
+The context bar wants wording closer to "No Symbol Set is in use for this
+Project", and it could say *why* — `_response` already returns a `reason`
+(`none`, `user_preference`, `project_default`, `organization_default`)
+that the UI currently discards. Item 4's "No active Symbol Sets" empty
+state is the same confusion in miniature; fix the two together.
+
+Wording only, no behaviour change, so it can ride along with the next
+change to those panels rather than shipping on its own.
+
 ## Non-UI follow-up found the same day
 
 The WP11.2 secret-scan gate (`scripts/secret_scan_added_lines.py`) only
