@@ -72,7 +72,7 @@ import symgov_backend.routes.workspace as routes_workspace  # noqa: E402
 # exercised via direct import, so its regression coverage here is a static
 # source check rather than a live call.
 
-NEW_MIGRATION_HEAD = "20260905_0044"
+NEW_MIGRATION_HEAD = "20260907_0045"
 
 psycopg = pytest.importorskip("psycopg")
 

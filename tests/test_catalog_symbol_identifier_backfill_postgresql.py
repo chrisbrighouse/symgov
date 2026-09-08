@@ -43,7 +43,7 @@ from test_organization_symbol_postgresql import _alembic, _database  # noqa: E40
 # `20260802_0026` creating it against already-populated tables.
 PRODUCTION_REVISION = "20260801_0026"
 BACKFILL_REVISION = "20260823_0030a"
-CURRENT_HEAD = "20260905_0044"
+CURRENT_HEAD = "20260907_0045"
 
 PUBLISHED_SYMBOL_COUNT = 3
 

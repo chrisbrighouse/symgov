@@ -37,7 +37,7 @@ if str(BACKEND) not in sys.path:
 from symgov_backend.models import AgentConfiguration, AgentFinding, Organization, OrganizationMembership, OrganizationRoleAssignment, PlatformRoleAssignment  # noqa: E402
 from symgov_backend.platform_governance import run_platform_governance  # noqa: E402
 
-NEW_MIGRATION_HEAD = "20260905_0044"
+NEW_MIGRATION_HEAD = "20260907_0045"
 
 psycopg = pytest.importorskip("psycopg")
 
