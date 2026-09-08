@@ -376,7 +376,12 @@ export function CreateOrganizationForm({ onCreate }) {
         id: 'new-org-code',
         type: 'text',
         value: code,
-        onChange: (e) => setCode(e.target.value),
+        // Organization codes must be entered uppercase ("must start with an
+        // uppercase letter and contain only uppercase alphanumeric characters
+        // or hyphens"); the API lower-cases them for the normalized form.
+        autoCapitalize: 'characters',
+        spellCheck: false,
+        onChange: (e) => setCode(e.target.value.toUpperCase()),
         required: true,
         style: { display: 'block', marginTop: '4px' },
       })

@@ -237,7 +237,11 @@ export function OrganizationSymbolSetsPanel({ isAdmin, api = DEFAULT_API, onCont
             id: 'set-admin-code',
             value: form.code,
             disabled: Boolean(editingSetId),
-            onChange: (event) => setForm((current) => ({ ...current, code: event.target.value })),
+            // Symbol set codes share project_service.normalize_code, so the same
+            // uppercase grammar applies.
+            autoCapitalize: 'characters',
+            spellCheck: false,
+            onChange: (event) => setForm((current) => ({ ...current, code: event.target.value.toUpperCase() })),
             required: !editingSetId,
           }),
         ),

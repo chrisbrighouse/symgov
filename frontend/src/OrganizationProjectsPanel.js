@@ -188,7 +188,12 @@ export function OrganizationProjectsPanel({ isAdmin, api = DEFAULT_API, onContex
             id: 'project-admin-code',
             value: form.code,
             disabled: Boolean(editingProjectId),
-            onChange: (event) => setForm((current) => ({ ...current, code: event.target.value })),
+            // The API validates the code as typed against ^[A-Z0-9][A-Z0-9-]{0,31}$
+            // (project_service.normalize_code) rather than upper-casing it, so a
+            // lowercase entry is rejected with a 422 only after submit.
+            autoCapitalize: 'characters',
+            spellCheck: false,
+            onChange: (event) => setForm((current) => ({ ...current, code: event.target.value.toUpperCase() })),
             required: !editingProjectId,
           }),
         ),
