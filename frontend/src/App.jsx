@@ -785,8 +785,8 @@ function SideRail() {
       ) : null}
       {canAdminOrganization || canAdminPlatform ? (
         <nav className="rail-nav rail-nav-admin" aria-label="Organization administration">
-          {canAdminOrganization ? <RailNavLink to="/organization/admin" label="Organization" icon="admin" /> : null}
-          {canAdminPlatform ? <RailNavLink to="/platform/admin" label="Platform" icon="admin" /> : null}
+          {canAdminOrganization ? <RailNavLink to="/organization/admin" label="Organization" icon="organization" /> : null}
+          {canAdminPlatform ? <RailNavLink to="/platform/admin" label="Platform" icon="platform" /> : null}
         </nav>
       ) : null}
       {canUseOrganizationSymbolDrafts || canReviewOrganizationSymbolSubmissions ? (
@@ -866,6 +866,10 @@ function NavIcon({ name }) {
           <path d="M12 18h.01" />
         </svg>
       );
+    case 'organization':
+      return <BuildingIcon />;
+    case 'platform':
+      return <LayersIcon />;
     case 'admin':
     default:
       return <CogIcon />;
@@ -878,6 +882,29 @@ function CameraIconMini() {
     <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
       <circle cx="12" cy="13" r="4" />
+    </svg>
+  );
+}
+
+// Organization and Platform previously shared the cog with the Admin link,
+// making three distinct destinations read as one repeated item in the rail.
+function BuildingIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 21V6.5A1.5 1.5 0 0 1 5.5 5h6A1.5 1.5 0 0 1 13 6.5V21" />
+      <path d="M13 21V11h5.5A1.5 1.5 0 0 1 20 12.5V21" />
+      <path d="M2.5 21h19" />
+      <path d="M6.75 9h3.5M6.75 12.5h3.5M6.75 16h3.5M16 14.5h1.5M16 17.5h1.5" />
+    </svg>
+  );
+}
+
+function LayersIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 3 2.5 8 12 13l9.5-5L12 3Z" />
+      <path d="m2.5 16 9.5 5 9.5-5" />
+      <path d="m2.5 12 9.5 5 9.5-5" />
     </svg>
   );
 }

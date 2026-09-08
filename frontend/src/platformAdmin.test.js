@@ -12,6 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { act, create } from 'react-test-renderer';
 import {
   CreateOrganizationForm,
+  userPickerOptions,
   GrantAdminForm,
   PlatformAdminPage,
   grantExistingPlatformAdmin,
@@ -136,6 +137,62 @@ describe('PlatformAdminPage', () => {
 
   it('accepts the authenticated session API', () => {
     assert.equal(PlatformAdminPage.length, 1);
+  });
+
+  it('excludes deactivated and deleted accounts and orders the rest alphabetically', () => {
+    const options = userPickerOptions([
+      { id: 'u-3', email: 'zoe@symgov.local', displayName: 'Zoe', isActive: true, isDeleted: false },
+      { id: 'u-1', email: 'ada@symgov.local', displayName: 'Ada', isActive: true, isDeleted: false },
+      { id: 'u-4', email: 'gone@symgov.local', displayName: 'Gone', isActive: false, isDeleted: false },
+      { id: 'u-5', email: 'deleted@symgov.local', displayName: 'Deleted', isActive: true, isDeleted: true },
+      { id: 'u-2', email: 'mia@symgov.local', displayName: 'Mia', isActive: true, isDeleted: false },
+    ]);
+    assert.deepEqual(options.map((option) => option.id), ['u-1', 'u-2', 'u-3']);
+    assert.equal(options[0].label, 'Ada (ada@symgov.local)');
+  });
+
+  it('offers a user picker for the initial admin instead of a raw id field', async () => {
+    const users = [
+      { id: 'u-2', email: 'mia@symgov.local', displayName: 'Mia', isActive: true, isDeleted: false },
+      { id: 'u-1', email: 'ada@symgov.local', displayName: 'Ada', isActive: true, isDeleted: false },
+    ];
+    const created = [];
+    let renderer;
+    await act(async () => {
+      renderer = create(createElement(CreateOrganizationForm, {
+        onCreate: async (payload) => { created.push(payload); },
+        loadUsers: async () => users,
+      }));
+    });
+    const select = renderer.root.findByProps({ id: 'new-org-initial-admin' });
+    assert.equal(select.type, 'select');
+    // Placeholder first, then users alphabetically.
+    assert.deepEqual(
+      renderer.root.findAllByType('option').map((option) => option.props.value),
+      ['', 'u-1', 'u-2'],
+    );
+
+    await act(async () => { select.props.onChange({ target: { value: 'u-1' } }); });
+    const form = renderer.root.findByType('form');
+    await act(async () => { await form.props.onSubmit({ preventDefault: () => {} }); });
+    assert.equal(created[0].initialAdminUserId, 'u-1');
+    await act(async () => renderer.unmount());
+  });
+
+  it('falls back to manual id entry when the user list cannot be loaded', async () => {
+    // Listing users requires the site admin role, which a platform admin need
+    // not hold; a 403 must not block organization creation.
+    let renderer;
+    await act(async () => {
+      renderer = create(createElement(CreateOrganizationForm, {
+        onCreate: async () => {},
+        loadUsers: async () => { throw new Error('Forbidden'); },
+      }));
+    });
+    const field = renderer.root.findByProps({ id: 'new-org-initial-admin' });
+    assert.equal(field.type, 'input');
+    assert.match(JSON.stringify(renderer.toJSON()), /User list unavailable/);
+    await act(async () => renderer.unmount());
   });
 
   it('renders labelled platform-admin and organization mutation controls', () => {

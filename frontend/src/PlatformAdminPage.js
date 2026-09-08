@@ -2,6 +2,7 @@ import { createElement, useCallback, useEffect, useRef, useState } from 'react';
 import { runWithStepUp } from './adminJourneys.js';
 import {
   demoteGovernedSymbol,
+  fetchAdminUsers,
   fetchDemotionImpactPreview,
   openOrganizationSymbolPromotionReview,
   requestJson,
@@ -342,12 +343,59 @@ function ProtectedSymgovMembers({ members, total, loading, error, onAdd, onRoleC
     members ? createElement('ul', { style: { listStyle: 'none', padding: 0 } }, members.map((member) => createElement(ProtectedMemberRow, { key: member.membershipId, member, onRoleChange, onDeactivate }))) : null);
 }
 
-export function CreateOrganizationForm({ onCreate }) {
+// Load every user so the initial admin can be picked rather than typed.
+// POST /platform/organizations accepts any valid user as an organization's
+// first Organization Admin -- they need not hold the site admin role -- so the
+// list is deliberately all users, not a filtered subset (decided 2026-09-08).
+async function loadAllUsers() {
+  const collected = [];
+  let page = 1;
+  for (;;) {
+    // pageSize is capped at 200 by routes/admin.py list_users.
+    const result = await fetchAdminUsers({ page, pageSize: 200, sort: 'name', sortDirection: 'asc' });
+    if (!result.ok) {
+      const error = new Error(result.message || 'User list unavailable.');
+      error.status = result.status;
+      throw error;
+    }
+    collected.push(...result.items);
+    if (result.items.length === 0 || collected.length >= result.total) break;
+    page += 1;
+  }
+  return collected;
+}
+
+export function userPickerOptions(users) {
+  // Deactivated or deleted accounts are excluded: an organization whose first
+  // admin cannot sign in has nobody able to administer it.
+  return users
+    .filter((user) => user.isActive && !user.isDeleted)
+    .map((user) => ({
+      id: user.id,
+      label: `${user.displayName || user.email} (${user.email})`,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+export function CreateOrganizationForm({ onCreate, loadUsers = loadAllUsers }) {
   const [code, setCode] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [initialAdminUserId, setInitialAdminUserId] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [users, setUsers] = useState(null);
+  const [usersError, setUsersError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    loadUsers()
+      .then((loaded) => { if (!cancelled) setUsers(userPickerOptions(loaded)); })
+      // Listing users needs the site admin role (routes/admin.py list_users,
+      // require_any_role({"admin"})), which a platform admin need not hold.
+      // Fall back to entering the id by hand rather than blocking creation.
+      .catch((err) => { if (!cancelled) setUsersError(err.message || 'User list unavailable.'); });
+    return () => { cancelled = true; };
+  }, [loadUsers]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -402,15 +450,32 @@ export function CreateOrganizationForm({ onCreate }) {
     createElement(
       'label',
       { htmlFor: 'new-org-initial-admin' },
-      'Initial admin user ID',
-      createElement('input', {
-        id: 'new-org-initial-admin',
-        type: 'text',
-        value: initialAdminUserId,
-        onChange: (e) => setInitialAdminUserId(e.target.value),
-        required: true,
-        style: { display: 'block', marginTop: '4px' },
-      })
+      users ? 'Initial admin' : 'Initial admin user ID',
+      users
+        ? createElement(
+          'select',
+          {
+            id: 'new-org-initial-admin',
+            value: initialAdminUserId,
+            onChange: (e) => setInitialAdminUserId(e.target.value),
+            required: true,
+            style: { display: 'block', marginTop: '4px' },
+          },
+          createElement('option', { value: '' }, 'Select a user…'),
+          ...users.map((user) => createElement('option', { key: user.id, value: user.id }, user.label)),
+        )
+        : createElement('input', {
+          id: 'new-org-initial-admin',
+          type: 'text',
+          value: initialAdminUserId,
+          onChange: (e) => setInitialAdminUserId(e.target.value),
+          required: true,
+          style: { display: 'block', marginTop: '4px' },
+        }),
+      usersError
+        ? createElement('span', { className: 'field-hint', style: { display: 'block', marginTop: '4px' } },
+          `User list unavailable (${usersError}) — enter the user's ID.`)
+        : null,
     ),
     createElement(
       'button',
