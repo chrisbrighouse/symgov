@@ -53,7 +53,7 @@ from symgov_backend.models import (  # noqa: E402
 )
 from symgov_backend.organization_steward import run_organization_steward  # noqa: E402
 
-NEW_MIGRATION_HEAD = "20260907_0045"
+NEW_MIGRATION_HEAD = "20260908_0046"
 
 psycopg = pytest.importorskip("psycopg")
 

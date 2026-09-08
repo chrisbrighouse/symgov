@@ -49,7 +49,7 @@ if str(BACKEND) not in sys.path:
 
 from symgov_backend.models import AgentConfiguration, AgentFinding  # noqa: E402
 
-NEW_MIGRATION_HEAD = "20260907_0045"
+NEW_MIGRATION_HEAD = "20260908_0046"
 
 psycopg = pytest.importorskip("psycopg")
 

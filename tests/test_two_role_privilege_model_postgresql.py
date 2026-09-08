@@ -59,7 +59,7 @@ if str(BACKEND) not in sys.path:
 
 from symgov_backend.subscriptions import PROTECTED_OWNER_EMAIL  # noqa: E402
 
-CURRENT_HEAD = "20260907_0045"
+CURRENT_HEAD = "20260908_0046"
 
 # The four tables 20260810_0028 makes append-only for symgov_app.
 HISTORY_TABLES = (
