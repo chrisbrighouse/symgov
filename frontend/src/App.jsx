@@ -791,7 +791,7 @@ function SideRail() {
       ) : null}
       {canUseOrganizationSymbolDrafts || canReviewOrganizationSymbolSubmissions ? (
         <nav className="rail-nav rail-nav-admin" aria-label="Organization symbol drafts">
-          {canUseOrganizationSymbolDrafts ? <RailNavLink to="/organization/symbols" label="Org Symbols" icon="admin" /> : null}
+          {canUseOrganizationSymbolDrafts ? <RailNavLink to="/organization/symbols" label="Org Symbols" icon="symbols" /> : null}
           {canReviewOrganizationSymbolSubmissions ? <RailNavLink to="/organization/symbols/review" label="Org Symbol Review" icon="reviews" /> : null}
         </nav>
       ) : null}
@@ -868,6 +868,8 @@ function NavIcon({ name }) {
       );
     case 'organization':
       return <BuildingIcon />;
+    case 'symbols':
+      return <ShapesIcon />;
     case 'platform':
       return <LayersIcon />;
     case 'admin':
@@ -888,6 +890,17 @@ function CameraIconMini() {
 
 // Organization and Platform previously shared the cog with the Admin link,
 // making three distinct destinations read as one repeated item in the rail.
+function ShapesIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8.5 3.5 13 11H4l4.5-7.5Z" />
+      <circle cx="16.75" cy="7.25" r="3.75" />
+      <rect x="4" y="14" width="7.5" height="7" rx="1.25" />
+      <rect x="13.5" y="14" width="7" height="7" rx="1.25" />
+    </svg>
+  );
+}
+
 function BuildingIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">

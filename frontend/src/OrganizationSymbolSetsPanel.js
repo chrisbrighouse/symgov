@@ -284,8 +284,13 @@ export function OrganizationSymbolSetsPanel({ isAdmin, api = DEFAULT_API, onCont
     createElement('h2', { id: 'organization-symbol-sets-heading' }, 'Symbol Sets'),
     loading ? createElement('p', { role: 'status' }, 'Loading Symbol Sets…') : null,
     error ? createElement('p', { role: 'alert', className: 'set-admin-status error' }, error) : null,
-    !loading && !error && activeSets.length === 0
-      ? createElement('p', { role: 'status' }, 'No active Symbol Sets.')
+    // The list below renders sets of every status, so an "empty" message keyed
+    // on active sets alone used to sit directly above a populated list.
+    !loading && !error && sets.items.length === 0
+      ? createElement('p', { role: 'status' }, 'No Symbol Sets.')
+      : null,
+    !loading && !error && sets.items.length > 0 && activeSets.length === 0
+      ? createElement('p', { role: 'status' }, 'No active Symbol Sets. Activate one to make it available to Projects.')
       : null,
     StatusMessage({ status }),
     createElement('ul', { className: 'set-admin-list' },

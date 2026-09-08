@@ -126,6 +126,32 @@ describe('mounted Stage 4 administration panels', () => {
     await act(async () => renderer.unmount());
   });
 
+  it('does not claim there are no Symbol Sets while listing draft ones', async () => {
+    // The list renders every status, so keying the empty state on active sets
+    // alone put "No active Symbol Sets." directly above a populated list.
+    const api = setsApi();
+    api.listSymbolSets = async () => ({
+      items: [{ id: 's-9', code: 'SET-09', name: 'Draft', description: null, disciplines: [], useCases: [], status: 'draft' }],
+      page: 1, pageSize: 50, total: 1,
+    });
+    let renderer;
+    await act(async () => { renderer = create(createElement(OrganizationSymbolSetsPanel, { isAdmin: true, api })); });
+    const text = JSON.stringify(renderer.toJSON());
+    assert.doesNotMatch(text, /No Symbol Sets\./);
+    assert.match(text, /Activate one to make it available to Projects/);
+    assert.match(text, /SET-09/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('says there are no Symbol Sets only when the list is genuinely empty', async () => {
+    const api = setsApi();
+    api.listSymbolSets = async () => ({ items: [], page: 1, pageSize: 50, total: 0 });
+    let renderer;
+    await act(async () => { renderer = create(createElement(OrganizationSymbolSetsPanel, { isAdmin: true, api })); });
+    assert.match(JSON.stringify(renderer.toJSON()), /No Symbol Sets\./);
+    await act(async () => renderer.unmount());
+  });
+
   it('does not offer Project availability for a set that is not active', async () => {
     // replace_projects rejects non-active sets with 409, so the control that
     // could only fail is not shown.

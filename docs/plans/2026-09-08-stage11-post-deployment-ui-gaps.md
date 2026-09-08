@@ -72,14 +72,23 @@ Activate button); step 3 is this item.
 `icon="admin"`. Only the label distinguishes them, so the Platform link
 — the only route to creating an organization — reads as a repeat of a
 link the operator already knows and was missed entirely on first use.
-Agreed with Chris to fix later; it is discoverability, not access.
+
+**Fixed 2026-09-08.** Organization gets a building glyph, Platform a
+layers glyph, and Org Symbols (a fourth link that shared the cog) a shapes
+glyph. Org Symbol Review still shares the `reviews` glyph with the
+top-level Reviews link — left alone deliberately: they are both review
+queues, so the shared icon reads as a family rather than a repeat.
 
 ## 4. "No active Symbol Sets" renders above a populated list
 
 `OrganizationSymbolSetsPanel.js:71,183`: the empty-state message keys off
 active sets only, while the list below renders sets of every status. With
 only draft sets present, the panel says there are none directly above a
-list of them. Cosmetic, one line.
+list of them.
+
+**Fixed 2026-09-08.** The genuinely-empty case says "No Symbol Sets."; a
+list holding only inactive sets says "No active Symbol Sets. Activate one
+to make it available to Projects.", which also points at the next step.
 
 ## 5. "Active" means two different things on the same page
 
