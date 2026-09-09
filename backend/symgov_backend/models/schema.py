@@ -2338,3 +2338,73 @@ class SemanticConceptRevision(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SymbolSemanticAssignment(Base):
+    """Bridge from a graphical symbol revision to the engineering meaning it carries."""
+
+    __tablename__ = "symbol_semantic_assignments"
+    __table_args__ = (
+        CheckConstraint(
+            "assignment_role in ('primary', 'qualifier', 'component')",
+            name="assignment_role",
+        ),
+        CheckConstraint(
+            "status in ('proposed', 'verified', 'rejected', 'retired')",
+            name="status",
+        ),
+        CheckConstraint(
+            "method in ('manual', 'source_mapping', 'rule', 'ai_assisted')",
+            name="method",
+        ),
+        CheckConstraint(
+            "confidence is null or (confidence >= 0 and confidence <= 1)",
+            name="confidence",
+        ),
+        # A verification decision must record when it happened. reviewed_by stays
+        # nullable so a deterministic import auto-verified under explicit policy
+        # (specification section 8.4) is representable without inventing a user.
+        CheckConstraint(
+            "status in ('proposed', 'retired') or reviewed_at is not null",
+            name="review_decision",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(evidence_json) = 'object'",
+            name="evidence_json_object",
+        ),
+        # Specification section 7.9: at most one verified primary concept per
+        # symbol revision. Proposals are deliberately unconstrained so competing
+        # candidates can sit side by side for review.
+        Index(
+            "uq_symbol_semantic_assignments_verified_primary",
+            "symbol_revision_id",
+            unique=True,
+            postgresql_where=text("assignment_role = 'primary' and status = 'verified'"),
+        ),
+        Index("ix_symbol_semantic_assignments_revision_status", "symbol_revision_id", "status"),
+        Index("ix_symbol_semantic_assignments_concept_status", "semantic_concept_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Both foreign keys are named explicitly: the convention would generate 66-
+    # and 68-character names, past PostgreSQL's 63-character identifier limit.
+    symbol_revision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("symbol_revisions.id", ondelete="RESTRICT", name="fk_symbol_semantic_assignments_symbol_revision_id"),
+        nullable=False,
+    )
+    semantic_concept_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("semantic_concepts.id", ondelete="RESTRICT", name="fk_symbol_semantic_assignments_semantic_concept_id"),
+        nullable=False,
+    )
+    assignment_role: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'proposed'"))
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    proposed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
