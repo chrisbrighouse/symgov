@@ -4,7 +4,28 @@
       "Bash(PYTHONPATH=backend timeout 100 python3 -m pytest tests/test_platform_admin_api.py -q)",
       "Bash(node --test frontend/src/platformAdmin.test.js)",
       "Bash(node --test frontend/src/platformAdmin.test.js frontend/src/organizationSession.test.js frontend/src/OrganizationAdminPage.test.js)",
-      "Bash(node *)"
+      "Bash(node *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Read(//tmp/claude-0/-docker-openclaw-hz0t-data-symgov/**)",
+      "Read(//tmp/claude-0/**)",
+      "Bash(git fetch *)",
+      "Bash(git rev-list *)",
+      "Read(//docker/symgov-hermes/**)",
+      "Bash(docker compose *)",
+      "Bash(python3 scripts/secret_scan_added_lines.py)",
+      "Bash(echo \"scan_exit=$?\")",
+      "Bash(docker exec *)",
+      "Bash(docker run *)",
+      "Bash(docker ps *)",
+      "Bash(docker port *)",
+      "Bash(docker stop *)",
+      "Bash(docker rm *)",
+      "Bash(docker restart *)",
+      "Bash(docker inspect *)",
+      "Bash(cat /docker/symgov-hermes/*)",
+      "Bash(grep * /docker/symgov-hermes/*)",
+      "Bash(ls /data/symgov-releases*)"
     ]
   }
 }
