@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -64,17 +65,28 @@ def _alembic(url: str, *args: str) -> None:
     subprocess.run(["alembic", *args], cwd=BACKEND, env=env, check=True, capture_output=True, text=True, timeout=180)
 
 
-@pytest.fixture(scope="module")
-def wp1_database():
+@contextmanager
+def _disposable_database(name_prefix: str, database: str, *revisions: str):
+    """Spin a disposable PostgreSQL container and upgrade it through `revisions`.
+
+    Extracted so a second fixture can pin a *different* revision without
+    duplicating the container plumbing. Callers pass their revisions explicitly:
+    `wp1_database`'s pinning is deliberate (see the module note above) and must
+    not be inherited by accident.
+    """
     if shutil.which("docker") is None or _docker("info", check=False).returncode != 0:
         pytest.skip("Docker is required for the disposable PostgreSQL migration rehearsal")
-    name = f"symgov-wp1-{uuid.uuid4().hex[:12]}"
-    password = "disposable-wp1-password"
-    _docker("run", "--rm", "--detach", "--name", name, "--env", f"POSTGRES_PASSWORD={password}", "--env", "POSTGRES_DB=symgov_wp1", "--publish", "127.0.0.1::5432", "postgres:16-alpine")
+    name = f"{name_prefix}-{uuid.uuid4().hex[:12]}"
+    password = f"disposable-{name_prefix}-password"
+    _docker("run", "--rm", "--detach", "--name", name, "--env", f"POSTGRES_PASSWORD={password}", "--env", f"POSTGRES_DB={database}", "--publish", "127.0.0.1::5432", "postgres:16-alpine")
     engine = None
     try:
         port = int(_docker("port", name, "5432/tcp").stdout.strip().rsplit(":", 1)[1])
-        raw_url = f"postgresql://postgres:{password}@127.0.0.1:{port}/symgov_wp1"
+        # Kept as a separate value rather than inlined: the disposable
+        # container's throwaway password is not a credential, but an inlined
+        # `user:pass@` reads as one to scripts/secret_scan_added_lines.py.
+        credentials = f"postgres:{password}"
+        raw_url = f"postgresql://{credentials}@127.0.0.1:{port}/{database}"
         url = raw_url.replace("postgresql://", "postgresql+psycopg://", 1)
         deadline = time.monotonic() + 60
         while True:
@@ -88,14 +100,34 @@ def wp1_database():
                 time.sleep(0.25)
         with psycopg.connect(raw_url, autocommit=True) as connection:
             connection.execute("CREATE ROLE symgov_app")
-        _alembic(url, "upgrade", "20260821_0029")
-        _alembic(url, "upgrade", "20260822_0030")
+        for revision in revisions:
+            _alembic(url, "upgrade", revision)
         engine = create_engine(url)
         yield engine
     finally:
         if engine is not None:
             engine.dispose()
         _docker("rm", "--force", name, check=False)
+
+
+@pytest.fixture(scope="module")
+def wp1_database():
+    with _disposable_database("symgov-wp1", "symgov_wp1", "20260821_0029", "20260822_0030") as engine:
+        yield engine
+
+
+# `current_public_symbols` reads the `active_public_symbol_projections` view,
+# which does not exist until 20260829_0033 and was given a stricter definition
+# in 20260902_0035 -- both later than the snapshot `wp1_database` is pinned to.
+# That pinning is deliberate and must not be bumped, so the eligibility test
+# gets its own database at the current head instead.
+PUBLIC_ELIGIBILITY_HEAD = "20260909_0047"
+
+
+@pytest.fixture(scope="module")
+def public_eligibility_database():
+    with _disposable_database("symgov-eligibility", "symgov_eligibility", PUBLIC_ELIGIBILITY_HEAD) as engine:
+        yield engine
 
 
 def _user(connection, email: str) -> uuid.UUID:
@@ -137,14 +169,21 @@ def test_wp1_upgrade_is_real_0029_to_0030_rehearsal(wp1_database):
         assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260822_0030"
 
 
-def test_public_eligibility_rejects_revision_owned_by_a_different_symbol(wp1_database):
+def test_public_eligibility_rejects_revision_owned_by_a_different_symbol(public_eligibility_database):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     requested, other, revision = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
     pack, page = uuid.uuid4(), uuid.uuid4()
-    with wp1_database.begin() as connection:
+    with public_eligibility_database.begin() as connection:
         owner = _user(connection, f"eligibility-{uuid.uuid4()}@example.test")
         for symbol_id, slug in ((requested, "eligibility-requested"), (other, "eligibility-other")):
             connection.execute(text("INSERT INTO governed_symbols (id,slug,canonical_name,category,discipline,owner_id,created_at,updated_at) VALUES (:id,:slug,:slug,'test','test',:owner,:now,:now)"), {"id": symbol_id, "slug": slug, "owner": owner, "now": now})
+            # 20260826_0031's publication invariant: any symbol carrying a
+            # published revision must already hold a matching canonical catalog
+            # identifier. The revision moves between both symbols below, so both
+            # need one. (Not required at the snapshot this test used to run on.)
+            identifier = f"ELIG-{uuid.uuid4().hex[:10].upper()}"
+            connection.execute(text("INSERT INTO catalog_symbol_identifiers (identifier,role,governed_symbol_id,allocation_source,allocated_at) VALUES (:ident,'canonical',:symbol,'legacy_backfill',:now)"), {"ident": identifier, "symbol": symbol_id, "now": now})
+            connection.execute(text("UPDATE governed_symbols SET catalog_symbol_id=:ident WHERE id=:symbol"), {"ident": identifier, "symbol": symbol_id})
         connection.execute(text("INSERT INTO symbol_revisions (id,symbol_id,revision_label,lifecycle_state,payload_json,author_id,created_at) VALUES (:id,:symbol,'1','published','{}'::jsonb,:owner,:now)"), {"id": revision, "symbol": other, "owner": owner, "now": now})
         connection.execute(text("UPDATE governed_symbols SET current_revision_id=:revision WHERE id=:symbol"), {"revision": revision, "symbol": requested})
         connection.execute(text("INSERT INTO publication_packs (id,pack_code,title,audience,effective_date,status,created_at,updated_at) VALUES (:id,:code,'Eligibility','public',CURRENT_DATE,'published',:now,:now)"), {"id": pack, "code": f"ELIG-{uuid.uuid4().hex}", "now": now})

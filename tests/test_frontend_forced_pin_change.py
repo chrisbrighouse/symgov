@@ -10,7 +10,12 @@ def test_forced_pin_change_route_and_guard_exist():
 
     assert 'path="/change-pin"' in source
     assert "auth.user?.mustChangePin" in source
-    assert '<Navigate to="/change-pin" replace state={{ from: location }} />' in source
+    # The guard must redirect and carry a return destination. How that
+    # destination is derived is deliberately not pinned here: it was once the
+    # raw `location`, and is now put through `internalDestinationFromLocation`
+    # so an off-site value cannot be replayed after the PIN change.
+    assert '<Navigate to="/change-pin" replace state={{ from:' in source
+    assert "internalDestinationFromLocation(location)" in source
     assert "function ChangePinPage()" in source
 
 
