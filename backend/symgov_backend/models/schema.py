@@ -2252,3 +2252,89 @@ class AgentFinding(Base):
     superseded_by_finding_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_findings.id", ondelete="SET NULL"), nullable=True)
     assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     issue_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class SemanticConcept(Base):
+    """Stable identity for an engineering meaning, independent of any graphic."""
+
+    __tablename__ = "semantic_concepts"
+    __table_args__ = (
+        CheckConstraint(
+            "concept_code ~ '^SGC-[0-9]{8}$'",
+            name="concept_code_grammar",
+        ),
+        CheckConstraint(
+            "concept_kind in ('physical_equipment', 'function', 'property', 'state', 'action', 'annotation', 'connection', 'safety_function', 'other')",
+            name="concept_kind",
+        ),
+        CheckConstraint(
+            "status in ('draft', 'active', 'deprecated', 'withdrawn')",
+            name="status",
+        ),
+        Index("uq_semantic_concepts_concept_code", "concept_code", unique=True),
+        Index("ix_semantic_concepts_status_concept_code", "status", "concept_code"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    concept_code: Mapped[str] = mapped_column(Text, nullable=False)
+    concept_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    # The convention-generated name would be 67 characters; PostgreSQL truncates
+    # identifiers at 63, so this foreign key is named explicitly.
+    current_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("semantic_concept_revisions.id", name="fk_semantic_concepts_current_revision_id"), nullable=True)
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SemanticConceptRevision(Base):
+    """Governed revision carrying the descriptive content of a semantic concept."""
+
+    __tablename__ = "semantic_concept_revisions"
+    __table_args__ = (
+        CheckConstraint(
+            "lifecycle_state in ('draft', 'review', 'approved', 'published', 'deprecated', 'withdrawn')",
+            name="lifecycle_state",
+        ),
+        CheckConstraint(
+            "btrim(revision_label) <> '' and char_length(revision_label) <= 64",
+            name="revision_label",
+        ),
+        CheckConstraint(
+            "btrim(preferred_name) <> '' and char_length(preferred_name) <= 256",
+            name="preferred_name",
+        ),
+        CheckConstraint(
+            "btrim(definition) <> '' and char_length(definition) <= 8000",
+            name="definition",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(aliases_json) = 'array'",
+            name="aliases_json_array",
+        ),
+        CheckConstraint(
+            "notes is null or (btrim(notes) <> '' and char_length(notes) <= 4000)",
+            name="notes",
+        ),
+        CheckConstraint(
+            "rationale is null or (btrim(rationale) <> '' and char_length(rationale) <= 2000)",
+            name="rationale",
+        ),
+        Index("uq_semantic_concept_revisions_concept_revision_label", "concept_id", "revision_label", unique=True),
+        Index("ix_semantic_concept_revisions_concept_created_at", "concept_id", "created_at"),
+        Index("ix_semantic_concept_revisions_lifecycle_state", "lifecycle_state"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    concept_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("semantic_concepts.id", ondelete="RESTRICT"), nullable=False)
+    revision_label: Mapped[str] = mapped_column(Text, nullable=False)
+    lifecycle_state: Mapped[str] = mapped_column(Text, nullable=False)
+    preferred_name: Mapped[str] = mapped_column(Text, nullable=False)
+    definition: Mapped[str] = mapped_column(Text, nullable=False)
+    aliases_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
+    author_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
