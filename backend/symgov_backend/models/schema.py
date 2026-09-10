@@ -1319,7 +1319,76 @@ class PromotionRequestDecision(Base):
 
 
 class SourcePackage(Base):
+    """The durable acquisition envelope for an ingestion batch or library release.
+
+    Specification section 7.11. The five columns above `provider_package_-`
+    `identifier` pre-date the semantic model and are written by the live
+    submission-intake path in `runtime.ensure_source_package_for_intake`; none
+    of them is governed by a vocabulary here, because a check constraint on a
+    pre-existing column would be validated against rows that path already
+    wrote. Everything SM-P0-05 adds is optional acquisition provenance.
+    """
+
     __tablename__ = "source_packages"
+    __table_args__ = (
+        # Section 7.11. The fifth method vocabulary in this model, and the
+        # only one that shares no value with the other four. Deliberately not
+        # unified; see `source_package_acquisition.PACKAGE_ACQUISITION_METHODS`.
+        CheckConstraint(
+            "acquisition_method is null or acquisition_method in "
+            "('manual_upload', 'public_download', 'licensed_download', 'api', 'contributed', 'generated')",
+            name="acquisition_method",
+        ),
+        # Half an acquisition event is not a record of one. Both sides are
+        # boolean, so this can never evaluate to NULL -- the three-valued-logic
+        # trap that bit SM-P0-03's checksum pairing.
+        CheckConstraint(
+            "(acquired_at is null) = (acquisition_method is null)",
+            name="acquisition_pairing",
+        ),
+        # Sections 7.10 and 7.11 name SHA-256 specifically, so this is a fixed
+        # 64-character grammar rather than SM-P0-03's algorithm-paired
+        # `^[0-9a-f]{32,128}$`, which would admit an MD5 digest.
+        CheckConstraint(
+            "package_sha256 is null or package_sha256 ~ '^[0-9a-f]{64}$'",
+            name="package_sha256",
+        ),
+        CheckConstraint(
+            "package_sha256 is null or acquired_at is not null",
+            name="package_integrity_context",
+        ),
+        CheckConstraint(
+            "source_uri is null or (source_uri ~ '^https?://' and char_length(source_uri) <= 1024)",
+            name="source_uri",
+        ),
+        CheckConstraint(
+            "provider_package_identifier is null or (btrim(provider_package_identifier) <> '' "
+            "and char_length(provider_package_identifier) <= 512)",
+            name="provider_package_identifier",
+        ),
+        CheckConstraint(
+            "release_version is null or (btrim(release_version) <> '' and char_length(release_version) <= 128)",
+            name="release_version",
+        ),
+        CheckConstraint(
+            "licence_reference is null or (btrim(licence_reference) <> '' and char_length(licence_reference) <= 512)",
+            name="licence_reference",
+        ),
+        CheckConstraint(
+            "ingestion_profile is null or (btrim(ingestion_profile) <> '' and char_length(ingestion_profile) <= 256)",
+            name="ingestion_profile",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(metadata_json) = 'object'",
+            name="metadata_json_object",
+        ),
+        Index(
+            "ix_source_packages_provider_package_identifier",
+            "provider",
+            "provider_package_identifier",
+            postgresql_where=text("provider_package_identifier is not null"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     package_code: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
@@ -1329,6 +1398,22 @@ class SourcePackage(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Section 7.11 acquisition provenance (SM-P0-05). All optional: the
+    # submission-intake path records none of it, and section 7.11 marks every
+    # one of these "recommended", not required.
+    provider_package_identifier: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    release_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    release_date: Mapped[object | None] = mapped_column(Date, nullable=True)
+    acquired_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acquisition_method: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A reference to terms/contract/rights record, never the licence text
+    # (section 7.12). The structured rights record it will point at is
+    # SM-P0-06; nothing here models rights.
+    licence_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    package_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ingestion_profile: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
 
 class Standard(Base):
@@ -1360,11 +1445,45 @@ class StandardVersion(Base):
 
 
 class SourcePackageEntry(Base):
+    """One symbol's place inside an acquired package.
+
+    Specification section 7.11's second half: `source_label` is retained, and
+    SM-P0-05 adds the three columns that let an individual symbol be traced
+    within the package -- Appendix B.2's "exact provider entry/symbol ID".
+    """
+
     __tablename__ = "source_package_entries"
     __table_args__ = (
+        CheckConstraint(
+            "provider_entry_identifier is null or (btrim(provider_entry_identifier) <> '' "
+            "and char_length(provider_entry_identifier) <= 512)",
+            name="provider_entry_identifier",
+        ),
+        CheckConstraint(
+            "source_path is null or (btrim(source_path) <> '' and char_length(source_path) <= 1024)",
+            name="source_path",
+        ),
+        CheckConstraint(
+            "original_asset_sha256 is null or original_asset_sha256 ~ '^[0-9a-f]{64}$'",
+            name="original_asset_sha256",
+        ),
+        # A hash that names no asset traces nothing. Every branch tests a
+        # column against NULL explicitly, so the constraint is true or false
+        # and never NULL.
+        CheckConstraint(
+            "original_asset_sha256 is null or source_path is not null "
+            "or provider_entry_identifier is not null",
+            name="original_asset_context",
+        ),
         Index("uq_source_package_entries_package_revision", "source_package_id", "symbol_revision_id", unique=True),
         Index("ix_source_package_entries_package_sort_order", "source_package_id", "sort_order"),
         Index("ix_source_package_entries_revision_package", "symbol_revision_id", "source_package_id"),
+        Index(
+            "ix_source_package_entries_provider_entry_identifier",
+            "source_package_id",
+            "provider_entry_identifier",
+            postgresql_where=text("provider_entry_identifier is not null"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1373,20 +1492,129 @@ class SourcePackageEntry(Base):
     sort_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_label: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    provider_entry_identifier: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Section 7.11 offers `source_path/source_locator`. This addresses the
+    # entry *inside* the package; the package's own location is
+    # `source_packages.source_uri`, so a second "locator" would duplicate it.
+    source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    original_asset_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class SymbolStandardLink(Base):
+    """A governed assertion about a symbol revision's relationship to a source.
+
+    Specification section 7.10. The point of SM-P0-05 is that this row can now
+    distinguish a precise normative graphical source from a loose reference:
+    which relationship (section 8.3), which symbol number inside the standard,
+    which figure or table, and whether anyone has verified it.
+    """
+
     __tablename__ = "symbol_standard_links"
     __table_args__ = (
+        # Section 8.3, in full. The column has been NOT NULL and unconstrained
+        # since 20260409_0001 with no writer anywhere, so there is no legacy
+        # value to accommodate.
+        CheckConstraint(
+            "relationship_type in ('normative_definition', 'normative_equivalent', "
+            "'informative_example', 'vendor_implementation', 'owner_variant', "
+            "'project_deviation', 'derived_from', 'comparison_only')",
+            name="relationship_type",
+        ),
+        CheckConstraint(
+            "assertion_status in ('proposed', 'verified', 'rejected', 'retired')",
+            name="assertion_status",
+        ),
+        # Section 7.10. The fourth method vocabulary in this model, kept
+        # distinct from the other four on purpose; see
+        # `standard_sources.STANDARD_VERIFICATION_METHODS`.
+        CheckConstraint(
+            "verification_method is null or verification_method in "
+            "('manual', 'import_manifest', 'source_api', 'ai_assisted')",
+            name="verification_method",
+        ),
+        # A verification must record when it happened and what it relied on.
+        # `verified_by_user_id` stays optional so a deterministic import
+        # verified under explicit policy (section 8.4) needs no invented user.
+        # `assertion_status` is NOT NULL, so neither branch can be NULL.
+        CheckConstraint(
+            "assertion_status <> 'verified' or (verified_at is not null and verification_method is not null)",
+            name="verified_decision",
+        ),
+        # Forbidding the empty string is what makes COALESCE(clause_reference,
+        # '') in the active-assertion index below unambiguous.
+        CheckConstraint(
+            "clause_reference is null or (btrim(clause_reference) <> '' and char_length(clause_reference) <= 256)",
+            name="clause_reference",
+        ),
+        CheckConstraint(
+            "source_symbol_identifier is null or (btrim(source_symbol_identifier) <> '' "
+            "and char_length(source_symbol_identifier) <= 512)",
+            name="source_symbol_identifier",
+        ),
+        CheckConstraint(
+            "figure_reference is null or (btrim(figure_reference) <> '' and char_length(figure_reference) <= 256)",
+            name="figure_reference",
+        ),
+        CheckConstraint(
+            "table_reference is null or (btrim(table_reference) <> '' and char_length(table_reference) <= 256)",
+            name="table_reference",
+        ),
+        CheckConstraint(
+            "source_uri is null or (source_uri ~ '^https?://' and char_length(source_uri) <= 1024)",
+            name="source_uri",
+        ),
+        # Section 7.10 names SHA-256 specifically, so a fixed 64-character
+        # grammar and no algorithm column.
+        CheckConstraint(
+            "source_asset_sha256 is null or source_asset_sha256 ~ '^[0-9a-f]{64}$'",
+            name="source_asset_sha256",
+        ),
+        CheckConstraint(
+            "source_asset_sha256 is null or source_uri is not null",
+            name="source_asset_provenance",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(evidence_json) = 'object'",
+            name="evidence_json_object",
+        ),
+        # Replaces 20260409_0001's
+        # `uq_symbol_standard_links_revision_standard_relationship_clause`,
+        # which included the nullable `clause_reference` and so enforced
+        # nothing for the NULL-clause case PostgreSQL treats as distinct.
+        # COALESCE rather than NULLS NOT DISTINCT because the latter needs
+        # PostgreSQL 15+ and the deployed server version is not recorded here.
+        # Partial on the live states so a rejected assertion does not block
+        # re-proposing, and so supersession can retire a predecessor.
         Index(
-            "uq_symbol_standard_links_revision_standard_relationship_clause",
+            "uq_symbol_standard_links_active_assertion",
             "symbol_revision_id",
             "standard_version_id",
             "relationship_type",
-            "clause_reference",
+            text("coalesce(clause_reference, '')"),
             unique=True,
+            postgresql_where=text("assertion_status in ('proposed', 'verified')"),
+        ),
+        # One standard version formally defines a symbol revision at most
+        # once: section 9.2's gate wants the graphical authority asserted
+        # unambiguously, and Appendix B.2's chain carries a single normative
+        # definition. Proposals stay unconstrained so candidates can compete.
+        Index(
+            "uq_symbol_standard_links_verified_definition",
+            "symbol_revision_id",
+            "standard_version_id",
+            unique=True,
+            postgresql_where=text(
+                "relationship_type = 'normative_definition' and assertion_status = 'verified'"
+            ),
         ),
         Index("ix_symbol_standard_links_revision_standard", "symbol_revision_id", "standard_version_id"),
+        # Section 14.3 names this read path explicitly. Spelled short: the
+        # convention's own name for these two columns is 66 characters.
+        Index(
+            "ix_symbol_standard_links_version_source_symbol_identifier",
+            "standard_version_id",
+            "source_symbol_identifier",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1396,6 +1624,21 @@ class SymbolStandardLink(Base):
     clause_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Section 7.10 source precision (SM-P0-05).
+    source_symbol_identifier: Mapped[str | None] = mapped_column(Text, nullable=True)
+    figure_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    table_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assertion_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'proposed'"))
+    verification_method: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_asset_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verified_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_symbol_standard_links_verified_by_user_id"),
+        nullable=True,
+    )
+    verified_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
 
 class PublicationPack(Base):
