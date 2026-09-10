@@ -2408,3 +2408,233 @@ class SymbolSemanticAssignment(Base):
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ExternalSemanticScheme(Base):
+    """An external reference-data library SymGov maps concepts into."""
+
+    __tablename__ = "external_semantic_schemes"
+    __table_args__ = (
+        CheckConstraint(
+            "scheme_code ~ '^[A-Z0-9][A-Z0-9.-]{0,62}[A-Z0-9]$'",
+            name="scheme_code",
+        ),
+        CheckConstraint(
+            "btrim(title) <> '' and char_length(title) <= 256",
+            name="title",
+        ),
+        CheckConstraint(
+            "btrim(issuing_body) <> '' and char_length(issuing_body) <= 256",
+            name="issuing_body",
+        ),
+        CheckConstraint(
+            "base_uri is null or (base_uri ~ '^https?://' and char_length(base_uri) <= 1024)",
+            name="base_uri",
+        ),
+        CheckConstraint(
+            "status in ('active', 'deprecated', 'withdrawn')",
+            name="status",
+        ),
+        Index("uq_external_semantic_schemes_scheme_code", "scheme_code", unique=True),
+        Index("ix_external_semantic_schemes_status_scheme_code", "status", "scheme_code"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scheme_code: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    issuing_body: Mapped[str] = mapped_column(Text, nullable=False)
+    base_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ExternalSemanticSchemeVersion(Base):
+    """One release of an external scheme; the unit every mapping must name."""
+
+    __tablename__ = "external_semantic_scheme_versions"
+    __table_args__ = (
+        CheckConstraint(
+            "btrim(version_label) <> '' and char_length(version_label) <= 128",
+            name="version_label",
+        ),
+        CheckConstraint(
+            "source_uri is null or (source_uri ~ '^https?://' and char_length(source_uri) <= 1024)",
+            name="source_uri",
+        ),
+        CheckConstraint(
+            # Both `is not null` tests are load-bearing: without them a
+            # checksum with a NULL algorithm makes the second branch NULL
+            # rather than false, and PostgreSQL accepts a check constraint
+            # that evaluates to NULL.
+            "(checksum is null and checksum_algorithm is null) or "
+            "(checksum is not null and checksum_algorithm is not null "
+            "and checksum ~ '^[0-9a-f]{32,128}$' "
+            "and checksum_algorithm in ('md5', 'sha1', 'sha256', 'sha512'))",
+            name="checksum_pairing",
+        ),
+        CheckConstraint(
+            "etag is null or (btrim(etag) <> '' and char_length(etag) <= 256)",
+            name="etag",
+        ),
+        # A hash or etag with no retrieval time cannot be reproduced, which
+        # defeats the configuration-management traceability specification
+        # section 3.2 asks of a versioned external dependency.
+        CheckConstraint(
+            "(checksum is null and etag is null) or retrieved_at is not null",
+            name="integrity_retrieval",
+        ),
+        CheckConstraint(
+            "status in ('active', 'deprecated', 'withdrawn')",
+            name="status",
+        ),
+        Index(
+            "uq_external_semantic_scheme_versions_scheme_version_label",
+            "scheme_id",
+            "version_label",
+            unique=True,
+        ),
+        Index("ix_external_semantic_scheme_versions_scheme_status", "scheme_id", "status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Both foreign keys are named explicitly: the convention would generate 72-
+    # and 61-character names against PostgreSQL's 63-character limit.
+    scheme_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("external_semantic_schemes.id", ondelete="RESTRICT", name="fk_external_semantic_scheme_versions_scheme_id"),
+        nullable=False,
+    )
+    version_label: Mapped[str] = mapped_column(Text, nullable=False)
+    release_date: Mapped[object | None] = mapped_column(Date, nullable=True)
+    source_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checksum: Mapped[str | None] = mapped_column(Text, nullable=True)
+    checksum_algorithm: Mapped[str | None] = mapped_column(Text, nullable=True)
+    etag: Mapped[str | None] = mapped_column(Text, nullable=True)
+    retrieved_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_external_semantic_scheme_versions_created_by_user_id"),
+        nullable=True,
+    )
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ConceptExternalReference(Base):
+    """A governed mapping from a SymGov concept into one external release.
+
+    The external identifier lives here and never on the concept: specification
+    section 7.5 and principle P-04 keep SymGov identity stable when an external
+    scheme splits, merges, renames or deprecates a class.
+    """
+
+    __tablename__ = "concept_external_references"
+    __table_args__ = (
+        CheckConstraint(
+            "btrim(external_identifier) <> '' and char_length(external_identifier) <= 512",
+            name="external_identifier",
+        ),
+        CheckConstraint(
+            "external_label is null or (btrim(external_label) <> '' and char_length(external_label) <= 512)",
+            name="external_label",
+        ),
+        CheckConstraint(
+            "mapping_type in ('exact', 'close', 'broader', 'narrower', 'related')",
+            name="mapping_type",
+        ),
+        CheckConstraint(
+            "mapping_status in ('proposed', 'verified', 'rejected', 'retired')",
+            name="mapping_status",
+        ),
+        CheckConstraint(
+            "mapping_method in ('manual', 'imported', 'rule', 'ai_assisted')",
+            name="mapping_method",
+        ),
+        CheckConstraint(
+            "confidence is null or (confidence >= 0 and confidence <= 1)",
+            name="confidence",
+        ),
+        # A verification decision must record when it happened. reviewed_by
+        # stays nullable so a deterministic import auto-verified under explicit
+        # policy (specification section 8.4) needs no invented user.
+        CheckConstraint(
+            "mapping_status in ('proposed', 'retired') or reviewed_at is not null",
+            name="review_decision",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(evidence_json) = 'object'",
+            name="evidence_json_object",
+        ),
+        # Specification section 16.2, as far as a constraint can carry it: the
+        # strongest mapping type may not reach `verified` anonymously, and may
+        # not do so with no evidence at all.
+        CheckConstraint(
+            "mapping_status <> 'verified' or mapping_type <> 'exact' "
+            "or reviewed_by_user_id is not null or mapping_method = 'imported'",
+            name="verified_exact_reviewer",
+        ),
+        CheckConstraint(
+            "mapping_status <> 'verified' or mapping_type <> 'exact' "
+            "or evidence_json <> '{}'::jsonb",
+            name="verified_exact_evidence",
+        ),
+        # Section 14.3 asks for these two read paths explicitly.
+        Index(
+            "ix_concept_external_references_scheme_version_identifier",
+            "scheme_version_id",
+            "external_identifier",
+        ),
+        Index("ix_concept_external_references_concept_status", "semantic_concept_id", "mapping_status"),
+        # One live assertion per (concept, release, external identifier).
+        # Rejected and retired rows stay out of the index so the governance
+        # history of a mapping survives alongside its replacement.
+        Index(
+            "uq_concept_external_references_active_mapping",
+            "semantic_concept_id",
+            "scheme_version_id",
+            "external_identifier",
+            unique=True,
+            postgresql_where=text("mapping_status in ('proposed', 'verified')"),
+        ),
+        # Two classes of one release cannot both be exactly this concept
+        # without asserting those two classes are themselves identical --
+        # the false equivalence section 8.1 says `exact` must avoid.
+        Index(
+            "uq_concept_external_references_verified_exact",
+            "semantic_concept_id",
+            "scheme_version_id",
+            unique=True,
+            postgresql_where=text("mapping_type = 'exact' and mapping_status = 'verified'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Both foreign keys are named explicitly: the convention would generate 68-
+    # and 82-character names, past PostgreSQL's 63-character identifier limit.
+    semantic_concept_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("semantic_concepts.id", ondelete="RESTRICT", name="fk_concept_external_references_semantic_concept_id"),
+        nullable=False,
+    )
+    # NOT NULL is the acceptance criterion in specification section 16.2: no
+    # external mapping may be stored without the release it was observed in.
+    scheme_version_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("external_semantic_scheme_versions.id", ondelete="RESTRICT", name="fk_concept_external_references_scheme_version_id"),
+        nullable=False,
+    )
+    external_identifier: Mapped[str] = mapped_column(Text, nullable=False)
+    external_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mapping_type: Mapped[str] = mapped_column(Text, nullable=False)
+    mapping_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'proposed'"))
+    mapping_method: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    proposed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
