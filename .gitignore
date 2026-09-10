@@ -18,3 +18,10 @@ symgov-notifications.json
 
 __pycache__/
 *.py[cod]
+
+# CFIHOS v2.0 CORE source archives. Public domain, downloadable from
+# https://www.jip36-cfihos.org/cfihos-standards/ -- kept out of the repo
+# because they are ~5.8MB of binaries. Migration 20260909_0052 carries the
+# extracted vocabulary plus the published archive's sha256, so the seed stays
+# auditable against the release without committing it.
+docs/cfihos/
