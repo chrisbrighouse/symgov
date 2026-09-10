@@ -151,10 +151,15 @@ def test_every_migration_identifier_fits_the_postgresql_limit():
     """PostgreSQL truncates identifiers at 63 characters.
 
     SM-P0-01 was first written with a 67-character convention-generated foreign
-    key name, and `alembic upgrade` failed outright. The remaining semantic-model
-    work packages introduce longer table names still
-    (symbol_revision_classification_assignments, concept_external_references),
-    so this guard covers every migration rather than only this one.
+    key name, and `alembic upgrade` failed outright. Later semantic-model work
+    packages introduce longer table names still
+    (concept_classification_assignments, concept_external_references), so this
+    guard covers every migration rather than only this one.
+
+    SM-P0-04's section 7.8 table was going to be the worst of them: on the
+    specification's logical name, `symbol_revision_classification_assignments`
+    (42 characters), every foreign key breaks 63 even when named explicitly.
+    It ships as `symbol_revision_classifications` (31) for that reason.
     """
     # Pre-dates this guard. Note the two different failure modes:
     #

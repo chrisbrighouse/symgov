@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, Numeric, PrimaryKeyConstraint, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, Numeric, PrimaryKeyConstraint, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -2637,4 +2637,341 @@ class ConceptExternalReference(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ClassificationScheme(Base):
+    """A governed browse/reporting facet: discipline, category, use case.
+
+    Specification section 7.6 is explicit that a classification scheme is a
+    browse/reporting system and *not necessarily an ontology*. Concept
+    semantics live in `semantic_concepts`; nodes here are a display hierarchy.
+
+    `scope` carries a single value in P0. Section 14.1 places scheme
+    management with a platform admin and names organisation-specific schemes
+    as a future extension, so the deferral is structural rather than implied.
+    """
+
+    __tablename__ = "classification_schemes"
+    __table_args__ = (
+        CheckConstraint(
+            "scheme_code ~ '^[A-Z0-9][A-Z0-9.-]{0,62}[A-Z0-9]$'",
+            name="scheme_code",
+        ),
+        CheckConstraint(
+            "btrim(name) <> '' and char_length(name) <= 256",
+            name="name",
+        ),
+        CheckConstraint(
+            "scope in ('platform')",
+            name="scope",
+        ),
+        CheckConstraint(
+            "btrim(version_label) <> '' and char_length(version_label) <= 64",
+            name="version_label",
+        ),
+        CheckConstraint(
+            "status in ('draft', 'active', 'deprecated', 'withdrawn')",
+            name="status",
+        ),
+        CheckConstraint(
+            "description is null or (btrim(description) <> '' and char_length(description) <= 4000)",
+            name="description",
+        ),
+        Index("uq_classification_schemes_scheme_code", "scheme_code", unique=True),
+        Index("ix_classification_schemes_status_scheme_code", "status", "scheme_code"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scheme_code: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    scope: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'platform'"))
+    version_label: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ClassificationNode(Base):
+    """One node of a classification scheme's display hierarchy.
+
+    The composite unique key on (id, scheme_id) is not decorative: it is the
+    target of the self-referencing parent foreign key and of both assignment
+    tables' node foreign keys, which is what stops a node from being parented
+    into -- or assigned through -- a *different* scheme.
+    """
+
+    __tablename__ = "classification_nodes"
+    __table_args__ = (
+        CheckConstraint(
+            "node_code ~ '^[A-Z0-9][A-Z0-9_]{0,62}[A-Z0-9]$'",
+            name="node_code",
+        ),
+        CheckConstraint(
+            "btrim(preferred_label) <> '' and char_length(preferred_label) <= 256",
+            name="preferred_label",
+        ),
+        CheckConstraint(
+            "description is null or (btrim(description) <> '' and char_length(description) <= 4000)",
+            name="description",
+        ),
+        CheckConstraint(
+            "sort_order >= 0",
+            name="sort_order",
+        ),
+        CheckConstraint(
+            "status in ('draft', 'active', 'deprecated', 'withdrawn')",
+            name="status",
+        ),
+        # `parent_node_id is null` first keeps every branch true/false: a bare
+        # `parent_node_id <> id` would evaluate to NULL for a root node, and
+        # PostgreSQL accepts a check constraint that evaluates to NULL.
+        CheckConstraint(
+            "parent_node_id is null or parent_node_id <> id",
+            name="parent_not_self",
+        ),
+        # The composite target both the parent link and the assignment tables
+        # point at. Convention-generated: uq_classification_nodes_id_scheme_id.
+        UniqueConstraint("id", "scheme_id"),
+        UniqueConstraint("scheme_id", "node_code"),
+        # A parent must live in the same scheme. Named explicitly: the
+        # convention would generate a 69-character name.
+        ForeignKeyConstraint(
+            ["parent_node_id", "scheme_id"],
+            ["classification_nodes.id", "classification_nodes.scheme_id"],
+            ondelete="RESTRICT",
+            name="fk_classification_nodes_parent_node_id_scheme_id",
+        ),
+        Index("ix_classification_nodes_scheme_id_sort_order", "scheme_id", "sort_order"),
+        Index("ix_classification_nodes_parent_node_id", "parent_node_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scheme_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("classification_schemes.id", ondelete="RESTRICT"), nullable=False)
+    node_code: Mapped[str] = mapped_column(Text, nullable=False)
+    parent_node_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    preferred_label: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ConceptClassificationAssignment(Base):
+    """A governed, meaning-oriented classification of a semantic concept.
+
+    Specification section 7.7. `classification_scheme_id` is denormalized from
+    the node so "at most one verified primary per scheme" can be a partial
+    unique index: a primary discipline and a primary category are both
+    legitimate, a second primary category is not.
+    """
+
+    __tablename__ = "concept_classification_assignments"
+    __table_args__ = (
+        # Section 7.7 lists `primary | secondary | inherited | proposed`.
+        # `proposed` is a governance *status* everywhere else in this model
+        # (section 8.4, and every delivered semantic package), so it is carried
+        # by `status` here and the role vocabulary stops at `inherited`.
+        CheckConstraint(
+            "assignment_role in ('primary', 'secondary', 'inherited')",
+            name="assignment_role",
+        ),
+        CheckConstraint(
+            "status in ('proposed', 'verified', 'rejected', 'retired')",
+            name="status",
+        ),
+        # Section 12.1 phase M2 adds `legacy_backfill` to the section 7.9
+        # vocabulary. Deliberately a third vocabulary: `concept_external_references`
+        # names `imported` where this names `source_mapping`, and unifying any
+        # of the three would be a specification change.
+        CheckConstraint(
+            "method in ('manual', 'source_mapping', 'rule', 'ai_assisted', 'legacy_backfill')",
+            name="method",
+        ),
+        CheckConstraint(
+            "confidence is null or (confidence >= 0 and confidence <= 1)",
+            name="confidence",
+        ),
+        # A verification decision must record when it happened. reviewed_by
+        # stays nullable so a deterministic assignment auto-verified under
+        # explicit policy (section 8.4) needs no invented user.
+        CheckConstraint(
+            "status in ('proposed', 'retired') or reviewed_at is not null",
+            name="review_decision",
+        ),
+        # Section 12.3: backfilled classifications must not be labelled
+        # verified. Both columns are NOT NULL, so neither branch can be NULL.
+        CheckConstraint(
+            "method <> 'legacy_backfill' or status <> 'verified'",
+            name="backfill_not_verified",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(evidence_json) = 'object'",
+            name="evidence_json_object",
+        ),
+        # The node must belong to the scheme this row claims. Named explicitly:
+        # the convention would generate an 81-character name.
+        ForeignKeyConstraint(
+            ["classification_node_id", "classification_scheme_id"],
+            ["classification_nodes.id", "classification_nodes.scheme_id"],
+            ondelete="RESTRICT",
+            name="fk_concept_classification_assignments_classification_node_id",
+        ),
+        # Section 14.3: index by target and by classification node.
+        Index("ix_concept_classification_assignments_concept_status", "semantic_concept_id", "status"),
+        Index("ix_concept_classification_assignments_node_status", "classification_node_id", "status"),
+        # At most one verified primary per (concept, scheme). Proposals are
+        # left unconstrained so competing candidates can sit side by side.
+        Index(
+            "uq_concept_classification_assignments_verified_primary",
+            "semantic_concept_id",
+            "classification_scheme_id",
+            unique=True,
+            postgresql_where=text("assignment_role = 'primary' and status = 'verified'"),
+        ),
+        # One live assertion per (concept, node). Rejected and retired rows
+        # stay out so an assignment's governance history survives its successor.
+        Index(
+            "uq_concept_classification_assignments_active_node",
+            "semantic_concept_id",
+            "classification_node_id",
+            unique=True,
+            postgresql_where=text("status in ('proposed', 'verified')"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Every foreign key here is named explicitly: the convention would generate
+    # 75, 81 and two 63-character names against PostgreSQL's 63-character limit.
+    semantic_concept_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("semantic_concepts.id", ondelete="RESTRICT", name="fk_concept_classification_assignments_semantic_concept_id"),
+        nullable=False,
+    )
+    classification_node_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    classification_scheme_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    assignment_role: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'proposed'"))
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    proposed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_concept_classification_assignments_proposed_by_user_id"),
+        nullable=True,
+    )
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_concept_classification_assignments_reviewed_by_user_id"),
+        nullable=True,
+    )
+    reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SymbolRevisionClassificationAssignment(Base):
+    """A governed, representation-oriented classification of a symbol revision.
+
+    Specification section 7.8: discipline, drawing application, symbol family
+    or graphical context, attached to the exact graphic rather than to the
+    meaning. Section 7.7 is the meaning-oriented counterpart, and the two are
+    deliberately not collapsed.
+
+    The table is named `symbol_revision_classifications` rather than the
+    specification's logical `symbol_revision_classification_assignments` (42
+    characters): every foreign key on the longer name breaks PostgreSQL's
+    63-character identifier limit even when named explicitly. Section 7 asks
+    that final migration naming follow repository conventions.
+    """
+
+    __tablename__ = "symbol_revision_classifications"
+    __table_args__ = (
+        # Section 7.8 lists `primary | secondary | proposed`; as in section
+        # 7.7, `proposed` is carried by `status`. There is no `inherited` here
+        # -- a revision inherits nothing, its concept does.
+        CheckConstraint(
+            "assignment_role in ('primary', 'secondary')",
+            name="assignment_role",
+        ),
+        CheckConstraint(
+            "status in ('proposed', 'verified', 'rejected', 'retired')",
+            name="status",
+        ),
+        CheckConstraint(
+            "method in ('manual', 'source_mapping', 'rule', 'ai_assisted', 'legacy_backfill')",
+            name="method",
+        ),
+        CheckConstraint(
+            "confidence is null or (confidence >= 0 and confidence <= 1)",
+            name="confidence",
+        ),
+        CheckConstraint(
+            "status in ('proposed', 'retired') or reviewed_at is not null",
+            name="review_decision",
+        ),
+        # Section 12.3: the phase M2 backfill must not label its own output
+        # verified. This is the constraint that makes that structural.
+        CheckConstraint(
+            "method <> 'legacy_backfill' or status <> 'verified'",
+            name="backfill_not_verified",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(evidence_json) = 'object'",
+            name="evidence_json_object",
+        ),
+        ForeignKeyConstraint(
+            ["classification_node_id", "classification_scheme_id"],
+            ["classification_nodes.id", "classification_nodes.scheme_id"],
+            ondelete="RESTRICT",
+            name="fk_symbol_revision_classifications_classification_node_id",
+        ),
+        Index("ix_symbol_revision_classifications_revision_status", "symbol_revision_id", "status"),
+        Index("ix_symbol_revision_classifications_node_status", "classification_node_id", "status"),
+        Index(
+            "uq_symbol_revision_classifications_verified_primary",
+            "symbol_revision_id",
+            "classification_scheme_id",
+            unique=True,
+            postgresql_where=text("assignment_role = 'primary' and status = 'verified'"),
+        ),
+        Index(
+            "uq_symbol_revision_classifications_active_node",
+            "symbol_revision_id",
+            "classification_node_id",
+            unique=True,
+            postgresql_where=text("status in ('proposed', 'verified')"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Every foreign key here is named explicitly: the convention would generate
+    # names of 71 characters and more against the 63-character limit.
+    symbol_revision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("symbol_revisions.id", ondelete="RESTRICT", name="fk_symbol_revision_classifications_symbol_revision_id"),
+        nullable=False,
+    )
+    classification_node_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    classification_scheme_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    assignment_role: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'proposed'"))
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    proposed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_symbol_revision_classifications_proposed_by_user_id"),
+        nullable=True,
+    )
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_symbol_revision_classifications_reviewed_by_user_id"),
+        nullable=True,
+    )
     reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
