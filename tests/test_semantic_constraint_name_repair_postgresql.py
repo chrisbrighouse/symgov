@@ -36,33 +36,83 @@ from symgov_backend.models import (  # noqa: E402
 )
 from symgov_backend.models.base import Base  # noqa: E402
 
-REPAIR_REVISION = "20260909_0050"
+REPAIR_REVISION = "20260909_0053"
 PREVIOUS_REVISION = "20260909_0049"
+# The head immediately before 20260909_0053, for the reversibility rehearsal.
+PREVIOUS_REPAIR_REVISION = "20260909_0052"
+# The revision 20260829_0033 revises -- rolling back to it runs that
+# migration's downgrade, which is what a one-way rename broke.
+ROLLBACK_PAST_0033 = "20260826_0032"
 
 REPAIRED_MODELS = (SemanticConcept, SemanticConceptRevision, SymbolSemanticAssignment)
 REPAIRED_TABLES = frozenset(model.__tablename__ for model in REPAIRED_MODELS)
 
 NOW = datetime(2026, 9, 9, 12, 0, 0, tzinfo=timezone.utc)
 
-# Tables whose check-constraint names disagreed with `schema.py` before this
-# work started, and which this migration deliberately does not touch. Each is a
-# separate decision: some are deployed, none are part of the semantic model.
-# Recorded rather than fixed so the guard below can be exact instead of
-# approximate -- shrinking this set is the point, growing it is a regression.
-PRE_EXISTING_NAME_DRIFT = frozenset(
+# Tables whose check-constraint names disagree with `schema.py`. Empty, and it
+# must stay empty: 20260909_0053 repaired the last ten entries. Shrinking this
+# set was the point; growing it is a regression, and the guard below is now
+# exact for every mapped table.
+PRE_EXISTING_NAME_DRIFT: frozenset[str] = frozenset()
+
+# Tables where the ORM and the database deliberately enforce *different
+# expressions* under the same constraint name. This is not drift and must not
+# be "repaired".
+#
+# 20260822_0030 implements these bounds with the `stage4_jsonb_max_depth` and
+# `stage4_string_array_bounds` PL/pgSQL functions. A CheckConstraint in
+# `schema.py` referencing either would make `Base.metadata.create_all()` fail
+# against a database that has never been migrated -- and
+# `tests/test_f0_4_review_without_unpublication.py` calls exactly that. So the
+# ORM carries a weaker builtin-only approximation on purpose, and
+# `test_project_symbol_set_migration.py::
+# test_orm_metadata_keeps_create_all_safe_provenance_boundary` asserts it.
+#
+# The database is the stronger side in every case here, so production
+# integrity is unaffected. The hazard runs the other way: a create_all schema
+# is laxer than production, so these expressions are the ones to check by hand
+# when changing either side.
+INTENTIONAL_ORM_EXPRESSION_DIVERGENCE: dict[str, frozenset[str]] = {
+    "projects": frozenset({"ck_projects_ck_projects_metadata_bounds"}),
+    "symbol_sets": frozenset(
+        {
+            "ck_symbol_sets_ck_symbol_sets_disciplines_bounds",
+            "ck_symbol_sets_ck_symbol_sets_use_cases_bounds",
+        }
+    ),
+    "symbol_set_items": frozenset(
+        {"ck_symbol_set_items_ck_symbol_set_items_provenance_bounds"}
+    ),
+}
+
+# The ten tables 20260909_0053 renames constraints on.
+_REPAIRED_TABLE_NAMES = frozenset(
     {
         "catalog_symbol_identifiers",
         "external_identities",
         "governed_symbols",
         "organization_symbol_review_decisions",
         "organization_symbol_review_submissions",
-        "projects",
         "provenance_assessments",
-        "symbol_set_items",
-        "symbol_sets",
         "user_sessions",
     }
 )
+
+# The custom SQL functions that may never appear in an ORM CheckConstraint.
+CREATE_ALL_UNSAFE_FUNCTIONS = ("stage4_jsonb_max_depth", "stage4_string_array_bounds")
+
+
+def _compact_sql(expression: str) -> str:
+    """Normalise whitespace, casing and PostgreSQL's rendering noise.
+
+    `pg_get_constraintdef` wraps in `CHECK (...)`, adds `::text` casts and
+    parenthesises aggressively, so a literal comparison would report every
+    constraint as divergent.
+    """
+    text_value = " ".join(expression.split()).lower()
+    for noise in ("check (", "::text", "::name", "(", ")", " "):
+        text_value = text_value.replace(noise, "")
+    return text_value
 
 
 def _expected_names(table) -> set[str]:
@@ -261,7 +311,8 @@ def test_the_semantic_model_is_no_longer_in_the_recorded_drift(repaired_database
 
 def test_the_recorded_drift_is_real_and_not_stale(repaired_database):
     """An allowlist entry that no longer drifts should be deleted, or the guard
-    silently stops covering that table."""
+    silently stops covering that table. The set is empty as of
+    20260909_0053, so this now also asserts nothing crept back in."""
     engine, _ = repaired_database
     with engine.begin() as connection:
         actual = _database_names(connection)
@@ -273,3 +324,148 @@ def test_the_recorded_drift_is_real_and_not_stale(repaired_database):
         if actual[table.name] == _expected_names(table):
             stale.append(table.name)
     assert stale == [], f"no longer drifting, remove from PRE_EXISTING_NAME_DRIFT: {stale}"
+    assert PRE_EXISTING_NAME_DRIFT == frozenset(), (
+        "20260909_0053 emptied this allowlist. A new entry means a migration "
+        "introduced name drift instead of passing a bare CheckConstraint name."
+    )
+
+
+# --------------------------------------------------------------------------
+# The three tables that diverge by expression on purpose
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("table_name", sorted(INTENTIONAL_ORM_EXPRESSION_DIVERGENCE))
+def test_the_divergent_tables_still_agree_on_every_name(repaired_database, table_name):
+    """Divergence is in the expressions only. If a name disagrees too, the
+    register is hiding real drift."""
+    engine, _ = repaired_database
+    with engine.begin() as connection:
+        actual = _database_names(connection).get(table_name, set())
+    assert actual == _expected_names(Base.metadata.tables[table_name])
+
+
+@pytest.mark.parametrize(
+    ("table_name", "constraint_names"), sorted(INTENTIONAL_ORM_EXPRESSION_DIVERGENCE.items())
+)
+def test_the_registered_divergence_is_real(repaired_database, table_name, constraint_names):
+    """A register entry that no longer diverges should be deleted, exactly as a
+    stale allowlist entry should."""
+    engine, _ = repaired_database
+    with engine.begin() as connection:
+        database_definitions = {
+            name: definition
+            for name, definition in connection.execute(
+                text(
+                    "SELECT c.conname, pg_get_constraintdef(c.oid) FROM pg_constraint c "
+                    "JOIN pg_class r ON r.oid = c.conrelid "
+                    "JOIN pg_namespace n ON n.oid = r.relnamespace "
+                    "WHERE n.nspname = 'public' AND c.contype = 'c' AND r.relname = :table"
+                ),
+                {"table": table_name},
+            )
+        }
+    preparer = postgresql.dialect().identifier_preparer
+    orm = {
+        preparer.format_constraint(constraint, _alembic_quote=False): str(constraint.sqltext)
+        for constraint in Base.metadata.tables[table_name].constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    for name in constraint_names:
+        assert name in database_definitions, f"{name} is gone from the database"
+        assert name in orm, f"{name} is gone from the ORM"
+        assert _compact_sql(database_definitions[name]) != _compact_sql(orm[name]), (
+            f"{name} no longer diverges; remove it from "
+            "INTENTIONAL_ORM_EXPRESSION_DIVERGENCE"
+        )
+
+
+def test_no_orm_constraint_references_a_function_create_all_cannot_provide(repaired_database):
+    """The reason the divergence exists. A CheckConstraint naming one of these
+    functions would make Base.metadata.create_all() fail on an unmigrated
+    database, which
+    tests/test_f0_4_review_without_unpublication.py depends on."""
+    offenders = []
+    for table in Base.metadata.tables.values():
+        for constraint in table.constraints:
+            if not isinstance(constraint, CheckConstraint):
+                continue
+            expression = str(constraint.sqltext)
+            if any(function in expression for function in CREATE_ALL_UNSAFE_FUNCTIONS):
+                offenders.append(f"{table.name}.{constraint.name}")
+    assert offenders == [], (
+        "these ORM check constraints reference a migration-only SQL function and "
+        f"will break create_all(): {offenders}"
+    )
+
+
+def test_the_repair_round_trips_through_a_downgrade():
+    """20260909_0053 must be reversible, and this is what proves its fifteen
+    restore names are right.
+
+    Ten of them carry a SQLAlchemy truncation hash reproduced verbatim from the
+    deployed schema. If any were wrong, the downgrade would leave a constraint
+    under the repaired name and the comparison below would catch it. The reason
+    it matters: alembic applies NAMING_CONVENTION to `op.drop_constraint`, so
+    20260829_0033's and 20260808_0027's downgrades ask for the *doubled* names,
+    and a one-way rename breaks those rollback paths.
+    """
+    with _database("symgov-name-repair-reverse") as (engine, url, _raw):
+        _alembic(url, "upgrade", PREVIOUS_REPAIR_REVISION)
+        with engine.begin() as connection:
+            before = _database_names(connection)
+
+        _alembic(url, "upgrade", REPAIR_REVISION)
+        _alembic(url, "downgrade", PREVIOUS_REPAIR_REVISION)
+        with engine.begin() as connection:
+            after = _database_names(connection)
+
+        for table in sorted(_REPAIRED_TABLE_NAMES):
+            assert after[table] == before[table], (
+                f"downgrade did not restore {table}'s deployed constraint names"
+            )
+
+        # And a re-upgrade must land back on the ORM's names.
+        _alembic(url, "upgrade", REPAIR_REVISION)
+        with engine.begin() as connection:
+            final = _database_names(connection)
+        for table in sorted(_REPAIRED_TABLE_NAMES):
+            assert final[table] == _expected_names(Base.metadata.tables[table])
+
+
+def test_rolling_back_past_the_older_migrations_still_works():
+    """The regression that caught this: `alembic downgrade` past
+    20260829_0033 failed once the constraints it drops by name had been
+    renamed."""
+    with _database("symgov-name-repair-rollback") as (engine, url, _raw):
+        _alembic(url, "upgrade", REPAIR_REVISION)
+        result = _alembic(url, "downgrade", ROLLBACK_PAST_0033, check=False)
+        assert result.returncode == 0, result.stdout + result.stderr
+        with engine.begin() as connection:
+            remaining = _database_names(connection)
+        # 20260829_0033's downgrade drops both of governed_symbols' check
+        # constraints, which leaves the table with none at all -- so it drops
+        # out of this map entirely rather than appearing with an empty set.
+        assert remaining.get("governed_symbols", set()) == set()
+        # user_sessions' `purpose` constraint is dropped by 20260808_0027,
+        # which is earlier than this rollback target, so it is still here --
+        # and it must be back under its deployed doubled name, which is the
+        # direct demonstration that downgrade restored it.
+        session_names = remaining.get("user_sessions", set())
+        assert "ck_user_sessions_ck_user_sessions_purpose" in session_names
+        assert "ck_user_sessions_purpose" not in session_names
+
+
+def test_provenance_assessments_is_now_declared_in_the_orm(repaired_database):
+    """The one entry in the old allowlist that was not a naming problem: the
+    database enforced two enumerations the model never declared, so a
+    create_all schema was laxer than production."""
+    engine, _ = repaired_database
+    with engine.begin() as connection:
+        actual = _database_names(connection).get("provenance_assessments", set())
+    expected = _expected_names(Base.metadata.tables["provenance_assessments"])
+    assert actual == expected
+    assert expected == {
+        "ck_provenance_assessments_processing_outcome",
+        "ck_provenance_assessments_rights_disposition",
+    }

@@ -56,7 +56,7 @@ from symgov_backend.subscriptions import PROTECTED_OWNER_EMAIL  # noqa: E402
 
 PRE_ORGANIZATION_REVISION = "20260802_0026"  # last revision before Organization Stage 1 (20260808_0027)
 VISIBILITY_FLOOR_REVISION = "20260829_0033"  # Stage 5's own recorded sole head at floor completion
-CURRENT_HEAD = "20260909_0052"
+CURRENT_HEAD = "20260909_0053"
 
 
 def _insert_legacy_user(engine, email: str, *, must_change_pin: bool = False) -> uuid.UUID:

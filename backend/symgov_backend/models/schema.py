@@ -122,7 +122,7 @@ class Project(Base):
         CheckConstraint("external_reference is null or char_length(external_reference) <= 200", name="ck_projects_external_reference_length"),
         CheckConstraint("status in ('active', 'closed')", name="ck_projects_status"),
         CheckConstraint("jsonb_typeof(metadata_json) = 'object'", name="ck_projects_metadata_object"),
-        CheckConstraint("octet_length(convert_to(metadata_json::text, 'UTF8')) <= 16384", name="ck_projects_metadata_size"),
+        CheckConstraint("octet_length(convert_to(metadata_json::text, 'UTF8')) <= 16384", name="ck_projects_metadata_bounds"),
         UniqueConstraint("organization_id", "normalized_code", name="uq_projects_organization_normalized_code"),
         Index("ix_projects_organization_status_code_id", "organization_id", "status", "normalized_code", "id"),
         Index("uq_projects_organization_external_reference", "organization_id", "normalized_external_reference", unique=True, postgresql_where=text("normalized_external_reference is not null")),
@@ -151,8 +151,8 @@ class SymbolSet(Base):
         CheckConstraint("status in ('draft', 'active', 'superseded', 'archived')", name="ck_symbol_sets_status"),
         CheckConstraint("description is null or char_length(description) <= 2000", name="ck_symbol_sets_description_length"),
         CheckConstraint("btrim(name) <> '' AND char_length(name) <= 200", name="ck_symbol_sets_name_bounds"),
-        CheckConstraint("jsonb_typeof(disciplines_json) = 'array' AND jsonb_array_length(disciplines_json) <= 32", name="ck_symbol_sets_disciplines_array_bounds"),
-        CheckConstraint("jsonb_typeof(use_cases_json) = 'array' AND jsonb_array_length(use_cases_json) <= 32", name="ck_symbol_sets_use_cases_array_bounds"),
+        CheckConstraint("jsonb_typeof(disciplines_json) = 'array' AND jsonb_array_length(disciplines_json) <= 32", name="ck_symbol_sets_disciplines_bounds"),
+        CheckConstraint("jsonb_typeof(use_cases_json) = 'array' AND jsonb_array_length(use_cases_json) <= 32", name="ck_symbol_sets_use_cases_bounds"),
         CheckConstraint("copied_from_symbol_set_id IS NULL OR copied_from_symbol_set_id <> id", name="ck_symbol_sets_copy_not_self"),
         UniqueConstraint("owner_organization_id", "normalized_code", name="uq_symbol_sets_owner_normalized_code"),
         Index("ix_symbol_sets_owner_status_code_id", "owner_organization_id", "status", "normalized_code", "id"),
@@ -204,7 +204,7 @@ class SymbolSetItem(Base):
         CheckConstraint("preferred_format is null or char_length(preferred_format) <= 200", name="ck_symbol_set_items_preferred_format_length"),
         CheckConstraint("notes is null or char_length(notes) <= 2000", name="ck_symbol_set_items_notes_length"),
         CheckConstraint("availability_reason is null or char_length(availability_reason) <= 500", name="ck_symbol_set_items_availability_reason_length"),
-        CheckConstraint("octet_length(convert_to(provenance_json::text, 'UTF8')) <= 16384", name="ck_symbol_set_items_provenance_size"),
+        CheckConstraint("octet_length(convert_to(provenance_json::text, 'UTF8')) <= 16384", name="ck_symbol_set_items_provenance_bounds"),
         UniqueConstraint("symbol_set_id", "governed_symbol_id", name="uq_symbol_set_items_set_symbol"),
         Index("ix_symbol_set_items_set_order_symbol", "symbol_set_id", "sort_order", "governed_symbol_id"),
         Index("ix_symbol_set_items_symbol_set", "governed_symbol_id", "symbol_set_id"),
@@ -1127,9 +1127,9 @@ class ExternalIdentity(Base):
     __table_args__ = (
         CheckConstraint(
             "identity_type in ('engineer', 'contractor', 'submitter', 'external_reviewer', 'other')",
-            name="external_identities_identity_type",
+            name="identity_type",
         ),
-        CheckConstraint("status in ('active', 'inactive')", name="external_identities_status"),
+        CheckConstraint("status in ('active', 'inactive')", name="status"),
         Index(
             "uq_external_identities_email_lower",
             text("lower(email)"),
@@ -1804,7 +1804,23 @@ class IntakeRecord(Base):
 
 class ProvenanceAssessment(Base):
     __tablename__ = "provenance_assessments"
-    __table_args__ = (Index("ix_provenance_assessments_intake_assessed_at", "intake_record_id", "assessed_at"),)
+    __table_args__ = (
+        # Both enumerations have been enforced in PostgreSQL since this table
+        # was created; they were simply never declared here, so anything built
+        # from this metadata got a laxer schema than production. Only these two
+        # are declared: `rights_status` and `risk_level` carry no database
+        # constraint, and inventing one here would make the ORM *stricter* than
+        # production, which is the same defect pointing the other way.
+        CheckConstraint(
+            "processing_outcome in ('pass', 'review_required', 'failed')",
+            name="processing_outcome",
+        ),
+        CheckConstraint(
+            "rights_disposition in ('cleared', 'unknown_warning', 'restricted', 'conflict', 'failed')",
+            name="rights_disposition",
+        ),
+        Index("ix_provenance_assessments_intake_assessed_at", "intake_record_id", "assessed_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     queue_item_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("agent_queue_items.id"), nullable=False)
