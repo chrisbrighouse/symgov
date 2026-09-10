@@ -1429,10 +1429,33 @@ class Standard(Base):
 
 
 class StandardVersion(Base):
+    """One edition of a standard.
+
+    Specification section 7.10 preserves this entity and extends none of it.
+    `provider_identifier` is the one addition (migration 20260910_0055): the
+    identifier a reference-data provider gives this edition in its own
+    register. It sits on the edition, not the standard, because that is what
+    such registers enumerate -- CFIHOS carries two rows for API Spec 17D, one
+    per edition, numbered separately.
+    """
+
     __tablename__ = "standard_versions"
     __table_args__ = (
+        CheckConstraint(
+            "provider_identifier is null or (btrim(provider_identifier) <> '' "
+            "and char_length(provider_identifier) <= 512)",
+            name="provider_identifier",
+        ),
         Index("uq_standard_versions_standard_version_label", "standard_id", "version_label", unique=True),
         Index("ix_standard_versions_standard_effective_date", "standard_id", "effective_date"),
+        # Partial so the editions that have no provider identifier -- every
+        # one registered by hand -- stay out of it entirely.
+        Index(
+            "uq_standard_versions_provider_identifier",
+            "provider_identifier",
+            unique=True,
+            postgresql_where=text("provider_identifier is not null"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1440,6 +1463,7 @@ class StandardVersion(Base):
     version_label: Mapped[str] = mapped_column(Text, nullable=False)
     effective_date: Mapped[object | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_identifier: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 

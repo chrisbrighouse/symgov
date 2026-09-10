@@ -102,7 +102,11 @@ STANDARD_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
 # `uq_symbol_standard_links_active_assertion` partial unique index.
 LIVE_ASSERTION_STATUSES = frozenset({"proposed", "verified"})
 
-STANDARD_CODE_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9./: -]{0,62}[A-Z0-9]$")
+# `+` is BSI amendment notation -- `BS 7608+A1` means "incorporating
+# Amendment 1" -- and appears in the CFIHOS register, so it is part of the
+# code rather than decoration. `:` appears because some issuing bodies bake
+# the edition into the code; splitting that out is the caller's job.
+STANDARD_CODE_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9./:+ -]{0,62}[A-Z0-9]$")
 
 # Sections 7.10 and 7.11 name SHA-256 specifically, so this is a fixed
 # 64-character grammar rather than SM-P0-03's algorithm-paired
@@ -115,6 +119,7 @@ STANDARD_CODE_MAX_LENGTH = 64
 TITLE_MAX_LENGTH = 256
 ISSUING_BODY_MAX_LENGTH = 256
 VERSION_LABEL_MAX_LENGTH = 128
+PROVIDER_IDENTIFIER_MAX_LENGTH = 512
 SOURCE_SYMBOL_IDENTIFIER_MAX_LENGTH = 512
 CLAUSE_REFERENCE_MAX_LENGTH = 256
 FIGURE_REFERENCE_MAX_LENGTH = 256
@@ -161,9 +166,13 @@ def normalize_standard_code(value: object) -> str:
     them in the codes themselves -- `ANSI/ISA-75.05.01`, `API Spec 6D`.
     """
     code = _normalize_required_text(value, "standard code", STANDARD_CODE_MAX_LENGTH)
-    if not code.isascii():
-        raise ValueError("standard code must contain ASCII characters only")
+    # Collapse whitespace *before* the ASCII test. A non-breaking space is
+    # both non-ASCII and whitespace, and reporting it as "must contain ASCII
+    # characters only" describes the wrong defect -- it is separator noise
+    # from a spreadsheet export, not a character the code really carries.
     normalized_code = " ".join(code.upper().split())
+    if not normalized_code.isascii():
+        raise ValueError("standard code must contain ASCII characters only")
     if not STANDARD_CODE_PATTERN.match(normalized_code):
         raise ValueError(f"standard code does not match the required grammar: {value!r}")
     return normalized_code
@@ -262,12 +271,23 @@ def register_standard_version(
     effective_date: date | None = None,
     status: str = "active",
     version_id: uuid.UUID | None = None,
+    provider_identifier: object = None,
 ) -> StandardVersion:
-    """Register one edition of a standard."""
+    """Register one edition of a standard.
+
+    `provider_identifier` is the identifier a reference-data provider gives
+    this edition in its own register -- CFIHOS numbers `API Spec 6D:2014` as
+    `CFIHOS-90000008`. It belongs on the edition rather than the standard
+    because that is what such a register enumerates: CFIHOS carries two rows
+    for API Spec 17D, one per edition.
+    """
     if status not in STANDARD_STATUSES:
         raise ValueError("invalid standard version status")
     normalized_label = _normalize_required_text(
         version_label, "standard version label", VERSION_LABEL_MAX_LENGTH
+    )
+    normalized_provider_identifier = _normalize_optional_text(
+        provider_identifier, "standard version provider identifier", PROVIDER_IDENTIFIER_MAX_LENGTH
     )
     _require_aware_timestamp(registered_at, "standard version registration time")
     if effective_date is not None and not isinstance(effective_date, date):
@@ -285,6 +305,7 @@ def register_standard_version(
         version_label=normalized_label,
         effective_date=effective_date,
         status=status,
+        provider_identifier=normalized_provider_identifier,
         created_at=registered_at,
         updated_at=registered_at,
     )
@@ -617,3 +638,21 @@ def list_standard_versions(
         StandardVersion.version_label,
     )
     return list(session.execute(query).scalars())
+
+
+def find_standard_version_by_provider_identifier(
+    session: Session, provider_identifier: str
+) -> StandardVersion | None:
+    """Look one edition up by a provider's own identifier for it.
+
+    Case is preserved on storage, so this matches exactly: the provider is the
+    authority on its own identifiers.
+    """
+    identifier = _normalize_optional_text(
+        provider_identifier, "standard version provider identifier", PROVIDER_IDENTIFIER_MAX_LENGTH
+    )
+    if identifier is None:
+        raise ValueError("a provider identifier is required")
+    return session.execute(
+        select(StandardVersion).where(StandardVersion.provider_identifier == identifier)
+    ).scalar_one_or_none()

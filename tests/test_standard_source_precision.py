@@ -475,9 +475,12 @@ def test_entry_orm_constraints_match_the_migration():
     }
 
 
-def test_the_two_preserved_entities_gained_no_constraint():
+def test_the_two_preserved_entities_gained_no_constraint_from_this_package():
+    """SM-P0-05 itself extends neither. `standard_versions.provider_identifier`
+    arrived with the CFIHOS seed (20260910_0055), a separately approved
+    follow-on, and is a format bound rather than a vocabulary."""
     assert _checks(Standard) == {}
-    assert _checks(StandardVersion) == {}
+    assert set(_checks(StandardVersion)) <= {"provider_identifier"}
 
 
 def test_no_added_check_constraint_can_evaluate_to_null():
@@ -621,7 +624,12 @@ def test_standard_status_policy_lives_in_the_service_not_the_database():
     assert CLOSED_STANDARD_STATUSES == frozenset({"withdrawn"})
     assert set(STANDARD_STATUS_TRANSITIONS) == set(STANDARD_STATUSES)
     assert STANDARD_STATUS_TRANSITIONS["withdrawn"] == frozenset()
-    assert _checks(Standard) == {} and _checks(StandardVersion) == {}
+    # No `status` constraint exists on either table, and none should: the
+    # specification names no vocabulary for them.
+    assert "status" not in _checks(Standard)
+    assert "status" not in _checks(StandardVersion)
+    for expression in {**_checks(Standard), **_checks(StandardVersion)}.values():
+        assert "deprecated" not in expression and "withdrawn" not in expression
 
 
 def test_licensed_acquisition_methods_point_forward_at_sm_p0_06():

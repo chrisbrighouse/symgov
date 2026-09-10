@@ -23,7 +23,7 @@ def test_project_symbol_set_migration_is_linear_head_and_models_are_exported():
     cfg.set_main_option("script_location", "backend/alembic")
     script = ScriptDirectory.from_config(cfg)
 
-    assert script.get_heads() == ["20260910_0054"]
+    assert script.get_heads() == ["20260910_0055"]
     revision = script.get_revision("20260822_0030")
     assert revision is not None
     assert revision.down_revision == "20260821_0029"

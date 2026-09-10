@@ -67,7 +67,14 @@ from symgov_backend.standard_sources import (  # noqa: E402
     verified_normative_definition,
 )
 
-PRECISION_REVISION = "20260910_0054"
+# Head, not 20260910_0054. The ORM is a single global object that always
+# reflects head, so a fixture pinned to an older revision breaks the moment a
+# later migration extends a table these models touch -- which 20260910_0055
+# does, adding `standard_versions.provider_identifier`. The claim that
+# SM-P0-05 itself touched neither preserved entity is pinned DB-free instead,
+# by test_0054_leaves_the_two_preserved_entities_unconstrained.
+PRECISION_REVISION = "20260910_0055"
+SOURCE_PRECISION_REVISION = "20260910_0054"
 PREVIOUS_REVISION = "20260909_0053"
 
 NOW = datetime(2026, 9, 10, 12, 0, 0, tzinfo=timezone.utc)
@@ -409,10 +416,15 @@ def test_the_extended_tables_carry_exactly_the_orm_constraint_names(precision_da
     assert actual == _expected_names(model.__table__)
 
 
-def test_the_two_preserved_entities_gained_nothing(precision_database):
-    """Section 7.10 preserves Standard and StandardVersion and extends
-    neither. Their status vocabularies are service policy, deliberately not
-    database constraints -- the specification names none."""
+def test_the_two_preserved_entities_carry_no_status_vocabulary(precision_database):
+    """Section 7.10 preserves Standard and StandardVersion and names no status
+    vocabulary for either, so none is declared in the database -- that rule is
+    service policy in `standard_sources.py` and is pinned by tests there.
+
+    `standard_versions` carries exactly one check, on the
+    `provider_identifier` that 20260910_0055 added for the CFIHOS register.
+    It bounds a format, not a vocabulary.
+    """
     engine, _ = precision_database
     with engine.begin() as connection:
         columns = dict(
@@ -424,14 +436,43 @@ def test_the_two_preserved_entities_gained_nothing(precision_database):
                 )
             ).all()
         )
-        checks = connection.execute(
-            text(
-                "SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
-                "WHERE t.relname IN ('standards','standard_versions') AND c.contype='c'"
+        checks = dict(
+            connection.execute(
+                text(
+                    "SELECT t.relname, c.conname FROM pg_constraint c "
+                    "JOIN pg_class t ON t.oid = c.conrelid "
+                    "WHERE t.relname IN ('standards','standard_versions') AND c.contype='c'"
+                )
+            ).all()
+        )
+    assert columns == {"standards": 7, "standard_versions": 8}
+    assert checks == {"standard_versions": "ck_standard_versions_provider_identifier"}
+
+
+def test_source_precision_itself_left_the_preserved_entities_untouched():
+    """The claim the test above used to make, checked at the revision it is
+    actually about: at 20260910_0054 neither table had gained a column or a
+    constraint."""
+    with _database("symgov-source-precision-preserved") as (engine, url, _raw):
+        _alembic(url, "upgrade", SOURCE_PRECISION_REVISION)
+        with engine.begin() as connection:
+            columns = dict(
+                connection.execute(
+                    text(
+                        "SELECT table_name, count(*) FROM information_schema.columns "
+                        "WHERE table_schema='public' "
+                        "AND table_name IN ('standards','standard_versions') GROUP BY table_name"
+                    )
+                ).all()
             )
-        ).scalar_one()
-    assert columns == {"standards": 7, "standard_versions": 7}
-    assert checks == 0
+            checks = connection.execute(
+                text(
+                    "SELECT count(*) FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid "
+                    "WHERE t.relname IN ('standards','standard_versions') AND c.contype='c'"
+                )
+            ).scalar_one()
+        assert columns == {"standards": 7, "standard_versions": 7}
+        assert checks == 0
 
 
 # --------------------------------------------------------------------------
@@ -870,16 +911,18 @@ def test_a_null_clause_and_an_empty_clause_cannot_collide(session, author_id):
 
 
 def test_a_standard_and_its_editions_round_trip(session):
+    """The code is synthetic on purpose: 20260910_0055 seeds the real CFIHOS
+    register into this database, and `API Spec 6D` is one of its 219."""
     standard = register_standard(
         session,
-        standard_code="api spec 6d",
+        standard_code="test spec 6d",
         title="Specification for Valves",
-        issuing_body="API",
+        issuing_body="Illustrative issuing body",
         registered_at=NOW,
     )
     session.flush()
-    assert standard.standard_code == "API SPEC 6D"
-    assert get_standard(session, "API Spec 6D").id == standard.id
+    assert standard.standard_code == "TEST SPEC 6D"
+    assert get_standard(session, "Test Spec 6D").id == standard.id
 
     register_standard_version(
         session,
@@ -902,7 +945,7 @@ def test_a_standard_and_its_editions_round_trip(session):
 
 def test_a_withdrawn_standard_accepts_no_new_editions(session):
     standard = register_standard(
-        session, standard_code="ISO 10628-2", title="Diagrams", registered_at=NOW
+        session, standard_code="TEST 10628-2", title="Diagrams", registered_at=NOW
     )
     session.flush()
     set_standard_status(session, standard.id, target_status="withdrawn", occurred_at=NOW)
