@@ -3258,3 +3258,326 @@ class SymbolRevisionClassificationAssignment(Base):
         nullable=True,
     )
     reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RightsRecord(Base):
+    """A durable, governed rights disposition for one provenance subject.
+
+    Specification section 7.12. Section 7.12 asks to reuse an equivalent
+    durable rights entity if one exists; none does. `provenance_assessments`
+    is the only rights-bearing table with a governed vocabulary, and it is
+    intake-scoped on both of its NOT NULL foreign keys, shares not one value
+    with section 7.12's disposition vocabulary, and is written by the live
+    intake pipeline. `hannah_photo_candidates.rights_status` is
+    candidate-scoped. Neither can carry a rights decision about a source
+    package, a standard edition or a governed symbol revision, which is what
+    authoritative ingestion needs; see migration 20260910_0056.
+
+    Exactly one of the three subject columns is set. A source package is the
+    primary anchor -- it is section 7.11's acquisition envelope, and
+    `source_packages.licence_reference` is the forward reference into this
+    table -- but a standard edition needs its own, because whether SymGov may
+    derive a symbol from one edition is a question about the standard and not
+    about any package, and a symbol revision needs its own, because section
+    9.2's publication gate is per-symbol and a redrawn asset's disposition
+    can differ from its source's.
+
+    One table with three nullable subjects rather than SM-P0-04's
+    three-tables-per-target shape: those two tables carry different role
+    vocabularies, whereas the record here is identical for all three
+    subjects, and three copies of one governed decision is three places for
+    section 7.12's vocabularies to drift apart.
+    """
+
+    __tablename__ = "rights_records"
+    __table_args__ = (
+        # A sum of `case` expressions, so the comparison is between two
+        # integers and can never evaluate to NULL. PostgreSQL accepts a check
+        # constraint that evaluates to NULL -- the trap that bit SM-P0-03's
+        # checksum pairing and SM-P0-04's parent check.
+        CheckConstraint(
+            "(case when source_package_id is null then 0 else 1 end "
+            "+ case when standard_version_id is null then 0 else 1 end "
+            "+ case when symbol_revision_id is null then 0 else 1 end) = 1",
+            name="subject_exactly_one",
+        ),
+        # Section 7.12, verbatim. Also section 13.1's "Rights" dimension.
+        CheckConstraint(
+            "rights_status in ('unknown', 'open', 'licensed', 'restricted', 'prohibited', 'expired')",
+            name="rights_status",
+        ),
+        # Section 7.12, verbatim. Shares no value with the deployed
+        # `provenance_assessments.rights_disposition` enumeration.
+        CheckConstraint(
+            "disposition in ('display', 'distribute', 'transform', 'compare_only', "
+            "'metadata_only', 'reject')",
+            name="disposition",
+        ),
+        # The sixth `method` vocabulary in this model, kept distinct from the
+        # other five on purpose; see `rights_provenance.RIGHTS_DETERMINATION_METHODS`.
+        CheckConstraint(
+            "determination_method in ('manual', 'licence_document', 'ai_assisted')",
+            name="determination_method",
+        ),
+        # `approved` rather than `verified`: section 7.12's own word is
+        # "approved", and a rights disposition is a legal approval rather
+        # than a verification of fact.
+        CheckConstraint(
+            "decision_status in ('proposed', 'approved', 'rejected', 'retired')",
+            name="decision_status",
+        ),
+        # Section 7.12: "a reference to terms/contract/rights record; not the
+        # licence text itself". The bound is SM-P0-05's, and is what keeps it
+        # a reference.
+        CheckConstraint(
+            "licence_reference is null or (btrim(licence_reference) <> '' "
+            "and char_length(licence_reference) <= 512)",
+            name="licence_reference",
+        ),
+        CheckConstraint(
+            "decision_reason is null or (btrim(decision_reason) <> '' "
+            "and char_length(decision_reason) <= 2000)",
+            name="decision_reason",
+        ),
+        # Section 7.12's who and when. `retired` is excluded because
+        # supersession retires a predecessor when its successor is approved;
+        # the actor of record is the successor's approver.
+        CheckConstraint(
+            "decision_status in ('proposed', 'retired') "
+            "or (decided_at is not null and decided_by_user_id is not null)",
+            name="decision_actor",
+        ),
+        # Section 7.12's why. No other table in this model requires a reason.
+        CheckConstraint(
+            "decision_status <> 'approved' or decision_reason is not null",
+            name="approved_reason",
+        ),
+        # Section 8.4, with no controlled-system exception: no deterministic
+        # reading of a licence is itself a rights decision.
+        CheckConstraint(
+            "decision_status <> 'approved' or determination_method <> 'ai_assisted'",
+            name="approved_not_ai_determined",
+        ),
+        CheckConstraint(
+            "decision_status <> 'approved' "
+            "or rights_status not in ('licensed', 'restricted') "
+            "or licence_reference is not null",
+            name="approved_licence_reference",
+        ),
+        # No constraint pairs `rights_status` against `disposition`. That a
+        # permissive disposition may only be *approved* on a status that
+        # supports it is real, and it is service policy in
+        # `rights_provenance.disposition_is_permitted`: rights gating is
+        # SM-P0-08's, and a storage-level rule would put a second gate in a
+        # second place. The same reasoning keeps `standard_sources`'
+        # status vocabulary out of the database.
+        CheckConstraint(
+            "jsonb_typeof(evidence_json) = 'object'",
+            name="evidence_json_object",
+        ),
+        # At most one *approved* record per subject. Proposals stay
+        # unconstrained so competing candidates can sit side by side;
+        # approving a successor retires its predecessor rather than being
+        # refused -- the supersession shape SM-P0-01 through -05 all use.
+        Index(
+            "uq_rights_records_approved_source_package",
+            "source_package_id",
+            unique=True,
+            postgresql_where=text("decision_status = 'approved' and source_package_id is not null"),
+        ),
+        Index(
+            "uq_rights_records_approved_standard_version",
+            "standard_version_id",
+            unique=True,
+            postgresql_where=text("decision_status = 'approved' and standard_version_id is not null"),
+        ),
+        Index(
+            "uq_rights_records_approved_symbol_revision",
+            "symbol_revision_id",
+            unique=True,
+            postgresql_where=text("decision_status = 'approved' and symbol_revision_id is not null"),
+        ),
+        # Section 14.3's shape for assignment tables -- index by target. Also
+        # the indexes the RESTRICT foreign keys need.
+        Index(
+            "ix_rights_records_source_package_id",
+            "source_package_id",
+            "decision_status",
+            postgresql_where=text("source_package_id is not null"),
+        ),
+        Index(
+            "ix_rights_records_standard_version_id",
+            "standard_version_id",
+            "decision_status",
+            postgresql_where=text("standard_version_id is not null"),
+        ),
+        Index(
+            "ix_rights_records_symbol_revision_id",
+            "symbol_revision_id",
+            "decision_status",
+            postgresql_where=text("symbol_revision_id is not null"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Every foreign key is named explicitly and short: the convention's own
+    # name for the entry-level key on the sibling table would be 72
+    # characters against PostgreSQL's 63-character limit.
+    source_package_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("source_packages.id", ondelete="RESTRICT", name="fk_rights_records_source_package_id"),
+        nullable=True,
+    )
+    standard_version_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("standard_versions.id", ondelete="RESTRICT", name="fk_rights_records_standard_version_id"),
+        nullable=True,
+    )
+    symbol_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("symbol_revisions.id", ondelete="RESTRICT", name="fk_rights_records_symbol_revision_id"),
+        nullable=True,
+    )
+    rights_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'unknown'"))
+    disposition: Mapped[str] = mapped_column(Text, nullable=False)
+    licence_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+    determination_method: Mapped[str] = mapped_column(Text, nullable=False)
+    decision_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'proposed'"))
+    # RESTRICT rather than SET NULL, and the only such key in the semantic
+    # model. Section 14.4 retains the governance decision history with the
+    # governed data, and an approved rights record that has lost its approver
+    # is precisely the record that must not exist -- `decision_actor` would
+    # refuse the NULL anyway, so RESTRICT reports the real reason.
+    decided_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT", name="fk_rights_records_decided_by_user_id"),
+        nullable=True,
+    )
+    decided_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    proposed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_rights_records_proposed_by_user_id"),
+        nullable=True,
+    )
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AssetTransformation(Base):
+    """One step of section 7.12's source asset -> tool/version -> derived asset.
+
+    Specification section 7.12's transformation lineage, and Appendix B.2's
+    "source file SHA-256 -> approved transformation -> SVG SHA-256". One row
+    per step, ordered by `step_index` within a symbol revision, so the chain
+    the specification asks for is representable and not just its endpoints.
+
+    One table rather than a lineage header plus steps: a header would carry
+    no field of its own -- the chain is fully described by
+    `(symbol_revision_id, step_index)` -- and would exist only to hold an id.
+
+    Chain *continuity*, that each step starts from the digest the previous
+    step produced, is a cross-row property and cannot be a check constraint.
+    It is enforced in `rights_provenance.record_asset_transformation`. The
+    database enforces every per-row property, including that a step which
+    changed nothing cannot be recorded.
+
+    Existing hash columns are joined to rather than duplicated:
+    `source_package_entries.original_asset_sha256`,
+    `source_packages.package_sha256`,
+    `symbol_standard_links.source_asset_sha256` and `attachments.sha256`.
+
+    No foreign key points at `rights_records`. Whether a transformation was
+    permitted depends on the source subject's approved disposition including
+    `transform`, and that judgement is section 9.2's publication gate --
+    SM-P0-08, not this package.
+    """
+
+    __tablename__ = "asset_transformations"
+    __table_args__ = (
+        CheckConstraint("step_index >= 1", name="step_index"),
+        CheckConstraint(
+            "btrim(tool_name) <> '' and char_length(tool_name) <= 128",
+            name="tool_name",
+        ),
+        CheckConstraint(
+            "btrim(tool_version) <> '' and char_length(tool_version) <= 64",
+            name="tool_version",
+        ),
+        # Sections 7.10, 7.11 and 7.12 all name SHA-256, so a fixed
+        # 64-character grammar and no algorithm column. Deliberately not
+        # SM-P0-03's algorithm-paired `^[0-9a-f]{32,128}$`, which would admit
+        # a 32-character MD5 digest.
+        CheckConstraint(
+            "source_asset_sha256 is null or source_asset_sha256 ~ '^[0-9a-f]{64}$'",
+            name="source_asset_sha256",
+        ),
+        CheckConstraint(
+            "derived_asset_sha256 ~ '^[0-9a-f]{64}$'",
+            name="derived_asset_sha256",
+        ),
+        # A derived asset with no identified source is not lineage. Both
+        # branches test a column against NULL explicitly.
+        CheckConstraint(
+            "source_asset_sha256 is not null or source_package_entry_id is not null",
+            name="source_asset_identified",
+        ),
+        CheckConstraint(
+            "source_asset_sha256 is null or derived_asset_sha256 <> source_asset_sha256",
+            name="transformation_changed_asset",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(evidence_json) = 'object'",
+            name="evidence_json_object",
+        ),
+        Index(
+            "uq_asset_transformations_revision_step",
+            "symbol_revision_id",
+            "step_index",
+            unique=True,
+        ),
+        # Which symbol a stored asset digest belongs to: section 13.3's
+        # lineage reporting, and a signal section 10.2's duplicate detection
+        # can use without a name comparison.
+        Index("ix_asset_transformations_derived_asset_sha256", "derived_asset_sha256"),
+        Index(
+            "ix_asset_transformations_source_asset_sha256",
+            "source_asset_sha256",
+            postgresql_where=text("source_asset_sha256 is not null"),
+        ),
+        Index(
+            "ix_asset_transformations_source_package_entry_id",
+            "source_package_entry_id",
+            postgresql_where=text("source_package_entry_id is not null"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbol_revision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("symbol_revisions.id", ondelete="RESTRICT", name="fk_asset_transformations_symbol_revision_id"),
+        nullable=False,
+    )
+    step_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_package_entry_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "source_package_entries.id",
+            ondelete="RESTRICT",
+            name="fk_asset_transformations_source_package_entry_id",
+        ),
+        nullable=True,
+    )
+    source_asset_sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tool_name: Mapped[str] = mapped_column(Text, nullable=False)
+    tool_version: Mapped[str] = mapped_column(Text, nullable=False)
+    derived_asset_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    performed_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    recorded_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_asset_transformations_recorded_by_user_id"),
+        nullable=True,
+    )
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
