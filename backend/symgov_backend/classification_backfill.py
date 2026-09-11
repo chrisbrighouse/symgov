@@ -63,6 +63,7 @@ from .classification_mapping import (
     plan_facet,
     resolve_node,
 )
+from .legacy_classification_sync import NON_DISPLAY_MATCH_BASES
 from .models import (
     GovernedSymbol,
     PublishedPage,
@@ -140,16 +141,30 @@ class PlannedBackfill:
     reused: bool
 
     @property
-    def rewrites_legacy_value(self) -> bool:
-        """Whether SM-P0-09 deriving this back would change the column.
+    def label_differs_from_column(self) -> bool:
+        """Whether the matched node's label reads differently from the column.
 
-        The seeded nodes *are* the hard-coded catalogue lists, so a value
-        that matched exactly derives back byte-identical. A value matched by
-        the trailing-S or legacy-taxonomy rule derives back as the node's
-        preferred label, which is a visible catalogue change and is reported
-        as one.
+        Not the same question as "will the catalogue change" -- see
+        `would_change_column`. A label can differ for three reasons: the
+        trailing-S rule (`door` -> `Doors`), an exact match on a differently
+        cased value (`pumps` -> `Pumps`), or the legacy taxonomy table
+        (`Piping` -> `Piping / P&ID`), and only the first two are allowed to
+        reach the column.
         """
         return self.node_label != self.raw_value
+
+    @property
+    def would_change_column(self) -> bool:
+        """Whether SM-P0-09 deriving this back would actually move the column.
+
+        The count an operator wants before running with `--apply`. A
+        `legacy_taxonomy` match is barred from the display column by
+        `legacy_classification_sync.NON_DISPLAY_MATCH_BASES`, because those
+        tables bucket for browsing -- `Cylinder`, `Stirrer` and `Envelope`
+        all fold into `Equipment` -- and folding them into the column would
+        destroy a distinction an operator recorded.
+        """
+        return self.label_differs_from_column and self.match_basis not in NON_DISPLAY_MATCH_BASES
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -162,7 +177,8 @@ class PlannedBackfill:
             "node_label": self.node_label,
             "match_basis": self.match_basis,
             "reused": self.reused,
-            "rewrites_legacy_value": self.rewrites_legacy_value,
+            "label_differs_from_column": self.label_differs_from_column,
+            "would_change_column": self.would_change_column,
         }
 
 
@@ -199,8 +215,14 @@ class BackfillReport:
     written_assignment_ids: list[uuid.UUID] = dataclass_field(default_factory=list)
 
     @property
-    def rewrites(self) -> list[PlannedBackfill]:
-        return [item for item in self.planned if item.rewrites_legacy_value]
+    def label_differences(self) -> list[PlannedBackfill]:
+        """Assignments whose node label reads differently from the column."""
+        return [item for item in self.planned if item.label_differs_from_column]
+
+    @property
+    def expected_column_changes(self) -> list[PlannedBackfill]:
+        """The subset of those that SM-P0-09 would actually write back."""
+        return [item for item in self.planned if item.would_change_column]
 
     def skip_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
@@ -216,7 +238,13 @@ class BackfillReport:
             "targets_examined": self.targets_examined,
             "assignments_planned": len(self.planned),
             "assignments_written": len(self.written_assignment_ids),
-            "legacy_value_rewrites": len(self.rewrites),
+            # Two counts, deliberately. The first is how many matched labels
+            # read differently from the column; the second is how many of those
+            # SM-P0-09 would actually write back. They were one field until the
+            # coarse-match guard landed, at which point a single number read as
+            # a promise of catalogue churn that does not happen.
+            "labels_differing_from_column": len(self.label_differences),
+            "expected_column_changes": len(self.expected_column_changes),
             "skipped": len(self.skipped),
             "skip_counts": self.skip_counts(),
             "planned": [item.as_dict() for item in self.planned],

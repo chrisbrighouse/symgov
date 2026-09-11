@@ -195,10 +195,15 @@ def test_a_dry_run_writes_nothing_and_still_reports_every_rewrite(session):
     assert report.written_assignment_ids == []
     assert _assignments(session, revision.id) == []
     # Both values move, and the dry run says so before anything is written.
-    assert {(item.field, item.raw_value, item.node_label) for item in report.rewrites} == {
+    assert {
+        (item.field, item.raw_value, item.node_label) for item in report.label_differences
+    } == {
         ("category", "door", "Doors"),
         ("discipline", "piping", "Piping / P&ID"),
     }
+    # Only the trailing-S one is allowed to reach the column; `piping` is a
+    # legacy-taxonomy match and stays out of it.
+    assert [item.field for item in report.expected_column_changes] == ["category"]
 
 
 def test_the_sweep_writes_proposed_legacy_backfill_rows(session):
@@ -222,7 +227,8 @@ def test_the_sweep_writes_proposed_legacy_backfill_rows(session):
         assert assignment.evidence_json["governed_symbol_slug"] == symbol.slug
 
     # An exact value derives back byte-identical, so nothing visibly changes.
-    assert report.rewrites == []
+    assert report.label_differences == []
+    assert report.expected_column_changes == []
     by_scheme = {
         assignment.classification_scheme_id: assignment for assignment in written
     }
@@ -367,7 +373,8 @@ def test_a_normalising_value_lands_on_the_seeded_node(session):
     category = next(item for item in report.planned if item.field == "category")
     assert category.node_label == "Doors"
     assert category.match_basis == "plural_variant"
-    assert category.rewrites_legacy_value is True
+    assert category.label_differs_from_column is True
+    assert category.would_change_column is True
     written = next(
         assignment
         for assignment in _assignments(session, revision.id)
@@ -390,7 +397,9 @@ def test_a_legacy_short_form_reaches_the_node_the_first_two_rules_cannot(session
     discipline = next(item for item in report.planned if item.field == "discipline")
     assert discipline.node_label == "Piping / P&ID"
     assert discipline.match_basis == "legacy_taxonomy"
-    assert discipline.rewrites_legacy_value is True
+    assert discipline.label_differs_from_column is True
+    # A legacy-taxonomy match earns its assignment but not the column.
+    assert discipline.would_change_column is False
 
 
 def test_the_promotion_fallbacks_produce_no_assignment(session):

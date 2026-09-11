@@ -382,7 +382,8 @@ def test_the_backfill_and_the_sync_compose_but_only_the_normalisation_shows(sess
     backfill = run_legacy_classification_backfill(
         session, backfilled_at=NOW, apply=True, symbol_slug=symbol.slug
     )
-    assert len(backfill.rewrites) == 2
+    assert len(backfill.label_differences) == 2
+    assert [item.field for item in backfill.expected_column_changes] == ["category"]
     assert {item.field: item.match_basis for item in backfill.planned} == {
         "category": "plural_variant",
         "discipline": "legacy_taxonomy",

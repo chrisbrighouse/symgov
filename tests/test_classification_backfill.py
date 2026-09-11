@@ -407,18 +407,46 @@ def _planned(raw_value: str, node_label: str, basis: str = "exact") -> PlannedBa
     )
 
 
-def test_a_rewrite_is_reported_as_one_and_an_exact_match_is_not():
+def test_a_differing_label_is_reported_and_an_identical_one_is_not():
     """"Which catalogue values visibly change" has to be answerable from the
     dry run, before anything is written."""
-    assert _planned("Doors", "Doors").rewrites_legacy_value is False
-    assert _planned("door", "Doors", "plural_variant").rewrites_legacy_value is True
-    assert _planned("piping", "Piping / P&ID", "legacy_taxonomy").rewrites_legacy_value is True
+    assert _planned("Doors", "Doors").label_differs_from_column is False
+    assert _planned("door", "Doors", "plural_variant").label_differs_from_column is True
+    assert _planned("piping", "Piping / P&ID", "legacy_taxonomy").label_differs_from_column is True
+
+
+def test_only_a_display_eligible_difference_would_change_the_column():
+    """The distinction the two counts exist for. A `legacy_taxonomy` match
+    differs from the column and is still barred from it, so reporting one
+    number would promise catalogue churn that does not happen."""
+    identical = _planned("Doors", "Doors")
+    normalised = _planned("door", "Doors", "plural_variant")
+    coarse = _planned("piping", "Piping / P&ID", "legacy_taxonomy")
+
+    assert identical.would_change_column is False
+    assert normalised.would_change_column is True
+    assert coarse.would_change_column is False
+    assert coarse.label_differs_from_column is True
+
+    payload = coarse.as_dict()
+    assert payload["label_differs_from_column"] is True
+    assert payload["would_change_column"] is False
+
+
+def test_the_barred_basis_is_the_one_the_sync_bars():
+    """Read from `legacy_classification_sync` rather than repeated, so the
+    backfill's forecast cannot disagree with what the sync will do."""
+    from symgov_backend.classification_backfill import NON_DISPLAY_MATCH_BASES as backfill_view
+    from symgov_backend.legacy_classification_sync import NON_DISPLAY_MATCH_BASES as sync_view
+
+    assert backfill_view is sync_view
 
 
 def test_the_report_counts_rewrites_and_skips_separately():
     report = BackfillReport(applied=False, targets_examined=3)
     report.planned.append(_planned("Doors", "Doors"))
     report.planned.append(_planned("door", "Doors", "plural_variant"))
+    report.planned.append(_planned("piping", "Piping / P&ID", "legacy_taxonomy"))
     report.skipped.append(
         SkippedBackfill(
             symbol_revision_id=uuid.uuid4(),
@@ -439,9 +467,12 @@ def test_the_report_counts_rewrites_and_skips_separately():
     )
     payload = report.as_dict()
     assert payload["applied"] is False
-    assert payload["assignments_planned"] == 2
+    assert payload["assignments_planned"] == 3
     assert payload["assignments_written"] == 0
-    assert payload["legacy_value_rewrites"] == 1
+    # Two labels read differently from their column; only one of them is
+    # allowed to reach it.
+    assert payload["labels_differing_from_column"] == 2
+    assert payload["expected_column_changes"] == 1
     assert payload["skip_counts"] == {"placeholder_value": 1, "already_assigned": 1}
     assert payload["method"] == BACKFILL_METHOD
     assert payload["backfiller_version"] == BACKFILLER_VERSION
@@ -450,7 +481,9 @@ def test_the_report_counts_rewrites_and_skips_separately():
 def test_a_dry_run_report_never_claims_a_write():
     report = BackfillReport(applied=False)
     report.planned.append(_planned("door", "Doors", "plural_variant"))
-    assert report.as_dict()["assignments_written"] == 0
+    payload = report.as_dict()
+    assert payload["assignments_written"] == 0
+    assert payload["expected_column_changes"] == 1
 
 
 def test_a_target_reads_the_column_its_facet_names():
@@ -536,7 +569,8 @@ def test_a_dry_run_rolls_back_and_an_apply_commits(monkeypatch, capsys):
     assert (session.commits, session.rollbacks) == (0, 1)
     assert calls[-1]["apply"] is False
     payload = json.loads(capsys.readouterr().out)
-    assert payload["legacy_value_rewrites"] == 1
+    assert payload["expected_column_changes"] == 1
+    assert payload["labels_differing_from_column"] == 1
     assert payload["planned"][0]["raw_value"] == "door"
 
     assert manage_symgov.main(["backfill-legacy-classifications", "--apply"]) == 0
@@ -565,7 +599,7 @@ def test_summary_only_drops_the_per_row_detail(monkeypatch, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert "planned" not in payload
     assert "skipped_detail" not in payload
-    assert payload["legacy_value_rewrites"] == 1
+    assert payload["expected_column_changes"] == 1
 
 
 def test_a_failed_sweep_rolls_back_and_exits_non_zero(monkeypatch, capsys):
