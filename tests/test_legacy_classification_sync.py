@@ -21,6 +21,10 @@ readings of the specification:
   `LegacyDerivation.changes` is False for every reason the derivation can
   give, which is what the parametrised test below asserts one reason at a
   time.
+* A `legacy_taxonomy` match creates the assignment but does not drive the
+  durable column. Measured against production first: without that rule, 63
+  of 96 symbols had a column rewritten and about half were coarsenings
+  (`Cylinder` -> `Equipment`) rather than normalisations.
 """
 
 from __future__ import annotations
@@ -40,6 +44,7 @@ from symgov_backend.classification_mapping import MAPPING_GAP_REASONS
 from symgov_backend.concept_external_references import EXTERNAL_MAPPING_METHODS
 from symgov_backend.legacy_classification_sync import (
     DERIVABLE_STATUSES,
+    NON_DISPLAY_MATCH_BASES,
     SHARED_WITH_MAPPING_GAP_REASONS,
     LEGACY_COLUMN_SCHEMES,
     METHOD_PREFERENCE,
@@ -48,6 +53,7 @@ from symgov_backend.legacy_classification_sync import (
     LegacySyncReport,
     _method_rank,
     _status_rank,
+    may_drive_display_value,
 )
 from symgov_backend.rights_provenance import RIGHTS_DETERMINATION_METHODS
 from symgov_backend.source_package_acquisition import PACKAGE_ACQUISITION_METHODS
@@ -347,3 +353,48 @@ def test_the_sync_is_wired_into_both_promotion_paths():
     assert source.index("record_classification_mapping(\n        session") < source.index(
         "record_legacy_classification_sync(\n        session"
     )
+
+
+# --- a coarse match may assign but not display -------------------------------
+
+
+class _FakeAssignment:
+    """Just the two fields `may_drive_display_value` reads."""
+
+    def __init__(self, evidence):
+        self.evidence_json = evidence
+
+
+def test_only_the_legacy_taxonomy_basis_is_barred_from_the_column():
+    assert NON_DISPLAY_MATCH_BASES == {"legacy_taxonomy"}
+    assert may_drive_display_value(_FakeAssignment({"match_basis": "legacy_taxonomy"})) is False
+    assert may_drive_display_value(_FakeAssignment({"match_basis": "exact"})) is True
+    assert may_drive_display_value(_FakeAssignment({"match_basis": "plural_variant"})) is True
+
+
+def test_an_assignment_with_no_recorded_basis_may_still_display():
+    """A deny-list, not an allow-list, and this is why: a reviewer's own
+    choice through a future review UI carries no `match_basis` at all, and it
+    is the most authoritative assertion there is. It must not be excluded by
+    a rule aimed at a coarse machine match."""
+    for evidence in ({}, None, {"source": "manual_review"}, "not-a-dict"):
+        assert may_drive_display_value(_FakeAssignment(evidence)) is True
+
+
+def test_the_barred_basis_is_one_the_mapper_can_actually_produce():
+    """Guards against the deny-list naming a basis that no longer exists,
+    which would silently stop barring anything."""
+    from symgov_backend.classification_mapping import MATCH_BASES
+
+    assert NON_DISPLAY_MATCH_BASES < MATCH_BASES
+
+
+def test_the_coarse_refusal_has_its_own_reason():
+    """Distinct from `no_derivable_assignment`, so a report can tell "nothing
+    classifies this symbol" from "the classification was too coarse to
+    show"."""
+    assert "coarse_match_basis" in SYNC_SKIP_REASONS
+    assert "coarse_match_basis" not in MAPPING_GAP_REASONS
+    derivation = _derivation(reason="coarse_match_basis")
+    assert derivation.changes is False
+    assert derivation.as_dict()["current_value"] == "door"

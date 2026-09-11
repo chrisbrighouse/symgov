@@ -52,6 +52,7 @@ from symgov_backend.classification_assignments import (  # noqa: E402
 )
 from symgov_backend.classification_backfill import (  # noqa: E402
     BACKFILL_METHOD,
+    backfilled_assignments,
     run_legacy_classification_backfill,
 )
 from symgov_backend.classification_mapping import MAPPING_METHOD  # noqa: E402
@@ -365,11 +366,16 @@ def test_a_manual_proposal_outranks_a_backfilled_one(session):
     assert symbol.category == "Valves"
 
 
-def test_the_backfill_and_the_sync_compose_into_a_normalisation(session):
-    """The two packages together, in the order they were decided to ship.
-    SM-P0-10 proposes `Doors` from the column holding `door`; SM-P0-09
-    derives the column back from it. The round trip is exactly the tidy-up
-    SM-P0-07's decision 8 asked for, and nothing else moves."""
+def test_the_backfill_and_the_sync_compose_but_only_the_normalisation_shows(session):
+    """The two packages together, end to end, and the coarseness rule with
+    them. `door` is matched by the trailing-S rule, so the column normalises
+    to `Doors`. `piping` is only reachable through the legacy taxonomy table,
+    so it earns its `Piping / P&ID` *assignment* -- which is what makes the
+    symbol findable under that facet once M5 is on -- while the column keeps
+    `piping`.
+
+    This is the production measurement in miniature: the backfill reports two
+    rewrites, and exactly one of them reaches a catalogue field."""
     owner = _user(session, "compose")
     symbol, revision = _symbol(session, owner, category="door", discipline="piping")
 
@@ -377,15 +383,26 @@ def test_the_backfill_and_the_sync_compose_into_a_normalisation(session):
         session, backfilled_at=NOW, apply=True, symbol_slug=symbol.slug
     )
     assert len(backfill.rewrites) == 2
+    assert {item.field: item.match_basis for item in backfill.planned} == {
+        "category": "plural_variant",
+        "discipline": "legacy_taxonomy",
+    }
 
     sync = sync_legacy_symbol_columns(
         session, symbol=symbol, symbol_revision_id=revision.id, synced_at=NOW
     )
 
-    assert set(sync.changed_columns) == {"category", "discipline"}
+    assert sync.changed_columns == ("category",)
     session.refresh(symbol)
-    assert (symbol.category, symbol.discipline) == ("Doors", "Piping / P&ID")
-    assert {item.assignment_method for item in sync.derivations} == {BACKFILL_METHOD}
+    assert (symbol.category, symbol.discipline) == ("Doors", "piping")
+    by_column = {item.column: item for item in sync.derivations}
+    assert by_column["category"].assignment_method == BACKFILL_METHOD
+    assert by_column["discipline"].reason == "coarse_match_basis"
+    assert by_column["discipline"].derived_value is None
+
+    # The assignment the column declined to display is still there, governed.
+    assignments = backfilled_assignments(session, symbol_revision_id=revision.id)
+    assert len(assignments) == 2
 
     # And it settles: a second round changes nothing.
     again = sync_legacy_symbol_columns(
@@ -537,3 +554,118 @@ def test_the_exists_predicate_refuses_a_rejected_assignment(session):
         },
     ).all()
     assert matched == []
+
+
+# --- the coarseness rule against real rows -----------------------------------
+
+
+def test_a_coarse_assignment_is_created_but_does_not_touch_the_column(session):
+    """The `Cylinder` case, which is 19 of the 96 production symbols. The
+    legacy taxonomy table folds `Cylinder` into `Equipment` for browse
+    bucketing; writing that into the durable column would destroy a
+    distinction an operator recorded."""
+    owner = _user(session, "coarse")
+    symbol, revision = _symbol(session, owner, category="Cylinder", discipline="Process")
+
+    backfill = run_legacy_classification_backfill(
+        session, backfilled_at=NOW, apply=True, symbol_slug=symbol.slug
+    )
+    planned = {item.field: item for item in backfill.planned}
+    assert planned["category"].node_label == "Equipment"
+    assert planned["category"].match_basis == "legacy_taxonomy"
+
+    report = sync_legacy_symbol_columns(
+        session, symbol=symbol, symbol_revision_id=revision.id, synced_at=NOW
+    )
+
+    assert report.changed_columns == ()
+    by_column = {item.column: item for item in report.derivations}
+    assert by_column["category"].reason == "coarse_match_basis"
+    assert by_column["discipline"].reason == "value_unchanged"
+    session.refresh(symbol)
+    assert symbol.category == "Cylinder"
+
+    # The governed assignment exists regardless -- M5 finds the symbol under
+    # the Equipment facet through it, which is the point.
+    assignment = backfilled_assignments(session, symbol_revision_id=revision.id)
+    nodes = {
+        session.get(ClassificationNode, item.classification_node_id).preferred_label
+        for item in assignment
+    }
+    assert "Equipment" in nodes
+
+
+def test_a_finer_eligible_assignment_still_wins_over_a_coarse_one(session):
+    """Filtered before ranking, so a coarse row that outranks by method does
+    not block a finer one from displaying."""
+    owner = _user(session, "coarse-vs-fine")
+    symbol, revision = _symbol(session, owner, category="Cylinder", discipline="Process")
+    # A coarse source_mapping row, which outranks legacy_backfill by method...
+    propose_symbol_revision_classification(
+        session,
+        symbol_revision_id=revision.id,
+        classification_node_id=_node(
+            session, scheme_code=CATEGORY_SCHEME, label="Equipment"
+        ).id,
+        assignment_role="primary",
+        method=MAPPING_METHOD,
+        proposed_at=NOW,
+        evidence={"match_basis": "legacy_taxonomy"},
+    )
+    # ...and a finer backfilled one, which is eligible to display.
+    propose_symbol_revision_classification(
+        session,
+        symbol_revision_id=revision.id,
+        classification_node_id=_node(session, scheme_code=CATEGORY_SCHEME, label="Valves").id,
+        assignment_role="primary",
+        method=BACKFILL_METHOD,
+        proposed_at=NOW,
+        evidence={"match_basis": "exact"},
+    )
+    session.flush()
+
+    chosen = derivable_primary_assignment(
+        session,
+        symbol_revision_id=revision.id,
+        classification_scheme_id=_node(
+            session, scheme_code=CATEGORY_SCHEME, label="Valves"
+        ).scheme_id,
+    )
+    assert chosen.evidence_json["match_basis"] == "exact"
+
+    sync_legacy_symbol_columns(
+        session, symbol=symbol, symbol_revision_id=revision.id, synced_at=NOW
+    )
+    session.refresh(symbol)
+    assert symbol.category == "Valves"
+
+
+def test_no_primary_at_all_is_reported_differently_from_a_coarse_one(session):
+    owner = _user(session, "reasons")
+    bare, bare_revision = _symbol(session, owner, category="door", discipline="Process")
+    report = sync_legacy_symbol_columns(
+        session, symbol=bare, symbol_revision_id=bare_revision.id, synced_at=NOW
+    )
+    assert {item.column: item.reason for item in report.derivations}["category"] == (
+        "no_derivable_assignment"
+    )
+
+    coarse, coarse_revision = _symbol(session, owner, category="Cylinder", discipline="Process")
+    propose_symbol_revision_classification(
+        session,
+        symbol_revision_id=coarse_revision.id,
+        classification_node_id=_node(
+            session, scheme_code=CATEGORY_SCHEME, label="Equipment"
+        ).id,
+        assignment_role="primary",
+        method=MAPPING_METHOD,
+        proposed_at=NOW,
+        evidence={"match_basis": "legacy_taxonomy"},
+    )
+    session.flush()
+    report = sync_legacy_symbol_columns(
+        session, symbol=coarse, symbol_revision_id=coarse_revision.id, synced_at=NOW
+    )
+    assert {item.column: item.reason for item in report.derivations}["category"] == (
+        "coarse_match_basis"
+    )

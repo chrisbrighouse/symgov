@@ -25,14 +25,28 @@ mapper could not read -- the column keeps exactly what it held. There is no
 state in which this package blanks a catalogue field, and
 `test_legacy_classification_sync.py` pins that for every refusal reason.
 
-**What visibly changes is a normalisation onto the seeded labels.** The
-seeded nodes *are* `catalog_taxonomy`'s hard-coded lists, so a column already
-holding a seeded label derives back byte-identical and nothing moves. A column
-holding `door`, `piping` or `hvac` derives back `Doors`, `Piping / P&ID` or
-`Heating / HVAC`. That is SM-P0-07's approved decision 8 -- tidying existing
-values onto the seeded labels is wanted -- and it repairs a live defect: the
-catalogue facet list serves the seeded labels, and the filter
-`gs.category ILIKE '%Doors%'` has never matched a symbol stored as `door`.
+**What visibly changes is a normalisation onto the seeded labels, and only
+that.** The seeded nodes *are* `catalog_taxonomy`'s hard-coded lists, so a
+column already holding a seeded label derives back byte-identical and nothing
+moves. A column holding `door` derives back `Doors`. That is SM-P0-07's
+approved decision 8 -- tidying existing values onto the seeded labels is
+wanted -- and it repairs a live defect: the catalogue facet list serves the
+seeded labels, and the filter `gs.category ILIKE '%Doors%'` has never matched
+a symbol stored as `door`.
+
+**A `legacy_taxonomy` match may create the assignment but must not drive the
+durable column.** Measured against production before this rule existed: 63 of
+96 symbols would have had a column rewritten, and roughly half of those were
+*coarsenings* rather than normalisations -- `Cylinder` and `Stirrer` and
+`Envelope` all collapsing to `Equipment`, `Gate Valves` to `Valves`. Those
+maps were built for browse *bucketing*, where many raw values fold into one
+coarse facet, and folding them into the display column destroys a distinction
+an operator actually recorded. So the third matching rule earns its structured
+assignment -- full 91-of-91 vocabulary coverage, and section 12.1 M5 finds the
+symbol under the coarse facet through that assignment -- while the column it
+was derived from keeps the more specific value. Nothing is lost; the coarse
+fact is now in the governed model where it belongs, rather than overwriting
+the specific one.
 
 **Choosing between proposals is deterministic.** Status first, then method,
 then age. A reviewer's `manual` assertion beats a mapper's `source_mapping`
@@ -83,13 +97,43 @@ METHOD_PREFERENCE: tuple[str, ...] = (
     "legacy_backfill",
 )
 
+# A match basis that must not drive the durable display column. Expressed as
+# a deny-list rather than an allow-list on purpose: an assignment carrying no
+# `match_basis` at all -- a reviewer's own choice through a future review UI,
+# say -- is a deliberate human assertion and *should* drive the column. Only
+# the basis measured as too coarse is excluded.
+NON_DISPLAY_MATCH_BASES = frozenset({"legacy_taxonomy"})
+
+
+def may_drive_display_value(assignment: SymbolRevisionClassificationAssignment) -> bool:
+    """Whether one assignment is allowed to set a legacy display column.
+
+    Reads `evidence_json["match_basis"]`, which both
+    `classification_mapping.apply_classification_mapping` and
+    `classification_backfill` record. A row with no evidence, or evidence
+    naming no basis, is eligible.
+    """
+    evidence = assignment.evidence_json or {}
+    basis = evidence.get("match_basis") if isinstance(evidence, dict) else None
+    return basis not in NON_DISPLAY_MATCH_BASES
+
+
 # Why a facet derived nothing. Diagnostic, like
 # `classification_mapping.MAPPING_GAP_REASONS`, and disjoint from every
 # `method` vocabulary. It is *not* disjoint from the mapping gap reasons, on
 # purpose: `no_scheme` means the same thing in both places -- the scheme is
 # not seeded -- and giving that one fact two names would be worse than
 # sharing it. The other two are this module's own.
-SYNC_SKIP_REASONS = frozenset({"no_derivable_assignment", "no_scheme", "value_unchanged"})
+SYNC_SKIP_REASONS = frozenset(
+    {
+        "no_derivable_assignment",
+        "no_scheme",
+        "value_unchanged",
+        # A primary exists, but every one of them was matched by a rule too
+        # coarse to display. The column keeps its more specific value.
+        "coarse_match_basis",
+    }
+)
 SHARED_WITH_MAPPING_GAP_REASONS = frozenset({"no_scheme"})
 
 
@@ -159,17 +203,11 @@ class LegacySyncReport:
         }
 
 
-def derivable_primary_assignment(
+def primary_assignment_candidates(
     session: Session, *, symbol_revision_id: uuid.UUID, classification_scheme_id: uuid.UUID
-) -> SymbolRevisionClassificationAssignment | None:
-    """Return the primary assignment a display value derives from.
-
-    Ordered in Python rather than SQL: the ranking is a policy this module
-    owns, and expressing it as a `CASE` in the query would put the same
-    judgement in two places. The candidate set is at most a handful of rows
-    for one revision in one scheme.
-    """
-    candidates = list(
+) -> list[SymbolRevisionClassificationAssignment]:
+    """Every open primary in one scheme, unranked and unfiltered."""
+    return list(
         session.execute(
             select(SymbolRevisionClassificationAssignment)
             .where(
@@ -183,6 +221,31 @@ def derivable_primary_assignment(
             .where(SymbolRevisionClassificationAssignment.status.in_(DERIVABLE_STATUSES))
         ).scalars()
     )
+
+
+def derivable_primary_assignment(
+    session: Session, *, symbol_revision_id: uuid.UUID, classification_scheme_id: uuid.UUID
+) -> SymbolRevisionClassificationAssignment | None:
+    """Return the primary assignment a display value derives from.
+
+    Filtered *before* ranking, so the column takes the best evidence that is
+    allowed to display rather than refusing because a coarser row happened to
+    outrank it.
+
+    Ordered in Python rather than SQL: the ranking is a policy this module
+    owns, and expressing it as a `CASE` in the query would put the same
+    judgement in two places. The candidate set is at most a handful of rows
+    for one revision in one scheme.
+    """
+    candidates = [
+        candidate
+        for candidate in primary_assignment_candidates(
+            session,
+            symbol_revision_id=symbol_revision_id,
+            classification_scheme_id=classification_scheme_id,
+        )
+        if may_drive_display_value(candidate)
+    ]
     if not candidates:
         return None
     candidates.sort(
@@ -220,12 +283,21 @@ def derive_legacy_column(
         classification_scheme_id=scheme.id,
     )
     if assignment is None:
+        # Distinguish "nothing asserts this scheme" from "everything that
+        # does was matched too coarsely to display".
+        had_candidates = bool(
+            primary_assignment_candidates(
+                session,
+                symbol_revision_id=symbol_revision_id,
+                classification_scheme_id=scheme.id,
+            )
+        )
         return LegacyDerivation(
             column=column,
             scheme_code=scheme_code,
             current_value=current_value,
             derived_value=None,
-            reason="no_derivable_assignment",
+            reason="coarse_match_basis" if had_candidates else "no_derivable_assignment",
         )
     node = session.get(ClassificationNode, assignment.classification_node_id)
     if node is None:  # pragma: no cover - a composite FK makes this unreachable
