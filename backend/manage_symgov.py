@@ -30,6 +30,7 @@ from symgov_backend.catalog_api_keys import (
     list_catalog_api_keys,
     revoke_catalog_api_key,
 )
+from symgov_backend.classification_backfill import run_legacy_classification_backfill
 from symgov_backend.db import create_session_factory
 from symgov_backend.runtime import RuntimePersistenceBridge, check_database_health, check_storage_health
 from symgov_backend.tracy_operations import (
@@ -181,6 +182,24 @@ def build_parser() -> argparse.ArgumentParser:
     tracy_backfill_parser.add_argument("--list-only", action="store_true", help="Only list candidate missing cases.")
     tracy_backfill_parser.add_argument("--apply", action="store_true", help="Apply the backfill. Omit for dry-run.")
 
+    classification_backfill_parser = subparsers.add_parser(
+        "backfill-legacy-classifications",
+        help="Propose classification assignments for existing symbols from their legacy category/discipline.",
+        description=(
+            "Specification section 12.1 phase M2. Writes proposed legacy_backfill "
+            "assignments, which can never be verified. Dry run unless --apply."
+        ),
+    )
+    classification_backfill_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    classification_backfill_parser.add_argument("--limit", type=int, help="Maximum symbol revisions to sweep.")
+    classification_backfill_parser.add_argument("--symbol-slug", help="Restrict the sweep to one governed symbol slug.")
+    classification_backfill_parser.add_argument(
+        "--apply", action="store_true", help="Apply the backfill. Omit for dry-run."
+    )
+    classification_backfill_parser.add_argument(
+        "--summary-only", action="store_true", help="Print counts without the per-row detail."
+    )
+
     gate_parser = subparsers.add_parser(
         "evaluate-automation-gates",
         help="Evaluate conservative publication automation gates without creating publication work.",
@@ -321,6 +340,64 @@ def _run_catalog_command(
     return 0
 
 
+def _run_legacy_classification_backfill(
+    *,
+    env_file: str | None,
+    limit: int | None,
+    symbol_slug: str | None,
+    apply: bool,
+    summary_only: bool,
+) -> int:
+    """Run one backfill sweep and print its report after commit.
+
+    Committing only when `--apply` was given keeps the dry run a genuine
+    read: the sweep resolves every node and reports every rewrite it would
+    make, and rolls the session back regardless.
+    """
+    session = None
+    try:
+        session_factory = create_session_factory(env_file=env_file, nopool=True)
+        session = session_factory()
+        report = run_legacy_classification_backfill(
+            session,
+            backfilled_at=datetime.now(timezone.utc),
+            limit=limit,
+            symbol_slug=symbol_slug,
+            apply=apply,
+        )
+        payload = report.as_dict()
+        if summary_only:
+            payload.pop("planned", None)
+            payload.pop("skipped_detail", None)
+        rendered = json.dumps(payload, indent=2, default=str)
+        if apply:
+            session.commit()
+        else:
+            session.rollback()
+    except Exception as exc:
+        if session is not None:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            try:
+                session.close()
+            except Exception:
+                pass
+        print(f"Legacy classification backfill failed: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        session.close()
+    except Exception:
+        print(rendered)
+        print("Legacy classification backfill session cleanup failed.", file=sys.stderr)
+        return 1
+
+    print(rendered)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None):
     args = parse_args(argv)
 
@@ -445,6 +522,15 @@ def main(argv: Sequence[str] | None = None):
             )
         print(json.dumps(result, indent=2, default=str))
         return
+
+    if args.command == "backfill-legacy-classifications":
+        return _run_legacy_classification_backfill(
+            env_file=args.db_env_file,
+            limit=args.limit,
+            symbol_slug=args.symbol_slug,
+            apply=args.apply,
+            summary_only=args.summary_only,
+        )
 
     if args.command == "evaluate-automation-gates":
         if args.review_split_metadata:

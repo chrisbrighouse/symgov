@@ -14,6 +14,7 @@ from .published_catalog import (
     published_fallback_source_asset,
     published_symbol_display_id,
 )
+from .settings import get_settings
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,55 @@ def catalog_symbol_summary(row) -> dict:
     }
 
 
+# Specification section 12.1 phase M5: a catalogue facet filter should match a
+# symbol whose *governed classification* names the facet, not only one whose
+# legacy text column happens to contain the string. The legacy column and the
+# payload-JSON match stay as the fallback section 10.1 asks for, so this can
+# only ever widen the matches among symbols the surrounding query already
+# admits -- it adds no table to the FROM chain and cannot reach a symbol
+# `active_public_symbol_projections` excludes (section 14.2).
+#
+# `preferred_label ILIKE` rather than an equality on `node_code`, because the
+# facet values the catalogue serves are the labels, and the surrounding
+# filters are all substring matches.
+_CLASSIFICATION_MATCH_SQL = """
+                OR EXISTS (
+                    SELECT 1
+                    FROM symbol_revision_classifications src
+                    JOIN classification_nodes cn ON cn.id = src.classification_node_id
+                    JOIN classification_schemes cs ON cs.id = src.classification_scheme_id
+                    WHERE src.symbol_revision_id = sr.id
+                      AND src.assignment_role = 'primary'
+                      AND src.status IN ('verified', 'proposed')
+                      AND cs.scheme_code = :{parameter}_scheme
+                      AND cn.preferred_label ILIKE :{parameter}
+                )"""
+
+_DISCIPLINE_SCHEME = "ENGINEERING-DISCIPLINE"
+_SYMBOL_CATEGORY_SCHEME = "SYMBOL-CATEGORY-FAMILY"
+
+
+def _facet_filter(
+    *,
+    column: str,
+    parameter: str,
+    scheme_code: str,
+    assignments_enabled: bool,
+    params: dict,
+) -> str:
+    """Build one facet filter, with or without the assignment match.
+
+    With the flag off the string is byte-identical to what this module built
+    before SM-P0-09, and no extra parameter is bound -- which is what makes
+    the rollout stageable and the "same SQL as today" claim checkable.
+    """
+    clause = f"(gs.{column} ILIKE :{parameter} OR CAST(sr.payload_json AS TEXT) ILIKE :{parameter}"
+    if assignments_enabled:
+        clause += _CLASSIFICATION_MATCH_SQL.format(parameter=parameter)
+        params[f"{parameter}_scheme"] = scheme_code
+    return clause + ")"
+
+
 def catalog_symbol_filters(
     *,
     q: str | None,
@@ -90,7 +140,12 @@ def catalog_symbol_filters(
     symbol_family: str | None,
     has_preview: bool | None,
     updated_since: str | None,
+    assignments_enabled: bool | None = None,
 ) -> tuple[list[str], dict, dict]:
+    if assignments_enabled is None:
+        assignments_enabled = bool(
+            getattr(get_settings(), "catalog_classification_assignments_enabled", False)
+        )
     filters: list[str] = []
     params: dict = {}
     response_filters: dict = {}
@@ -111,11 +166,27 @@ def catalog_symbol_filters(
         )
         params["query"] = f"%{q}%"
     if discipline:
-        filters.append("(gs.discipline ILIKE :discipline OR CAST(sr.payload_json AS TEXT) ILIKE :discipline)")
+        filters.append(
+            _facet_filter(
+                column="discipline",
+                parameter="discipline",
+                scheme_code=_DISCIPLINE_SCHEME,
+                assignments_enabled=assignments_enabled,
+                params=params,
+            )
+        )
         params["discipline"] = f"%{discipline}%"
         response_filters["discipline"] = discipline
     if category:
-        filters.append("(gs.category ILIKE :category OR CAST(sr.payload_json AS TEXT) ILIKE :category)")
+        filters.append(
+            _facet_filter(
+                column="category",
+                parameter="category",
+                scheme_code=_SYMBOL_CATEGORY_SCHEME,
+                assignments_enabled=assignments_enabled,
+                params=params,
+            )
+        )
         params["category"] = f"%{category}%"
         response_filters["category"] = category
     if use_case:

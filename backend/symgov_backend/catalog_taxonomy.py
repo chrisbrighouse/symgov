@@ -174,6 +174,35 @@ def _normalized_key(value: Any) -> str:
     return re.sub(r"[\s-]+", "_", str(value or "").strip().lower())
 
 
+LEGACY_TAXONOMY_FACETS = ("discipline", "category")
+
+_LEGACY_FACET_MAPS = {
+    "discipline": _DISCIPLINE_MAP,
+    "category": _CATEGORY_MAP,
+}
+
+
+def legacy_taxonomy_labels(facet: str, value: object) -> tuple[str, ...]:
+    """Return this catalogue's own reading of one raw facet value.
+
+    `_DISCIPLINE_MAP` and `_CATEGORY_MAP` are the deterministic short-form
+    vocabulary the product has always understood: `piping` means
+    "Piping / P&ID", `vessel` means "Vessels / Tanks", `motor` means
+    "Motors / Drives". They are facet-specific -- `hvac` is the discipline
+    "HVAC" and the category "Heating / HVAC" -- so a caller must say which
+    facet it is resolving, and the ordering of a multi-label entry is the
+    order the browse taxonomy already applies.
+
+    Exposed for `classification_mapping`, which consults it as a third
+    matching rule after the exact and trailing-S ones. It is a lookup in a
+    fixed table, not similarity matching, so specification section 16.2 is
+    unaffected.
+    """
+    if facet not in _LEGACY_FACET_MAPS:
+        raise ValueError(f"unknown legacy taxonomy facet: {facet!r}")
+    return tuple(_LEGACY_FACET_MAPS[facet].get(_normalized_key(value)) or ())
+
+
 def _text_tokens(*values: Any) -> list[str]:
     tokens: list[str] = []
     for value in values:

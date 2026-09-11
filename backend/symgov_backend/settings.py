@@ -182,6 +182,13 @@ class SymgovAPISettings:
         "yes",
         "on",
     }
+    # Specification section 12.1 phase M5: read governed classification
+    # assignments in the catalogue with a fallback to the legacy columns.
+    # Staged rollout, so off by default -- with the flag off the catalogue
+    # SQL is byte-identical to what it was before SM-P0-09.
+    catalog_classification_assignments_enabled: bool = os.environ.get(
+        "SYMGOV_CATALOG_CLASSIFICATION_ASSIGNMENTS_ENABLED", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
     organization_symbols_enabled: bool = os.environ.get("SYMGOV_ORGANIZATION_SYMBOLS_ENABLED", "").strip().lower() in {
         "1",
         "true",

@@ -376,9 +376,19 @@ def test_an_entirely_unmappable_classification_still_promotes(session_factory):
 
 
 def test_the_legacy_columns_receive_exactly_what_they_did_before(session_factory):
-    """The SM-P0-09 line, pinned. `category` and `discipline` come from the
-    reviewed property first and the classification record second, with the
-    same `symbol`/`general` fallbacks -- unchanged by this package."""
+    """The SM-P0-09 line, pinned -- and it did not move.
+
+    `category` and `discipline` still come from the reviewed property first
+    and the classification record second, with the same `symbol`/`general`
+    fallbacks. SM-P0-09 now derives both columns from the structured primary
+    afterwards, and this test still passes untouched because its two cases
+    are exactly the ones that cannot move: `Pumps` and `Process` are seeded
+    node labels, so they derive back byte-identical, and the fallbacks are
+    placeholder values, so they produce no assignment to derive from at all.
+
+    Where the line *does* move is a value the mapper normalises --
+    `door` -> `Doors` -- and that is pinned in
+    `test_legacy_classification_sync_postgresql.py` rather than here."""
     with session_factory() as session:
         review_case, decision = _seed_case(
             session,

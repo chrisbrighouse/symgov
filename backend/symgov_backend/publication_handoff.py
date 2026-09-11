@@ -42,6 +42,7 @@ from .classification_mapping import (
     apply_classification_mapping,
     classification_fields_from_record,
 )
+from .legacy_classification_sync import sync_legacy_symbol_columns
 from .publication_authority import lock_review_case_decision_authority
 from .publication_gate import propose_intake_rights_record
 from .runtime import (
@@ -429,6 +430,43 @@ def record_intake_rights_proposal(
     return report
 
 
+def record_legacy_classification_sync(
+    session: Session,
+    *,
+    symbol: GovernedSymbol,
+    revision: SymbolRevision,
+    synced_at: datetime,
+) -> dict[str, Any]:
+    """Dual-write the legacy columns from the structured primaries (SM-P0-09).
+
+    Section 12.1 phase M4. Runs *after* `record_classification_mapping`,
+    because it derives `GovernedSymbol.category`/`.discipline` from the
+    assignments that call has just proposed -- the columns were written from
+    the reviewed property a few lines earlier, and the precedence is
+    deliberately the same one, so for a value already holding a seeded label
+    this changes nothing at all.
+
+    Wrapped for `record_classification_mapping`'s reason and with the same
+    force. A column that keeps its old value is the compatible outcome, so
+    there is no failure mode here worth failing a promotion over.
+    """
+    try:
+        report = sync_legacy_symbol_columns(
+            session,
+            symbol=symbol,
+            symbol_revision_id=revision.id,
+            synced_at=synced_at,
+        ).as_dict()
+    except Exception as exc:  # pragma: no cover - promotion must not fail for this
+        report = {"status": "failed", "error": str(exc)[:512]}
+    revision.payload_json = {
+        **(revision.payload_json or {}),
+        "legacy_classification_sync": report,
+    }
+    session.flush()
+    return report
+
+
 def ensure_approved_symbol_revision(
     session: Session,
     *,
@@ -574,6 +612,12 @@ def ensure_approved_symbol_revision(
         proposed_at=now,
         review_case=review_case,
         decision=decision,
+    )
+    record_legacy_classification_sync(
+        session,
+        symbol=symbol,
+        revision=revision,
+        synced_at=now,
     )
     symbol.current_revision_id = revision.id
     symbol.updated_at = now
@@ -861,6 +905,12 @@ def ensure_approved_child_symbol_revision(
         proposed_at=now,
         review_case=review_case,
         decision=decision,
+    )
+    record_legacy_classification_sync(
+        session,
+        symbol=symbol,
+        revision=revision,
+        synced_at=now,
     )
     symbol.current_revision_id = revision.id
     symbol.updated_at = now

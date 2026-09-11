@@ -65,6 +65,7 @@ from .automation_policy import (
     PLACEHOLDER_DISCIPLINES,
     PLACEHOLDER_VALUES,
 )
+from .catalog_taxonomy import legacy_taxonomy_labels
 from .classification_assignments import propose_symbol_revision_classification
 from .classification_schemes import (
     NODE_LABEL_MAX_LENGTH,
@@ -109,6 +110,10 @@ MAPPING_GAP_REASONS = frozenset(
         "no_source_package",
         "carried_in_payload",
         "mapping_failed",
+        # SM-P0-10's own: a revision already carries a primary in the scheme,
+        # so the backfill has nothing to add. Here rather than in a rival
+        # frozenset, because it is the same diagnostic family.
+        "already_assigned",
     }
 )
 
@@ -121,6 +126,19 @@ STANDARD_RELATIONSHIP_TYPE = "derived_from"
 
 _SYMBOL_CATEGORY_SCHEME = "SYMBOL-CATEGORY-FAMILY"
 _DISCIPLINE_SCHEME = "ENGINEERING-DISCIPLINE"
+
+# Which legacy taxonomy facet backs each seeded scheme. The lookup has to
+# know: `hvac` is the discipline "HVAC" and the category "Heating / HVAC".
+_LEGACY_TAXONOMY_FACETS = {
+    _DISCIPLINE_SCHEME: "discipline",
+    _SYMBOL_CATEGORY_SCHEME: "category",
+}
+
+# How a candidate code was arrived at. A *diagnostic* vocabulary: it reaches
+# `evidence_json["match_basis"]` and never a `method` column, so it is not an
+# eighth method vocabulary -- `tests/test_classification_mapping.py` pins
+# that, as it does for the gap reasons.
+MATCH_BASES = frozenset({"exact", "plural_variant", "legacy_taxonomy"})
 
 
 @dataclass(frozen=True)
@@ -157,8 +175,10 @@ class PlannedAssignment:
     """One proposed representation classification, before a node is resolved.
 
     `candidate_node_codes` is ordered by preference. The first that resolves
-    to an active node in `scheme_code` wins, and `match_basis` records which
-    rule found it so a reviewer can see how the value was matched.
+    to an active node in `scheme_code` wins, and the matching entry of
+    `candidate_match_bases` records which rule found it so a reviewer can see
+    how the value was matched. The two tuples are parallel; `candidates`
+    pairs them up.
     """
 
     field: str
@@ -166,6 +186,11 @@ class PlannedAssignment:
     assignment_role: str
     raw_value: str
     candidate_node_codes: tuple[str, ...]
+    candidate_match_bases: tuple[str, ...] = ()
+
+    @property
+    def candidates(self) -> tuple[tuple[str, str], ...]:
+        return tuple(zip(self.candidate_node_codes, self.candidate_match_bases))
 
 
 @dataclass(frozen=True)
@@ -219,28 +244,89 @@ def _is_placeholder(value: str, placeholders: set[str]) -> bool:
     return value.strip().casefold() in placeholders
 
 
-def _candidate_node_codes(value: str) -> tuple[str, ...]:
-    """Derive the node codes a value could match, best first.
+def _candidate_node_codes(value: str, *, scheme_code: str) -> tuple[tuple[str, str], ...]:
+    """Derive the (code, match_basis) pairs a value could match, best first.
 
-    `derive_classification_node_code` already folds case and punctuation, so
-    `mechanical`, `Mechanical` and `MECHANICAL` are one code. The seeded
-    labels are plural where the workspace values are singular -- `Valves`
-    against Libby's `valve`, `Doors` against `door` -- so a trailing-S
-    variant is tried second. That is a deterministic rewrite of one
-    character, recorded in evidence when it is what matched; it is not
-    similarity matching, which section 16.2 forbids.
+    Three rules, tried in order, each deterministic and none of them
+    similarity matching -- section 16.2 forbids that.
+
+    `exact`: `derive_classification_node_code` already folds case and
+    punctuation, so `mechanical`, `Mechanical` and `MECHANICAL` are one code.
+
+    `plural_variant`: the seeded labels are plural where the workspace values
+    are singular -- `Valves` against Libby's `valve`, `Doors` against `door`
+    -- so a trailing-S variant is tried second. One character, added or
+    removed.
+
+    `legacy_taxonomy`: the catalogue's own `_DISCIPLINE_MAP`/`_CATEGORY_MAP`,
+    consulted last. Those tables already read `piping` as "Piping / P&ID" and
+    `vessel` as "Vessels / Tanks" -- forty short forms whose node codes the
+    first two rules cannot reach, because `PIPING` is not `PIPING_P_ID`. A
+    multi-label entry such as `fire_alarm` contributes both of its labels, in
+    the order the browse taxonomy applies, so the first is preferred.
+
+    Codes are de-duplicated keeping the best basis: for `valve` the legacy
+    table agrees with the trailing-S rule, and the pair stays
+    `("VALVE", "VALVES")`.
     """
     try:
         exact = derive_classification_node_code(value)
     except ValueError:
         return ()
-    if exact.endswith("S"):
-        return (exact, exact[:-1])
-    return (exact, f"{exact}S")
+    candidates: list[tuple[str, str]] = [(exact, "exact")]
+    plural = exact[:-1] if exact.endswith("S") else f"{exact}S"
+    if plural:
+        candidates.append((plural, "plural_variant"))
+    facet = _LEGACY_TAXONOMY_FACETS.get(scheme_code)
+    if facet is not None:
+        for label in legacy_taxonomy_labels(facet, value):
+            try:
+                candidates.append((derive_classification_node_code(label), "legacy_taxonomy"))
+            except ValueError:  # pragma: no cover - every seeded label derives
+                continue
+    seen: set[str] = set()
+    ordered: list[tuple[str, str]] = []
+    for code, basis in candidates:
+        if code in seen:
+            continue
+        seen.add(code)
+        ordered.append((code, basis))
+    return tuple(ordered)
 
 
-def _match_basis(code: str, candidates: tuple[str, ...]) -> str:
-    return "exact" if candidates and code == candidates[0] else "plural_variant"
+def plan_facet(
+    *,
+    field: str,
+    value: object,
+    scheme_code: str,
+    assignment_role: str,
+    placeholders: set[str],
+) -> PlannedAssignment | MappingGap:
+    """Decide what one raw facet value proposes, or why it proposes nothing.
+
+    Module-level and shared, deliberately. Promotion-time mapping (SM-P0-07)
+    and the legacy backfill (SM-P0-10) both route every facet value through
+    this one function, so the two agree by construction. SM-P0-09 derives
+    `GovernedSymbol.category`/`.discipline` back from whichever of them wrote
+    the assignment, and a divergence between the two rules would make that
+    derivation depend on how a symbol happened to reach the catalogue.
+    """
+    cleaned = _clean_text(value)
+    if cleaned is None:
+        return MappingGap(field=field, raw_value=None, reason="no_value")
+    if _is_placeholder(cleaned, placeholders):
+        return MappingGap(field=field, raw_value=cleaned, reason="placeholder_value")
+    candidates = _candidate_node_codes(cleaned, scheme_code=scheme_code)
+    if not candidates:
+        return MappingGap(field=field, raw_value=cleaned, reason="no_node_match")
+    return PlannedAssignment(
+        field=field,
+        scheme_code=scheme_code,
+        assignment_role=assignment_role,
+        raw_value=cleaned,
+        candidate_node_codes=tuple(code for code, _ in candidates),
+        candidate_match_bases=tuple(basis for _, basis in candidates),
+    )
 
 
 def plan_classification_mapping(fields: ClassificationFields) -> ClassificationMappingPlan:
@@ -260,26 +346,17 @@ def plan_classification_mapping(fields: ClassificationFields) -> ClassificationM
         assignment_role: str,
         placeholders: set[str],
     ) -> None:
-        cleaned = _clean_text(value)
-        if cleaned is None:
-            gaps.append(MappingGap(field=field, raw_value=None, reason="no_value"))
-            return
-        if _is_placeholder(cleaned, placeholders):
-            gaps.append(MappingGap(field=field, raw_value=cleaned, reason="placeholder_value"))
-            return
-        candidates = _candidate_node_codes(cleaned)
-        if not candidates:
-            gaps.append(MappingGap(field=field, raw_value=cleaned, reason="no_node_match"))
-            return
-        assignments.append(
-            PlannedAssignment(
-                field=field,
-                scheme_code=scheme_code,
-                assignment_role=assignment_role,
-                raw_value=cleaned,
-                candidate_node_codes=candidates,
-            )
+        planned = plan_facet(
+            field=field,
+            value=value,
+            scheme_code=scheme_code,
+            assignment_role=assignment_role,
+            placeholders=placeholders,
         )
+        if isinstance(planned, MappingGap):
+            gaps.append(planned)
+        else:
+            assignments.append(planned)
 
     # Section 9.3 row 1: engineeringDiscipline -> Engineering Discipline.
     facet(
@@ -454,14 +531,19 @@ class ClassificationMappingOutcome:
         }
 
 
-def _resolve_node(
-    session: Session, *, scheme_code: str, candidate_node_codes: tuple[str, ...]
-) -> ClassificationNode | None:
-    """Return the first active node matching a candidate code, or None."""
+def resolve_node(
+    session: Session, *, scheme_code: str, candidates: tuple[tuple[str, str], ...]
+) -> tuple[ClassificationNode, str] | None:
+    """Return the first active node matching a candidate, with its basis.
+
+    The basis travels with the node rather than being recovered by index
+    afterwards, so `evidence_json["match_basis"]` cannot drift from the rule
+    that actually matched.
+    """
     scheme = get_classification_scheme(session, scheme_code)
     if scheme is None:
         return None
-    for code in candidate_node_codes:
+    for code, basis in candidates:
         node = session.execute(
             select(ClassificationNode)
             .where(ClassificationNode.scheme_id == scheme.id)
@@ -469,7 +551,7 @@ def _resolve_node(
             .where(ClassificationNode.status == "active")
         ).scalar_one_or_none()
         if node is not None:
-            return node
+            return node, basis
     return None
 
 
@@ -556,12 +638,12 @@ def apply_classification_mapping(
 
     for planned in plan.assignments:
         try:
-            node = _resolve_node(
+            resolved_node = resolve_node(
                 session,
                 scheme_code=planned.scheme_code,
-                candidate_node_codes=planned.candidate_node_codes,
+                candidates=planned.candidates,
             )
-            if node is None:
+            if resolved_node is None:
                 gaps.append(
                     MappingGap(
                         field=planned.field,
@@ -571,7 +653,7 @@ def apply_classification_mapping(
                     )
                 )
                 continue
-            match_basis = _match_basis(node.node_code, planned.candidate_node_codes)
+            node, match_basis = resolved_node
             existing = _existing_assignment(
                 session,
                 symbol_revision_id=symbol_revision_id,
