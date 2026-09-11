@@ -37,6 +37,11 @@ from .models import (
 from .service_users import enforce_noninteractive_service_account, new_service_pin_hash
 from .settings import get_settings
 from .organization_promotion_handoff import execute_organization_promotion_handoff
+from .classification_mapping import (
+    MAPPER_VERSION,
+    apply_classification_mapping,
+    classification_fields_from_record,
+)
 from .publication_authority import lock_review_case_decision_authority
 from .runtime import (
     coerce_uuid,
@@ -281,6 +286,98 @@ def derive_symbol_name(context: dict[str, Any], slug: str) -> str:
     return title
 
 
+def load_child_classification_record(
+    session: Session,
+    *,
+    review_case: ReviewCase,
+    child_key: str | None,
+    index: int,
+) -> ClassificationRecord | None:
+    """Find a split child's own classification record, if one was produced.
+
+    Libby already emits `parent_review_case_id`, `symbol_key` and
+    `symbol_region_index` for a child task (`run_libby_classification.py`),
+    and until SM-P0-07 nothing read them back. The parent sheet's record is
+    deliberately *not* a fallback: for a raster split it describes the sheet,
+    whose family, process category and equipment class are the sheet-level
+    placeholders `mixed_symbol_set`, `review_required` and `mixed_equipment`.
+    Inheriting those would assert that every extracted child is a mixed
+    symbol set, which is worse than recording nothing.
+    """
+    candidates = (
+        session.query(ClassificationRecord)
+        .filter(
+            ClassificationRecord.status == "current",
+            ClassificationRecord.parent_review_case_id == review_case.id,
+        )
+        .order_by(ClassificationRecord.created_at.desc())
+        .all()
+    )
+    for record in candidates:
+        if record.symbol_region_index is not None and record.symbol_region_index == index:
+            return record
+    key = str(child_key or "").strip().casefold()
+    if key:
+        for record in candidates:
+            if str(record.symbol_key or "").strip().casefold() == key:
+                return record
+    return None
+
+
+def record_classification_mapping(
+    session: Session,
+    *,
+    revision: SymbolRevision,
+    classification: ClassificationRecord | None,
+    symbol_properties: ReviewSymbolProperty | None,
+    intake: IntakeRecord | None,
+    review_case: ReviewCase,
+    decision: HumanReviewDecision,
+    proposed_by_user_id: uuid.UUID | None,
+    proposed_at: datetime,
+) -> dict[str, Any]:
+    """Propose SM-P0-07's structured classifications for one approved revision.
+
+    Wrapped whole as well as per item, deliberately. `apply_classification_mapping`
+    is total by construction, and this second guard means even a defect in it
+    cannot stop a reviewed symbol from being promoted -- the failure is
+    recorded in the payload where a reviewer can see it instead.
+
+    The human-reviewed property wins over the classification record for
+    discipline and category, which is the precedence the legacy columns above
+    already use. Keeping both derived from one precedence is what lets
+    SM-P0-09 later derive the legacy column *from* the assignment without
+    either value changing.
+    """
+    try:
+        fields = classification_fields_from_record(
+            classification,
+            discipline=symbol_properties.discipline if symbol_properties else None,
+            category=symbol_properties.category if symbol_properties else None,
+        )
+        report = apply_classification_mapping(
+            session,
+            symbol_revision_id=revision.id,
+            fields=fields,
+            proposed_at=proposed_at,
+            proposed_by_user_id=proposed_by_user_id,
+            source_package_id=intake.source_package_id if intake else None,
+            context={
+                "review_case_id": str(review_case.id),
+                "review_decision_id": str(decision.id),
+            },
+        ).as_report()
+    except Exception as exc:  # pragma: no cover - promotion must not fail for this
+        report = {
+            "mapper_version": MAPPER_VERSION,
+            "status": "failed",
+            "error": str(exc)[:512],
+        }
+    revision.payload_json = {**(revision.payload_json or {}), "classification_mapping": report}
+    session.flush()
+    return report
+
+
 def ensure_approved_symbol_revision(
     session: Session,
     *,
@@ -392,6 +489,11 @@ def ensure_approved_symbol_revision(
             "process_category": classification.process_category if classification else None,
             "parent_equipment_class": classification.parent_equipment_class if classification else None,
             "source_classification": classification.source_classification if classification else None,
+            # SM-P0-07: these four reached the database and then vanished here.
+            "industry": classification.industry if classification else None,
+            "standards_source": classification.standards_source if classification else None,
+            "library_provenance_class": classification.library_provenance_class if classification else None,
+            "format": classification.format if classification else None,
         },
         "lineage": {
             "intake_record_id": str(intake.id) if intake else None,
@@ -401,6 +503,17 @@ def ensure_approved_symbol_revision(
     }
     revision.rationale = text_value(decision.decision_note, fallback="Approved during Daisy-coordinated human review.")
     session.flush()
+    record_classification_mapping(
+        session,
+        revision=revision,
+        classification=classification,
+        symbol_properties=symbol_properties,
+        intake=intake,
+        review_case=review_case,
+        decision=decision,
+        proposed_by_user_id=service_user.id,
+        proposed_at=now,
+    )
     symbol.current_revision_id = revision.id
     symbol.updated_at = now
     session.flush()
@@ -542,6 +655,16 @@ def ensure_approved_child_symbol_revision(
     canonical_name = text_value(symbol_properties.name if symbol_properties else None, canonical_name)
     category = text_value(symbol_properties.category if symbol_properties else None, fallback="symbol")
     discipline = text_value(symbol_properties.discipline if symbol_properties else None, fallback="general")
+    child_classification = load_child_classification_record(
+        session,
+        review_case=review_case,
+        child_key=text_value(
+            reviewed_split_item.child_key if reviewed_split_item else None,
+            child_decision.get("childId"),
+        )
+        or None,
+        index=index,
+    )
 
     symbol = session.query(GovernedSymbol).filter_by(slug=slug).one_or_none()
     if symbol is None:
@@ -603,21 +726,34 @@ def ensure_approved_child_symbol_revision(
         "source_object_key": child_object_key,
         "review_case_id": str(review_case.id),
         "review_decision_id": str(decision.id),
-        "classification_record_id": None,
+        "classification_record_id": str(child_classification.id) if child_classification else None,
         "review_symbol_properties_id": str(symbol_properties.id) if symbol_properties else None,
         "display_name": display_metadata.get("display_name"),
         "package_display_id": display_metadata.get("package_display_id"),
         "package_symbol_sequence": display_metadata.get("package_symbol_sequence"),
         "classification": {
             "status": "human_approved_split_child",
-            "confidence": None,
-            "libby_approved": None,
+            # SM-P0-07: these came back as None even where the child had a
+            # classification record of its own. The parent sheet's record is
+            # still not a fallback -- see load_child_classification_record.
+            "confidence": float(child_classification.confidence) if child_classification else None,
+            "libby_approved": child_classification.libby_approved if child_classification else None,
             "discipline": discipline,
             "category": category,
-            "symbol_family": None,
-            "process_category": None,
-            "parent_equipment_class": None,
-            "source_classification": "raster_split_review",
+            "symbol_family": child_classification.symbol_family if child_classification else None,
+            "process_category": child_classification.process_category if child_classification else None,
+            "parent_equipment_class": (
+                child_classification.parent_equipment_class if child_classification else None
+            ),
+            "source_classification": (
+                child_classification.source_classification if child_classification else "raster_split_review"
+            ),
+            "industry": child_classification.industry if child_classification else None,
+            "standards_source": child_classification.standards_source if child_classification else None,
+            "library_provenance_class": (
+                child_classification.library_provenance_class if child_classification else None
+            ),
+            "format": child_classification.format if child_classification else None,
         },
         "lineage": {
             "intake_record_id": str(intake.id) if intake else None,
@@ -637,6 +773,17 @@ def ensure_approved_child_symbol_revision(
         fallback="Approved as an extracted child symbol during raster split review.",
     )
     session.flush()
+    record_classification_mapping(
+        session,
+        revision=revision,
+        classification=child_classification,
+        symbol_properties=symbol_properties,
+        intake=intake,
+        review_case=review_case,
+        decision=decision,
+        proposed_by_user_id=service_user.id,
+        proposed_at=now,
+    )
     symbol.current_revision_id = revision.id
     symbol.updated_at = now
     session.flush()
