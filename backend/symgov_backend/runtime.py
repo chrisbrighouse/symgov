@@ -28,6 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from .catalog_symbol_ids import ensure_catalog_symbol_id
 from .db import create_session_factory, read_env_file
 from .publication_authority import lock_review_case_decision_authority
+from .publication_gate import describe_refusal, enforce_publication_gate
 from .property_options import remember_property_option
 from .service_users import enforce_noninteractive_service_account, new_service_pin_hash
 from .models import (
@@ -2491,6 +2492,27 @@ class RuntimePersistenceBridge:
                 symbol = session.get(GovernedSymbol, revision.symbol_id)
                 if symbol is None:
                     raise RuntimeError(f"Missing governed_symbols row for revision {revision_id}.")
+                # SM-P0-08, specification section 9.2. Evaluated and recorded
+                # for every revision; it *refuses* only one that reaches an
+                # authoritative source package (section 17's "new
+                # authoritative ingestion profiles"). Every package the live
+                # intake path creates is a `submission_sheet`, so nothing
+                # published today is caught -- the evaluation is written with
+                # outcome `not_in_scope` and its traceability gaps recorded,
+                # which is section 12.1's phase M6.
+                #
+                # Before `allocate_catalog_identity_for_publication`, which
+                # is the first irreversible step. Raising is this method's
+                # existing shape for every other refusal, and unwinds the
+                # surrounding `session_scope`.
+                gate_decision = enforce_publication_gate(
+                    session,
+                    symbol_revision_id=revision_id,
+                    evaluated_at=completed_at,
+                    evaluated_by_user_id=approval_actor_id,
+                )
+                if not gate_decision.permitted:
+                    raise RuntimeError(describe_refusal(gate_decision))
                 allocate_catalog_identity_for_publication(
                     session,
                     symbol,

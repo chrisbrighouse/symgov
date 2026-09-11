@@ -79,6 +79,7 @@ from .models import (
     SymbolRevision,
 )
 from .product_usage_events import record_governance_usage_event
+from .publication_gate import describe_refusal, enforce_publication_gate
 
 OPEN_PROMOTION_STATUSES = ("submitted", "triage", "in_review", "changes_requested")
 
@@ -232,6 +233,26 @@ def execute_organization_promotion_handoff(
     approval_target = _ensure_organization_promotion_approval_target(
         session, review_decision=decision, revision=revision, created_at=now
     )
+
+    # SM-P0-08, specification section 9.2. Evaluated for every promotion and
+    # recorded for every promotion; it *refuses* only a revision that reaches
+    # an authoritative source package (section 17's "new authoritative
+    # ingestion profiles"). Everything the live intake path has ever created
+    # is a `submission_sheet` package and is therefore grandfathered, with
+    # its traceability gaps written down rather than hidden -- section 12.1's
+    # phase M6.
+    #
+    # Before the state change, not after: a refusal must leave the symbol
+    # organisation-private, and `_fail` is this path's existing shape for
+    # every other refusal.
+    gate_decision = enforce_publication_gate(
+        session,
+        symbol_revision_id=revision.id,
+        evaluated_at=now,
+        evaluated_by_user_id=decision.decided_by,
+    )
+    if not gate_decision.permitted:
+        return _fail(describe_refusal(gate_decision))
 
     # visibility must flip to 'public' before allocating a catalog symbol
     # ID: `ck_governed_symbols_catalog_symbol_visibility_barrier` requires

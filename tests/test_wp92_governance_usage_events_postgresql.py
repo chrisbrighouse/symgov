@@ -63,7 +63,14 @@ from symgov_backend.models import OrganizationMembership, ProductUsageEvent, Use
 from symgov_backend.routes.organizations import get_icon_storage_bridge  # noqa: E402
 from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E402
 
-NEW_MIGRATION_HEAD = "20260904_0043"
+# Moved from 20260904_0043 to head by SM-P0-08. This file drives the real
+# organization-promotion path, and section 9.2's publication gate now sits on
+# it -- reading `symbol_semantic_assignments`, `symbol_revision_classifications`,
+# `rights_records`, `asset_transformations` and `publication_gate_*`, none of
+# which exist at 20260904_0043. An upgrade target, not a head assertion: it is
+# here so the fixture has the schema the code under test reads, and it must
+# track head for as long as that stays true.
+NEW_MIGRATION_HEAD = "20260911_0057"
 
 psycopg = pytest.importorskip("psycopg")
 

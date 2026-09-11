@@ -43,6 +43,7 @@ from .classification_mapping import (
     classification_fields_from_record,
 )
 from .publication_authority import lock_review_case_decision_authority
+from .publication_gate import propose_intake_rights_record
 from .runtime import (
     coerce_uuid,
     download_object_bytes,
@@ -378,6 +379,56 @@ def record_classification_mapping(
     return report
 
 
+def record_intake_rights_proposal(
+    session: Session,
+    *,
+    revision: SymbolRevision,
+    provenance: ProvenanceAssessment | None,
+    intake: IntakeRecord | None,
+    proposed_by_user_id: uuid.UUID | None,
+    proposed_at: datetime,
+    review_case: ReviewCase,
+    decision: HumanReviewDecision,
+) -> dict[str, Any]:
+    """Carry Tracy's rights assessment into a durable proposed `RightsRecord`.
+
+    SM-P0-08. Section 9.2's rights dimension needs an *approved* record and
+    nothing in production wrote any record at all, so the assessment died
+    with the intake row it was attached to -- which is intake-scoped on both
+    of its NOT NULL keys and cannot follow the symbol.
+
+    Wrapped for `record_classification_mapping`'s reason and with the same
+    force: this is a proposal, not the gate, and a defect in it must not stop
+    a reviewed symbol from being promoted. The gate itself is not wrapped,
+    runs later, and does refuse.
+    """
+    try:
+        record = propose_intake_rights_record(
+            session,
+            symbol_revision_id=revision.id,
+            provenance=provenance,
+            intake_record_id=intake.id if intake else None,
+            proposed_at=proposed_at,
+            proposed_by_user_id=proposed_by_user_id,
+            context={
+                "review_case_id": str(review_case.id),
+                "review_decision_id": str(decision.id),
+            },
+        )
+    except Exception as exc:  # pragma: no cover - promotion must not fail for this
+        report = {"status": "failed", "error": str(exc)[:512]}
+    else:
+        report = {
+            "status": "proposed" if record is not None else "skipped",
+            "rights_record_id": str(record.id) if record is not None else None,
+            "disposition": record.disposition if record is not None else None,
+            "rights_status": record.rights_status if record is not None else None,
+        }
+    revision.payload_json = {**(revision.payload_json or {}), "rights_proposal": report}
+    session.flush()
+    return report
+
+
 def ensure_approved_symbol_revision(
     session: Session,
     *,
@@ -514,6 +565,16 @@ def ensure_approved_symbol_revision(
         proposed_by_user_id=service_user.id,
         proposed_at=now,
     )
+    record_intake_rights_proposal(
+        session,
+        revision=revision,
+        provenance=provenance,
+        intake=intake,
+        proposed_by_user_id=service_user.id,
+        proposed_at=now,
+        review_case=review_case,
+        decision=decision,
+    )
     symbol.current_revision_id = revision.id
     symbol.updated_at = now
     session.flush()
@@ -625,6 +686,7 @@ def ensure_approved_child_symbol_revision(
     context = load_review_context(session, review_case)
     validation = context["validation_report"]
     intake = context["intake_record"]
+    provenance = context["provenance_assessment"]
     service_user = ensure_publication_service_user(session)
     now = utc_now()
 
@@ -783,6 +845,22 @@ def ensure_approved_child_symbol_revision(
         decision=decision,
         proposed_by_user_id=service_user.id,
         proposed_at=now,
+    )
+    # The parent sheet's *classification* is deliberately never inherited
+    # (see load_child_classification_record); its *rights* assessment is,
+    # because the two are not the same kind of fact. A sheet's family and
+    # process category describe the sheet and are wrong for an extracted
+    # child, whereas the rights assessment describes the acquired artefact,
+    # and the child came out of that same artefact.
+    record_intake_rights_proposal(
+        session,
+        revision=revision,
+        provenance=provenance,
+        intake=intake,
+        proposed_by_user_id=service_user.id,
+        proposed_at=now,
+        review_case=review_case,
+        decision=decision,
     )
     symbol.current_revision_id = revision.id
     symbol.updated_at = now

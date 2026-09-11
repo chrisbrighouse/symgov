@@ -26,7 +26,7 @@ from symgov_backend.models import (
     ReviewSplitItem,
     SymbolRevision,
 )
-from symgov_backend import publication_handoff, review_followup_handoff
+from symgov_backend import publication_gate, publication_handoff, review_followup_handoff
 from symgov_backend import runtime
 from symgov_backend.routes import workspace as workspace_routes
 from symgov_backend.schemas import (
@@ -1303,6 +1303,25 @@ def test_runtime_publication_persistence_attributes_governance_to_human_and_exec
 
     bridge = Bridge()
     monkeypatch.setattr(runtime, "resolve_durable_publication_revisions", lambda *_args, **_kwargs: [revision])
+    # SM-P0-08 put section 9.2's publication gate on this path. It reads eight
+    # governed tables, and this file's `Session` is a hand-rolled double whose
+    # `execute` returns None. Stubbed rather than widened: this test is about
+    # which actor is attributed to the job and the audit events, not about the
+    # gate, and `tests/test_publication_gate_postgresql.py` exercises the gate
+    # against a real server.
+    monkeypatch.setattr(
+        runtime,
+        "enforce_publication_gate",
+        lambda *_args, **_kwargs: publication_gate.PublicationGateDecision(
+            symbol_revision_id=revision.id,
+            in_scope=False,
+            source_package_id=None,
+            outcome="not_in_scope",
+            dimensions=(),
+            refusal_reasons=(),
+            traceability_level="T0",
+        ),
+    )
     bridge.persist_publication_execution(queue_item, run_record, artifact_record, report)
     bridge.persist_publication_execution(queue_item, run_record, artifact_record, report)
 

@@ -3581,3 +3581,245 @@ class AssetTransformation(Base):
         nullable=True,
     )
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PublicationGateException(Base):
+    """An approved waiver of one section 9.2 publication-gate dimension.
+
+    Specification section 9.2's semantic-identity row ends "or an explicit
+    approved 'semantic identity pending' exception for non-engineering/
+    annotation symbols". That escape hatch is the only reason the gate can
+    ever pass today: nothing in production creates a `SemanticConcept`, so
+    without it no in-scope symbol could satisfy the semantic dimension by any
+    path.
+
+    A governed row rather than a flag or a policy constant, because section
+    9.2's word is "approved". Excusing a publication requirement is a
+    decision, and it carries the same who / when / why section 7.12 requires
+    of a rights approval -- including `approved_by_user_id` with
+    `ondelete="RESTRICT"`, for the reason `RightsRecord.decided_by_user_id`
+    has it: an approved waiver that has lost its approver is exactly the row
+    that must not exist.
+
+    `dimension` is constrained to section 9.2's six names. *Which* of the six
+    may be waived is service policy in
+    `publication_gate.WAIVABLE_DIMENSIONS`, not a check constraint -- the
+    same split 20260910_0056 settled on for `disposition_is_permitted`, so
+    that loosening a policy never requires a migration. A row waiving
+    `rights` is therefore storable and unwritable, and section 16.2's "no
+    public authoritative-source symbol is newly published with unresolved
+    rights" is enforced by `propose_publication_gate_exception` and by tests.
+    """
+
+    __tablename__ = "publication_gate_exceptions"
+    __table_args__ = (
+        CheckConstraint(
+            "dimension in ('semantic_identity', 'source', 'graphical_authority', "
+            "'rights', 'integrity', 'classification')",
+            name="dimension",
+        ),
+        CheckConstraint(
+            "decision_status in ('proposed', 'approved', 'rejected', 'retired')",
+            name="decision_status",
+        ),
+        # `retired` is excluded because supersession retires a predecessor
+        # automatically when its successor is approved; the actor of record
+        # is the successor's approver. `decision_status` is NOT NULL, so
+        # neither branch can evaluate to NULL.
+        CheckConstraint(
+            "decision_status in ('proposed', 'retired') "
+            "or (approved_at is not null and approved_by_user_id is not null)",
+            name="decision_actor",
+        ),
+        CheckConstraint(
+            "decision_status <> 'approved' or approval_reason is not null",
+            name="approved_reason",
+        ),
+        CheckConstraint(
+            "approval_reason is null or (btrim(approval_reason) <> '' "
+            "and char_length(approval_reason) <= 2000)",
+            name="approval_reason_bounds",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(evidence_json) = 'object'",
+            name="evidence_json_object",
+        ),
+        Index(
+            "uq_publication_gate_exceptions_approved",
+            "symbol_revision_id",
+            "dimension",
+            unique=True,
+            postgresql_where=text("decision_status = 'approved'"),
+        ),
+        Index(
+            "ix_publication_gate_exceptions_symbol_revision_id",
+            "symbol_revision_id",
+            "decision_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbol_revision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "symbol_revisions.id",
+            ondelete="RESTRICT",
+            name="fk_publication_gate_exceptions_symbol_revision_id",
+        ),
+        nullable=False,
+    )
+    dimension: Mapped[str] = mapped_column(Text, nullable=False)
+    decision_status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'proposed'"))
+    approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.id",
+            ondelete="RESTRICT",
+            name="fk_publication_gate_exceptions_approved_by_user_id",
+        ),
+        nullable=True,
+    )
+    approved_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approval_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    proposed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL",
+            name="fk_publication_gate_exceptions_proposed_by_user_id",
+        ),
+        nullable=True,
+    )
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class PublicationGateEvaluation(Base):
+    """One durable evaluation of section 9.2's six-dimension publication gate.
+
+    Section 14.4 keeps governance decisions "with the governed data" and
+    refuses to rely on short-lived operational telemetry as the permanent
+    record, so a gate decision has to survive the request that produced it
+    rather than only being returned to the caller.
+
+    Rows accumulate; re-evaluating a revision records a new one. Why a symbol
+    was refused last month is part of the history section 14.4 retains, and
+    section 13.3's coverage reporting is a query over exactly this table.
+
+    `outcome` has three values. `not_in_scope` is section 17's grandfathering
+    case, recorded rather than omitted: the row still carries all six
+    dimension results and the derived section 13.2 level, so it says the
+    symbol published because it was out of scope rather than because it
+    passed. That is section 12.1's "existing published symbols grandfathered
+    with traceability gaps reported", made answerable.
+
+    `dimension_results_json` always holds six entries, whatever the outcome. A
+    partial evaluation is not a gate decision, and `dimension_results_complete`
+    makes that a storage guarantee rather than a convention.
+    """
+
+    __tablename__ = "publication_gate_evaluations"
+    __table_args__ = (
+        CheckConstraint(
+            "outcome in ('permitted', 'refused', 'not_in_scope')",
+            name="outcome",
+        ),
+        CheckConstraint(
+            "traceability_level in ('T0', 'T1', 'T2', 'T3', 'T4', 'T5')",
+            name="traceability_level",
+        ),
+        # Boolean on both sides: `in_scope` is NOT NULL and `outcome` is NOT
+        # NULL, so this can never evaluate to NULL.
+        CheckConstraint(
+            "in_scope = (outcome <> 'not_in_scope')",
+            name="scope_matches_outcome",
+        ),
+        CheckConstraint(
+            "in_scope = false or source_package_id is not null",
+            name="scope_requires_package",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(dimension_results_json) = 'array'",
+            name="dimension_results_array",
+        ),
+        CheckConstraint(
+            "jsonb_array_length(dimension_results_json) = 6",
+            name="dimension_results_complete",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(refusal_reasons_json) = 'array'",
+            name="refusal_reasons_array",
+        ),
+        # `not_in_scope` is constrained by neither: a grandfathered symbol
+        # publishes while still carrying the reasons it would have failed on.
+        CheckConstraint(
+            "outcome <> 'refused' or jsonb_array_length(refusal_reasons_json) > 0",
+            name="refusal_names_a_reason",
+        ),
+        CheckConstraint(
+            "outcome <> 'permitted' or jsonb_array_length(refusal_reasons_json) = 0",
+            name="permit_names_no_reason",
+        ),
+        CheckConstraint(
+            "btrim(policy_version) <> '' and char_length(policy_version) <= 128",
+            name="policy_version",
+        ),
+        Index(
+            "ix_publication_gate_evaluations_symbol_revision_id",
+            "symbol_revision_id",
+            "evaluated_at",
+        ),
+        Index(
+            "ix_publication_gate_evaluations_outcome",
+            "outcome",
+            "evaluated_at",
+            postgresql_where=text("in_scope"),
+        ),
+        Index(
+            "ix_publication_gate_evaluations_source_package_id",
+            "source_package_id",
+            postgresql_where=text("source_package_id is not null"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbol_revision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "symbol_revisions.id",
+            ondelete="RESTRICT",
+            name="fk_publication_gate_evaluations_symbol_revision_id",
+        ),
+        nullable=False,
+    )
+    source_package_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "source_packages.id",
+            ondelete="RESTRICT",
+            name="fk_publication_gate_evaluations_source_package_id",
+        ),
+        nullable=True,
+    )
+    in_scope: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    traceability_level: Mapped[str] = mapped_column(Text, nullable=False)
+    dimension_results_json: Mapped[list] = mapped_column(JSONB, nullable=False)
+    refusal_reasons_json: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    policy_version: Mapped[str] = mapped_column(Text, nullable=False)
+    evaluated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    # SET NULL, not RESTRICT: an evaluation is a machine reading of the
+    # governed rows, not a governance decision by this actor. The decisions it
+    # reads carry their own RESTRICT approvers.
+    evaluated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL",
+            name="fk_publication_gate_evaluations_evaluated_by_user_id",
+        ),
+        nullable=True,
+    )
