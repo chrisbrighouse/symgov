@@ -337,6 +337,8 @@ def record_classification_mapping(
     decision: HumanReviewDecision,
     proposed_by_user_id: uuid.UUID | None,
     proposed_at: datetime,
+    discipline: str | None = None,
+    category: str | None = None,
 ) -> dict[str, Any]:
     """Propose SM-P0-07's structured classifications for one approved revision.
 
@@ -350,12 +352,19 @@ def record_classification_mapping(
     already use. Keeping both derived from one precedence is what lets
     SM-P0-09 later derive the legacy column *from* the assignment without
     either value changing.
+
+    `discipline`/`category` are the same precedence slot for a caller that has
+    no `ReviewSymbolProperty` at all. The organization promotion path
+    (SM-P1-01 WP1.0) is one: its reviewed values were captured on the
+    organization draft and live on `GovernedSymbol` itself, and there is no
+    Libby/Rupert intake behind them. `symbol_properties` still wins where it
+    exists, so the intake path is unchanged.
     """
     try:
         fields = classification_fields_from_record(
             classification,
-            discipline=symbol_properties.discipline if symbol_properties else None,
-            category=symbol_properties.category if symbol_properties else None,
+            discipline=symbol_properties.discipline if symbol_properties else discipline,
+            category=symbol_properties.category if symbol_properties else category,
         )
         report = apply_classification_mapping(
             session,

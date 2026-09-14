@@ -234,6 +234,49 @@ def execute_organization_promotion_handoff(
         session, review_decision=decision, revision=revision, created_at=now
     )
 
+    # Deferred, not module-level: `publication_handoff` imports this module
+    # to dispatch organization promotions (its `execute_publication_handoff`),
+    # so a module-level import here closes that cycle. Same idiom as
+    # `auth.py`'s deferred `organization_authorization` import.
+    from .publication_handoff import record_classification_mapping, record_legacy_classification_sync
+
+    # SM-P1-01 WP1.0, specification section 12.1 phase M4. Until this call
+    # existed, an organization symbol promoted to the public catalogue
+    # arrived with free-text `category`/`discipline` only and no
+    # `symbol_revision_classifications` row at all: invisible to the M5
+    # catalogue assignment read and absent from every semantic review queue.
+    # `apply_classification_mapping` had two production callers, both on the
+    # Rupert/Daisy intake path, and this one was simply missing.
+    #
+    # The reviewed values are the ones the organization contributor recorded
+    # on the draft (`organization_symbol_drafts.create_*`), which live on the
+    # governed symbol itself -- there is no `ReviewSymbolProperty` and no
+    # `IntakeRecord` on this path, so they are passed directly.
+    #
+    # *Before* the gate, deliberately, and this is the intake path's ordering
+    # too: there, `ensure_approved_symbol_revision` proposes at review-
+    # decision time and `runtime.py` evaluates the gate later at publication.
+    # Section 9.2's evaluation reads `symbol_revision_classifications`, so
+    # proposing afterwards would record a classification gap on every
+    # organization promotion that the revision does not actually have --
+    # poisoning `publication_gate_evaluations`, which is section 13.1's
+    # durable traceability record. Wrapped whole, so a mapper defect still
+    # cannot stop a promotion a human has approved; the gate is the thing
+    # that refuses.
+    record_classification_mapping(
+        session,
+        revision=revision,
+        classification=None,
+        symbol_properties=None,
+        intake=None,
+        review_case=review_case,
+        decision=decision,
+        proposed_by_user_id=decision.decided_by,
+        proposed_at=now,
+        discipline=symbol.discipline,
+        category=symbol.category,
+    )
+
     # SM-P0-08, specification section 9.2. Evaluated for every promotion and
     # recorded for every promotion; it *refuses* only a revision that reaches
     # an authoritative source package (section 17's "new authoritative
@@ -253,6 +296,23 @@ def execute_organization_promotion_handoff(
     )
     if not gate_decision.permitted:
         return _fail(describe_refusal(gate_decision))
+
+    # SM-P0-09's dual-write, and *after* the gate unlike the mapping above:
+    # this one rewrites the durable `GovernedSymbol.category`/`.discipline`
+    # display columns, and a refused promotion must leave the organization's
+    # own symbol exactly as it found it. A proposed assignment on a refused
+    # promotion is harmless and is reused if the promotion is resubmitted
+    # (`_existing_assignment`); a rewritten display column would not be.
+    #
+    # `NON_DISPLAY_MATCH_BASES` applies here exactly as it does on the intake
+    # path: a `legacy_taxonomy` match is too coarse to drive the column, so
+    # the operator's own value stays.
+    record_legacy_classification_sync(
+        session,
+        symbol=symbol,
+        revision=revision,
+        synced_at=now,
+    )
 
     # visibility must flip to 'public' before allocating a catalog symbol
     # ID: `ck_governed_symbols_catalog_symbol_visibility_barrier` requires

@@ -365,3 +365,228 @@ def test_only_admin_or_reviewer_role_can_open_a_promotion_review_case(wp73_datab
         f"/api/v1/organization-symbols/{symbol_id}/promotion-requests/{promotion_request_id}/open-review"
     )
     assert forbidden_response.status_code == 403
+
+
+# --- SM-P1-01 WP1.0: the organization-promotion classification dual-write ---
+#
+# `apply_classification_mapping` had exactly two production call sites, both
+# in `publication_handoff.py` (the Rupert/Daisy intake path). The organization
+# promotion path enforced section 9.2's publication gate but never proposed a
+# structured classification, so a symbol promoted out of an organization
+# arrived in the public catalogue with free-text `category`/`discipline` only
+# and no `symbol_revision_classifications` row -- invisible to the M5
+# catalogue assignment read that is switched on in production, and absent from
+# any semantic review queue. Specification section 12.1 phase M4; a P0 defect
+# against it, repaired here.
+#
+# These run over the real HTTP promotion journey rather than calling the
+# handoff directly, because the defect was in which production caller invokes
+# the mapper, not in the mapper.
+
+
+def _promote_organization_symbol(engine, *, suffix, name, category, discipline):
+    """Drive one organization symbol from draft to accepted public promotion.
+
+    Returns `(symbol_id, revision_id)`. Each call uses its own admin and
+    reviewer emails: the database fixture is module-scoped, and the deciding
+    reviewer must not be a member of the submitting organization.
+    """
+    admin_email = f"wp10admin-{suffix}@example.test"
+    reviewer_email = f"wp10reviewer-{suffix}@example.test"
+
+    admin_client, Session = _client(engine)
+    with Session() as session:
+        admin_user = upsert_user(
+            session,
+            email=admin_email,
+            display_name=f"WP1.0 Admin {suffix}",
+            roles=[],
+            pin="1234",
+            must_change_pin=False,
+        )
+        session.commit()
+        admin_user_id = admin_user.id
+    _add_membership(Session, admin_user_id, base_role="admin", capabilities=("contributor", "symbol_reviewer"))
+
+    login = admin_client.post("/api/v1/auth/login", json={"email": admin_email, "pin": "1234"})
+    assert login.status_code == 200, login.text
+
+    create_response = admin_client.post(
+        "/api/v1/organization-symbols",
+        json={"name": name, "category": category, "discipline": discipline, "summary": "A WP1.0 fixture symbol."},
+    )
+    assert create_response.status_code == 200, create_response.text
+    symbol_id = create_response.json()["id"]
+    revision_id = create_response.json()["currentRevisionId"]
+
+    submit_review = admin_client.post(
+        f"/api/v1/organization-symbols/{symbol_id}/revisions/{revision_id}/submit", json={}
+    )
+    assert submit_review.status_code == 200, submit_review.text
+    decide_review = admin_client.post(
+        f"/api/v1/organization-symbols/{symbol_id}/review-submissions/{submit_review.json()['id']}/decision",
+        json={"decision": "approved"},
+    )
+    assert decide_review.status_code == 200, decide_review.text
+
+    submit_promotion = admin_client.post(
+        f"/api/v1/organization-symbols/{symbol_id}/promotion-requests",
+        json={"reason": "Broadly useful outside our organization.", "sharingAcknowledgment": True},
+    )
+    assert submit_promotion.status_code == 200, submit_promotion.text
+    promotion_request_id = submit_promotion.json()["id"]
+
+    reviewer_client, _ = _client(engine)
+    _create_user_with_global_roles(
+        Session, email=reviewer_email, display_name=f"WP1.0 Reviewer {suffix}", roles=["reviewer"]
+    )
+    reviewer_login = reviewer_client.post("/api/v1/auth/login", json={"email": reviewer_email, "pin": "1234"})
+    assert reviewer_login.status_code == 200, reviewer_login.text
+
+    open_review = reviewer_client.post(
+        f"/api/v1/organization-symbols/{symbol_id}/promotion-requests/{promotion_request_id}/open-review"
+    )
+    assert open_review.status_code == 200, open_review.text
+    review_case_id = open_review.json()["reviewCaseId"]
+
+    decision_response = reviewer_client.post(
+        f"/api/v1/workspace/review-cases/{review_case_id}/decisions",
+        json={"decisionCode": "approve"},
+    )
+    assert decision_response.status_code == 200, decision_response.text
+    assert decision_response.json()["currentStage"] == "published"
+    return symbol_id, revision_id
+
+
+def _classification_assignments(engine, revision_id):
+    with engine.begin() as connection:
+        return connection.execute(
+            text(
+                "SELECT cs.scheme_code, cn.node_code, cn.preferred_label, a.assignment_role, "
+                "       a.status, a.method, a.evidence_json->>'match_basis' AS match_basis, "
+                "       a.evidence_json->>'raw_value' AS raw_value, a.proposed_by_user_id "
+                "FROM symbol_revision_classifications a "
+                "JOIN classification_nodes cn ON cn.id = a.classification_node_id "
+                "JOIN classification_schemes cs ON cs.id = a.classification_scheme_id "
+                "WHERE a.symbol_revision_id = :revision "
+                "ORDER BY cs.scheme_code"
+            ),
+            {"revision": revision_id},
+        ).all()
+
+
+def _legacy_columns(engine, symbol_id):
+    with engine.begin() as connection:
+        return connection.execute(
+            text("SELECT category, discipline FROM governed_symbols WHERE id=:id"), {"id": symbol_id}
+        ).one()
+
+
+def test_organization_promotion_proposes_structured_classification_assignments(wp73_database):
+    """A promoted organization symbol must reach the public catalogue with
+    SM-P0-07's structured assignments, not free text alone.
+
+    `mechanical` matches the seeded `Mechanical` discipline node exactly;
+    `valve` reaches `Valves` through the trailing-S rule. Both are display-
+    eligible bases, so SM-P0-09's dual-write may also canonicalize the legacy
+    columns -- proved separately below for the coarse basis that may not.
+    """
+    engine, _, _ = wp73_database
+    symbol_id, revision_id = _promote_organization_symbol(
+        engine, suffix="exact", name="WP1.0 Ball Valve", category="valve", discipline="mechanical"
+    )
+
+    rows = _classification_assignments(engine, revision_id)
+    by_scheme = {row.scheme_code: row for row in rows}
+    assert set(by_scheme) == {"ENGINEERING-DISCIPLINE", "SYMBOL-CATEGORY-FAMILY"}, rows
+
+    discipline_row = by_scheme["ENGINEERING-DISCIPLINE"]
+    assert discipline_row.node_code == "MECHANICAL"
+    assert discipline_row.preferred_label == "Mechanical"
+    assert discipline_row.match_basis == "exact"
+    assert discipline_row.raw_value == "mechanical"
+
+    category_row = by_scheme["SYMBOL-CATEGORY-FAMILY"]
+    assert category_row.node_code == "VALVES"
+    assert category_row.preferred_label == "Valves"
+    assert category_row.match_basis == "plural_variant"
+    assert category_row.raw_value == "valve"
+
+    for row in rows:
+        # Section 12.3: promotion proposes, it does not verify. A human
+        # decision through the semantic review queue is what verifies.
+        assert row.status == "proposed"
+        assert row.assignment_role == "primary"
+        assert row.method == "source_mapping"
+        # Attributed to the deciding reviewer, never to a service user.
+        assert row.proposed_by_user_id is not None
+
+    # SM-P0-09's dual-write: a display-eligible basis canonicalizes the legacy
+    # display columns from the assignment the promotion has just proposed.
+    legacy = _legacy_columns(engine, symbol_id)
+    assert legacy.discipline == "Mechanical"
+    assert legacy.category == "Valves"
+
+
+def test_organization_promotion_keeps_a_coarse_taxonomy_match_out_of_the_legacy_columns(wp73_database):
+    """`legacy_taxonomy` is in `NON_DISPLAY_MATCH_BASES` for a measured
+    reason (SM-P0-09, commit 56677a9): the browse taxonomy maps were built for
+    bucketing, and using them to rewrite a durable column destroyed
+    distinctions operators had recorded. The assignment is still proposed --
+    it is real structure -- but the operator's own `civil` stays in the
+    column. The repaired promotion path must honour the same rule the intake
+    path does.
+    """
+    engine, _, _ = wp73_database
+    symbol_id, revision_id = _promote_organization_symbol(
+        engine, suffix="coarse", name="WP1.0 Retaining Wall", category="fire", discipline="civil"
+    )
+
+    rows = _classification_assignments(engine, revision_id)
+    by_scheme = {row.scheme_code: row for row in rows}
+
+    # `civil` reaches `Civil / Structural` only through the browse taxonomy.
+    assert by_scheme["ENGINEERING-DISCIPLINE"].node_code == "CIVIL_STRUCTURAL"
+    assert by_scheme["ENGINEERING-DISCIPLINE"].match_basis == "legacy_taxonomy"
+    # `fire` is a discipline short form, not a category one: no category node.
+    assert "SYMBOL-CATEGORY-FAMILY" not in by_scheme, rows
+
+    legacy = _legacy_columns(engine, symbol_id)
+    assert legacy.discipline == "civil", "a coarse match must not rewrite the display column"
+    assert legacy.category == "fire", "an unmatched facet must not clear the display column"
+
+
+def test_a_classification_mapping_failure_still_promotes_the_symbol(wp73_database, monkeypatch):
+    """SM-P0-07's rule, which the repaired path inherits: the classification
+    proposal is wrapped whole as well as per item, so even a total failure in
+    the mapper records itself in the payload where a reviewer can see it
+    rather than refusing a promotion a human has already approved. The
+    publication gate is the thing that refuses; this is not.
+    """
+    engine, _, _ = wp73_database
+
+    def _explode(*args, **kwargs):
+        raise RuntimeError("deliberate WP1.0 mapper failure")
+
+    monkeypatch.setattr("symgov_backend.publication_handoff.apply_classification_mapping", _explode)
+
+    symbol_id, revision_id = _promote_organization_symbol(
+        engine, suffix="failure", name="WP1.0 Broken Mapper", category="valve", discipline="mechanical"
+    )
+
+    with engine.begin() as connection:
+        symbol_row = connection.execute(
+            text("SELECT visibility, catalog_symbol_id FROM governed_symbols WHERE id=:id"), {"id": symbol_id}
+        ).one()
+        assert symbol_row.visibility == "public"
+        assert symbol_row.catalog_symbol_id is not None
+
+        report = connection.execute(
+            text("SELECT payload_json->'classification_mapping' FROM symbol_revisions WHERE id=:id"),
+            {"id": revision_id},
+        ).scalar_one()
+
+    assert report is not None, "the failure must be recorded, not swallowed"
+    assert report["status"] == "failed"
+    assert "deliberate WP1.0 mapper failure" in report["error"]
+    assert not _classification_assignments(engine, revision_id)
