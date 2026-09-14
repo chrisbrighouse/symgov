@@ -61,6 +61,13 @@ SETTINGS_SOURCE = (
 # server in `test_semantic_review_routes_postgresql.py`. What this file
 # proves is route policy, which is settled before any row is written.
 _SEMANTIC_MODELS = (
+    # WP1.5 only: the forecast route resolves the review case before it
+    # reaches any semantic table, so an absent case must be answerable as
+    # 404 rather than as a missing relation.
+    "ReviewCase",
+    "ReviewSplitItem",
+    "ClassificationRecord",
+    "ReviewSymbolProperty",
     "CatalogSymbolIdentifier",
     "GovernedSymbol",
     "SymbolRevision",
@@ -234,6 +241,12 @@ SEMANTIC_REVIEW_ROUTES = (
     ("POST", "/semantic-review/concepts/{concept_id}/external-mappings", "reviewer_admin"),
     ("POST", "/semantic-review/external-mappings/{reference_id}/decision", "reviewer_admin"),
     ("GET", "/semantic-review/classification-schemes", "reviewer_admin"),
+    # WP1.5, decision Q9: the approval forecast on the intake review pane.
+    (
+        "GET",
+        "/semantic-review/review-cases/{review_case_id}/classification-preview",
+        "reviewer_admin",
+    ),
 )
 
 V1_PREFIX = "/api/v1"
@@ -512,3 +525,65 @@ def test_the_scheme_read_offers_only_the_schemes_a_reviewer_may_assign_into():
 
     assert "ClassificationSchemeOptionsResponse" in schemas, sorted(schemas)
     assert "items" in schemas["ClassificationSchemeOptionsResponse"]["properties"]
+
+
+# --- WP1.5: the approval forecast ----------------------------------------
+
+
+def test_an_absent_review_case_is_reported_absent_not_as_a_broken_query():
+    """The forecast route resolves the case before anything else.
+
+    A review case is not a symbol, so section 14.2 has nothing to scope here
+    (`ReviewCase` names no organisation, and neither does `ClassificationRecord`
+    or `IntakeRecord`); the 404 is plain absence rather than the tenant
+    substitution the symbol routes make.
+    """
+    client, _Session, _user_id, _settings = _semantic_client(roles=("reviewer",))
+
+    response = client.get(
+        f"{V1_PREFIX}/semantic-review/review-cases/{uuid.uuid4()}/classification-preview"
+    )
+
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"] == "Review case was not found."
+
+
+def test_the_forecast_route_carries_no_tenant_predicate_and_says_why():
+    """Measured rather than assumed, and the argument is the reason.
+
+    Neither `IntakeRecord` nor `ClassificationRecord` carries an organisation,
+    and the intake lane feeds the public catalog. Section 14.2 is about
+    organisation-private *symbol existence*; a review case naming no symbol
+    and no organisation gives it nothing to protect. This is the same
+    reasoning that left `GET /semantic-review/classification-schemes`
+    unscoped -- and the argument has to be stated where the next reader of
+    the route will find it, not merely acted on.
+    """
+    import inspect
+
+    import symgov_backend.routes.semantic_review as route_module
+
+    source = inspect.getsource(route_module.review_case_classification_preview)
+    assert "_scope(" not in source
+    assert "14.2" in source
+
+
+def test_the_forecast_is_named_as_a_forecast_in_the_contract_itself():
+    """`CLAUDE.md` forbids presenting an illustrative value as a production
+    one. A client generated from this operation must not be able to read the
+    response as recorded state."""
+    operation = _operation(
+        create_app().openapi(),
+        "GET",
+        "/semantic-review/review-cases/{review_case_id}/classification-preview",
+    )
+    schema = create_app().openapi()["components"]["schemas"][
+        "ReviewCaseClassificationPreviewResponse"
+    ]
+
+    assert set(schema["properties"]) >= {"willAssert", "willGap", "willLink"}
+    assert "assignments" not in schema["properties"]
+    assert "gaps" not in schema["properties"]
+    assert "splitItemId" in {
+        parameter["name"] for parameter in operation.get("parameters", [])
+    }

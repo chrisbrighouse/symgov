@@ -26,9 +26,11 @@ The seeded schemes and nodes these tests look up are rows migration
 
 from __future__ import annotations
 
+import json
 import sys
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -938,3 +940,359 @@ def test_reproposing_the_same_node_before_rejecting_is_refused_by_the_index(revi
         },
     )
     assert collision.status_code == 422, collision.text
+
+
+# --- WP1.5: the approval forecast, end to end ----------------------------
+#
+# Decision Q9 (2026-09-14). `test_classification_mapping_postgresql.py` proves
+# that the forecast equals what the approval writes; what needs proving here
+# is the *route* -- that it composes the writer's path over real seeded
+# schemes, that a split child is forecast from its own classification record
+# rather than the sheet's, and that reading it writes nothing.
+
+
+def _seed_review_case(
+    session,
+    *,
+    label,
+    classification=None,
+    reviewed_properties=None,
+    split_children=(),
+    with_package=True,
+):
+    """The smallest review case the forecast route will resolve.
+
+    Deliberately not `execute_publication_handoff`'s full fixture: the route
+    runs *before* any decision, so a decision, an approval target and a
+    governed symbol are all absent by construction.
+    """
+    from symgov_backend.models import (
+        AgentDefinition,
+        AgentQueueItem,
+        ClassificationRecord,
+        IntakeRecord,
+        ReviewCase,
+        ReviewSplitItem,
+        ReviewSymbolProperty,
+        SourcePackage,
+        ValidationReport,
+    )
+
+    # `category`, `discipline` and `confidence` are NOT NULL on
+    # `classification_records`, so a fixture that omits them fails at INSERT
+    # rather than exercising the route. The two text defaults are
+    # `publication_handoff`'s own fallbacks.
+    def _record(values):
+        return {
+            "category": "symbol",
+            "discipline": "general",
+            "confidence": Decimal("0.84"),
+            **values,
+        }
+
+    now = _now()
+    agent = AgentDefinition(
+        id=uuid.uuid4(), slug=f"libby-{label}", display_name="Libby", role="classification",
+        model="test", status="active", queue_family="classification",
+        created_at=now, updated_at=now,
+    )
+    session.add(agent)
+    session.flush()
+
+    queue_item = AgentQueueItem(
+        id=uuid.uuid4(), agent_id=agent.id, source_type="intake_record", source_id=uuid.uuid4(),
+        status="completed", priority="normal", payload_json={}, created_at=now,
+    )
+    session.add(queue_item)
+    session.flush()
+
+    package = None
+    if with_package:
+        package = SourcePackage(
+            id=uuid.uuid4(), package_code=f"{abs(hash(label)) % 0x10000:04X}",
+            title=f"{label} submission", provider="contributor@example.test",
+            package_type="submission_sheet", status="active", created_at=now, updated_at=now,
+        )
+        session.add(package)
+        session.flush()
+
+    intake = IntakeRecord(
+        id=uuid.uuid4(), queue_item_id=queue_item.id, source_type="submission",
+        source_ref=f"{label}-ref", submitter="contributor@example.test",
+        submission_kind="single_symbol", intake_status="accepted", eligibility_status="eligible",
+        source_package_id=package.id if package else None, raw_object_key=f"raw/{label}.svg",
+        normalized_submission_json={"original_filename": f"{label}.svg", "candidate_title": label},
+        routing_recommendation_json={}, report_json={}, created_at=now,
+    )
+    session.add(intake)
+    session.flush()
+
+    validation = ValidationReport(
+        id=uuid.uuid4(), queue_item_id=queue_item.id, source_type="intake_record",
+        source_id=intake.id, validation_status="pass", defect_count=0,
+        normalized_payload_json={}, report_json={}, created_at=now,
+    )
+    session.add(validation)
+    session.flush()
+
+    review_case = ReviewCase(
+        id=uuid.uuid4(), source_entity_type="validation_report", source_entity_id=validation.id,
+        current_stage="classification_review", escalation_level="standard", opened_at=now,
+    )
+    session.add(review_case)
+    session.flush()
+
+    if classification is not None:
+        session.add(
+            ClassificationRecord(
+                id=uuid.uuid4(), queue_item_id=queue_item.id, intake_record_id=intake.id,
+                validation_report_id=validation.id, review_case_id=review_case.id,
+                symbol_key=label, status="current", classification_status="provisional",
+                source_id=intake.id, source_type="intake_record",
+                libby_approved=False, created_at=now, updated_at=now, **_record(classification),
+            )
+        )
+
+    if reviewed_properties is not None:
+        session.add(
+            ReviewSymbolProperty(
+                id=uuid.uuid4(), review_case_id=review_case.id,
+                symbol_record_key=str(review_case.id), name=label, description="",
+                category=reviewed_properties.get("category"),
+                discipline=reviewed_properties.get("discipline"),
+                created_at=now, updated_at=now,
+            )
+        )
+
+    split_items = []
+    for index, child in enumerate(split_children):
+        item = ReviewSplitItem(
+            id=uuid.uuid4(), review_case_id=review_case.id, child_key=child["child_key"],
+            proposed_symbol_id=child["child_key"].upper(), proposed_symbol_name=child["child_key"],
+            file_name=f"{child['child_key']}.svg", parent_file_name=f"{label}.svg",
+            attachment_object_key=f"raw/{child['child_key']}.svg", status="awaiting_decision",
+            payload_json={"package_symbol_sequence": index + 1},
+            created_at=now, updated_at=now,
+        )
+        session.add(item)
+        session.flush()
+        session.add(
+            ClassificationRecord(
+                id=uuid.uuid4(), queue_item_id=queue_item.id, review_case_id=None,
+                parent_review_case_id=review_case.id, symbol_key=child["child_key"],
+                symbol_region_index=index, status="current", classification_status="provisional",
+                source_id=review_case.id, source_type="review_case",
+                libby_approved=False, created_at=now, updated_at=now, **_record(child["classification"]),
+            )
+        )
+        split_items.append(item)
+
+    session.flush()
+    return review_case, split_items
+
+
+_SHEET_CLASSIFICATION = {
+    "category": "symbol_sheet",
+    "discipline": "Mechanical",
+    "industry": "process_engineering",
+    "symbol_family": "mixed_symbol_set",
+    "standards_source": "https://example.test/isa-5-1",
+    "library_provenance_class": "contributor_submission",
+    "format": "svg",
+}
+
+
+def test_the_forecast_route_names_what_the_approval_will_propose(reviewer_client):
+    client, Session = reviewer_client
+    with Session() as session:
+        review_case, _items = _seed_review_case(
+            session,
+            label="preview-basic",
+            classification={
+                "category": "Valves",
+                "discipline": "Mechanical",
+                "industry": "process_engineering",
+                "symbol_family": "door",
+                "library_provenance_class": "contributor_submission",
+                "format": "svg",
+            },
+        )
+        session.commit()
+        review_case_id = review_case.id
+
+    response = client.get(
+        f"{V1}/semantic-review/review-cases/{review_case_id}/classification-preview"
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["reviewCaseId"] == str(review_case_id)
+    assert body["splitItemId"] is None
+    assert body["method"] == "source_mapping"
+    assert body["disciplineUsed"] == "Mechanical"
+
+    proposed = {(item["schemeCode"], item["nodeCode"]) for item in body["willAssert"]}
+    assert ("ENGINEERING-DISCIPLINE", "MECHANICAL") in proposed
+    assert ("SYMBOL-CATEGORY-FAMILY", "VALVES") in proposed
+    # Every entry names a real seeded node, alongside its readable label.
+    for item in body["willAssert"]:
+        assert item["nodeLabel"]
+        assert uuid.UUID(item["classificationNodeId"])
+        assert item["matchBasis"] in {"exact", "plural_variant", "legacy_taxonomy"}
+
+    # Section 9.3's unseeded schemes are reported before the decision, which is
+    # the half of decision Q9 an SME can still act on.
+    gaps = {gap["field"]: gap for gap in body["willGap"]}
+    assert gaps["industry"]["reason"] == "no_scheme"
+    assert gaps["industry"]["rawValue"] == "process_engineering"
+    assert gaps["format"]["reason"] == "carried_in_payload"
+
+
+def test_the_forecast_route_follows_the_reviewed_property(reviewer_client):
+    """A reviewer who corrects the discipline in place sees the correction
+    forecast, not the record it overrode."""
+    client, Session = reviewer_client
+    with Session() as session:
+        review_case, _items = _seed_review_case(
+            session,
+            label="preview-precedence",
+            classification={"category": "Valves", "discipline": "Mechanical"},
+            reviewed_properties={"category": "Pumps", "discipline": "Process"},
+        )
+        session.commit()
+        review_case_id = review_case.id
+
+    body = client.get(
+        f"{V1}/semantic-review/review-cases/{review_case_id}/classification-preview"
+    ).json()
+
+    assert body["disciplineUsed"] == "Process"
+    assert body["categoryUsed"] == "Pumps"
+    primaries = {
+        item["schemeCode"]: item["nodeLabel"]
+        for item in body["willAssert"]
+        if item["assignmentRole"] == "primary"
+    }
+    assert primaries["ENGINEERING-DISCIPLINE"] == "Process"
+    assert primaries["SYMBOL-CATEGORY-FAMILY"] == "Pumps"
+
+
+def test_a_split_child_is_forecast_from_its_own_record_not_the_sheets(reviewer_client):
+    """The sheet's record holds `mixed_symbol_set`, which
+    `load_child_classification_record` deliberately refuses to inherit. A
+    forecast that used it would predict exactly what approval will not write.
+    """
+    client, Session = reviewer_client
+    with Session() as session:
+        review_case, items = _seed_review_case(
+            session,
+            label="preview-split",
+            classification=_SHEET_CLASSIFICATION,
+            split_children=[
+                {"child_key": "child-1", "classification": {"category": "Pumps", "discipline": "Process", "symbol_family": "valve"}},
+            ],
+        )
+        session.commit()
+        review_case_id = review_case.id
+        split_item_id = items[0].id
+
+    sheet = client.get(
+        f"{V1}/semantic-review/review-cases/{review_case_id}/classification-preview"
+    ).json()
+    child = client.get(
+        f"{V1}/semantic-review/review-cases/{review_case_id}/classification-preview",
+        params={"splitItemId": str(split_item_id)},
+    ).json()
+
+    assert child["splitItemId"] == str(split_item_id)
+    assert child["disciplineUsed"] == "Process"
+    assert sheet["disciplineUsed"] == "Mechanical"
+    child_primaries = {
+        item["schemeCode"]: item["nodeCode"]
+        for item in child["willAssert"]
+        if item["assignmentRole"] == "primary"
+    }
+    assert child_primaries["SYMBOL-CATEGORY-FAMILY"] == "PUMPS"
+    # The sheet's own placeholder family is nowhere in the child's forecast.
+    assert "mixed_symbol_set" not in json.dumps(child)
+
+
+def test_a_split_item_of_another_case_is_reported_absent(reviewer_client):
+    client, Session = reviewer_client
+    with Session() as session:
+        first, items = _seed_review_case(
+            session,
+            label="preview-split-a",
+            classification={"discipline": "Mechanical"},
+            split_children=[{"child_key": "child-a", "classification": {"discipline": "Process"}}],
+        )
+        second, _none = _seed_review_case(
+            session, label="preview-split-b", classification={"discipline": "Mechanical"}
+        )
+        session.commit()
+        foreign_split_id = items[0].id
+        second_id = second.id
+
+    response = client.get(
+        f"{V1}/semantic-review/review-cases/{second_id}/classification-preview",
+        params={"splitItemId": str(foreign_split_id)},
+    )
+
+    assert response.status_code == 404, response.text
+    assert response.json()["detail"] == "Review split item was not found."
+
+
+def test_reading_the_forecast_route_writes_nothing(reviewer_client):
+    client, Session = reviewer_client
+    with Session() as session:
+        review_case, _items = _seed_review_case(
+            session,
+            label="preview-readonly",
+            classification={"category": "Valves", "discipline": "Mechanical", "standards_source": "ISA-5.1"},
+        )
+        session.commit()
+        review_case_id = review_case.id
+
+    with Session() as session:
+        before = (
+            session.query(SymbolRevisionClassificationAssignment).count(),
+            session.query(SymbolRevision).count(),
+        )
+
+    assert client.get(
+        f"{V1}/semantic-review/review-cases/{review_case_id}/classification-preview"
+    ).status_code == 200
+
+    with Session() as session:
+        assert (
+            session.query(SymbolRevisionClassificationAssignment).count(),
+            session.query(SymbolRevision).count(),
+        ) == before
+
+
+def test_a_personal_mode_session_may_read_the_forecast(review_api_database, seeded):
+    """No tenant predicate, and the reason is measured rather than assumed.
+
+    Neither `IntakeRecord` nor `ClassificationRecord` carries an organisation,
+    and the intake lane feeds the public catalog. Section 14.2 is about
+    organisation-private *symbol existence*; a review case naming no symbol
+    and no organisation gives it nothing to protect -- the same reasoning that
+    left `GET /semantic-review/classification-schemes` unscoped.
+    """
+    client, Session = _client(review_api_database)
+    _user(Session, email="personal-forecast@example.test", roles=("reviewer",))
+    _login(client, "personal-forecast@example.test")
+
+    with Session() as session:
+        review_case, _items = _seed_review_case(
+            session, label="preview-personal", classification={"discipline": "Mechanical"}
+        )
+        session.commit()
+        review_case_id = review_case.id
+
+    response = client.get(
+        f"{V1}/semantic-review/review-cases/{review_case_id}/classification-preview"
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["disciplineUsed"] == "Mechanical"

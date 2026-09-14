@@ -1929,6 +1929,90 @@ class ExternalMappingDecisionRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# SM-P1-01 WP1.5 -- the approval's classification forecast
+#
+# Decision Q9 (2026-09-14). Every governed semantic assertion is written by
+# the approval handoff that runs *after* the review this sits in, so there is
+# no recorded state to report; what there is, and what a reviewer can still
+# act on, is what approving the case *will* assert and which section 9.3
+# fields will fall into a gap.
+#
+# Nothing in this response is recorded state, and the field names say so:
+# `willAssert` and `willGap`, not `assignments` and `gaps`. `CLAUDE.md`
+# forbids presenting an illustrative value as a production one, and a forecast
+# labelled like a record is exactly that.
+# ---------------------------------------------------------------------------
+
+
+class ClassificationForecastAssignmentResponse(BaseModel):
+    """One classification the approval will propose.
+
+    `classificationNodeId` is the transport key; `nodeCode` and `nodeLabel`
+    are what a reviewer reads, and `matchBasis` says which rule found the node
+    -- `exact`, `plural_variant` or `legacy_taxonomy` -- so a value matched
+    through the legacy taxonomy table is visibly not an exact hit.
+    """
+
+    field: str
+    schemeCode: str
+    assignmentRole: str
+    rawValue: str
+    classificationNodeId: str
+    nodeCode: str
+    nodeLabel: str
+    matchBasis: str
+
+
+class ClassificationForecastGapResponse(BaseModel):
+    """One section 9.3 field the approval will record but not map.
+
+    The raw value is always carried: a gap without the value is still a loss,
+    which is section 16.1's "no field silently dropped" read forwards.
+    """
+
+    field: str
+    rawValue: str | None
+    reason: str
+    detail: str | None
+
+
+class ClassificationForecastLinkResponse(BaseModel):
+    """A section 9.3 row whose target is a link, not a classification.
+
+    `standardsSource` reaches `symbol_standard_links` and
+    `libraryProvenanceClass` reaches `source_package_entries`.
+    """
+
+    field: str
+    rawValue: str | None
+    target: str
+    relationshipType: str | None = None
+
+
+class ReviewCaseClassificationPreviewResponse(BaseModel):
+    """What approving this review case will assert. Not what it has asserted.
+
+    `disciplineUsed`/`categoryUsed` are the values the forecast actually
+    planned from, after the reviewed-property precedence. They are reported
+    rather than described so a reviewer who has just corrected a discipline in
+    place can see that the correction is the one being forecast -- and so this
+    response carries no second copy of the precedence rule to drift from the
+    writer's.
+    """
+
+    reviewCaseId: str
+    splitItemId: str | None
+    classificationRecordId: str | None
+    disciplineUsed: str | None
+    categoryUsed: str | None
+    method: str
+    mapperVersion: str
+    willAssert: list[ClassificationForecastAssignmentResponse]
+    willGap: list[ClassificationForecastGapResponse]
+    willLink: list[ClassificationForecastLinkResponse]
+
+
+# ---------------------------------------------------------------------------
 # SM-P1-01 WP1.3 -- rights record review API
 #
 # The reviewer's own proposal is the point of these two. Section 7.12 asks for

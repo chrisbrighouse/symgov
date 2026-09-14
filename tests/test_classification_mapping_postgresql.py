@@ -698,3 +698,159 @@ def test_a_standard_with_two_active_editions_is_ambiguous_not_guessed(session_fa
             .count()
             == 0
         )
+
+
+# --- SM-P1-01 WP1.5: the forecast is what the approval writes -------------
+#
+# Decision Q9 (2026-09-14). The intake review pane shows what approving the
+# case *will* assert, because every governed semantic assertion is written by
+# the handoff that runs after that review. The whole value of the panel rests
+# on the forecast and the writer agreeing, and agreement is a fact about a
+# seeded database -- which scheme holds an active node for `Mechanical` is not
+# provable without one. So it is proved here, against the same seeded schemes
+# migration `20260909_0051` inserts, by running both over one review case.
+
+
+def _forecast_for(session, review_case):
+    """Compose the forecast exactly as the route does."""
+    from symgov_backend.classification_mapping import preview_classification_mapping
+    from symgov_backend.publication_handoff import (
+        classification_fields_for_review,
+        load_review_context,
+        load_review_symbol_properties,
+    )
+
+    context = load_review_context(session, review_case)
+    intake = context["intake_record"]
+    return preview_classification_mapping(
+        session,
+        fields=classification_fields_for_review(
+            context["classification_record"],
+            symbol_properties=load_review_symbol_properties(session, review_case=review_case),
+        ),
+        source_package_id=intake.source_package_id if intake else None,
+    )
+
+
+def test_the_forecast_names_exactly_the_assignments_the_approval_proposes(session_factory):
+    """Node for node, role for role, and match basis for match basis.
+
+    If this drifts, the panel tells an SME that approving will assert one
+    classification and the approval asserts another -- which decision Q9
+    records as worse than showing nothing at all.
+    """
+    with session_factory() as session:
+        review_case, decision = _seed_case(
+            session, label="forecast-writes", classification=FULL_CLASSIFICATION
+        )
+        session.flush()
+
+        forecast = _forecast_for(session, review_case)
+
+        revision = ensure_approved_symbol_revision(
+            session, review_case=review_case, decision=decision
+        )
+        session.commit()
+
+        written = {
+            (_scheme_of(session, row), _node_of(session, row).node_code, row.assignment_role)
+            for row in _assignments(session, revision.id)
+        }
+        predicted = {
+            (item.scheme_code, item.node_code, item.assignment_role)
+            for item in forecast.assignments
+        }
+        assert predicted == written
+        assert predicted  # a vacuous agreement would prove nothing
+
+        report = revision.payload_json["classification_mapping"]
+        assert {(row["field"], row["match_basis"]) for row in report["assignments"]} == {
+            (item.field, item.match_basis) for item in forecast.assignments
+        }
+
+
+def test_the_forecast_names_exactly_the_gaps_the_approval_records(session_factory):
+    """Section 9.3 fields that will fall into a gap, before the decision.
+
+    Decision Q9's second half: the gap list is the part an SME can still act
+    on -- by correcting the record, or by knowing the value will survive only
+    as free text.
+    """
+    with session_factory() as session:
+        review_case, decision = _seed_case(
+            session, label="forecast-gaps", classification=FULL_CLASSIFICATION
+        )
+        session.flush()
+
+        forecast = _forecast_for(session, review_case)
+
+        revision = ensure_approved_symbol_revision(
+            session, review_case=review_case, decision=decision
+        )
+        session.commit()
+
+        report = revision.payload_json["classification_mapping"]
+        assert {(gap["field"], gap["reason"]) for gap in report["gaps"]} == {
+            (gap.field, gap.reason) for gap in forecast.gaps
+        }
+        assert {entry["field"] for entry in report["resolved"]} == {
+            entry["field"] for entry in forecast.resolved
+        }
+
+
+def test_the_forecast_follows_the_reviewed_property_not_the_record(session_factory):
+    """The Reviews surface lets an SME edit discipline and category in place.
+
+    A forecast that read the classification record directly would predict the
+    wrong node the moment a reviewer corrected one, and would go on predicting
+    it right up to the approval that proves it wrong. This test fails if the
+    override is dropped from the shared precedence.
+    """
+    with session_factory() as session:
+        review_case, _decision = _seed_case(
+            session,
+            label="forecast-precedence",
+            classification=FULL_CLASSIFICATION,
+            reviewed_properties={"category": "Pumps", "discipline": "Process"},
+        )
+        session.flush()
+
+        forecast = _forecast_for(session, review_case)
+
+        primaries = {
+            item.scheme_code: item.node_label
+            for item in forecast.assignments
+            if item.assignment_role == "primary"
+        }
+        assert primaries["ENGINEERING-DISCIPLINE"] == "Process"
+        assert primaries["SYMBOL-CATEGORY-FAMILY"] == "Pumps"
+        # The record's own values, which the forecast must not have used.
+        assert FULL_CLASSIFICATION["discipline"] == "Mechanical"
+        assert FULL_CLASSIFICATION["category"] == "Valves"
+
+
+def test_reading_the_forecast_is_not_an_act_of_governance(session_factory):
+    """It runs before the decision, on a case an SME may still reject."""
+    with session_factory() as session:
+        review_case, _decision = _seed_case(
+            session, label="forecast-readonly", classification=FULL_CLASSIFICATION
+        )
+        session.commit()
+
+        before = (
+            session.query(SymbolRevisionClassificationAssignment).count(),
+            session.query(SymbolStandardLink).count(),
+            session.query(SourcePackageEntry).count(),
+            session.query(SymbolRevision).count(),
+        )
+
+        forecast = _forecast_for(session, review_case)
+        session.commit()
+
+        assert forecast.assignments
+        assert (
+            session.query(SymbolRevisionClassificationAssignment).count(),
+            session.query(SymbolStandardLink).count(),
+            session.query(SourcePackageEntry).count(),
+            session.query(SymbolRevision).count(),
+        ) == before

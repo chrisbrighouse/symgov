@@ -39,6 +39,7 @@ from .settings import get_settings
 from .organization_promotion_handoff import execute_organization_promotion_handoff
 from .classification_mapping import (
     MAPPER_VERSION,
+    ClassificationFields,
     apply_classification_mapping,
     classification_fields_from_record,
 )
@@ -326,6 +327,33 @@ def load_child_classification_record(
     return None
 
 
+def classification_fields_for_review(
+    classification: ClassificationRecord | None,
+    *,
+    symbol_properties: ReviewSymbolProperty | None,
+    discipline: str | None = None,
+    category: str | None = None,
+) -> ClassificationFields:
+    """Section 9.3's fields for one review, under the reviewed precedence.
+
+    The human-reviewed `ReviewSymbolProperty` wins over the classification
+    record for discipline and category; a caller with neither -- the
+    organization promotion path (SM-P1-01 WP1.0), whose reviewed values live
+    on `GovernedSymbol` itself -- supplies them directly, and
+    `symbol_properties` still wins where it exists.
+
+    Named and shared rather than inlined, because SM-P1-01 WP1.5's approval
+    forecast has to compose exactly what the writer below composes. A second
+    copy of this precedence would drift, and a panel that forecasts a
+    different node from the one approval proposes is worse than no panel.
+    """
+    return classification_fields_from_record(
+        classification,
+        discipline=symbol_properties.discipline if symbol_properties else discipline,
+        category=symbol_properties.category if symbol_properties else category,
+    )
+
+
 def record_classification_mapping(
     session: Session,
     *,
@@ -361,10 +389,11 @@ def record_classification_mapping(
     exists, so the intake path is unchanged.
     """
     try:
-        fields = classification_fields_from_record(
+        fields = classification_fields_for_review(
             classification,
-            discipline=symbol_properties.discipline if symbol_properties else discipline,
-            category=symbol_properties.category if symbol_properties else category,
+            symbol_properties=symbol_properties,
+            discipline=discipline,
+            category=category,
         )
         report = apply_classification_mapping(
             session,

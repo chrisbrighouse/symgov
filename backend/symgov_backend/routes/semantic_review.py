@@ -18,6 +18,17 @@ scope is reported as absent, never as forbidden: `404` and `403` are
 distinguishable, and the difference is exactly the private-symbol existence
 section 14.2 forbids revealing.
 
+**Two reads carry no tenant predicate, and in both cases the argument is
+measured rather than assumed.** `classification_scheme_options` returns seeded
+platform reference data naming no symbol, and
+`review_case_classification_preview` (WP1.5) resolves a review case, which
+names no symbol and no organisation -- neither `ReviewCase` nor
+`ClassificationRecord` nor `IntakeRecord` carries one, and the intake lane
+feeds the public catalog. Section 14.2 is about organisation-private *symbol
+existence*; where there is no symbol there is nothing for it to protect. Each
+route states that argument in its own docstring, because the convenience is
+never the reason.
+
 **Authorization is decision Q2, resolved 2026-09-12.** Concept lifecycle --
 create, add revision, transition -- is `require_platform_admin`, matching
 section 17's "concept governance is platform-level initially". Symbol
@@ -69,6 +80,11 @@ from ..classification_assignments import (
     propose_symbol_revision_classification,
     transition_symbol_revision_classification,
 )
+from ..classification_mapping import (
+    MAPPER_VERSION,
+    MAPPING_METHOD,
+    preview_classification_mapping,
+)
 from ..classification_schemes import list_classification_nodes
 from ..concept_external_references import (
     list_concept_external_references,
@@ -83,12 +99,20 @@ from ..models import (
     ExternalSemanticScheme,
     ExternalSemanticSchemeVersion,
     GovernedSymbol,
+    ReviewCase,
+    ReviewSplitItem,
     RightsRecord,
     SemanticConcept,
     SemanticConceptRevision,
     SymbolRevision,
     SymbolRevisionClassificationAssignment,
     SymbolSemanticAssignment,
+)
+from ..publication_handoff import (
+    classification_fields_for_review,
+    load_child_classification_record,
+    load_review_context,
+    load_review_symbol_properties,
 )
 from ..rights_provenance import (
     list_rights_records,
@@ -106,6 +130,7 @@ from ..schemas import (
     ExternalMappingDecisionRequest,
     RightsRecordDecisionRequest,
     RightsRecordProposeRequest,
+    ReviewCaseClassificationPreviewResponse,
     RightsRecordQueueResponse,
     RightsRecordReviewRowResponse,
     SemanticConceptCreateRequest,
@@ -629,6 +654,174 @@ def classification_scheme_options(
             }
             for scheme in schemes
         ]
+    )
+
+
+# ---------------------------------------------------------------------------
+# The approval's classification forecast (WP1.5, decision Q9)
+# ---------------------------------------------------------------------------
+
+
+def _split_item_for(
+    session: Session, *, review_case: ReviewCase, split_item_id: uuid.UUID
+) -> ReviewSplitItem:
+    """Resolve a split child of *this* case, or report it absent.
+
+    A split item belonging to another review case is reported absent rather
+    than forbidden for the same reason every other single-row read on this
+    router does it: the two are distinguishable and the difference is
+    information.
+    """
+    split_item = session.get(ReviewSplitItem, split_item_id)
+    if split_item is None or split_item.review_case_id != review_case.id:
+        raise HTTPException(status_code=404, detail="Review split item was not found.")
+    return split_item
+
+
+def _split_item_region_index(split_item: ReviewSplitItem) -> int:
+    """The child's ordinal in the sheet's derivative manifest.
+
+    `ensure_split_items` stores it one-based as `package_symbol_sequence`;
+    `ClassificationRecord.symbol_region_index` is zero-based, which is what
+    `load_child_classification_record` matches on.
+
+    The approval handoff instead passes this child's position among the
+    *approved* children, which is not knowable before the decision and, when a
+    reviewer approves only some children, is not this ordinal either. Using
+    the manifest position is the identity that exists now; the child key is
+    the fallback in `load_child_classification_record` and is exact.
+    """
+    payload = split_item.payload_json if isinstance(split_item.payload_json, dict) else {}
+    try:
+        return max(int(payload.get("package_symbol_sequence")) - 1, 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+@router.get(
+    "/review-cases/{review_case_id}/classification-preview",
+    response_model=ReviewCaseClassificationPreviewResponse,
+    responses=_ERROR_RESPONSES,
+)
+def review_case_classification_preview(
+    review_case_id: uuid.UUID,
+    splitItemId: uuid.UUID | None = Query(None),
+    session: Session = Depends(get_db_session),
+    _current_user: AuthenticatedUser = Depends(reviewer),
+) -> ReviewCaseClassificationPreviewResponse:
+    """What approving this review case will assert, and what it will not.
+
+    Decision Q9, 2026-09-14. WP1.5 was specified as a read-only panel showing
+    the *proposed* semantic state beside an intake review. Measured against
+    the tables before any code was planned, that population is empty by
+    construction: `SymbolRevisionClassificationAssignment` and `RightsRecord`
+    rows are created only inside `execute_publication_handoff`, on the
+    decision itself, and `ensure_approved_symbol_revision` *creates* the
+    revision from the `HumanReviewDecision` -- so an open review case has no
+    `symbol_revisions` row to ask about at all. A governed-state panel would
+    have read "nothing yet" in exactly the population it was designed for.
+
+    This is the thing that is genuinely non-empty beforehand: the forecast.
+    It is a **composition of the writer's own path**, never a restatement of
+    its rules -- `load_review_context`, `load_review_symbol_properties`,
+    `classification_fields_for_review` (the precedence
+    `record_classification_mapping` applies) and
+    `preview_classification_mapping` (the plan
+    `apply_classification_mapping` applies). A second copy of any of them
+    would drift, and a panel forecasting a different node from the one
+    approval proposes is worse than no panel.
+
+    **No tenant predicate, and the reason is measured rather than assumed.**
+    Neither `IntakeRecord` nor `ClassificationRecord` carries an organisation,
+    and the intake lane feeds the public catalog. Section 14.2 is about
+    organisation-private *symbol existence*; a review case naming no symbol
+    and no organisation gives it nothing to protect. That argument -- not the
+    convenience -- is why `_scope` is absent here, and it is the same one that
+    left `classification_scheme_options` unscoped.
+
+    `splitItemId` names a raster-split child. It is not optional politeness: a
+    split sheet's own classification record holds the sheet-level placeholders
+    `mixed_symbol_set`/`review_required`/`mixed_equipment`, which
+    `load_child_classification_record` deliberately refuses to inherit, so
+    forecasting a child from the case-level record would forecast exactly what
+    the approval will not write.
+
+    Writes nothing. Reading this panel is not an act of governance.
+    """
+    review_case = session.get(ReviewCase, review_case_id)
+    if review_case is None:
+        raise HTTPException(status_code=404, detail="Review case was not found.")
+
+    split_item = (
+        None
+        if splitItemId is None
+        else _split_item_for(session, review_case=review_case, split_item_id=splitItemId)
+    )
+
+    context = load_review_context(session, review_case)
+    intake = context["intake_record"]
+    symbol_properties = load_review_symbol_properties(
+        session, review_case=review_case, split_item=split_item
+    )
+    classification = (
+        context["classification_record"]
+        if split_item is None
+        else load_child_classification_record(
+            session,
+            review_case=review_case,
+            child_key=split_item.child_key,
+            index=_split_item_region_index(split_item),
+        )
+    )
+
+    fields = classification_fields_for_review(classification, symbol_properties=symbol_properties)
+    forecast = preview_classification_mapping(
+        session,
+        fields=fields,
+        source_package_id=intake.source_package_id if intake else None,
+    )
+
+    return ReviewCaseClassificationPreviewResponse(
+        reviewCaseId=str(review_case.id),
+        splitItemId=str(split_item.id) if split_item else None,
+        classificationRecordId=(
+            str(fields.classification_record_id) if fields.classification_record_id else None
+        ),
+        disciplineUsed=fields.discipline,
+        categoryUsed=fields.category,
+        method=MAPPING_METHOD,
+        mapperVersion=MAPPER_VERSION,
+        willAssert=[
+            {
+                "field": item.field,
+                "schemeCode": item.scheme_code,
+                "assignmentRole": item.assignment_role,
+                "rawValue": item.raw_value,
+                "classificationNodeId": str(item.node_id),
+                "nodeCode": item.node_code,
+                "nodeLabel": item.node_label,
+                "matchBasis": item.match_basis,
+            }
+            for item in forecast.assignments
+        ],
+        willGap=[
+            {
+                "field": gap.field,
+                "rawValue": gap.raw_value,
+                "reason": gap.reason,
+                "detail": gap.detail,
+            }
+            for gap in forecast.gaps
+        ],
+        willLink=[
+            {
+                "field": entry["field"],
+                "rawValue": entry.get("raw_value"),
+                "target": entry["target"],
+                "relationshipType": entry.get("relationship_type"),
+            }
+            for entry in forecast.resolved
+        ],
     )
 
 

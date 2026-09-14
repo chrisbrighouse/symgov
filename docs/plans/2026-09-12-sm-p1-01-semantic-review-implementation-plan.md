@@ -408,8 +408,218 @@ stamped before and after the run and re-verified unchanged. Frontend: **335
 passed, 0 failed, 52 suites**, up from WP1.4's 325 by exactly the ten new
 tests. `npm run build` succeeds, 86 modules, 642.66 kB.
 
-**WP1.5 — Read-only semantic panel in the existing review surfaces**
-Embed a read-only "Engineering meaning" summary into the existing review case detail and the organisation symbol review page, so an SME reviewing an intake sees the proposed semantic state without leaving the lane. Read-only deliberately: the decision controls stay in one place (WP1.4) so there is one audit path.
+**WP1.5 — Read-only semantic panel in the existing review surfaces** — **RE-SCOPED 2026-09-14 by decisions Q9 and Q10**
+
+*The sentence this package was written with.* "Embed a read-only 'Engineering
+meaning' summary into the existing review case detail and the organisation
+symbol review page, so an SME reviewing an intake sees the proposed semantic
+state without leaving the lane. Read-only deliberately: the decision controls
+stay in one place (WP1.4) so there is one audit path."
+
+*Why it could not be built as written.* Measured against the tables before
+any code was planned: **every governed semantic assertion in the system is
+written by an approval handoff that runs after the review the panel would sit
+in.** `SymbolRevisionClassificationAssignment` and `RightsRecord` rows are
+created at exactly two call sites — `publication_handoff.py:604`/`:891`
+(intake approval) and `organization_promotion_handoff.py:266` (promotion
+approval, WP1.0's repair) — and both run inside
+`execute_publication_handoff`, on the decision itself. So:
+
+- **The intake review case detail has no symbol revision to ask about at
+  all.** `/workspace/review-cases` lists only open cases (`closed_at IS
+  NULL`) of `source_entity_type` `validation_report` or
+  `provenance_assessment` (`workspace.py:2457`). Neither has a
+  `symbol_revisions` row: `ensure_approved_symbol_revision`
+  (`publication_handoff.py:479`) *creates* the revision from the
+  `HumanReviewDecision`. There is no identifier to pass to
+  `GET /semantic-review/symbol-revisions/{id}`.
+- **The organisation symbol review page has a real revision id and nothing
+  hanging off it.** `OrganizationSymbolDraftResponse.currentRevision.id`
+  (`schemas.py:1383`) is a genuine `symbol_revisions` row, and
+  `_visible_revision` would resolve it for an organisation-mode session. But
+  no path writes assignments to an organisation draft revision before
+  promotion, so the panel would resolve and render nothing.
+
+Built literally, the panel would show "no semantic assertions yet" in exactly
+the population it was designed for. Recorded as a finding, not worked around.
+
+*Re-scoped shape (decision Q9).* The panel forecasts rather than reports: on
+the intake review case detail it shows **what approving this case will
+assert, and which section 9.3 fields will fall into a gap**. This is the one
+thing that is genuinely non-empty before the decision, it is computable from
+code that already exists and is already tested, and it sits beside the raw
+`ClassificationRecord` fields the detail pane already renders as Discipline /
+Format / Industry / Symbol family.
+
+The forecast **must be a composition of the existing mapping path, never a
+restatement of its rules** — a second copy of the precedence would drift from
+the one that actually writes, and a panel that forecasts something other than
+what approval does is worse than no panel:
+
+```
+context           = load_review_context(session, review_case)              # publication_handoff.py:229
+classification    = context["classification_record"]
+symbol_properties = load_review_symbol_properties(session, review_case=...)  # publication_handoff.py:196
+fields            = classification_fields_from_record(                      # classification_mapping.py:462
+                        classification,
+                        discipline=symbol_properties.discipline if symbol_properties else None,
+                        category=symbol_properties.category  if symbol_properties else None)
+plan              = plan_classification_mapping(fields)                     # classification_mapping.py:332 (pure)
+resolved          = resolve_node(session, scheme_code=..., candidates=...)   # classification_mapping.py:534
+```
+
+That `discipline`/`category` precedence is `record_classification_mapping`'s
+own (`publication_handoff.py:364-367`): the human-reviewed
+`ReviewSymbolProperty` wins over the classification record. The Reviews
+surface lets an SME edit those properties in place, so a preview that skipped
+the override would forecast the wrong node the moment a reviewer corrected a
+discipline. Resolve the candidates rather than listing raw codes: a candidate
+that resolves to no active node is a gap the SME would otherwise not discover
+until after approval.
+
+*Delivery shape.* One new read on the **existing** `semantic_review` router —
+`GET /semantic-review/review-cases/{review_case_id}/classification-preview` —
+behind the same default-off `SYMGOV_SEMANTIC_REVIEW_ENABLED` flag, the same
+`admin`/`reviewer` boundary and the same 422 envelope as its sixteen
+siblings, so WP1.5 changes nothing in production until the flag is activated
+under its own approval. No migration; the head stays at `20260911_0057`.
+
+**No tenant predicate, and the reason is measured rather than assumed.**
+Neither `IntakeRecord` (`models/schema.py:2053`) nor `ClassificationRecord`
+(`:2121`) carries an organisation, and the intake lane feeds the public
+catalog. Section 14.2 is about organisation-private *symbol existence*; a
+review case naming no symbol and no organisation gives it nothing to
+protect. This is the same reasoning that left
+`GET /semantic-review/classification-schemes` unscoped, and it is the
+argument — not the convenience — that must hold at review.
+
+*Frontend.* The forecast panel embeds in `ReviewsPage`'s focus pane
+(`App.jsx:5069`), in the `copy-block` idiom, beside the existing
+`review-support-facts`. Label it plainly as a forecast of the approval, never
+as recorded state — `CLAUDE.md` forbids presenting an illustrative value as a
+production one. `/reviews` is already gated
+`RequireAnyRole roles={['admin','reviewer']}`, an exact match for the
+router's `require_any_role({"admin", "reviewer"})`, so the lane needs no
+second role rule — only the capability gate for the flag.
+
+*The organisation symbol review page (decision Q10).* Its governed-state
+panel stays in scope but **renders only for a session that satisfies the
+API's own boundary and the flag, and is absent otherwise** — no failed
+request, no empty frame, no promise the API will not keep. The page is gated
+on an *organisation capability* (`canReviewOrganizationSymbols` →
+`symbol_reviewer`, or organisation `baseRole === 'admin'`,
+`projectContext.js:80`), which is a different axis from the platform role the
+router requires; an organisation reviewer without platform `admin`/`reviewer`
+would otherwise meet a 403. This mirrors `semanticReviewJourney.js`, which
+already reproduces the API boundary rather than inventing a stricter or
+looser one. Widening the router to accept the organisation capability was
+considered and **rejected**: it would re-open decision Q2, which §4 records as
+settled.
+
+*Read-only throughout.* The decision controls stay in WP1.4 so there is one
+audit path, exactly as the original sentence intended.
+
+**WP1.5 — DELIVERED 2026-09-14**
+
+*Delivered shape.* One new read — `GET
+/semantic-review/review-cases/{review_case_id}/classification-preview`, the
+seventeenth route in this router's semantic policy matrix and its nineteenth
+route overall (WP1.3's two rights writes share the router) — behind the same
+default-off flag, the same `admin`/`reviewer` boundary and the same 422
+envelope as its siblings. No migration; head unmoved at `20260911_0057`. The flag was never
+activated, so production is unchanged.
+
+The forecast is a composition and not a copy, and two extractions are what
+make that literally true rather than merely intended:
+
+- **`publication_handoff.classification_fields_for_review`** — the reviewed
+  precedence (`ReviewSymbolProperty` wins over the classification record),
+  lifted out of `record_classification_mapping` and now called by both the
+  writer and the forecast. A DB-free test fails if the writer stops calling
+  it, and a PostgreSQL test fails if the override is dropped.
+- **`classification_mapping.preview_classification_mapping`** — plans with
+  `plan_classification_mapping` (the same pure function) and resolves with
+  `resolve_node` and `_standard_version_for` (the same lookups), writing
+  nothing. The two gap constructors `apply_classification_mapping` used
+  inline — `_no_node_match_gap` and `_no_source_package_gap` — are now shared
+  module functions, so the gap an SME is shown before the decision is the
+  same row, word for word, that the approval records.
+
+Two things the §4 text does not cover, recorded rather than decided silently:
+
+- **The route takes an optional `splitItemId`, and it is not optional
+  politeness.** The Reviews queue lists raster-split children as their own
+  rows, and approving one runs `ensure_approved_child_symbol_revision`, which
+  uses the *child's* classification record and the child's own
+  `ReviewSymbolProperty`. `load_child_classification_record` deliberately
+  refuses to inherit the sheet's record, whose family, process category and
+  equipment class are the placeholders `mixed_symbol_set`/`review_required`/
+  `mixed_equipment`. A case-level forecast for a split child would therefore
+  have forecast precisely what the approval will not write — the failure Q9
+  calls worse than no panel. The parameter composes the same two functions
+  the child path composes; it introduces no rule of its own.
+- **A measured discrepancy in the split path, not fixed here.** The approval
+  handoff passes `load_child_classification_record` the child's position among
+  the *approved* children (`approved_child_decisions`), which is unknowable
+  before a decision and, when a reviewer approves only some children, is not
+  the manifest position either. The forecast passes the manifest position
+  (`ReviewSplitItem.payload_json["package_symbol_sequence"] - 1`, which is
+  what `ClassificationRecord.symbol_region_index` means), falling back — as
+  the writer does — to the child key, which is exact. The two agree whenever
+  every child is approved. Where they would not, the *handoff* is the one
+  matching a child against another child's region index; that is a
+  pre-existing defect in `ensure_approved_child_symbol_revision`'s `index`
+  argument, reachable without this package, and fixing it would widen WP1.5
+  into the approval path it is only meant to forecast. Recorded here for
+  scheduling, alongside the `propose_external_mapping` sibling defect the
+  2026-09-14 amendment recorded.
+
+*Frontend.* `ReviewClassificationForecast` (a new module, the `createElement`
+idiom WP1.4 established) embedded in `ReviewsPage`'s focus pane in the
+`copy-block` idiom, immediately after `review-support-facts` — beside the raw
+Discipline / Format / Industry / Symbol family values it is a statement
+about. Every heading says "will", the panel opens by saying it is a forecast
+and not recorded state, and the closed backend vocabularies
+(`MAPPING_GAP_REASONS`, `MATCH_BASES`) are rendered as sentences rather than
+machine values. It is absent unless `canAccessSemanticReview` holds — the same
+predicate the WP1.4 surface uses, so the UI reproduces the API's boundary
+rather than inventing one. On the organisation symbol review page (Q10) the
+governed-state panel reads `activeDraft.currentRevision.id` through the
+existing `fetchSemanticReviewSymbolRevision` and is likewise absent for a
+session the router would refuse; `auth` now reaches
+`OrganizationSymbolReviewQueuePanel` for that one purpose. Neither panel adds
+a decision control.
+
+*Closing evidence.* Backend: 30 new tests. Nine DB-free in
+`test_classification_mapping.py` (53 → 62) — three pinning the shared
+precedence and that the writer still calls it, six pinning that the forecast
+accounts for every section 9.3 field, reports the writer's own gap
+vocabulary, plans with the writer's own planner and writes nothing. Four in
+`test_classification_mapping_postgresql.py`, which are the ones that matter:
+over one seeded review case the forecast names exactly the assignments the
+approval proposes (node for node, role for role, match basis for match
+basis), exactly the gaps it records, follows the reviewed property rather
+than the record it overrode, and leaves every table unchanged. Eleven in
+`test_semantic_review_routes.py` — three explicit (absent case reported
+absent, the unscoped-read argument stated in the route itself, and the
+contract naming the response `willAssert`/`willGap`/`willLink` rather than
+`assignments`/`gaps`) plus the eight parametrized policy-matrix instances the
+seventeenth route adds. Six in `test_semantic_review_routes_postgresql.py`,
+including the split-child forecast against the sheet's, the foreign
+split-item 404, the personal-mode read and a write-nothing check on the route
+itself. Full portable partition on the final bytes: **3988 passed, 3 skipped,
+3 deselected** in 1448s — the WP1.4-amendment baseline of 3958 plus exactly
+the 30 new tests, no regression. Identity stamped before and after the run
+and re-verified unchanged. Head unmoved at `20260911_0057`; `backend/alembic`
+is untouched. Frontend:
+**362 passed, 0 failed, 56 suites** via `npm run test:frontend`, up from 335
+by exactly the 27 new tests — 3 API-helper, 17 in the new
+`reviewSemanticPreview.test.js` (13 unit plus 4 mounted through the real
+application router at `/reviews`) and 7 in `organizationSymbolDrafts.test.js`
+for Q10. `npm run build` succeeds: 87 modules (86 plus the one new source
+module), `dist/assets/index-*.js` 651.20 kB against 642.66 kB; the >500 kB
+chunk-size warning is pre-existing. Not committed; nothing pushed, deployed or
+activated.
 
 **WP1.6 — Route-policy matrix, regression and acceptance**
 Full portable regression, frontend tests, `npm run build`, a tenant-isolation matrix proving no organisation-private symbol existence leaks through any new endpoint (§14.2, §16.1), and an acceptance pass against the §16.1 criteria this package claims to close.
@@ -428,14 +638,21 @@ Full portable regression, frontend tests, `npm run build`, a tenant-isolation ma
 | `tests/test_classification_mapping_postgresql.py` | extend | WP1.0 org promotion path |
 | `frontend/src/semanticReview.test.js` | new | WP1.4 |
 | `tests/test_publication_gate_postgresql.py` | extend | WP1.3 gate satisfaction |
+| `tests/test_semantic_review_routes.py` | extend | WP1.5 preview route policy, flag-off 404 |
+| `tests/test_classification_mapping.py` | extend | WP1.5 forecast == what approval writes |
+| `frontend/src/reviewSemanticPreview.test.js` | new | WP1.5 intake panel |
+| `frontend/src/organizationSymbolDrafts.test.js` | extend | WP1.5 Q10 hide-when-ungated |
 
 Pin every new `*_postgresql.py` fixture at the current head (`20260911_0057`) — the ORM is one global object that always reflects head, and a fixture pinned to an older revision breaks the moment a later migration extends a table its models touch.
 
-## 4. Decisions log — RESOLVED 2026-09-12
+## 4. Decisions log — RESOLVED
 
-All six were put to Chris on 2026-09-12 and answered in the same session. Each was
-confirmed on the recommendation as written below. No work package is blocked on a
-decision; the §2 sequence is final.
+Q1–Q6 were put to Chris on 2026-09-12 and answered in the same session, each
+confirmed on the recommendation as written below. Q7 and Q8 followed on
+2026-09-13 with the WP1.2 route inventory (recorded inline in §2's WP1.2
+entry). Q9 and Q10 followed on 2026-09-14, when WP1.5's targets were measured
+against the tables and found empty at decision time. No work package is
+blocked on a decision; the §2 sequence is final.
 
 **Q1. Where does semantic review live? → (a) a standalone semantic review queue.**
 Its own route, driven by queries over the semantic tables, independent of `ReviewCase`.
@@ -473,6 +690,29 @@ Existing assignments in those three schemes are displayed; no control creates on
 three unused schemes their first writer through a review UI is a product decision about
 what SymGov asks reviewers to record, and `CLAUDE.md` forbids inventing workflow states.
 Revisit separately once the vocabularies are settled.
+
+**Q9. WP1.5's two target surfaces are both empty at decision time. What does the panel show? → the mapping forecast.** *(2026-09-14)*
+Every governed semantic assertion is written by the approval handoff that runs
+*after* the review the panel sits in, so a governed-state panel in the intake
+lane would render "nothing yet" in every case it was designed for. The panel
+instead shows what approving the case **will** assert and which section 9.3
+fields will fall into a gap, composed from `load_review_context`,
+`load_review_symbol_properties`, `classification_fields_from_record`,
+`plan_classification_mapping` and `resolve_node` — all existing and tested,
+and `plan_classification_mapping` is pure by its own docstring. Cost: one new
+read on the existing router. The three alternatives were building it as
+specified and accepting a permanently empty panel, delivering only on the
+organisation page, and deferring to WP1.6. Chris chose the forecast. It must
+be labelled as a forecast of the approval, never as recorded state.
+
+**Q10. The organisation symbol review page's gate does not match the API's. What does the panel do there? → hide it.** *(2026-09-14)*
+That page is gated on the organisation capability `symbol_reviewer` (or
+organisation `baseRole === 'admin'`); the router requires the *platform* role
+`admin` or `reviewer`. A reviewer holding only the former would meet a 403.
+The panel is therefore absent unless the session satisfies the router's own
+boundary and the flag — not rendered as an error and not rendered as an empty
+frame. Widening the router to accept the organisation capability was rejected
+as a re-opening of Q2.
 
 **Settled, do not re-litigate:** concept governance is platform-level (§17); Industry/Application and process-category vocabularies are Chris's separate research and no scheme is seeded here; `ConceptTerm` and organisation-scoped concepts stay deferred; M3 provisional concept candidates are **not** in this package — manual concept creation lands first, so there is something to review before a generator fills the queue.
 

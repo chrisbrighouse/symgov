@@ -276,3 +276,38 @@ test('a dormant feature reports its 404 detail rather than a validation message'
     },
   );
 });
+
+// --- WP1.5: the approval forecast ----------------------------------------
+
+test('the classification preview names the review case and omits an absent split item', async () => {
+  reset({ reviewCaseId: 'rc-1', splitItemId: null, willAssert: [], willGap: [], willLink: [] });
+
+  const preview = await api.fetchReviewCaseClassificationPreview('rc-1');
+
+  assert.equal(
+    fetchCalls[0].url,
+    `${ROOT}/semantic-review/review-cases/rc-1/classification-preview`,
+  );
+  assert.equal(fetchCalls[0].options.method ?? 'GET', 'GET');
+  assert.equal(preview.reviewCaseId, 'rc-1');
+});
+
+test('a split child is forecast through its own split item, not the sheet', async () => {
+  reset({ reviewCaseId: 'rc-1', splitItemId: 'si-9', willAssert: [], willGap: [], willLink: [] });
+
+  await api.fetchReviewCaseClassificationPreview('rc-1', { splitItemId: 'si-9' });
+
+  assert.equal(
+    fetchCalls[0].url,
+    `${ROOT}/semantic-review/review-cases/rc-1/classification-preview?splitItemId=si-9`,
+  );
+});
+
+test('a dormant flag is reported as absence, not as a malformed request', async () => {
+  reset({ error: 'not_found', detail: 'Not found.' }, { ok: false, status: 404 });
+
+  await assert.rejects(
+    () => api.fetchReviewCaseClassificationPreview('rc-1'),
+    (error) => error.status === 404,
+  );
+});

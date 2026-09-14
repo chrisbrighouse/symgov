@@ -1965,6 +1965,24 @@ export async function fetchSemanticReviewSymbolRevision(symbolRevisionId) {
   return semanticReviewPayload(result, 'Symbol revision semantic state load failed.');
 }
 
+// SM-P1-01 WP1.5, decision Q9. What approving a review case *will* assert.
+//
+// Not a read of recorded state, and never presented as one: every governed
+// semantic assertion is written by the approval handoff that runs after this
+// review, so an open case has nothing recorded to report. `splitItemId` names
+// a raster-split child, whose own classification record the approval uses in
+// place of the sheet's.
+export async function fetchReviewCaseClassificationPreview(reviewCaseId, { splitItemId = '' } = {}) {
+  const result = await requestJson(
+    withQuery(
+      `${SEMANTIC_REVIEW_ROOT}/review-cases/${encodeURIComponent(reviewCaseId)}/classification-preview`,
+      { splitItemId },
+    ),
+    { cache: 'no-store' },
+  );
+  return semanticReviewPayload(result, 'Approval forecast load failed.');
+}
+
 export async function decideSemanticReviewSemanticAssignment(assignmentId, { targetStatus }) {
   return semanticReviewWrite(
     `/semantic-assignments/${encodeURIComponent(assignmentId)}/decision`,

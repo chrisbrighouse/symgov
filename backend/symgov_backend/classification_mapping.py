@@ -20,6 +20,13 @@ are unmappable still gets promoted; the value lands in `evidence_json` and in
 the payload's mapping report instead of in an exception. Section 16.1 asks
 that no field be silently dropped, not that every field map.
 
+**The rules can be run without writing anything.** SM-P1-01 WP1.5 forecasts
+the approval on the intake review pane, and `preview_classification_mapping`
+is that forecast: the same planner, the same node and standard lookups, the
+same gap rows, and no proposal. It is a composition of the writer rather than
+a copy of it, which is why the two gap constructors both paths need are
+module-level functions and not inline literals.
+
 **Nothing here writes a verified row.** Section 8.4 keeps a machine
 assertion proposed however confident it is, and
 `propose_symbol_revision_classification` starts every row at `proposed`
@@ -531,6 +538,188 @@ class ClassificationMappingOutcome:
         }
 
 
+def _no_node_match_gap(planned: PlannedAssignment) -> MappingGap:
+    """No active node in the scheme for any of a value's candidate codes.
+
+    Shared by `apply_classification_mapping` and
+    `preview_classification_mapping` so the gap an SME is shown before the
+    decision is the same row, word for word, that the approval records.
+    """
+    return MappingGap(
+        field=planned.field,
+        raw_value=planned.raw_value,
+        reason="no_node_match",
+        detail=f"no active node in {planned.scheme_code} for {planned.candidate_node_codes[0]}",
+    )
+
+
+def _no_source_package_gap(library_provenance_class: str | None) -> MappingGap:
+    """`_ensure_package_entry`'s only refusal, shared for the same reason."""
+    return MappingGap(
+        field="libraryProvenanceClass",
+        raw_value=library_provenance_class,
+        reason="no_source_package",
+        detail="the intake record names no source package",
+    )
+
+
+@dataclass(frozen=True)
+class ForecastAssignment:
+    """One classification the approval will propose, with its node resolved.
+
+    The node identity travels alongside the human-readable code and label
+    rather than instead of them (`CLAUDE.md`), and `match_basis` says which
+    rule found it, so a reviewer can see *how* a workspace value was matched
+    before the decision rather than after.
+    """
+
+    field: str
+    scheme_code: str
+    assignment_role: str
+    raw_value: str
+    node_id: uuid.UUID
+    node_code: str
+    node_label: str
+    match_basis: str
+
+
+@dataclass(frozen=True)
+class ClassificationMappingForecast:
+    """What approving a review case would assert, without asserting it.
+
+    The same three parts `ClassificationMappingOutcome` reports after the
+    fact: what maps, what does not and why, and the two section 9.3 rows whose
+    target is a link rather than a classification assignment.
+    """
+
+    assignments: tuple[ForecastAssignment, ...] = ()
+    gaps: tuple[MappingGap, ...] = ()
+    resolved: tuple[dict[str, Any], ...] = ()
+
+    @property
+    def gap_fields(self) -> frozenset[str]:
+        return frozenset(gap.field for gap in self.gaps)
+
+
+def preview_classification_mapping(
+    session: Session,
+    *,
+    fields: ClassificationFields,
+    source_package_id: uuid.UUID | None = None,
+) -> ClassificationMappingForecast:
+    """Forecast `apply_classification_mapping` without performing it.
+
+    SM-P1-01 WP1.5, decision Q9 (2026-09-14). Every governed semantic
+    assertion in the system is written by the approval handoff that runs
+    *after* the review an SME is sitting in, so a panel reporting recorded
+    state would be empty in exactly the population it is for. This is what
+    the approval *will* assert instead, and which section 9.3 fields will
+    fall into a gap.
+
+    It is a composition, not a second copy of the rules. The fields, schemes,
+    roles and candidate codes all come from `plan_classification_mapping`,
+    which is pure; the node, the standard edition and the package decision all
+    come from the same lookups `apply_classification_mapping` uses. A forecast
+    that restated any of them would drift from the writer, and a panel that
+    predicts a different node from the one approval proposes is worse than no
+    panel at all.
+
+    Two differences from the outcome, both structural rather than chosen.
+    There is no revision yet, so `_existing_assignment`'s idempotent reuse
+    cannot be consulted -- a re-proposal of a node a revision already holds is
+    invisible here, because no revision exists to hold it. And nothing is
+    written: reading this panel is not an act of governance.
+
+    Each leg is wrapped exactly as the writer wraps it, so a lookup fault is
+    forecast as the `mapping_failed` gap the approval would record rather
+    than as a failed request on a review pane.
+    """
+    plan = plan_classification_mapping(fields)
+    assignments: list[ForecastAssignment] = []
+    gaps: list[MappingGap] = list(plan.gaps)
+    resolved: list[dict[str, Any]] = []
+
+    for planned in plan.assignments:
+        try:
+            resolved_node = resolve_node(
+                session,
+                scheme_code=planned.scheme_code,
+                candidates=planned.candidates,
+            )
+            if resolved_node is None:
+                gaps.append(_no_node_match_gap(planned))
+                continue
+            node, match_basis = resolved_node
+            assignments.append(
+                ForecastAssignment(
+                    field=planned.field,
+                    scheme_code=planned.scheme_code,
+                    assignment_role=planned.assignment_role,
+                    raw_value=planned.raw_value,
+                    node_id=node.id,
+                    node_code=node.node_code,
+                    node_label=node.preferred_label,
+                    match_basis=match_basis,
+                )
+            )
+        except Exception as exc:  # pragma: no cover - defensive, as in the writer
+            gaps.append(
+                MappingGap(
+                    field=planned.field,
+                    raw_value=planned.raw_value,
+                    reason="mapping_failed",
+                    detail=str(exc)[:512],
+                )
+            )
+
+    if plan.standards_source is None:
+        gaps.append(MappingGap(field="standardsSource", raw_value=None, reason="no_value"))
+    else:
+        try:
+            version, gap = _standard_version_for(session, plan.standards_source)
+            if gap is not None:
+                gaps.append(gap)
+            else:
+                resolved.append(
+                    {
+                        "field": "standardsSource",
+                        "raw_value": plan.standards_source,
+                        "target": "symbol_standard_links",
+                        "relationship_type": STANDARD_RELATIONSHIP_TYPE,
+                        "standard_version_id": str(version.id),
+                    }
+                )
+        except Exception as exc:  # pragma: no cover - defensive, as in the writer
+            gaps.append(
+                MappingGap(
+                    field="standardsSource",
+                    raw_value=plan.standards_source,
+                    reason="mapping_failed",
+                    detail=str(exc)[:512],
+                )
+            )
+
+    # `_ensure_package_entry`'s only refusal, reproduced by calling neither it
+    # nor a copy of its rule: it is the one condition that does not depend on
+    # a revision, and the rest of that function is the write itself.
+    if source_package_id is None:
+        gaps.append(_no_source_package_gap(plan.library_provenance_class))
+    else:
+        resolved.append(
+            {
+                "field": "libraryProvenanceClass",
+                "raw_value": plan.library_provenance_class,
+                "target": "source_package_entries",
+            }
+        )
+
+    return ClassificationMappingForecast(
+        assignments=tuple(assignments),
+        gaps=tuple(gaps),
+        resolved=tuple(resolved),
+    )
+
+
 def resolve_node(
     session: Session, *, scheme_code: str, candidates: tuple[tuple[str, str], ...]
 ) -> tuple[ClassificationNode, str] | None:
@@ -644,14 +833,7 @@ def apply_classification_mapping(
                 candidates=planned.candidates,
             )
             if resolved_node is None:
-                gaps.append(
-                    MappingGap(
-                        field=planned.field,
-                        raw_value=planned.raw_value,
-                        reason="no_node_match",
-                        detail=f"no active node in {planned.scheme_code} for {planned.candidate_node_codes[0]}",
-                    )
-                )
+                gaps.append(_no_node_match_gap(planned))
                 continue
             node, match_basis = resolved_node
             existing = _existing_assignment(
@@ -830,12 +1012,7 @@ def _ensure_package_entry(
     and `source_label` is where the provenance class lands.
     """
     if source_package_id is None:
-        return None, MappingGap(
-            field="libraryProvenanceClass",
-            raw_value=library_provenance_class,
-            reason="no_source_package",
-            detail="the intake record names no source package",
-        )
+        return None, _no_source_package_gap(library_provenance_class)
     existing = session.execute(
         select(SourcePackageEntry)
         .where(SourcePackageEntry.symbol_revision_id == symbol_revision_id)

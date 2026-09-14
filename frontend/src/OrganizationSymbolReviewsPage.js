@@ -12,5 +12,9 @@ export function OrganizationSymbolReviewsPage({ auth }) {
       createElement('h2', null, 'Organization symbol review is not available for this session.'),
     );
   }
-  return createElement(OrganizationSymbolReviewQueuePanel, null);
+  // `auth` reaches the panel for decision Q10 only: the governed semantic
+  // state it can show is behind the semantic review API's *platform* role
+  // boundary and its default-off flag, which are a different axis from the
+  // organization capability that gates this page.
+  return createElement(OrganizationSymbolReviewQueuePanel, { auth });
 }

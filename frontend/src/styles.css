@@ -4930,3 +4930,61 @@ button.catalog-preview-format-badge:focus-visible {
     overflow: visible;
   }
 }
+
+/* SM-P1-01 WP1.5: the approval forecast in the Reviews focus pane, and the
+   read-only governed state on the organization symbol review page. Both reuse
+   the existing block idioms and add only the list rhythm the rows need. */
+
+.review-classification-forecast h5,
+.organization-symbol-governed-state h4 {
+  margin: 0.9rem 0 0.35rem;
+  font-size: 0.95rem;
+}
+
+.review-forecast-body {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.review-forecast-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.review-forecast-list li {
+  padding: 0.4rem 0;
+  border-bottom: 1px solid var(--stroke);
+  line-height: 1.5;
+}
+
+.review-forecast-list li:last-child {
+  border-bottom: none;
+}
+
+.review-forecast-list strong {
+  display: block;
+}
+
+.organization-symbol-governed-state {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--stroke);
+}
+
+.organization-symbol-governed-state dt {
+  margin-top: 0.6rem;
+  font-weight: 600;
+}
+
+.organization-symbol-governed-state dd {
+  margin: 0.2rem 0 0;
+}
+
+@media (max-width: 720px) {
+  .review-forecast-list li {
+    padding: 0.5rem 0;
+  }
+}

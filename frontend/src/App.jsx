@@ -73,6 +73,7 @@ import { EffectivePalettePanel } from './EffectivePalettePanel.js';
 import { canMountEffectivePalette, canMountOrganizationSymbolDrafts, canMountProjectContext, canReviewOrganizationSymbols } from './projectContext.js';
 import { OrganizationSymbolDraftsPage } from './OrganizationSymbolDraftsPage.js';
 import { OrganizationSymbolReviewsPage } from './OrganizationSymbolReviewsPage.js';
+import { ReviewClassificationForecast } from './ReviewClassificationForecast.js';
 import { Header } from './Header.js';
 import FavouriteButton from './FavouriteButton.js';
 import FavouriteFilter from './FavouriteFilter.js';
@@ -5203,6 +5204,19 @@ function ReviewsPage() {
                 <Fact label="Standards source" value={activeChange.standardsSource || 'Pending'} />
                 <Fact label="Provenance class" value={activeChange.libraryProvenanceClass || 'Pending'} />
               </div>
+              {/*
+                SM-P1-01 WP1.5, decision Q9. The forecast sits beside the raw
+                classification facts above because it is a statement about
+                exactly those values: what approving this item will do with
+                them, and which of them will survive only as free text. It is
+                absent unless the session satisfies the semantic review API's
+                own boundary and its default-off flag.
+              */}
+              <ReviewClassificationForecast
+                auth={auth}
+                reviewCaseId={workspaceState.mode === 'live' ? activeReviewCaseId : ''}
+                splitItemId={activeChange.splitItemId || ''}
+              />
               {activeChildren.length > 1 ? (
                 <>
                 <SectionHeading title="Child Symbol Decisions" subtitle="Per-symbol actions and notes" />

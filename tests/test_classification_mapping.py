@@ -365,3 +365,185 @@ def test_the_child_payload_no_longer_hardcodes_three_fields_to_none():
 def test_the_mapper_version_is_recorded_with_every_proposal():
     assert MAPPER_VERSION.startswith("symgov-classification-mapping-")
     assert MAPPER_VERSION in inspect.getsource(mapping_service)
+
+
+# --- SM-P1-01 WP1.5: the forecast composes the writer, never restates it ---
+#
+# Decision Q9 (2026-09-14) puts a *forecast* of the approval on the intake
+# review case detail: what approving this case will assert, and which section
+# 9.3 fields fall into a gap. A second copy of the mapping rules would drift
+# from the one that actually writes, and a panel that forecasts something
+# other than what approval does is worse than no panel. So the precedence and
+# the plan are shared functions, and these tests fail if either is forked.
+
+
+def _record(**overrides):
+    from symgov_backend.models import ClassificationRecord
+
+    base = dict(
+        discipline="Mechanical",
+        category="Valves",
+        industry="process_engineering",
+        symbol_family="door",
+        process_category="flow_control",
+        parent_equipment_class="valve",
+        standards_source="ISA-5.1",
+        library_provenance_class="contributor_submission",
+        source_classification="contributor_asserted",
+        format="svg",
+        aliases_json=["Gate valve"],
+        search_terms_json=["valve", "gate"],
+        source_refs_json=["https://example.test/source"],
+        confidence=Decimal("0.84"),
+    )
+    base.update(overrides)
+    return ClassificationRecord(**base)
+
+
+def test_the_review_precedence_is_one_named_function_and_the_property_wins():
+    """`record_classification_mapping`'s own rule, lifted out so a forecast
+    can reuse it rather than copy it.
+
+    The Reviews surface lets an SME edit the reviewed discipline and category
+    in place, so a forecast that read the classification record directly would
+    predict the wrong node the moment a reviewer corrected one.
+    """
+    from types import SimpleNamespace
+
+    compose = getattr(publication_handoff, "classification_fields_for_review", None)
+    assert compose is not None, "WP1.5's forecast needs the writer's precedence as a shared function"
+
+    fields = compose(
+        _record(discipline="Mechanical", category="Valves"),
+        symbol_properties=SimpleNamespace(discipline="Electrical", category="Doors"),
+    )
+
+    assert fields.discipline == "Electrical"
+    assert fields.category == "Doors"
+    # Every other field still comes from the record.
+    assert fields.symbol_family == "door"
+    assert fields.format == "svg"
+
+
+def test_the_shared_precedence_falls_back_to_the_record_then_to_the_caller():
+    from types import SimpleNamespace
+
+    compose = publication_handoff.classification_fields_for_review
+
+    from_record = compose(_record(), symbol_properties=None)
+    assert (from_record.discipline, from_record.category) == ("Mechanical", "Valves")
+
+    # The organisation promotion path (WP1.0) has no ReviewSymbolProperty and
+    # no ClassificationRecord; its reviewed values live on GovernedSymbol.
+    from_caller = compose(None, symbol_properties=None, discipline="Civil", category="Doors")
+    assert (from_caller.discipline, from_caller.category) == ("Civil", "Doors")
+
+    # A property with no value of its own does not blank the record's.
+    from_empty_property = compose(_record(), symbol_properties=SimpleNamespace(discipline=None, category=None))
+    assert (from_empty_property.discipline, from_empty_property.category) == ("Mechanical", "Valves")
+
+
+def test_the_writer_and_the_forecast_share_that_one_function():
+    """If the writer stops calling it, the forecast starts forecasting
+    something the approval will not do."""
+    writer = inspect.getsource(publication_handoff.record_classification_mapping)
+    assert "classification_fields_for_review(" in writer
+    assert "classification_fields_from_record(" not in writer
+
+
+class _NoRows:
+    """The smallest session `resolve_node` and `get_standard` will accept.
+
+    DB-free on purpose, to keep this file's scope note true. It answers "no
+    such scheme, no such standard", which is a real production state -- the
+    Industry/Application scheme is not seeded -- and is what makes every
+    planned assignment fall to a gap so the accounting can be checked without
+    a server. That the forecast and the writer agree on a *seeded* database is
+    proved in `test_classification_mapping_postgresql.py`, where it belongs.
+    """
+
+    def execute(self, _statement):
+        return self
+
+    def scalar_one_or_none(self):
+        return None
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return []
+
+    def first(self):
+        return None
+
+
+def test_the_forecast_accounts_for_every_field_the_writer_accounts_for():
+    """Section 16.1's "no field silently dropped", applied to the forecast.
+
+    A field the approval would report is a field the SME must be able to see
+    *before* deciding; that is the whole point of decision Q9.
+    """
+    forecast = mapping_service.preview_classification_mapping(
+        _NoRows(), fields=_fields(), source_package_id=None
+    )
+
+    accounted = {assignment.field for assignment in forecast.assignments}
+    accounted |= {gap.field for gap in forecast.gaps}
+    accounted |= {entry["field"] for entry in forecast.resolved}
+    missing = [field for field in SECTION_9_3_FIELDS if field not in accounted]
+    assert missing == []
+
+
+def test_the_forecast_reports_the_same_gap_vocabulary_the_writer_reports():
+    forecast = mapping_service.preview_classification_mapping(
+        _NoRows(), fields=_fields(), source_package_id=None
+    )
+
+    assert {gap.reason for gap in forecast.gaps} <= MAPPING_GAP_REASONS
+
+
+def test_an_unseeded_scheme_is_forecast_as_the_gap_the_writer_would_record():
+    """`apply_classification_mapping` records `no_node_match` when
+    `resolve_node` finds nothing. The forecast must say the same thing, or the
+    SME discovers the gap only after approving."""
+    forecast = mapping_service.preview_classification_mapping(
+        _NoRows(), fields=_fields(), source_package_id=None
+    )
+
+    discipline = [gap for gap in forecast.gaps if gap.field == "engineeringDiscipline"]
+    assert [gap.reason for gap in discipline] == ["no_node_match"]
+    assert discipline[0].raw_value == "Mechanical"
+    assert forecast.assignments == ()
+
+
+def test_a_submission_naming_no_source_package_is_forecast_as_that_gap():
+    forecast = mapping_service.preview_classification_mapping(
+        _NoRows(), fields=_fields(), source_package_id=None
+    )
+
+    (gap,) = [gap for gap in forecast.gaps if gap.field == "libraryProvenanceClass"]
+    assert gap.reason == "no_source_package"
+    assert gap.raw_value == "contributor_submission"
+
+
+def test_the_forecast_writes_nothing():
+    """It runs on a review case that has not been decided. A forecast that
+    proposed a row would make looking at the panel an act of governance."""
+    source = inspect.getsource(mapping_service.preview_classification_mapping)
+    for writer in (
+        "propose_symbol_revision_classification(",
+        "assert_symbol_standard_link(",
+        "add_source_package_entry(",
+        "session.add(",
+        "session.flush(",
+        "session.commit(",
+    ):
+        assert writer not in source, writer
+
+
+def test_the_forecast_plans_with_the_writers_own_planner():
+    """Not a second copy of the rules -- the same pure function."""
+    source = inspect.getsource(mapping_service.preview_classification_mapping)
+    assert "plan_classification_mapping(fields)" in source
+    assert "resolve_node(" in source
