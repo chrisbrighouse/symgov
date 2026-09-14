@@ -1597,3 +1597,342 @@ class EscalateAgentFindingRequest(BaseModel):
 
 class RunAgentResponse(BaseModel):
     touchedFindingIds: list[str]
+
+
+# ---------------------------------------------------------------------------
+# SM-P1-01 WP1.2 -- semantic review API
+#
+# Queue pages carry `limit`/`offset` rather than the `page`/`pageSize`/`total`
+# of `PagedProjectResponse`. That is deliberate and not an oversight: the
+# WP1.1 queue functions take a bound and an offset and return rows, with no
+# COUNT behind them, so a `total` here would be a number this API cannot
+# actually compute. Reporting an invented one is worse than reporting none.
+# ---------------------------------------------------------------------------
+
+
+class SemanticReviewSymbolIdentityResponse(BaseModel):
+    """The operator-readable identity of a symbol, per `CLAUDE.md`.
+
+    `catalogSymbolId` is the human identifier (`S-000001`); the UUID stays
+    available as a transport key but is never the compact label. The owning
+    organisation is deliberately absent: a reviewer needs to act on the row,
+    not to learn which tenant a public symbol was promoted from.
+    """
+
+    governedSymbolId: str
+    catalogSymbolId: str | None
+    canonicalName: str
+    slug: str
+    visibility: str
+
+
+class SemanticReviewConceptIdentityResponse(BaseModel):
+    semanticConceptId: str
+    conceptCode: str
+    preferredName: str | None
+    conceptKind: str
+    status: str
+
+
+class SemanticReviewCapabilitiesResponse(BaseModel):
+    """Which decisions the services will actually accept for this row.
+
+    `mustRepropose` is not the negation of `canVerify`. It is true only where
+    verification is barred by a rule a reviewer cannot lift -- a
+    `legacy_backfill` classification (section 12.3) or an `ai_assisted` rights
+    determination (section 8.4) -- and the row is otherwise live, so the
+    available action is to reject and propose afresh.
+    """
+
+    canVerify: bool
+    canReject: bool
+    canRetire: bool
+    mustRepropose: bool
+    blockedReason: str | None
+
+
+class SymbolClassificationReviewRowResponse(BaseModel):
+    assignmentId: str
+    symbolRevisionId: str
+    symbol: SemanticReviewSymbolIdentityResponse
+    classificationSchemeId: str
+    schemeCode: str
+    nodeCode: str
+    nodeLabel: str
+    assignmentRole: str
+    status: str
+    method: str
+    confidence: float | None
+    evidence: dict[str, Any]
+    proposedAt: str
+    capabilities: SemanticReviewCapabilitiesResponse
+
+
+class SymbolSemanticAssignmentReviewRowResponse(BaseModel):
+    assignmentId: str
+    symbolRevisionId: str
+    symbol: SemanticReviewSymbolIdentityResponse
+    concept: SemanticReviewConceptIdentityResponse
+    assignmentRole: str
+    status: str
+    method: str
+    confidence: float | None
+    evidence: dict[str, Any]
+    proposedAt: str
+    capabilities: SemanticReviewCapabilitiesResponse
+
+
+class ConceptClassificationReviewRowResponse(BaseModel):
+    assignmentId: str
+    concept: SemanticReviewConceptIdentityResponse
+    classificationSchemeId: str
+    schemeCode: str
+    nodeCode: str
+    nodeLabel: str
+    assignmentRole: str
+    status: str
+    method: str
+    confidence: float | None
+    evidence: dict[str, Any]
+    proposedAt: str
+    capabilities: SemanticReviewCapabilitiesResponse
+
+
+class ConceptExternalMappingReviewRowResponse(BaseModel):
+    referenceId: str
+    concept: SemanticReviewConceptIdentityResponse
+    schemeVersionId: str
+    schemeCode: str
+    schemeVersionLabel: str
+    externalIdentifier: str
+    externalLabel: str | None
+    mappingType: str
+    status: str
+    method: str
+    confidence: float | None
+    evidence: dict[str, Any]
+    proposedAt: str
+    capabilities: SemanticReviewCapabilitiesResponse
+
+
+class RightsRecordReviewRowResponse(BaseModel):
+    recordId: str
+    subjectKind: str
+    symbolRevisionId: str | None
+    symbol: SemanticReviewSymbolIdentityResponse | None
+    sourcePackageId: str | None
+    standardVersionId: str | None
+    rightsStatus: str
+    disposition: str
+    determinationMethod: str
+    licenceReference: str | None
+    status: str
+    evidence: dict[str, Any]
+    proposedAt: str
+    capabilities: SemanticReviewCapabilitiesResponse
+
+
+class SymbolClassificationQueueResponse(BaseModel):
+    items: list[SymbolClassificationReviewRowResponse]
+    limit: int
+    offset: int
+
+
+class SymbolSemanticAssignmentQueueResponse(BaseModel):
+    items: list[SymbolSemanticAssignmentReviewRowResponse]
+    limit: int
+    offset: int
+
+
+class ConceptClassificationQueueResponse(BaseModel):
+    items: list[ConceptClassificationReviewRowResponse]
+    limit: int
+    offset: int
+
+
+class ConceptExternalMappingQueueResponse(BaseModel):
+    items: list[ConceptExternalMappingReviewRowResponse]
+    limit: int
+    offset: int
+
+
+class ConceptExternalMappingListResponse(BaseModel):
+    """A concept's mappings after a write -- not a queue page.
+
+    No `limit`/`offset`: a write applied no pagination bound, and reporting
+    one would describe a page that was never taken.
+    """
+
+    items: list[ConceptExternalMappingReviewRowResponse]
+
+
+class RightsRecordQueueResponse(BaseModel):
+    items: list[RightsRecordReviewRowResponse]
+    limit: int
+    offset: int
+
+
+class SymbolRevisionSemanticStateResponse(BaseModel):
+    """One revision's whole governed semantic state, in one read.
+
+    External mappings are not here: they hang off a concept, not a revision,
+    and their queue is the surface that reviews them. Including them would
+    mean choosing which of an assigned concept's mappings are "this
+    revision's", which is a relationship the model does not assert.
+    """
+
+    symbolRevisionId: str
+    revisionLabel: str
+    lifecycleState: str
+    symbol: SemanticReviewSymbolIdentityResponse
+    semanticAssignments: list[SymbolSemanticAssignmentReviewRowResponse]
+    classificationAssignments: list[SymbolClassificationReviewRowResponse]
+    rightsRecords: list[RightsRecordReviewRowResponse]
+
+
+class SemanticConceptCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    conceptKind: str = Field(min_length=1, max_length=64)
+    preferredName: str = Field(min_length=1, max_length=256)
+    definition: str = Field(min_length=1, max_length=8000)
+    revisionLabel: str = Field(default="r1", min_length=1, max_length=64)
+    aliases: list[str] | None = Field(default=None, max_length=64)
+    notes: str | None = Field(default=None, max_length=4000)
+    rationale: str | None = Field(default=None, max_length=2000)
+
+
+class SemanticConceptRevisionCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revisionLabel: str = Field(min_length=1, max_length=64)
+    preferredName: str = Field(min_length=1, max_length=256)
+    definition: str = Field(min_length=1, max_length=8000)
+    aliases: list[str] | None = Field(default=None, max_length=64)
+    notes: str | None = Field(default=None, max_length=4000)
+    rationale: str | None = Field(default=None, max_length=2000)
+
+
+class SemanticConceptRevisionTransitionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    targetState: str = Field(min_length=1, max_length=32)
+
+
+class SemanticConceptRevisionResponse(BaseModel):
+    semanticConceptId: str
+    conceptCode: str
+    revisionId: str
+    revisionLabel: str
+    preferredName: str
+    definition: str
+    lifecycleState: str
+    conceptStatus: str
+    createdAt: str
+
+
+class SymbolSemanticAssignmentProposeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    semanticConceptId: uuid.UUID
+    assignmentRole: str = Field(min_length=1, max_length=32)
+    method: str = Field(min_length=1, max_length=32)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    evidence: dict[str, Any] | None = None
+
+
+class SymbolClassificationProposeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    classificationNodeId: uuid.UUID
+    assignmentRole: str = Field(min_length=1, max_length=32)
+    method: str = Field(min_length=1, max_length=32)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    evidence: dict[str, Any] | None = None
+
+
+class ConceptExternalMappingProposeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schemeVersionId: uuid.UUID
+    externalIdentifier: str = Field(min_length=1, max_length=512)
+    mappingType: str = Field(min_length=1, max_length=32)
+    mappingMethod: str = Field(min_length=1, max_length=32)
+    externalLabel: str | None = Field(default=None, max_length=512)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    evidence: dict[str, Any] | None = None
+
+
+class SemanticReviewDecisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    targetStatus: str = Field(min_length=1, max_length=32)
+
+
+class ExternalMappingDecisionRequest(BaseModel):
+    """Verifying a mapping needs its basis, and section 16.2 rejects one.
+
+    `verificationBasis` is required to verify and recorded in the evidence, so
+    the reason a mapping is trusted outlives the reviewer. An `exact` mapping
+    cannot be verified on `string_similarity`, however high its confidence --
+    the service enforces that, and this schema does not second-guess it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    targetStatus: str = Field(min_length=1, max_length=32)
+    verificationBasis: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+# ---------------------------------------------------------------------------
+# SM-P1-01 WP1.3 -- rights record review API
+#
+# The reviewer's own proposal is the point of these two. Section 7.12 asks for
+# who, when and why on an approval; `transition_rights_record` demands all
+# three, and refuses an `ai_assisted` determination outright (section 8.4), so
+# these models stay deliberately thin and let the service decide.
+# ---------------------------------------------------------------------------
+
+
+class RightsRecordProposeRequest(BaseModel):
+    """A reviewer's own rights determination.
+
+    Exactly one subject must be named. A record about "a package and also an
+    edition" asserts one decision about two different things, and a record
+    about nothing is not a record -- `rights_provenance._subject_kwargs`
+    enforces that, and this model does not duplicate the rule.
+
+    `rightsStatus` defaults to `unknown`, which is the only honest value
+    before anyone has looked. A permissive disposition may be *proposed* on
+    any status; only approving one is constrained, so a reviewer can put
+    "I believe we may distribute this" forward and have the licence evidence
+    demanded at the decision.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    disposition: str = Field(min_length=1, max_length=32)
+    determinationMethod: str = Field(min_length=1, max_length=32)
+    rightsStatus: str = Field(default="unknown", min_length=1, max_length=32)
+    symbolRevisionId: uuid.UUID | None = None
+    sourcePackageId: uuid.UUID | None = None
+    standardVersionId: uuid.UUID | None = None
+    licenceReference: str | None = Field(default=None, max_length=512)
+    decisionReason: str | None = Field(default=None, max_length=2000)
+    evidence: dict[str, Any] | None = None
+
+
+class RightsRecordDecisionRequest(BaseModel):
+    """Approve, reject or retire one rights record.
+
+    `rightsStatus` and `licenceReference` may be corrected as part of the
+    decision, because the decision is often what establishes them: a record
+    proposed as `unknown` becomes `licensed` when the contract is found.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    targetStatus: str = Field(min_length=1, max_length=32)
+    decisionReason: str | None = Field(default=None, max_length=2000)
+    rightsStatus: str | None = Field(default=None, min_length=1, max_length=32)
+    licenceReference: str | None = Field(default=None, max_length=512)

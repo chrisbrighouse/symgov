@@ -110,6 +110,11 @@ def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | No
             "organizationSymbolsEnabled": effective.organizations_enabled and effective.organization_symbols_enabled,
             "organizationAgentsEnabled": effective.organizations_enabled and effective.organization_agents_enabled,
             "organizationIconUploadEnabled": organization_icon_upload_enabled,
+            # Not gated on organizations: semantic review is platform
+            # governance (section 17), and its own router guard is the
+            # authority on reachability. This only tells the frontend
+            # whether to render the surface at all.
+            "semanticReviewEnabled": effective.semantic_review_enabled,
         },
         recentStepUpAt=user.recent_step_up_at.isoformat() if user.recent_step_up_at else None,
     )

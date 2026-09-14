@@ -30,6 +30,7 @@ from .routes.projects import router as projects_router, stage4_route_guard
 from .routes.symbol_sets import default_router as symbol_sets_default_router, router as symbol_sets_router
 from .routes.symbol_context import router as symbol_context_router
 from .routes.organization_symbols import router as organization_symbols_router, organization_symbols_route_guard
+from .routes.semantic_review import router as semantic_review_router, semantic_review_route_guard
 from .routes.symbol_demotion import router as symbol_demotion_router, symbol_demotion_route_guard
 from .routes.workspace import legacy_router as legacy_workspace_router
 from .routes.workspace import router as workspace_router
@@ -151,6 +152,14 @@ def create_app() -> FastAPI:
         symbol_demotion_router,
         prefix=settings.api_prefix,
         dependencies=[Depends(symbol_demotion_route_guard), csrf, session_access],
+    )
+    # v1-only (decision Q7): every router added since Stage 4 is mounted once
+    # at `settings.api_prefix`, and this API's first consumer is WP1.4's own
+    # frontend, so a legacy `/api` twin would serve zero callers.
+    app.include_router(
+        semantic_review_router,
+        prefix=settings.api_prefix,
+        dependencies=[Depends(semantic_review_route_guard), csrf, session_access],
     )
     app.include_router(legacy_auth_router, prefix="/api", dependencies=[csrf])
     app.include_router(legacy_admin_router, prefix="/api", dependencies=[csrf, session_access])

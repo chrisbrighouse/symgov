@@ -201,6 +201,16 @@ class SymgovAPISettings:
         "yes",
         "on",
     }
+    # Specification section 15.2 row SM-P1-01, decision Q3. The semantic
+    # review API and its surface ship dormant: default off, evaluated at
+    # import like every other I-20 flag, so activation is a process restart
+    # and a separate operation with its own approval.
+    semantic_review_enabled: bool = os.environ.get("SYMGOV_SEMANTIC_REVIEW_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     organization_pilot_codes: tuple[str, ...] = field(default_factory=_organization_pilot_codes)
 
 

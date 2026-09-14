@@ -219,6 +219,7 @@ def test_zero_eligible_organizations_issues_personal_session_when_feature_is_off
         "organizationSymbolsEnabled": False,
         "organizationAgentsEnabled": False,
         "organizationIconUploadEnabled": False,
+        "semanticReviewEnabled": False,
     }
     assert response.cookies.get("symgov_session")
 
@@ -278,6 +279,7 @@ def test_one_eligible_organization_issues_bound_session_and_effective_context():
         "organizationSymbolsEnabled": True,
         "organizationAgentsEnabled": True,
         "organizationIconUploadEnabled": False,
+        "semanticReviewEnabled": False,
     }
     token = response.cookies.get("symgov_session")
     with Session() as session:
@@ -502,6 +504,7 @@ def test_auth_me_aliases_return_only_bounded_current_context_without_private_mem
         "organizationSymbolsEnabled": True,
         "organizationAgentsEnabled": True,
         "organizationIconUploadEnabled": False,
+        "semanticReviewEnabled": False,
     }
 
     for path in ("/api/v1/auth/me", "/api/auth/me"):
@@ -649,6 +652,7 @@ def test_login_aliases_have_exact_response_and_cookie_parity(path, outcome):
         "organizationSymbolsEnabled": True,
         "organizationAgentsEnabled": True,
         "organizationIconUploadEnabled": False,
+        "semanticReviewEnabled": False,
     }
     token = response.cookies.get("symgov_session")
     assert token and client.cookies.get("symgov_session") == token
@@ -709,6 +713,8 @@ def test_successful_mandatory_pin_change_with_no_eligible_organization_issues_pe
             "organizationSymbolsEnabled": True,
             "organizationAgentsEnabled": True,
             "organizationIconUploadEnabled": False,
+            "semanticReviewEnabled": False,
+        "semanticReviewEnabled": False,
         },
         "recentStepUpAt": None,
     }

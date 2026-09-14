@@ -65,7 +65,8 @@ from symgov_backend.models import (  # noqa: E402
 from symgov_backend.organization_promotion_handoff import (  # noqa: E402
     execute_organization_promotion_handoff,
 )
-from symgov_backend.publication_gate import (  # noqa: E402
+from symgov_backend.publication_gate import (
+    propose_intake_rights_record,  # noqa: E402
     PUBLICATION_GATE_POLICY_VERSION,
     approved_gate_exceptions,
     collect_publication_gate_facts,
@@ -211,12 +212,16 @@ def _a_node(session) -> ClassificationNode:
     )
 
 
-def _satisfy_all_dimensions(session, actor: uuid.UUID, *, package_type: str):
+def _satisfy_all_dimensions(session, actor: uuid.UUID, *, package_type: str, include_rights: bool = True):
     """Seed one revision that satisfies every section 9.2 dimension.
 
     Semantic identity is satisfied by section 9.2's own exception rather than
     by a verified concept assignment: nothing in production creates a
     `SemanticConcept`, so the exception is the only path there is.
+
+    `include_rights=False` leaves the rights dimension unsatisfied, which is
+    what every real revision looks like before SM-P1-01 WP1.3: the only rights
+    record production can create is `ai_assisted` and therefore unapprovable.
     """
     _symbol_id, revision_id = _symbol_revision(session, actor)
 
@@ -256,24 +261,25 @@ def _satisfy_all_dimensions(session, actor: uuid.UUID, *, package_type: str):
         verified_by_user_id=actor,
     )
 
-    rights = propose_rights_record(
-        session,
-        disposition="distribute",
-        determination_method="licence_document",
-        proposed_at=NOW,
-        rights_status="licensed",
-        symbol_revision_id=revision_id,
-        licence_reference="CONTRACT-GATE-001",
-    )
-    session.flush()
-    transition_rights_record(
-        session,
-        rights.id,
-        target_status="approved",
-        occurred_at=NOW,
-        decided_by_user_id=actor,
-        decision_reason="Distribution is permitted under the recorded contract.",
-    )
+    if include_rights:
+        rights = propose_rights_record(
+            session,
+            disposition="distribute",
+            determination_method="licence_document",
+            proposed_at=NOW,
+            rights_status="licensed",
+            symbol_revision_id=revision_id,
+            licence_reference="CONTRACT-GATE-001",
+        )
+        session.flush()
+        transition_rights_record(
+            session,
+            rights.id,
+            target_status="approved",
+            occurred_at=NOW,
+            decided_by_user_id=actor,
+            decision_reason="Distribution is permitted under the recorded contract.",
+        )
 
     # Integrity: the shape `organization_symbol_drafts.upload_draft_asset`
     # writes, which is the only one that carries a hash today.
@@ -1427,3 +1433,149 @@ def test_a_second_promotion_does_not_duplicate_or_overwrite_the_proposal(session
     rows = session.query(RightsRecord).filter(RightsRecord.symbol_revision_id == first.id).all()
     assert [row.id for row in rows] == [record_id]
     assert second.payload_json["rights_proposal"]["status"] == "skipped"
+
+
+# --------------------------------------------------------------------------
+# SM-P1-01 WP1.3 -- the rights dimension, satisfied over HTTP
+#
+# Everything above seeds rights by calling the service directly. That proves
+# the gate reads an approved record; it does not prove anybody can *make* one.
+# Production cannot: `propose_intake_rights_record` is the only creator of a
+# `RightsRecord` and it always writes `ai_assisted`, which section 8.4 makes
+# permanently unapprovable. So the gate's rights dimension has been
+# unsatisfiable by any real path since SM-P0-08 shipped it, and SM-P2's
+# authoritative ingestion sits behind an all-waiver or all-refusal gate.
+#
+# This is the test that closes that loop: the intake proposal production
+# actually writes, refused; then a reviewer's own record proposed and approved
+# through the API; then the same gate permitting.
+# --------------------------------------------------------------------------
+
+
+def _rights_review_client(engine):
+    from fastapi.testclient import TestClient
+
+    from symgov_backend.app import create_app
+    from symgov_backend.dependencies import get_db_session
+    from symgov_backend.settings import SymgovAPISettings, get_settings
+
+    app = create_app()
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    settings = SymgovAPISettings(
+        organizations_enabled=True,
+        semantic_review_enabled=True,
+        organization_pilot_codes=("acme", "symgov"),
+    )
+
+    def override_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db_session] = override_db
+    app.dependency_overrides[get_settings] = lambda: settings
+    return TestClient(app, headers={"origin": "http://testserver"}), Session
+
+
+def _rights_reviewer(Session, email):
+    """A reviewer with a real global role, logged in over HTTP."""
+    from symgov_backend.auth import upsert_user
+    from symgov_backend.models import UserSubscription
+
+    with Session() as session:
+        user = upsert_user(
+            session, email=email, display_name=email, roles=[], pin="1234", must_change_pin=False
+        )
+        session.commit()
+        user_id = user.id
+    with Session() as session:
+        subscription = session.get(UserSubscription, user_id)
+        subscription.tier = "plus"
+        subscription.expires_on = NOW.date().replace(year=NOW.year + 1)
+        session.commit()
+    with Session() as session:
+        upsert_user(
+            session, email=email, display_name=email, roles=["reviewer"],
+            pin="1234", must_change_pin=False,
+        )
+        session.commit()
+    return user_id
+
+
+def test_a_reviewers_approved_record_satisfies_the_gate_that_an_intake_proposal_cannot(
+    session_factory,
+):
+    engine = session_factory.kw["bind"]
+    client, Session = _rights_review_client(engine)
+    _rights_reviewer(Session, "gate-rights-reviewer@example.test")
+    login = client.post(
+        "/api/v1/auth/login", json={"email": "gate-rights-reviewer@example.test", "pin": "1234"}
+    )
+    assert login.status_code == 200, login.text
+
+    with session_factory() as seed:
+        actor = _user(seed, "gate-rights")
+        revision_id, _package = _satisfy_all_dimensions(
+            seed, actor, package_type="authoritative_library", include_rights=False
+        )
+        # What production actually holds: the intake proposal, `ai_assisted`.
+        intake = propose_intake_rights_record(
+            seed,
+            symbol_revision_id=revision_id,
+            provenance=None,
+            proposed_at=NOW,
+        )
+        seed.commit()
+        intake_id = intake.id if intake is not None else None
+
+    with session_factory() as reading:
+        refused = evaluate_publication_gate(
+            collect_publication_gate_facts(reading, revision_id)
+        )
+    assert refused.outcome == "refused"
+    assert "rights_undecided" in refused.refusal_reasons
+
+    if intake_id is not None:
+        blocked = client.post(
+            f"/api/v1/semantic-review/rights-records/{intake_id}/decision",
+            json={"targetStatus": "approved", "decisionReason": "Trying the intake proposal."},
+        )
+        assert blocked.status_code == 422, blocked.text
+        assert "ai_assisted" in blocked.text
+
+    proposed = client.post(
+        "/api/v1/semantic-review/rights-records",
+        json={
+            "disposition": "distribute",
+            "determinationMethod": "licence_document",
+            "rightsStatus": "licensed",
+            "symbolRevisionId": str(revision_id),
+            "licenceReference": "CONTRACT-GATE-001",
+        },
+    )
+    assert proposed.status_code == 201, proposed.text
+
+    approved = client.post(
+        f"/api/v1/semantic-review/rights-records/{proposed.json()['recordId']}/decision",
+        json={
+            "targetStatus": "approved",
+            "decisionReason": "Distribution is permitted under the recorded contract.",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+
+    # A fresh session deliberately: the API commits through one of its own,
+    # and this module's `session` fixture is transactional and rolls back, so
+    # the gate must read from a connection that can see those committed rows.
+    with session_factory() as reading:
+        permitted = evaluate_publication_gate(
+            collect_publication_gate_facts(reading, revision_id)
+        )
+
+    assert permitted.outcome == "permitted", permitted.refusal_reasons
+    assert permitted.refusal_reasons == ()
+    rights = next(r for r in permitted.dimensions if r.dimension == "rights")
+    assert rights.satisfied is True
+    assert rights.waived is False, "satisfied by a real approved record, not by an exception"
