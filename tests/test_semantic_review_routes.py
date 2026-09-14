@@ -233,6 +233,7 @@ SEMANTIC_REVIEW_ROUTES = (
     ("POST", "/semantic-review/symbol-classifications/{assignment_id}/decision", "reviewer_admin"),
     ("POST", "/semantic-review/concepts/{concept_id}/external-mappings", "reviewer_admin"),
     ("POST", "/semantic-review/external-mappings/{reference_id}/decision", "reviewer_admin"),
+    ("GET", "/semantic-review/classification-schemes", "reviewer_admin"),
 )
 
 V1_PREFIX = "/api/v1"
@@ -460,3 +461,54 @@ def test_no_request_body_accepts_an_unknown_field():
     assert bodies, "expected the write routes to declare request bodies"
     for name in bodies:
         assert document["components"]["schemas"][name].get("additionalProperties") is False, name
+
+
+# ---------------------------------------------------------------------------
+# SM-P1-01 WP1.2 amendment (2026-09-14): making section 12.3's remedy
+# reachable.
+#
+# `test_a_reviewer_rejects_a_backfilled_row_then_proposes_afresh` already
+# proves the API can carry out "reject it and propose afresh with a real
+# method" -- but it proves it using a node id the *fixture* holds. No read on
+# this surface returned one, so no client could take the second step. These
+# two close that, and nothing else about the delivered contract changes.
+# ---------------------------------------------------------------------------
+
+
+def test_a_classification_row_names_the_node_a_reproposal_needs():
+    """Without this the queue's own `mustRepropose` advice is unfollowable.
+
+    The row already carries `schemeCode`, `nodeCode` and `nodeLabel` -- all
+    display values. `propose_symbol_revision_classification` takes a
+    `classificationNodeId`, and a client that cannot obtain one can reject a
+    backfilled assignment but never replace it.
+    """
+    schemas = create_app().openapi()["components"]["schemas"]
+
+    row = schemas["SymbolClassificationReviewRowResponse"]["properties"]
+
+    assert "classificationNodeId" in row, sorted(row)
+    # The display fields stay: `CLAUDE.md` keeps the human-readable label
+    # prominent and the identifier is a transport key, never the label.
+    for display_field in ("schemeCode", "nodeCode", "nodeLabel"):
+        assert display_field in row, sorted(row)
+
+
+def test_the_scheme_read_offers_only_the_schemes_a_reviewer_may_assign_into():
+    """Decision Q6, enforced at the picker as well as at the proposal.
+
+    `USE-CASE`, `DOCUMENT-TYPE` and `REPRESENTATION-TYPE` stay read-only in
+    v1. The propose route already refuses them with the validation envelope;
+    listing them as choosable would invite a refusal the caller could have
+    been spared.
+    """
+    from symgov_backend.routes.semantic_review import REVIEWER_ASSIGNABLE_SCHEME_CODES
+
+    assert REVIEWER_ASSIGNABLE_SCHEME_CODES == frozenset(
+        {"ENGINEERING-DISCIPLINE", "SYMBOL-CATEGORY-FAMILY"}
+    )
+
+    schemas = create_app().openapi()["components"]["schemas"]
+
+    assert "ClassificationSchemeOptionsResponse" in schemas, sorted(schemas)
+    assert "items" in schemas["ClassificationSchemeOptionsResponse"]["properties"]

@@ -2019,3 +2019,24 @@ export async function proposeSemanticReviewRightsRecord({
     'Rights record proposal failed.',
   );
 }
+
+// The 2026-09-14 WP1.2 amendment. Section 12.3 tells a reviewer to reject a
+// `legacy_backfill` classification and propose afresh with a real method; the
+// propose route always existed, but nothing returned a `classificationNodeId`
+// until now, so the second half of that instruction was unreachable.
+
+export async function listSemanticReviewClassificationSchemes() {
+  const result = await requestJson(`${SEMANTIC_REVIEW_ROOT}/classification-schemes`, { cache: 'no-store' });
+  const payload = semanticReviewPayload(result, 'Classification scheme load failed.');
+  return { items: Array.isArray(payload?.items) ? payload.items : [] };
+}
+
+export async function proposeSemanticReviewClassification(symbolRevisionId, {
+  classificationNodeId, assignmentRole, method, confidence, evidence,
+}) {
+  return semanticReviewWrite(
+    `/symbol-revisions/${encodeURIComponent(symbolRevisionId)}/classifications`,
+    presentFields({ classificationNodeId, assignmentRole, method, confidence, evidence }),
+    'Classification proposal failed.',
+  );
+}

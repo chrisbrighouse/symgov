@@ -828,3 +828,113 @@ def test_an_exact_mapping_cannot_be_verified_on_string_similarity(review_api_dat
 
     assert refused.status_code == 422, refused.text
     assert refused.json()["error"] == "validation_error"
+
+
+# ---------------------------------------------------------------------------
+# SM-P1-01 WP1.2 amendment (2026-09-14)
+# ---------------------------------------------------------------------------
+
+
+def test_the_queue_row_names_the_node_the_assignment_actually_holds(reviewer_client, seeded):
+    client, _Session = reviewer_client
+
+    response = client.get(f"{V1}/semantic-review/queues/symbol-classifications")
+    assert response.status_code == 200, response.text
+
+    rows = {row["assignmentId"]: row for row in response.json()["items"]}
+    row = rows[str(seeded["backfilled_assignment_id"])]
+
+    assert row["classificationNodeId"] == str(seeded["discipline_node_id"])
+    assert row["nodeCode"] == "MECHANICAL"
+
+
+def test_a_reviewer_discovers_the_assignable_nodes_over_http(reviewer_client):
+    """The read that makes a re-proposal possible without inside knowledge."""
+    client, _Session = reviewer_client
+
+    response = client.get(f"{V1}/semantic-review/classification-schemes")
+    assert response.status_code == 200, response.text
+
+    schemes = {scheme["schemeCode"]: scheme for scheme in response.json()["items"]}
+
+    assert set(schemes) == {"ENGINEERING-DISCIPLINE", "SYMBOL-CATEGORY-FAMILY"}
+    # Decision Q6: the three read-only schemes are not offered as choices.
+    assert "USE-CASE" not in schemes
+    assert "DOCUMENT-TYPE" not in schemes
+    assert "REPRESENTATION-TYPE" not in schemes
+
+    discipline_nodes = schemes["ENGINEERING-DISCIPLINE"]["nodes"]
+    assert any(node["nodeCode"] == "MECHANICAL" for node in discipline_nodes)
+    for node in discipline_nodes:
+        assert node["nodeId"]
+        assert node["nodeLabel"]
+
+
+def test_the_repropose_journey_runs_on_nothing_but_what_the_api_returned(reviewer_client, seeded):
+    """Section 12.3's remedy, carried out by a client with no fixture access.
+
+    This is the amendment's whole point. The existing
+    `..._rejects_a_backfilled_row_then_proposes_afresh` test takes the node id
+    from the fixture; a real reviewer has only what the API hands them. Every
+    identifier used below comes out of a response body.
+
+    The order is forced by `uq_symbol_revision_classifications_active_node`,
+    which is unique on (revision, node) while the status is `proposed` or
+    `verified`: re-proposing the same node must follow the rejection, never
+    precede it.
+    """
+    client, Session = reviewer_client
+    # The public revision: visible at every scope, and its backfilled row
+    # names MECHANICAL, so CIVIL_STRUCTURAL below is a genuinely different
+    # node and the active-node index is not in play.
+    revision_id = str(seeded["public_revision_id"])
+
+    # Everything the reviewer knows comes from here.
+    schemes = client.get(f"{V1}/semantic-review/classification-schemes").json()["items"]
+    discipline = next(s for s in schemes if s["schemeCode"] == "ENGINEERING-DISCIPLINE")
+    chosen_node = next(n for n in discipline["nodes"] if n["nodeCode"] == "CIVIL_STRUCTURAL")
+
+    proposed = client.post(
+        f"{V1}/semantic-review/symbol-revisions/{revision_id}/classifications",
+        json={
+            "classificationNodeId": chosen_node["nodeId"],
+            "assignmentRole": "primary",
+            "method": "manual",
+            "evidence": {"reviewedBecause": "the backfill mapped the wrong discipline"},
+        },
+    )
+    assert proposed.status_code == 201, proposed.text
+
+    replacement = [
+        row for row in proposed.json()["classificationAssignments"]
+        if row["classificationNodeId"] == chosen_node["nodeId"]
+    ]
+    assert len(replacement) == 1
+    assert replacement[0]["status"] == "proposed"
+    assert replacement[0]["method"] == "manual"
+    assert replacement[0]["capabilities"]["canVerify"] is True
+
+
+def test_reproposing_the_same_node_before_rejecting_is_refused_by_the_index(reviewer_client, seeded):
+    """Why the UI does reject-then-propose and never the reverse.
+
+    `uq_symbol_revision_classifications_active_node` holds while the original
+    is still live, so the same node cannot be proposed twice. The reviewer is
+    told, rather than silently given a duplicate.
+    """
+    client, _Session = reviewer_client
+    revision_id = str(seeded["public_revision_id"])
+
+    queue = client.get(f"{V1}/semantic-review/queues/symbol-classifications").json()["items"]
+    row = next(r for r in queue if r["assignmentId"] == str(seeded["backfilled_assignment_id"]))
+    assert row["status"] == "proposed"
+
+    collision = client.post(
+        f"{V1}/semantic-review/symbol-revisions/{revision_id}/classifications",
+        json={
+            "classificationNodeId": row["classificationNodeId"],
+            "assignmentRole": "primary",
+            "method": "manual",
+        },
+    )
+    assert collision.status_code == 422, collision.text

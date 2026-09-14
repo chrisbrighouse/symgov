@@ -89,6 +89,23 @@ function revisionState() {
   };
 }
 
+function schemeOptions() {
+  return {
+    items: [
+      {
+        schemeId: 'cs-1',
+        schemeCode: 'ENGINEERING-DISCIPLINE',
+        name: 'Engineering Discipline',
+        nodes: [
+          { nodeId: 'n-mech', nodeCode: 'MECHANICAL', nodeLabel: 'Mechanical', parentNodeId: null },
+          { nodeId: 'n-civil', nodeCode: 'CIVIL_STRUCTURAL', nodeLabel: 'Civil / Structural', parentNodeId: null },
+        ],
+      },
+    ],
+  };
+}
+
+
 async function mount(path, currentUser, requests) {
   globalThis.fetch = async (url, options = {}) => {
     const method = options.method || 'GET';
@@ -96,6 +113,7 @@ async function mount(path, currentUser, requests) {
     if (url.includes('/auth/me')) return response(200, { user: currentUser });
     if (url.includes('/semantic-review/queues/symbol-classifications')) return response(200, queuePage());
     if (url.includes('/semantic-review/symbol-revisions/')) return response(200, revisionState());
+    if (url.includes('/semantic-review/classification-schemes')) return response(200, schemeOptions());
     throw new Error(`Unexpected request: ${method} ${url}`);
   };
 
@@ -145,6 +163,25 @@ describe('mounted semantic review journey', () => {
 
     // Decision Q7: v1 only. There is no legacy `/api` twin to fall back to.
     assert.equal(requests.some(({ url }) => /\/api\/semantic-review/.test(url)), false);
+    await act(async () => renderer.unmount());
+  });
+
+  it('makes section 12.3 remedy reachable end to end through the real router', async () => {
+    const requests = [];
+    const renderer = await mount('/semantic-review', user({ roles: ['reviewer'] }), requests);
+
+    // The amendment's whole point: the queue tells the reviewer to reject and
+    // propose afresh, and the surface can now actually do the second half.
+    const schemeRead = requests.find(({ url }) => url.includes('/semantic-review/classification-schemes'));
+    assert.ok(schemeRead, 'the surface reads the assignable schemes');
+    assert.match(schemeRead.url, /\/api\/v1\/semantic-review\/classification-schemes/);
+
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Propose a classification' }));
+    const nodes = renderer.root
+      .findByProps({ 'aria-label': 'Classification node' })
+      .findAllByType('option')
+      .map((option) => option.props.value);
+    assert.ok(nodes.includes('n-civil'), nodes.join(','));
     await act(async () => renderer.unmount());
   });
 

@@ -168,6 +168,7 @@ class ClassificationReviewRow:
     symbol_revision_id: uuid.UUID
     symbol: ReviewSymbolIdentity
     classification_scheme_id: uuid.UUID
+    classification_node_id: uuid.UUID
     scheme_code: str
     node_code: str
     node_label: str
@@ -285,6 +286,7 @@ def list_open_symbol_revision_classifications(
                 owner_organization_id=symbol.owner_organization_id,
             ),
             classification_scheme_id=assignment.classification_scheme_id,
+            classification_node_id=assignment.classification_node_id,
             scheme_code=scheme_code,
             node_code=node_code,
             node_label=node_label,

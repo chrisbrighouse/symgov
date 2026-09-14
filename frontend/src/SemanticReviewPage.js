@@ -10,7 +10,9 @@ import {
   listSemanticReviewConceptExternalMappings,
   listSemanticReviewRightsRecords,
   listSemanticReviewSymbolClassifications,
+  listSemanticReviewClassificationSchemes,
   listSemanticReviewSymbolSemanticAssignments,
+  proposeSemanticReviewClassification,
   proposeSemanticReviewRightsRecord,
 } from './api.js';
 
@@ -48,6 +50,8 @@ const DEFAULT_API = {
   decideExternalMapping: decideSemanticReviewExternalMapping,
   decideRightsRecord: decideSemanticReviewRightsRecord,
   proposeRightsRecord: proposeSemanticReviewRightsRecord,
+  classificationSchemes: listSemanticReviewClassificationSchemes,
+  proposeClassification: proposeSemanticReviewClassification,
 };
 
 const DEFAULT_LIMIT = 50;
@@ -71,6 +75,14 @@ const READ_ONLY_SCHEME_CODES = new Set(['USE-CASE', 'DOCUMENT-TYPE', 'REPRESENTA
 const PROPOSABLE_DETERMINATION_METHODS = RIGHTS_DETERMINATION_METHODS.filter(
   (method) => method !== 'ai_assisted',
 );
+
+// Section 12.3's "propose afresh with a real method". A reviewer choosing a
+// node in a review surface is making a manual determination; `rule` or
+// `source_mapping` would claim a provenance that did not happen, and
+// `legacy_backfill` is the very thing being replaced.
+const REVIEWER_CLASSIFICATION_METHOD = 'manual';
+
+const SYMBOL_CLASSIFICATION_ROLES = ['primary', 'secondary'];
 
 const RIGHTS_DISPOSITIONS = ['display', 'distribute', 'transform', 'compare_only', 'metadata_only', 'reject'];
 const RIGHTS_STATUS_VALUES = ['unknown', 'open', 'licensed', 'restricted', 'prohibited', 'expired'];
@@ -318,6 +330,8 @@ export function SemanticReviewPage({ auth, api = DEFAULT_API }) {
   // queue the reviewer is looking at. Re-cloning `filters` would not refetch:
   // the page effect depends on the filter *values*, not on their container.
   const [refreshToken, setRefreshToken] = useState(0);
+  const [schemes, setSchemes] = useState({ loaded: false, error: '', items: [] });
+  const [draft, setDraft] = useState({ schemeCode: '', nodeId: '', assignmentRole: 'primary' });
 
   const queue = queueByKey(queueKey);
 
@@ -372,6 +386,9 @@ export function SemanticReviewPage({ auth, api = DEFAULT_API }) {
     }
     let cancelled = false;
     setRevisionState({ loading: true, error: '', state: null });
+    // A node chosen for one revision must not be carried to the next: the
+    // proposal would land on a symbol the reviewer never picked it for.
+    setDraft((current) => ({ ...current, nodeId: '' }));
     api.symbolRevision(revisionId)
       .then((state) => {
         if (!cancelled) setRevisionState({ loading: false, error: '', state });
@@ -383,6 +400,26 @@ export function SemanticReviewPage({ auth, api = DEFAULT_API }) {
       cancelled = true;
     };
   }, [api, revisionId]);
+
+  // Once per session, not once per row: the two assignable schemes are
+  // seeded reference data holding 31 nodes between them.
+  useEffect(() => {
+    if (schemes.loaded || queue.detail !== 'revision') return undefined;
+    let cancelled = false;
+    api.classificationSchemes()
+      .then((page) => {
+        if (cancelled) return;
+        const items = Array.isArray(page?.items) ? page.items : [];
+        setSchemes({ loaded: true, error: '', items });
+        setDraft((current) => (current.schemeCode ? current : { ...current, schemeCode: items[0]?.schemeCode || '' }));
+      })
+      .catch((error) => {
+        if (!cancelled) setSchemes({ loaded: true, error: errorMessage(error, 'Classification scheme load failed.'), items: [] });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [api, queue.detail, schemes.loaded]);
 
   const changeQueue = useCallback((nextKey) => {
     setQueueKey(nextKey);
@@ -450,6 +487,22 @@ export function SemanticReviewPage({ auth, api = DEFAULT_API }) {
       () => api.decideRightsRecord(row.recordId, { targetStatus }),
       (updated) => {
         if (updated?.recordId) replaceQueueRow(updated, (candidate) => candidate.recordId);
+      },
+    );
+  }
+
+  async function submitClassificationProposal(revisionId) {
+    if (!draft.nodeId) return;
+    await runDecision(
+      `${revisionId}-classification-proposal`,
+      () => api.proposeClassification(revisionId, {
+        classificationNodeId: draft.nodeId,
+        assignmentRole: draft.assignmentRole,
+        method: REVIEWER_CLASSIFICATION_METHOD,
+      }),
+      (state) => {
+        setRevisionState({ loading: false, error: '', state });
+        setDraft((current) => ({ ...current, nodeId: '' }));
       },
     );
   }
@@ -791,12 +844,14 @@ export function SemanticReviewPage({ auth, api = DEFAULT_API }) {
                 ? createElement(
                   'p',
                   { className: 'set-admin-muted' },
-                  'Re-proposing a classification is not available from this surface in this release.',
+                  'Reject this row, then propose the correct node below. The order is '
+                  + 'forced: one revision may hold only one live assignment per node.',
                 )
                 : null,
             }),
           ))
           : createElement('p', { className: 'set-admin-muted' }, 'No classification assignments are recorded for this revision.'),
+        renderClassificationProposalForm(state),
       ),
 
       createElement(
@@ -826,6 +881,110 @@ export function SemanticReviewPage({ auth, api = DEFAULT_API }) {
             }),
           ))
           : createElement('p', { className: 'set-admin-muted' }, 'No rights records are recorded for this revision.'),
+      ),
+    );
+  }
+
+  function renderClassificationProposalForm(state) {
+    if (schemes.error) {
+      return createElement('p', { role: 'alert', className: 'form-message error' }, schemes.error);
+    }
+    if (!schemes.items.length) return null;
+
+    const scheme = schemes.items.find((candidate) => candidate.schemeCode === draft.schemeCode)
+      || schemes.items[0];
+    // The partial unique index `uq_symbol_revision_classifications_active_node`
+    // permits one live assignment per (revision, node), so a node this
+    // revision already holds is shown as taken rather than offered and
+    // refused.
+    const liveNodeIds = new Set(
+      (state.classificationAssignments || [])
+        .filter((row) => row.status === 'proposed' || row.status === 'verified')
+        .map((row) => row.classificationNodeId),
+    );
+
+    return createElement(
+      'form',
+      {
+        className: 'decision-block semantic-review-proposal',
+        'aria-label': 'Propose a classification',
+        onSubmit: (event) => {
+          event.preventDefault();
+          return submitClassificationProposal(state.symbolRevisionId);
+        },
+      },
+      createElement('h4', null, 'Propose a classification'),
+      createElement(
+        'p',
+        { className: 'set-admin-muted' },
+        `Recorded as a ${REVIEWER_CLASSIFICATION_METHOD} determination, attributed to you, and starting as proposed.`,
+      ),
+      createElement(
+        'label',
+        { className: 'field' },
+        createElement('span', null, 'Scheme'),
+        createElement(
+          'select',
+          {
+            'aria-label': 'Classification scheme',
+            value: scheme.schemeCode,
+            onChange: (event) => setDraft((current) => ({ ...current, schemeCode: event.target.value, nodeId: '' })),
+          },
+          schemes.items.map((candidate) => createElement(
+            'option',
+            { key: candidate.schemeCode, value: candidate.schemeCode },
+            candidate.name || candidate.schemeCode,
+          )),
+        ),
+      ),
+      createElement(
+        'label',
+        { className: 'field' },
+        createElement('span', null, 'Node'),
+        createElement(
+          'select',
+          {
+            'aria-label': 'Classification node',
+            value: draft.nodeId,
+            onChange: (event) => setDraft((current) => ({ ...current, nodeId: event.target.value })),
+          },
+          createElement('option', { key: 'none', value: '', disabled: false }, 'Choose a node…'),
+          (scheme.nodes || []).map((node) => createElement(
+            'option',
+            {
+              key: node.nodeId,
+              value: node.nodeId,
+              disabled: liveNodeIds.has(node.nodeId),
+            },
+            liveNodeIds.has(node.nodeId)
+              ? `${node.nodeLabel} (already assigned)`
+              : node.nodeLabel,
+          )),
+        ),
+      ),
+      createElement(
+        'label',
+        { className: 'field' },
+        createElement('span', null, 'Role'),
+        createElement(
+          'select',
+          {
+            'aria-label': 'Classification role',
+            value: draft.assignmentRole,
+            onChange: (event) => setDraft((current) => ({ ...current, assignmentRole: event.target.value })),
+          },
+          SYMBOL_CLASSIFICATION_ROLES.map((role) => createElement('option', { key: role, value: role }, role)),
+        ),
+      ),
+      createElement(
+        'button',
+        {
+          type: 'submit',
+          className: 'action-button primary',
+          disabled: !draft.nodeId || decision.busy === `${state.symbolRevisionId}-classification-proposal`,
+          'aria-label': 'Submit classification proposal',
+        },
+        'Propose classification',
       ),
     );
   }

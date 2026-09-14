@@ -327,6 +327,87 @@ baseline; the >500 kB chunk-size warning is pre-existing. The backend was not
 touched, so the **3944 passed / 3 skipped / 3 deselected** portable baseline
 stands unchanged and was not re-run.
 
+**WP1.2/WP1.4 amendment — making section 12.3's remedy reachable** — **DELIVERED 2026-09-14**, approved by Chris the same day
+
+WP1.4 found that the instruction `mustRepropose` carries could be read but not
+followed. `propose_symbol_revision_classification` takes a
+`classificationNodeId`, and **no read on the delivered surface returned one**:
+`ClassificationReviewRow` and `SymbolRevisionSemanticStateResponse` both carry
+`schemeCode`/`nodeCode`/`nodeLabel`, which are display values, and
+`/catalog/taxonomy` returns the free-text legacy facets rather than
+`classification_nodes`. WP1.2's own
+`test_a_reviewer_rejects_a_backfilled_row_then_proposes_afresh` passed only
+because the *fixture* held the identifier; no client could take the second
+step. So every one of the 132 production rows could be rejected and never
+replaced.
+
+Chris chose the two-step shape over an atomic `repropose` route on 2026-09-14.
+The reason is the partial unique index
+`uq_symbol_revision_classifications_active_node`, unique on
+(`symbol_revision_id`, `classification_node_id`) while the status is
+`proposed` or `verified`: re-proposing the **same** node must follow the
+rejection and can never precede it, while a **different** node may be proposed
+first. The gap between the two calls is recoverable — rejecting frees the node,
+so the replacement can be proposed at any later moment and nothing is
+destroyed — which is what made a third write route, with its own request
+model, policy matrix and tenant rule, not worth adding to a delivered API.
+
+*Delivered shape.* Two additions and one fix, no migration; head unmoved at
+`20260911_0057`.
+
+- `classificationNodeId` on `ClassificationReviewRow` and on
+  `SymbolClassificationReviewRowResponse`, rendered by both the queue and the
+  revision detail. It sits *alongside* the display fields and never replaces
+  them (`CLAUDE.md`). Deliberately **not** added to
+  `ConceptClassificationReviewRow`: that queue has a read and no decision or
+  propose route, so a node identifier there would serve nothing.
+- `GET /semantic-review/classification-schemes`, the sixteenth route on the
+  same router, behind the same default-off flag and the same
+  `admin`/`reviewer` boundary. It returns only
+  `REVIEWER_ASSIGNABLE_SCHEME_CODES` — decision Q6 keeps the other three
+  read-only and the propose route already refuses them, so offering them as
+  choices would invite a refusal the caller could be spared. No pagination
+  (the two schemes hold 11 and 20 nodes) and no tenant predicate (schemes and
+  nodes are seeded platform reference data naming no symbol, so section 14.2
+  has nothing to say about them). Only `active` nodes are offered.
+- **A defect the amendment made reachable, and fixed with it.** A duplicate
+  live node escaped `propose_symbol_classification` as a raw
+  `IntegrityError` — an unhandled 500, not a refusal. It was unreachable
+  before only because no client could name a node at all. It now wears the
+  same 422 envelope as every other refusal on this router, matched on the
+  index name so a genuine storage fault still surfaces as one.
+
+*A sibling defect, measured and deliberately not fixed here.*
+`propose_external_mapping` has the same shape:
+`uq_concept_external_references_active_mapping` would escape as a 500 on a
+duplicate active mapping. It is **not** reachable from any UI — WP1.4 ships
+decision controls for external mappings but no propose control — so fixing it
+would have widened an amendment beyond what its own change makes reachable.
+Recorded here for scheduling rather than silently carried.
+
+*Frontend.* The revision detail gained a "Propose a classification" form:
+scheme and node pickers fed by the new read, `primary`/`secondary` role, and
+the method fixed at `manual` rather than offered as a choice — a reviewer
+picking a node is making a manual determination, and `legacy_backfill` is the
+very thing being replaced. Nodes the revision already holds live are shown as
+taken rather than offered and refused, mirroring the index predicate. The
+queue's *filter* still offers `legacy_backfill`, because that is how a
+reviewer finds the 132 rows.
+
+*Closing evidence.* Backend: 258 passed across the six semantic and rights
+test files, including four new PostgreSQL tests — the queue row naming the
+node the assignment actually holds, the assignable-scheme read excluding all
+three Q6 schemes, the full re-proposal journey run on **nothing but values the
+API returned** (the test the old fixture-fed one could not be), and the
+same-node collision refused as a 422 rather than a 500. Full portable
+partition on the final bytes: **3958 passed, 3 skipped, 3 deselected** in
+1476s -- the WP1.3 baseline of 3944 plus exactly the 14 new tests (two route
+contract tests, eight parametrized policy-matrix instances the new route adds
+to the existing table, and four PostgreSQL tests), no regression. Identity
+stamped before and after the run and re-verified unchanged. Frontend: **335
+passed, 0 failed, 52 suites**, up from WP1.4's 325 by exactly the ten new
+tests. `npm run build` succeeds, 86 modules, 642.66 kB.
+
 **WP1.5 — Read-only semantic panel in the existing review surfaces**
 Embed a read-only "Engineering meaning" summary into the existing review case detail and the organisation symbol review page, so an SME reviewing an intake sees the proposed semantic state without leaving the lane. Read-only deliberately: the decision controls stay in one place (WP1.4) so there is one audit path.
 

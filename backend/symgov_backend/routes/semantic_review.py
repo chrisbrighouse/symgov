@@ -60,6 +60,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..auth import AuthenticatedUser
@@ -68,6 +69,7 @@ from ..classification_assignments import (
     propose_symbol_revision_classification,
     transition_symbol_revision_classification,
 )
+from ..classification_schemes import list_classification_nodes
 from ..concept_external_references import (
     list_concept_external_references,
     propose_concept_external_reference,
@@ -96,6 +98,7 @@ from ..rights_provenance import (
 from ..schemas import (
     APIErrorResponse,
     APIValidationErrorResponse,
+    ClassificationSchemeOptionsResponse,
     ConceptClassificationQueueResponse,
     ConceptExternalMappingListResponse,
     ConceptExternalMappingProposeRequest,
@@ -206,6 +209,21 @@ def _invalid(message: str, field: tuple[str, ...] = ("body",)) -> RequestValidat
     return RequestValidationError([{"loc": field, "msg": message, "type": "value_error"}])
 
 
+def _is_active_node_conflict(exc: IntegrityError) -> bool:
+    """Is this the partial unique index on one revision's live nodes?
+
+    `uq_symbol_revision_classifications_active_node` is unique on
+    (symbol_revision_id, classification_node_id) while the status is
+    `proposed` or `verified`. Matched by name rather than by catching every
+    IntegrityError, so a genuine storage fault still surfaces as one.
+    """
+    message = str(exc.orig or exc).lower()
+    return (
+        "duplicate key value" in message
+        and "uq_symbol_revision_classifications_active_node" in message
+    )
+
+
 def _decimal(value: float | None) -> Decimal | None:
     return None if value is None else Decimal(str(value))
 
@@ -268,6 +286,7 @@ def _classification_row(row) -> dict:
         "symbolRevisionId": str(row.symbol_revision_id),
         "symbol": _symbol_payload(row.symbol),
         "classificationSchemeId": str(row.classification_scheme_id),
+        "classificationNodeId": str(row.classification_node_id),
         "schemeCode": row.scheme_code,
         "nodeCode": row.node_code,
         "nodeLabel": row.node_label,
@@ -560,6 +579,59 @@ def rights_record_queue(
     )
 
 
+@router.get(
+    "/classification-schemes",
+    response_model=ClassificationSchemeOptionsResponse,
+    responses=_ERROR_RESPONSES,
+)
+def classification_scheme_options(
+    session: Session = Depends(get_db_session),
+    _current_user: AuthenticatedUser = Depends(reviewer),
+) -> ClassificationSchemeOptionsResponse:
+    """The nodes a reviewer may propose against.
+
+    Added by the 2026-09-14 amendment. WP1.2 shipped a propose route taking a
+    `classificationNodeId` and no read that returned one, so section 12.3's
+    "reject it and propose afresh with a real method" was readable advice a
+    client could not act on. `test_a_reviewer_rejects_a_backfilled_row_then_
+    proposes_afresh` passed only because the fixture held the identifier.
+
+    Scoped to `REVIEWER_ASSIGNABLE_SCHEME_CODES` for decision Q6: the other
+    three schemes are display-only in v1 and the propose route refuses them,
+    so offering them as choices would invite a refusal.
+
+    No tenant predicate: schemes and nodes are seeded platform reference data
+    naming no symbol, so section 14.2 -- which is about private symbol
+    existence -- has nothing to say here. Only active nodes are offered; a
+    retired node is not a choice.
+    """
+    schemes = session.execute(
+        select(ClassificationScheme)
+        .where(ClassificationScheme.scheme_code.in_(sorted(REVIEWER_ASSIGNABLE_SCHEME_CODES)))
+        .order_by(ClassificationScheme.scheme_code)
+    ).scalars().all()
+
+    return ClassificationSchemeOptionsResponse(
+        items=[
+            {
+                "schemeId": str(scheme.id),
+                "schemeCode": scheme.scheme_code,
+                "name": scheme.name,
+                "nodes": [
+                    {
+                        "nodeId": str(node.id),
+                        "nodeCode": node.node_code,
+                        "nodeLabel": node.preferred_label,
+                        "parentNodeId": str(node.parent_node_id) if node.parent_node_id else None,
+                    }
+                    for node in list_classification_nodes(session, scheme.id, status="active")
+                ],
+            }
+            for scheme in schemes
+        ]
+    )
+
+
 # ---------------------------------------------------------------------------
 # One revision's semantic state
 # ---------------------------------------------------------------------------
@@ -621,6 +693,7 @@ def symbol_revision_semantic_state(
                 "symbolRevisionId": str(revision.id),
                 "symbol": identity,
                 "classificationSchemeId": str(assignment.classification_scheme_id),
+                "classificationNodeId": str(assignment.classification_node_id),
                 "schemeCode": scheme.scheme_code,
                 "nodeCode": node.node_code,
                 "nodeLabel": node.preferred_label,
@@ -964,10 +1037,25 @@ def propose_symbol_classification(
             confidence=_decimal(body.confidence),
             evidence=body.evidence,
         )
+        session.flush()
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="Symbol revision was not found.") from exc
     except ValueError as exc:
         raise _invalid(str(exc)) from exc
+    except IntegrityError as exc:
+        # Reachable since the 2026-09-14 amendment gave reviewers a node
+        # picker: before it, no client could name a node at all, so the
+        # collision could only be produced from inside the process. It is a
+        # refusal like any other on this router, not a fault, so it wears the
+        # same 422 envelope rather than escaping as a 500.
+        session.rollback()
+        if not _is_active_node_conflict(exc):
+            raise
+        raise _invalid(
+            "this revision already has a live assignment to that node; "
+            "decide the existing one before proposing the node again",
+            ("body", "classificationNodeId"),
+        ) from exc
     session.commit()
     return symbol_revision_semantic_state(revision.id, session=session, current_user=current_user)
 

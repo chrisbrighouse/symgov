@@ -212,6 +212,36 @@ test('a reviewer rights proposal names exactly one subject and omits blank optio
   });
 });
 
+test('the assignable classification schemes are read uncached', async () => {
+  reset({ items: [{ schemeId: 'cs-1', schemeCode: 'ENGINEERING-DISCIPLINE', name: 'Engineering Discipline', nodes: [] }] });
+
+  const schemes = await api.listSemanticReviewClassificationSchemes();
+
+  assert.equal(fetchCalls[0].url, `${ROOT}/semantic-review/classification-schemes`);
+  assert.equal(fetchCalls[0].options.cache, 'no-store');
+  assert.equal(schemes.items[0].schemeCode, 'ENGINEERING-DISCIPLINE');
+});
+
+test('a reviewer classification proposal posts the node id and omits blank optionals', async () => {
+  reset({ symbolRevisionId: 'rev-1', semanticAssignments: [], classificationAssignments: [], rightsRecords: [] });
+
+  await api.proposeSemanticReviewClassification('rev-1', {
+    classificationNodeId: 'node-9',
+    assignmentRole: 'primary',
+    method: 'manual',
+    evidence: { reviewedBecause: 'backfill rejected' },
+  });
+
+  assert.equal(fetchCalls[0].url, `${ROOT}/semantic-review/symbol-revisions/rev-1/classifications`);
+  assert.equal(fetchCalls[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(fetchCalls[0].options.body), {
+    classificationNodeId: 'node-9',
+    assignmentRole: 'primary',
+    method: 'manual',
+    evidence: { reviewedBecause: 'backfill rejected' },
+  });
+});
+
 test('a governance refusal surfaces the issue message, not the generic 422 detail', async () => {
   // The 422 envelope puts the human-readable refusal in `issues[].msg`;
   // `detail` is the handler's constant "Request validation failed."

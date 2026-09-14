@@ -1652,10 +1652,22 @@ class SemanticReviewCapabilitiesResponse(BaseModel):
 
 
 class SymbolClassificationReviewRowResponse(BaseModel):
+    """One classification assignment as a reviewer sees it.
+
+    `classificationNodeId` is the transport key a re-proposal needs, added by
+    the 2026-09-14 WP1.2 amendment. Section 12.3 tells a reviewer to reject a
+    `legacy_backfill` row and propose afresh, and
+    `propose_symbol_revision_classification` takes a node id -- so without this
+    field the instruction could be read but never carried out. It sits
+    alongside `schemeCode`/`nodeCode`/`nodeLabel` and never replaces them:
+    `CLAUDE.md` keeps the human-readable label prominent.
+    """
+
     assignmentId: str
     symbolRevisionId: str
     symbol: SemanticReviewSymbolIdentityResponse
     classificationSchemeId: str
+    classificationNodeId: str
     schemeCode: str
     nodeCode: str
     nodeLabel: str
@@ -1730,6 +1742,38 @@ class RightsRecordReviewRowResponse(BaseModel):
     evidence: dict[str, Any]
     proposedAt: str
     capabilities: SemanticReviewCapabilitiesResponse
+
+
+class ClassificationNodeOptionResponse(BaseModel):
+    """One node a reviewer may propose against."""
+
+    nodeId: str
+    nodeCode: str
+    nodeLabel: str
+    parentNodeId: str | None
+
+
+class ClassificationSchemeOptionResponse(BaseModel):
+    schemeId: str
+    schemeCode: str
+    name: str
+    nodes: list[ClassificationNodeOptionResponse]
+
+
+class ClassificationSchemeOptionsResponse(BaseModel):
+    """The schemes and nodes a reviewer may actually assign into.
+
+    Decision Q6 keeps `USE-CASE`, `DOCUMENT-TYPE` and `REPRESENTATION-TYPE`
+    read-only in v1, and the propose route already refuses them. Listing them
+    here as choices would invite a 422 the caller could have been spared, so
+    this read offers only the two schemes
+    `classification_mapping.plan_classification_mapping` maps into.
+
+    No pagination: the two seeded schemes hold 11 and 20 nodes, so a page
+    bound would be ceremony over a list that fits in one response.
+    """
+
+    items: list[ClassificationSchemeOptionResponse]
 
 
 class SymbolClassificationQueueResponse(BaseModel):

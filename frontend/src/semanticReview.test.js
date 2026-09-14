@@ -39,6 +39,7 @@ function classificationRow(overrides = {}) {
     symbolRevisionId: 'rev-1',
     symbol: SYMBOL,
     classificationSchemeId: 'cs-1',
+    classificationNodeId: 'n-piping',
     schemeCode: 'ENGINEERING-DISCIPLINE',
     nodeCode: 'PIPING',
     nodeLabel: 'Piping',
@@ -169,6 +170,26 @@ function stubApi(overrides = {}) {
     decideExternalMapping: record('decideExternalMapping', async () => ({ items: [mappingRow({ status: 'verified', capabilities: capabilities({ canVerify: false, canReject: false }) })] })),
     decideRightsRecord: record('decideRightsRecord', async () => rightsRow({ status: 'rejected', capabilities: capabilities({ canVerify: false, canReject: false, canRetire: false, mustRepropose: false, blockedReason: null }) })),
     proposeRightsRecord: record('proposeRightsRecord', async () => rightsRow({ recordId: 'rr-2', determinationMethod: 'manual', status: 'proposed', capabilities: capabilities() })),
+    classificationSchemes: record('classificationSchemes', async () => ({
+      items: [
+        {
+          schemeId: 'cs-1',
+          schemeCode: 'ENGINEERING-DISCIPLINE',
+          name: 'Engineering Discipline',
+          nodes: [
+            { nodeId: 'n-mech', nodeCode: 'MECHANICAL', nodeLabel: 'Mechanical', parentNodeId: null },
+            { nodeId: 'n-civil', nodeCode: 'CIVIL_STRUCTURAL', nodeLabel: 'Civil / Structural', parentNodeId: null },
+          ],
+        },
+        {
+          schemeId: 'cs-2',
+          schemeCode: 'SYMBOL-CATEGORY-FAMILY',
+          name: 'Symbol Category/Family',
+          nodes: [{ nodeId: 'n-valves', nodeCode: 'VALVES', nodeLabel: 'Valves', parentNodeId: null }],
+        },
+      ],
+    })),
+    proposeClassification: record('proposeClassification', async () => revisionState()),
   };
   return Object.assign(api, overrides);
 }
@@ -458,7 +479,162 @@ describe('SemanticReviewPage decision controls', () => {
     const renderer = await renderPage(api);
 
     assert.match(markup(renderer), /Read-only scheme/);
-    assert.equal(allByLabel(renderer, 'Propose classification').length, 0);
+    // Q6 is about creation: the row is displayed, but no control assigns into
+    // a read-only scheme. The picker offers only what the assignable-scheme
+    // read returned, and that read excludes all three.
+    const schemeOptions = byLabel(renderer, 'Classification scheme').findAllByType('option');
+    const offered = schemeOptions.map((option) => option.props.value);
+    assert.deepEqual(offered, ['ENGINEERING-DISCIPLINE', 'SYMBOL-CATEGORY-FAMILY']);
+    for (const readOnly of ['USE-CASE', 'DOCUMENT-TYPE', 'REPRESENTATION-TYPE']) {
+      assert.equal(offered.includes(readOnly), false, readOnly);
+    }
+    await act(async () => renderer.unmount());
+  });
+});
+
+describe('SemanticReviewPage classification proposal', () => {
+  it('makes section 12.3 followable: reject the backfilled row, then propose afresh', async () => {
+    const api = stubApi();
+    const renderer = await renderPage(api);
+
+    // The mounted row is the production case: proposed, legacy_backfill,
+    // permanently unverifiable. Reject is offered; verify is not.
+    assert.equal(allByLabel(renderer, 'Reject classification S-000042 ENGINEERING-DISCIPLINE PIPING').length, 1);
+
+    await act(async () => {
+      byLabel(renderer, 'Classification scheme').props.onChange({ target: { value: 'ENGINEERING-DISCIPLINE' } });
+    });
+    await act(async () => {
+      byLabel(renderer, 'Classification node').props.onChange({ target: { value: 'n-civil' } });
+    });
+    await act(async () => {
+      await byLabel(renderer, 'Propose a classification').props.onSubmit({ preventDefault() {} });
+    });
+
+    const proposal = api.calls.find(([name]) => name === 'proposeClassification');
+    assert.equal(proposal[1], 'rev-1');
+    assert.deepEqual(proposal[2], {
+      classificationNodeId: 'n-civil',
+      assignmentRole: 'primary',
+      method: 'manual',
+    });
+    await act(async () => renderer.unmount());
+  });
+
+  it('clears the chosen node when a different revision is opened', async () => {
+    // Otherwise a node picked for one revision is silently carried to the
+    // next, and the reviewer proposes it against a symbol they never chose.
+    let revision = 'rev-1';
+    const api = stubApi({
+      symbolClassifications: async (params = {}) => ({
+        items: [
+          classificationRow({ assignmentId: 'ca-1', symbolRevisionId: 'rev-1' }),
+          classificationRow({ assignmentId: 'ca-2', symbolRevisionId: 'rev-2' }),
+        ],
+        limit: params.limit ?? 50,
+        offset: params.offset ?? 0,
+      }),
+      symbolRevision: async (id) => {
+        revision = id;
+        return revisionState({ symbolRevisionId: id, classificationAssignments: [] });
+      },
+    });
+    const renderer = await renderPage(api);
+
+    await act(async () => {
+      byLabel(renderer, 'Classification node').props.onChange({ target: { value: 'n-civil' } });
+    });
+    assert.equal(byLabel(renderer, 'Classification node').props.value, 'n-civil');
+
+    await act(async () => {
+      renderer.root
+        .findByProps({ 'aria-label': 'Open S-000042 ENGINEERING-DISCIPLINE · PIPING — Piping', 'aria-current': false })
+        .props.onClick({ preventDefault() {} });
+    });
+
+    assert.equal(revision, 'rev-2');
+    assert.equal(byLabel(renderer, 'Classification node').props.value, '');
+    await act(async () => renderer.unmount());
+  });
+
+  it('reads the assignable schemes once, not once per row', async () => {
+    const api = stubApi();
+    const renderer = await renderPage(api);
+
+    assert.equal(api.calls.filter(([name]) => name === 'classificationSchemes').length, 1);
+    await act(async () => renderer.unmount());
+  });
+
+  it('fixes the proposal method at manual rather than offering a choice', async () => {
+    const api = stubApi();
+    const renderer = await renderPage(api);
+
+    // Scoped to the form: the queue's *filter* offers legacy_backfill on
+    // purpose, since that is how a reviewer finds the 132 backfilled rows.
+    // The proposal must not offer it, or any other method.
+    const form = byLabel(renderer, 'Propose a classification');
+    const offered = form.findAllByType('option').map((option) => option.props.value);
+    for (const method of ['legacy_backfill', 'manual', 'source_mapping', 'rule', 'ai_assisted']) {
+      assert.equal(offered.includes(method), false, method);
+    }
+    const captions = form.findAllByType('p').map((node) => node.props.children).join(' ');
+    assert.match(captions, /manual determination/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('marks a node the revision already holds live, because the index forbids a second', async () => {
+    const api = stubApi({
+      symbolRevision: async () => revisionState({
+        classificationAssignments: [classificationRow({ classificationNodeId: 'n-mech', nodeCode: 'MECHANICAL', status: 'proposed' })],
+      }),
+    });
+    const renderer = await renderPage(api);
+
+    const nodeOptions = byLabel(renderer, 'Classification node').findAllByType('option');
+    const mechanical = nodeOptions.find((option) => option.props.value === 'n-mech');
+    const civil = nodeOptions.find((option) => option.props.value === 'n-civil');
+    assert.equal(mechanical.props.disabled, true);
+    assert.equal(civil.props.disabled, false);
+    await act(async () => renderer.unmount());
+  });
+
+  it('re-renders the panel from the proposal response', async () => {
+    const api = stubApi({
+      proposeClassification: async () => revisionState({
+        classificationAssignments: [classificationRow({ assignmentId: 'ca-2', nodeCode: 'CIVIL_STRUCTURAL', method: 'manual', capabilities: capabilities() })],
+      }),
+    });
+    const renderer = await renderPage(api);
+
+    const readsBefore = api.calls.filter(([name]) => name === 'symbolRevision').length;
+    await act(async () => {
+      byLabel(renderer, 'Classification node').props.onChange({ target: { value: 'n-civil' } });
+    });
+    await act(async () => {
+      await byLabel(renderer, 'Propose a classification').props.onSubmit({ preventDefault() {} });
+    });
+
+    assert.equal(api.calls.filter(([name]) => name === 'symbolRevision').length, readsBefore);
+    assert.match(markup(renderer), /CIVIL_STRUCTURAL/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('surfaces the active-node refusal against the form', async () => {
+    const api = stubApi({
+      proposeClassification: async () => {
+        throw new Error('body.classificationNodeId: this revision already has a live assignment to that node; decide the existing one before proposing the node again');
+      },
+    });
+    const renderer = await renderPage(api);
+
+    await act(async () => {
+      byLabel(renderer, 'Classification node').props.onChange({ target: { value: 'n-civil' } });
+    });
+    await act(async () => {
+      await byLabel(renderer, 'Propose a classification').props.onSubmit({ preventDefault() {} });
+    });
+
+    assert.match(markup(renderer), /already has a live assignment to that node/);
     await act(async () => renderer.unmount());
   });
 });
