@@ -1836,3 +1836,186 @@ export async function submitExternalSubmission(formState) {
 
   return payload;
 }
+
+// --- SM-P1-01 WP1.4: semantic review ---
+//
+// Every path here is v1-only (decision Q7) and lives under the default-off
+// `SYMGOV_SEMANTIC_REVIEW_ENABLED` flag, so a dormant deployment answers 404
+// rather than 403 and these helpers report it as "not found" without
+// advertising the surface.
+//
+// The 422 envelope puts a governance refusal's human-readable sentence in
+// `issues[].msg`; `detail` is the application handler's constant
+// "Request validation failed.". `semanticReviewPayload` prefers the issues,
+// which is how a reviewer gets told that a `legacy_backfill` classification
+// cannot be verified rather than that their request was malformed.
+
+const SEMANTIC_REVIEW_ROOT = '/semantic-review';
+
+function semanticReviewPayload(result, fallbackMessage) {
+  if (!result.ok) {
+    const validationDetails = formatValidationIssues(result.payload?.issues);
+    const error = new Error(validationDetails || result.payload?.detail || result.message || fallbackMessage);
+    error.status = result.status;
+    throw error;
+  }
+  return result.payload;
+}
+
+function semanticReviewQueue(payload, limit, offset) {
+  return {
+    items: Array.isArray(payload?.items) ? payload.items : [],
+    limit: Number.isFinite(Number(payload?.limit)) ? Number(payload.limit) : limit,
+    offset: Number.isFinite(Number(payload?.offset)) ? Number(payload.offset) : offset,
+  };
+}
+
+async function semanticReviewQueueRequest(path, params, limit, offset, fallbackMessage) {
+  const result = await requestJson(withQuery(`${SEMANTIC_REVIEW_ROOT}${path}`, params), { cache: 'no-store' });
+  return semanticReviewQueue(semanticReviewPayload(result, fallbackMessage), limit, offset);
+}
+
+async function semanticReviewWrite(path, body, fallbackMessage) {
+  const result = await requestJson(`${SEMANTIC_REVIEW_ROOT}${path}`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return semanticReviewPayload(result, fallbackMessage);
+}
+
+function presentFields(candidate) {
+  const body = {};
+  for (const [key, value] of Object.entries(candidate)) {
+    if (value !== undefined && value !== null && value !== '') {
+      body[key] = value;
+    }
+  }
+  return body;
+}
+
+export async function listSemanticReviewSymbolClassifications({
+  status = 'proposed', method = '', schemeCode = '', limit = 50, offset = 0,
+} = {}) {
+  return semanticReviewQueueRequest(
+    '/queues/symbol-classifications',
+    { status, method, schemeCode, limit, offset },
+    limit,
+    offset,
+    'Symbol classification queue load failed.',
+  );
+}
+
+export async function listSemanticReviewSymbolSemanticAssignments({
+  status = 'proposed', method = '', limit = 50, offset = 0,
+} = {}) {
+  // No `schemeCode`: a symbol->concept assignment names no classification
+  // scheme, and the route declares no such parameter.
+  return semanticReviewQueueRequest(
+    '/queues/symbol-semantic-assignments',
+    { status, method, limit, offset },
+    limit,
+    offset,
+    'Symbol semantic assignment queue load failed.',
+  );
+}
+
+export async function listSemanticReviewConceptClassifications({
+  status = 'proposed', method = '', schemeCode = '', limit = 50, offset = 0,
+} = {}) {
+  return semanticReviewQueueRequest(
+    '/queues/concept-classifications',
+    { status, method, schemeCode, limit, offset },
+    limit,
+    offset,
+    'Concept classification queue load failed.',
+  );
+}
+
+export async function listSemanticReviewConceptExternalMappings({
+  status = 'proposed', method = '', schemeCode = '', limit = 50, offset = 0,
+} = {}) {
+  return semanticReviewQueueRequest(
+    '/queues/concept-external-mappings',
+    { status, method, schemeCode, limit, offset },
+    limit,
+    offset,
+    'External mapping queue load failed.',
+  );
+}
+
+export async function listSemanticReviewRightsRecords({
+  status = 'proposed', determinationMethod = '', limit = 50, offset = 0,
+} = {}) {
+  // `determinationMethod`, not `method`: the rights table names its own
+  // vocabulary and the route follows it.
+  return semanticReviewQueueRequest(
+    '/queues/rights-records',
+    { status, determinationMethod, limit, offset },
+    limit,
+    offset,
+    'Rights record queue load failed.',
+  );
+}
+
+export async function fetchSemanticReviewSymbolRevision(symbolRevisionId) {
+  const result = await requestJson(
+    `${SEMANTIC_REVIEW_ROOT}/symbol-revisions/${encodeURIComponent(symbolRevisionId)}`,
+    { cache: 'no-store' },
+  );
+  return semanticReviewPayload(result, 'Symbol revision semantic state load failed.');
+}
+
+export async function decideSemanticReviewSemanticAssignment(assignmentId, { targetStatus }) {
+  return semanticReviewWrite(
+    `/semantic-assignments/${encodeURIComponent(assignmentId)}/decision`,
+    { targetStatus },
+    'Semantic assignment decision failed.',
+  );
+}
+
+export async function decideSemanticReviewSymbolClassification(assignmentId, { targetStatus }) {
+  return semanticReviewWrite(
+    `/symbol-classifications/${encodeURIComponent(assignmentId)}/decision`,
+    { targetStatus },
+    'Classification decision failed.',
+  );
+}
+
+export async function decideSemanticReviewExternalMapping(referenceId, { targetStatus, verificationBasis = '' }) {
+  return semanticReviewWrite(
+    `/external-mappings/${encodeURIComponent(referenceId)}/decision`,
+    presentFields({ targetStatus, verificationBasis }),
+    'External mapping decision failed.',
+  );
+}
+
+export async function decideSemanticReviewRightsRecord(recordId, {
+  targetStatus, decisionReason = '', rightsStatus = '', licenceReference = '',
+}) {
+  return semanticReviewWrite(
+    `/rights-records/${encodeURIComponent(recordId)}/decision`,
+    presentFields({ targetStatus, decisionReason, rightsStatus, licenceReference }),
+    'Rights record decision failed.',
+  );
+}
+
+export async function proposeSemanticReviewRightsRecord({
+  disposition, determinationMethod, rightsStatus = 'unknown',
+  symbolRevisionId = '', sourcePackageId = '', standardVersionId = '',
+  licenceReference = '', decisionReason = '',
+}) {
+  return semanticReviewWrite(
+    '/rights-records',
+    presentFields({
+      disposition,
+      determinationMethod,
+      rightsStatus,
+      symbolRevisionId,
+      sourcePackageId,
+      standardVersionId,
+      licenceReference,
+      decisionReason,
+    }),
+    'Rights record proposal failed.',
+  );
+}

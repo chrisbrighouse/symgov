@@ -237,8 +237,95 @@ activated.
 
 **Running regression baseline: 3944 passed / 3 skipped / 3 deselected.**
 
-**WP1.4 — Semantic review surface (frontend)**
+**WP1.4 — Semantic review surface (frontend)** — **DELIVERED 2026-09-14**
 A standalone semantic review surface at its own route (Q1), behind the flag. Queue list plus a detail panel showing, for one symbol revision: primary/qualifier/component assignments, classification assignments per scheme, external mappings, evidence JSON and status, each with its decision control. Keeps the existing visual language and responsive behaviour; accessible controls, visible focus states, semantic labels, keyboard-navigable queue. Human-readable symbol IDs and operator-readable timestamps prominent. Per Q6, `USE-CASE`, `DOCUMENT-TYPE` and `REPRESENTATION-TYPE` render read-only: existing assignments are visible, no control creates one. Tests in the existing `frontend/src/*.test.js` pattern, run by `npm run test:frontend`.
+
+*Delivered shape.* A standalone surface at `/semantic-review` (Q1), reached
+from a new "Semantics" rail item, behind two gates in series that mirror the
+two the API applies: `RequireAnyRole roles={['admin','reviewer']}` for
+WP1.2/WP1.3's boundary, and a `semanticReviewEnabled` capability gate for the
+default-off flag (Q3). The route lives in `semanticReviewRoutes.js` rather
+than inline, following `adminRoutes.js`, so the 7700-line `App.jsx` gained 16
+lines. The capability predicate is deliberately **not**
+`adminJourneys.hasActiveOrganizationContext`: decision Q3 exposes the flag as
+platform governance rather than an organisation entitlement, so a
+personal-mode session is legitimate and the router's own section 14.2 scope
+predicate — not a second, stricter UI rule — decides what it sees. The flag
+was never activated; nothing was committed, pushed or deployed, and the
+Alembic head is unmoved at `20260911_0057`.
+
+Five queues as a tablist with a roving tabindex, an offset pager that reports
+"showing N" and never a total (the WP1.1 queries carry no COUNT), and a focus
+pane whose contents follow the row kind: a symbol-targeted row opens the
+revision's whole state, and a concept-targeted one is reviewed in place.
+Decision controls render from each row's `capabilities` and never from its
+status — a mutation that ignored `canVerify` fails three tests, which is the
+evidence that the rule is enforced rather than merely intended.
+
+Four findings, all measured against the delivered API rather than inferred,
+none of which section 4 covers:
+
+- **A `legacy_backfill` classification cannot actually be re-proposed from
+  any surface, and that is an API gap, not a UI omission.** `mustRepropose`
+  instructs "reject it and propose afresh with a real method", but
+  `POST /semantic-review/symbol-revisions/{id}/classifications` requires a
+  `classificationNodeId`, and **no read in the 17-operation surface returns
+  one**: `ClassificationReviewRow` carries `scheme_code`, `node_code` and
+  `node_label` but no node id, `SymbolRevisionSemanticStateResponse` carries
+  the same fields, and `/catalog/taxonomy` returns the free-text legacy
+  facets, not `classification_nodes`. So WP1.4 renders the reject control and
+  the blocked reason and says plainly that re-proposal is unavailable here.
+  Closing the loop needs either `classificationNodeId` on the row or a
+  node-lookup read — a WP1.2 amendment, and a decision for Chris, not one
+  WP1.4 may take. The equivalent rights path has no such gap: the row names
+  its own subject, so the reviewer's own record **is** proposable, which is
+  the half section 8.4 actually blocks in production.
+- **The 422 envelope's readable sentence is in `issues[].msg`, not
+  `detail`.** `app.py`'s `validation_exception_handler` sets `detail` to the
+  constant "Request validation failed." and puts the service's own sentence in
+  `issues`. The helpers therefore prefer `formatValidationIssues(...)` and
+  fall back to `detail`, which is what makes a section 12.3 or section 8.4
+  refusal legible to a reviewer. Surfacing `detail` alone would have shown
+  every governance refusal as a malformed request.
+- **Concept classifications have no decision route.** WP1.2 ships five queue
+  reads but four decision writes; `ConceptClassificationAssignment` has none.
+  That queue is therefore rendered read-only with the reason stated, rather
+  than given a control the API cannot honour.
+- **External mappings are not in the revision detail, by the schema's own
+  decision.** This plan's WP1.4 sentence lists them in the detail panel;
+  `SymbolRevisionSemanticStateResponse` deliberately excludes them because a
+  mapping hangs off a concept and choosing which of an assigned concept's
+  mappings are "this revision's" would assert a relationship the model does
+  not hold. They are reviewed in their own queue instead. Recorded as a
+  deviation from this plan's wording, resolved on the API's reasoning.
+
+Two smaller choices, recorded rather than made silently: the reviewer's rights
+proposal form offers `manual` and `licence_document` only — the API still
+accepts `ai_assisted`, but offering the one method section 8.4 can never
+approve would be offering a self-defeating act on the surface whose purpose is
+to clear that bar; and a successful proposal refreshes the queue through an
+explicit token, because the page effect depends on the filter *values* and
+re-cloning the filter object would not have refetched (caught by a test that
+fails when the token is removed).
+
+*Closing evidence.* 53 new frontend tests across four files —
+`semanticReviewApi.test.js` 14 (method, URL, query string and body against the
+real helpers, the v1 path, the 422-issues preference and the dormant-flag
+404), `semanticReviewJourney.test.js` 8 (the capability predicate including
+the personal-mode case and the denied state), `semanticReview.test.js` 25
+(queue rendering, capability-driven controls, the two `mustRepropose`
+populations, Q6's read-only marker, offset paging with no total, the tablist
+keyboard contract, empty/loading/error states and the write-response
+re-render), and `semanticReviewMountedJourney.test.js` 6 (the route mounted
+through the real application router for `reviewer`, for `admin` and for a
+personal-mode session, absent behind the flag, denied outside the role
+boundary, and the legacy `/rights` lane left in place). `npm run test:frontend`:
+**325 passed, 0 failed, 51 suites** — the 272 baseline plus exactly the 53 new
+tests, no regression. `npm run build` succeeds: 86 modules (83 plus the three
+new source modules), `dist/assets/index-*.js` 639.29 kB against a 613.50 kB
+baseline; the >500 kB chunk-size warning is pre-existing. The backend was not
+touched, so the **3944 passed / 3 skipped / 3 deselected** portable baseline
+stands unchanged and was not re-run.
 
 **WP1.5 — Read-only semantic panel in the existing review surfaces**
 Embed a read-only "Engineering meaning" summary into the existing review case detail and the organisation symbol review page, so an SME reviewing an intake sees the proposed semantic state without leaving the lane. Read-only deliberately: the decision controls stay in one place (WP1.4) so there is one audit path.

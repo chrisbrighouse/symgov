@@ -66,6 +66,8 @@ import ProfilePage from './ProfilePage.jsx';
 import OrganizationSelectionPage from './OrganizationSelectionPage.js';
 import { adminRouteElements } from './adminRoutes.js';
 import { canAccessOrganizationAdmin, canAccessPlatformAdmin } from './adminJourneys.js';
+import { semanticReviewRouteElements } from './semanticReviewRoutes.js';
+import { canAccessSemanticReview } from './semanticReviewJourney.js';
 import { ProjectContextBar } from './ProjectContextBar.js';
 import { EffectivePalettePanel } from './EffectivePalettePanel.js';
 import { canMountEffectivePalette, canMountOrganizationSymbolDrafts, canMountProjectContext, canReviewOrganizationSymbols } from './projectContext.js';
@@ -539,6 +541,7 @@ function AppContent() {
           <Route path="/workspace/users" element={<RequireAnyRole roles={['admin']}><AdminUsersPage /></RequireAnyRole>} />
           <Route path="/workspace/llm" element={<RequireAnyRole roles={['admin']}><AdminLlmPage /></RequireAnyRole>} />
           {adminRouteElements(auth, RequireAuth)}
+          {semanticReviewRouteElements(auth, RequireAnyRole)}
           <Route path="/organization/symbols" element={<RequireAuth><OrganizationSymbolDraftsPage auth={auth} /></RequireAuth>} />
           <Route path="/organization/symbols/review" element={<RequireAuth><OrganizationSymbolReviewsPage auth={auth} /></RequireAuth>} />
           <Route path="/reviews" element={<RequireAnyRole roles={['admin', 'reviewer']}><ReviewsPage /></RequireAnyRole>} />
@@ -767,6 +770,7 @@ function SideRail() {
   const canAdminPlatform = canAccessPlatformAdmin(user);
   const canUseOrganizationSymbolDrafts = canMountOrganizationSymbolDrafts({ user });
   const canReviewOrganizationSymbolSubmissions = canReviewOrganizationSymbols({ user });
+  const canReviewSemantics = canAccessSemanticReview(user);
 
   return (
     <aside className="side-rail" aria-label="Primary navigation">
@@ -776,6 +780,7 @@ function SideRail() {
         {canSubmit ? <RailNavLink to="/standards/submit" label="Submissions" icon="submissions" /> : null}
         {canReview ? <RailNavLink to="/rights" label="Rights" icon="rights" /> : null}
         {canReview ? <RailNavLink to="/reviews" label="Reviews" icon="reviews" /> : null}
+        {canReviewSemantics ? <RailNavLink to="/semantic-review" label="Semantics" icon="semantics" /> : null}
         <RailNavLink to="/support" label="Support" icon="support" />
       </nav>
       {canAdmin ? (
@@ -855,6 +860,17 @@ function NavIcon({ name }) {
           <path d="M8 8h8" />
           <path d="M8 12h5" />
           <path d="m14 16 1.5 1.5L19 14" />
+        </svg>
+      );
+    case 'semantics':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="5.5" r="2.5" />
+          <circle cx="6" cy="17" r="2.5" />
+          <circle cx="18" cy="17" r="2.5" />
+          <path d="M10.2 7.4 7.8 14.6" />
+          <path d="m13.8 7.4 2.4 7.2" />
+          <path d="M8.5 17h7" />
         </svg>
       );
     case 'support':
