@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
+import { createElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   listOrganizationSymbolSets,
@@ -14,9 +14,14 @@ const DEFAULT_API = {
   search: searchSymbolSetBuilder,
 };
 
-function StatusMessage({ status }) {
+function StatusMessage({ status, onRetry }) {
   if (!status?.message) return null;
-  return createElement('p', { role: status.mode === 'error' ? 'alert' : 'status', className: `set-admin-status ${status.mode || 'info'}` }, status.message);
+  return createElement('div', null,
+    createElement('p', { role: status.mode === 'error' ? 'alert' : 'status', className: `set-admin-status ${status.mode || 'info'}` }, status.message),
+    status.mode === 'error' && onRetry
+      ? createElement('button', { type: 'button', onClick: onRetry, 'aria-label': 'Retry loading Symbol Set items' }, 'Retry')
+      : null,
+  );
 }
 
 function SourceBadge({ source, organizationWide }) {
@@ -37,6 +42,10 @@ function toInput(item) {
   };
 }
 
+function symbolDisplayId(item) {
+  return item.displayId || item.catalogSymbolId || item.slug || '';
+}
+
 function reindexed(items) {
   return items.map((item, index) => ({ ...item, sortOrder: index }));
 }
@@ -50,6 +59,10 @@ function facetCounts(items, field) {
   return counts;
 }
 
+function totalPages(total, pageSize) {
+  return Math.max(1, Math.ceil(Number(total || 0) / Math.max(1, Number(pageSize || 1))));
+}
+
 export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -60,13 +73,26 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
   const [selectedSetId, setSelectedSetId] = useState('');
   const [itemsLoading, setItemsLoading] = useState(false);
   const [savedItems, setSavedItems] = useState([]);
+  const [savedEtag, setSavedEtag] = useState('');
   const [items, setItems] = useState([]);
+  const [authoritativeLoadComplete, setAuthoritativeLoadComplete] = useState(false);
+  const [loadedSetId, setLoadedSetId] = useState('');
+  const loadGeneration = useRef(0);
 
   const [query, setQuery] = useState('');
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [searchResults, setSearchResults] = useState([]);
+  const [searchPage, setSearchPage] = useState(1);
+  const [searchPageSize, setSearchPageSize] = useState(100);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [disciplineFilter, setDisciplineFilter] = useState('');
+  const [formatFilter, setFormatFilter] = useState('');
   const [selectedSearchIds, setSelectedSearchIds] = useState({});
+  const [selectedItemIds, setSelectedItemIds] = useState({});
+  const [pendingRemovalIds, setPendingRemovalIds] = useState([]);
+  const searchGeneration = useRef(0);
 
   const refreshSets = useCallback(async () => {
     setLoading(true);
@@ -88,22 +114,79 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
   }, [refreshSets]);
 
   const loadItems = useCallback(async (setId) => {
+    const generation = loadGeneration.current + 1;
+    loadGeneration.current = generation;
+    setAuthoritativeLoadComplete(false);
+    setLoadedSetId('');
+    setSavedItems([]);
+    setSavedEtag('');
+    setItems([]);
+    setSelectedSearchIds({});
+    setSelectedItemIds({});
+    setPendingRemovalIds([]);
     if (!setId) {
-      setSavedItems([]);
-      setItems([]);
+      setItemsLoading(false);
       return;
     }
     setItemsLoading(true);
     setStatus({ mode: '', message: '' });
     try {
-      const next = await api.listItems(setId, { page: 1, pageSize: 1000 });
-      const loaded = (next?.items || []).map((item) => ({ ...item }));
+      const requestedPageSize = 200;
+      const loaded = [];
+      const seenIds = new Set();
+      let expectedTotal = null;
+      let expectedEtag = null;
+      let page = 1;
+      while (expectedTotal === null || loaded.length < expectedTotal) {
+        const next = await api.listItems(setId, { page, pageSize: requestedPageSize });
+        if (generation !== loadGeneration.current) return;
+        const responsePage = Number(next?.page);
+        const responsePageSize = Number(next?.pageSize);
+        const responseTotal = Number(next?.total);
+        const responseEtag = typeof next?.etag === 'string' ? next.etag : '';
+        const pageItems = Array.isArray(next?.items) ? next.items : null;
+        if (
+          responsePage !== page
+          || !Number.isInteger(responsePageSize) || responsePageSize < 1 || responsePageSize > 200
+          || !Number.isInteger(responseTotal) || responseTotal < 0
+          || !responseEtag
+          || pageItems === null || pageItems.length > responsePageSize
+          || (expectedTotal !== null && responseTotal !== expectedTotal)
+          || (expectedEtag !== null && responseEtag !== expectedEtag)
+        ) {
+          throw new Error('Symbol Set items load was incomplete. Editing is disabled; retry the load.');
+        }
+        expectedTotal = responseTotal;
+        expectedEtag = responseEtag;
+        for (const item of pageItems) {
+          const itemId = item.id || item.governedSymbolId;
+          if (seenIds.has(itemId)) {
+            throw new Error('Symbol Set items load returned duplicate rows. Editing is disabled; retry the load.');
+          }
+          seenIds.add(itemId);
+          loaded.push({ ...item });
+        }
+        if (loaded.length > expectedTotal || (pageItems.length === 0 && loaded.length < expectedTotal)) {
+          throw new Error('Symbol Set items load was incomplete. Editing is disabled; retry the load.');
+        }
+        if (expectedTotal === loaded.length) break;
+        page += 1;
+        if (page > expectedTotal + 1) {
+          throw new Error('Symbol Set items load was incomplete. Editing is disabled; retry the load.');
+        }
+      }
+      if (generation !== loadGeneration.current || expectedTotal !== loaded.length) return;
       setSavedItems(loaded);
+      setSavedEtag(expectedEtag);
       setItems(loaded);
+      setLoadedSetId(setId);
+      setAuthoritativeLoadComplete(true);
     } catch (err) {
-      setStatus({ mode: 'error', message: err.message || 'Symbol Set items unavailable.' });
+      if (generation === loadGeneration.current) {
+        setStatus({ mode: 'error', message: err.message || 'Symbol Set items unavailable.' });
+      }
     } finally {
-      setItemsLoading(false);
+      if (generation === loadGeneration.current) setItemsLoading(false);
     }
   }, [api]);
 
@@ -112,31 +195,87 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
   }, [selectedSetId, loadItems]);
 
   const dirty = useMemo(() => JSON.stringify(items) !== JSON.stringify(savedItems), [items, savedItems]);
+  const editableReady = authoritativeLoadComplete && loadedSetId === selectedSetId && !itemsLoading;
 
-  async function runSearch(event) {
+  function resetSearchResults() {
+    searchGeneration.current += 1;
+    setSearchResults([]);
+    setSelectedSearchIds({});
+    setSearchPage(1);
+    setSearchTotal(0);
+    setSearchError('');
+  }
+
+  function changeSelectedSet(nextSetId) {
+    if (nextSetId === selectedSetId) return;
+    if (dirty) {
+      const confirmed = typeof window !== 'undefined'
+        && typeof window.confirm === 'function'
+        && window.confirm('Discard unsaved Symbol Set changes and switch sets?');
+      if (!confirmed) return;
+    }
+    setAuthoritativeLoadComplete(false);
+    setLoadedSetId('');
+    setSavedItems([]);
+    setSavedEtag('');
+    setItems([]);
+    setSelectedSearchIds({});
+    setSelectedItemIds({});
+    setPendingRemovalIds([]);
+    resetSearchResults();
+    setSelectedSetId(nextSetId);
+  }
+
+  async function runSearch(event, pageToLoad = 1) {
     event?.preventDefault?.();
+    const generation = searchGeneration.current + 1;
+    searchGeneration.current = generation;
     setSearchLoading(true);
     setSearchError('');
+    setSelectedSearchIds({});
     try {
-      const next = await api.search({ q: query.trim(), page: 1, pageSize: 100 });
-      setSearchResults(next?.items || []);
+      const next = await api.search({
+        q: query.trim(),
+        category: categoryFilter.trim(),
+        discipline: disciplineFilter.trim(),
+        format: formatFilter.trim(),
+        page: pageToLoad,
+        pageSize: 100,
+      });
+      if (generation !== searchGeneration.current) return;
+      setSearchResults(Array.isArray(next?.items) ? next.items : []);
+      setSearchPage(Number(next?.page || pageToLoad));
+      setSearchPageSize(Number(next?.pageSize || 100));
+      setSearchTotal(Number(next?.total || 0));
     } catch (err) {
-      setSearchError(err.message || 'Symbol Set Builder search failed.');
+      if (generation === searchGeneration.current) {
+        setSearchError(err.message || 'Symbol Set Builder search failed.');
+        setSearchResults([]);
+        setSearchTotal(0);
+      }
     } finally {
-      setSearchLoading(false);
+      if (generation === searchGeneration.current) setSearchLoading(false);
     }
   }
 
   function toggleSearchSelection(governedSymbolId) {
+    if (!editableReady) return;
     setSelectedSearchIds((current) => ({ ...current, [governedSymbolId]: !current[governedSymbolId] }));
   }
 
   const presentIds = useMemo(() => new Set(items.map((item) => item.governedSymbolId)), [items]);
 
   function addSelectedToSet() {
-    const toAdd = searchResults.filter((entry) => (
-      entry.source === 'public' && selectedSearchIds[entry.governedSymbolId] && !presentIds.has(entry.governedSymbolId)
-    ));
+    if (!editableReady) return;
+    const selectedIds = new Set();
+    const toAdd = searchResults.filter((entry) => {
+      const isAddable = (entry.source === 'public' || entry.source === 'organization')
+        && selectedSearchIds[entry.governedSymbolId]
+        && !presentIds.has(entry.governedSymbolId)
+        && !selectedIds.has(entry.governedSymbolId);
+      if (isAddable) selectedIds.add(entry.governedSymbolId);
+      return isAddable;
+    });
     if (toAdd.length === 0) return;
     setItems((current) => reindexed([
       ...current,
@@ -148,6 +287,8 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
         notes: null,
         preferredFormat: null,
         provenance: {},
+        catalogSymbolId: entry.catalogSymbolId || null,
+        displayId: entry.displayId || entry.catalogSymbolId || null,
         canonicalName: entry.canonicalName,
         category: entry.category,
         discipline: entry.discipline,
@@ -159,11 +300,32 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
     setStatus({ mode: '', message: '' });
   }
 
-  function removeItem(governedSymbolId) {
-    setItems((current) => reindexed(current.filter((item) => item.governedSymbolId !== governedSymbolId)));
+  function beginRemoval(governedSymbolIds) {
+    if (!editableReady) return;
+    const ids = [...new Set(governedSymbolIds)].filter((id) => presentIds.has(id));
+    if (ids.length > 0) setPendingRemovalIds(ids);
+  }
+
+  function toggleItemSelection(governedSymbolId) {
+    if (!editableReady) return;
+    setSelectedItemIds((current) => ({ ...current, [governedSymbolId]: !current[governedSymbolId] }));
+  }
+
+  function confirmRemoval() {
+    if (!editableReady || pendingRemovalIds.length === 0) return;
+    const ids = new Set(pendingRemovalIds);
+    setItems((current) => reindexed(current.filter((item) => !ids.has(item.governedSymbolId))));
+    setSelectedItemIds((current) => {
+      const next = { ...current };
+      for (const id of pendingRemovalIds) delete next[id];
+      return next;
+    });
+    setPendingRemovalIds([]);
+    setStatus({ mode: '', message: 'Removal staged locally. Save changes to commit it.' });
   }
 
   function moveItem(governedSymbolId, direction) {
+    if (!editableReady) return;
     setItems((current) => {
       const index = current.findIndex((item) => item.governedSymbolId === governedSymbolId);
       const target = index + direction;
@@ -182,6 +344,7 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
 
   function handleDrop(event, targetGovernedSymbolId) {
     event.preventDefault();
+    if (!editableReady) return;
     const draggedId = event.dataTransfer.getData('text/plain');
     if (!draggedId || draggedId === targetGovernedSymbolId) return;
     setItems((current) => {
@@ -196,19 +359,23 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
   }
 
   function updateField(governedSymbolId, field, value) {
+    if (!editableReady) return;
     setItems((current) => current.map((item) => (
       item.governedSymbolId === governedSymbolId ? { ...item, [field]: value } : item
     )));
   }
 
   async function saveChanges() {
-    if (!selectedSetId) return;
+    if (!selectedSetId || !editableReady || !savedEtag) return;
+    const saveSetId = selectedSetId;
+    const saveGeneration = loadGeneration.current;
     setSaving(true);
     setStatus({ mode: '', message: '' });
     try {
-      await api.replaceItems(selectedSetId, items.map(toInput));
+      await api.replaceItems(saveSetId, items.map(toInput), savedEtag);
+      if (saveGeneration !== loadGeneration.current || loadedSetId !== saveSetId || selectedSetId !== saveSetId) return;
       setStatus({ mode: 'success', message: 'Symbol Set items saved.' });
-      await loadItems(selectedSetId);
+      await loadItems(saveSetId);
     } catch (err) {
       setStatus({ mode: 'error', message: err.message || 'Symbol Set items save failed.' });
     } finally {
@@ -217,7 +384,10 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
   }
 
   function discardChanges() {
+    if (!editableReady) return;
     setItems(savedItems);
+    setSelectedItemIds({});
+    setPendingRemovalIds([]);
     setStatus({ mode: '', message: '' });
   }
 
@@ -233,6 +403,8 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
   const categoryCounts = facetCounts(items, 'category');
   const disciplineCounts = facetCounts(items, 'discipline');
   const formatCounts = facetCounts(items.filter((item) => item.preferredFormat), 'preferredFormat');
+  const searchPageCount = totalPages(searchTotal, searchPageSize);
+  const selectedItemCount = Object.values(selectedItemIds).filter(Boolean).length;
 
   return createElement(
     'section',
@@ -243,14 +415,14 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
     !loading && !error && sets.length === 0
       ? createElement('p', { role: 'status' }, 'No active Symbol Sets to build. Create one above first.')
       : null,
-    StatusMessage({ status }),
+    StatusMessage({ status, onRetry: selectedSetId ? () => loadItems(selectedSetId) : null }),
     sets.length > 0
       ? createElement('label', { htmlFor: 'symbol-set-builder-set-select' },
         'Symbol Set',
         createElement('select', {
           id: 'symbol-set-builder-set-select',
           value: selectedSetId,
-          onChange: (event) => setSelectedSetId(event.target.value),
+          onChange: (event) => changeSelectedSet(event.target.value),
         }, sets.map((setRow) => createElement('option', { key: setRow.id, value: setRow.id }, `${setRow.code} · ${setRow.name}`))),
       )
       : null,
@@ -268,9 +440,48 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
               'aria-label': 'Search symbols to add to this Symbol Set',
               placeholder: 'Search by name, category, or discipline',
               value: query,
-              onChange: (event) => setQuery(event.target.value),
+              onChange: (event) => {
+                setQuery(event.target.value);
+                resetSearchResults();
+              },
             }),
             createElement('button', { type: 'submit', disabled: searchLoading }, searchLoading ? 'Searching…' : 'Search'),
+          ),
+          createElement('div', { className: 'symbol-set-builder-filters', 'aria-label': 'Symbol Set Builder filters' },
+            createElement('label', { htmlFor: 'symbol-set-builder-category-filter' },
+              'Category',
+              createElement('input', {
+                id: 'symbol-set-builder-category-filter',
+                value: categoryFilter,
+                onChange: (event) => { setCategoryFilter(event.target.value); resetSearchResults(); },
+              }),
+            ),
+            createElement('label', { htmlFor: 'symbol-set-builder-discipline-filter' },
+              'Discipline',
+              createElement('input', {
+                id: 'symbol-set-builder-discipline-filter',
+                value: disciplineFilter,
+                onChange: (event) => { setDisciplineFilter(event.target.value); resetSearchResults(); },
+              }),
+            ),
+            createElement('label', { htmlFor: 'symbol-set-builder-format-filter' },
+              'Format',
+              createElement('input', {
+                id: 'symbol-set-builder-format-filter',
+                value: formatFilter,
+                onChange: (event) => { setFormatFilter(event.target.value); resetSearchResults(); },
+              }),
+            ),
+            createElement('button', {
+              type: 'button',
+              onClick: () => {
+                setCategoryFilter('');
+                setDisciplineFilter('');
+                setFormatFilter('');
+                resetSearchResults();
+              },
+              'aria-label': 'Clear Symbol Set Builder filters',
+            }, 'Clear filters'),
           ),
           searchError ? createElement('p', { role: 'alert', className: 'set-admin-status error' }, searchError) : null,
           !searchLoading && !searchError && searchResults.length === 0
@@ -283,32 +494,49 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
               createElement('button', {
                 type: 'button',
                 onClick: addSelectedToSet,
-                disabled: Object.values(selectedSearchIds).every((value) => !value),
+                disabled: !editableReady || Object.values(selectedSearchIds).every((value) => !value),
                 'aria-label': 'Add selected symbols to this Symbol Set',
               }, 'Add selected to set'),
               createElement('ul', { className: 'set-admin-list', 'aria-label': 'Symbol Set Builder search results' },
                 searchResults.map((entry) => {
                   const alreadyPresent = presentIds.has(entry.governedSymbolId);
-                  const addable = entry.source === 'public' && !alreadyPresent;
+                  const addable = (entry.source === 'public' || entry.source === 'organization') && !alreadyPresent;
                   return createElement('li', { key: entry.governedSymbolId, className: 'set-admin-item' },
                     createElement('label', null,
                       createElement('input', {
                         type: 'checkbox',
-                        disabled: !addable,
+                        disabled: !editableReady || !addable,
                         checked: Boolean(selectedSearchIds[entry.governedSymbolId]),
                         onChange: () => toggleSearchSelection(entry.governedSymbolId),
                         'aria-label': `Select ${entry.canonicalName}`,
                       }),
-                      createElement('strong', null, ` ${entry.canonicalName} · ${entry.slug}`),
+                      createElement('strong', null, ` ${entry.canonicalName} · ${symbolDisplayId(entry)}`),
                       createElement(SourceBadge, { source: entry.source, organizationWide: entry.organizationWide }),
                     ),
                     createElement('p', { className: 'set-admin-muted' },
                       `Category: ${entry.category} · Discipline: ${entry.discipline}`
                       + (alreadyPresent ? ' · Already in this set' : '')
-                      + (entry.source === 'organization' ? ' · Toggle organization-wide instead of adding to a set' : '')),
+                      + (entry.source === 'organization' ? ' · Approved organization symbol' : '')),
                   );
                 }),
               ),
+              searchTotal > 0
+                ? createElement('div', { className: 'project-context-pagination', 'aria-label': 'Symbol Set Builder search pagination' },
+                  createElement('button', {
+                    type: 'button',
+                    onClick: () => runSearch(undefined, Math.max(1, searchPage - 1)),
+                    disabled: searchLoading || searchPage <= 1,
+                    'aria-label': 'Previous Symbol Set Builder search page',
+                  }, 'Previous'),
+                  createElement('span', null, `Page ${searchPage} of ${searchPageCount}`),
+                  createElement('button', {
+                    type: 'button',
+                    onClick: () => runSearch(undefined, Math.min(searchPageCount, searchPage + 1)),
+                    disabled: searchLoading || searchPage >= searchPageCount,
+                    'aria-label': 'Next Symbol Set Builder search page',
+                  }, 'Next'),
+                )
+                : null,
             )
             : null,
         ),
@@ -328,11 +556,34 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
                 ? ` · Preferred formats: ${Object.entries(formatCounts).map(([key, count]) => `${key} (${count})`).join(', ')}`
                 : ''))
             : null,
+          createElement('div', { className: 'set-admin-actions', role: 'group', 'aria-label': 'Batch Symbol Set item actions' },
+            createElement('button', {
+              type: 'button',
+              disabled: !editableReady || selectedItemCount === 0,
+              onClick: () => beginRemoval(Object.entries(selectedItemIds).filter(([, selected]) => selected).map(([id]) => id)),
+              'aria-label': 'Remove selected symbols from this Symbol Set',
+            }, `Remove selected${selectedItemCount ? ` (${selectedItemCount})` : ''}`),
+          ),
+          pendingRemovalIds.length > 0
+            ? createElement('div', { role: 'alertdialog', 'aria-label': 'Confirm staged Symbol Set item removal' },
+              createElement('p', null, `Remove ${pendingRemovalIds.length} selected item(s) from the staged Symbol Set changes? This is local until you save.`),
+              createElement('button', {
+                type: 'button',
+                onClick: confirmRemoval,
+                'aria-label': 'Confirm removal of selected Symbol Set items',
+              }, 'Confirm removal'),
+              createElement('button', {
+                type: 'button',
+                onClick: () => setPendingRemovalIds([]),
+                'aria-label': 'Cancel removal of selected Symbol Set items',
+              }, 'Cancel'),
+            )
+            : null,
           createElement('ul', { className: 'set-admin-list symbol-set-builder-item-list', 'aria-label': 'Current Symbol Set items, in order' },
             items.map((item, index) => createElement('li', {
               key: item.governedSymbolId,
               className: `set-admin-item${item.availabilityStatus === 'unavailable' ? ' unavailable' : ''}`,
-              draggable: true,
+              draggable: editableReady,
               onDragStart: (event) => handleDragStart(event, item.governedSymbolId),
               onDragOver: (event) => event.preventDefault(),
               onDrop: (event) => handleDrop(event, item.governedSymbolId),
@@ -340,8 +591,15 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
             createElement(
               'div',
               null,
-              createElement('strong', null, `${item.canonicalName || item.governedSymbolId} · ${item.slug || ''}`),
-              createElement(SourceBadge, { source: 'public' }),
+              createElement('input', {
+                type: 'checkbox',
+                disabled: !editableReady,
+                checked: Boolean(selectedItemIds[item.governedSymbolId]),
+                onChange: () => toggleItemSelection(item.governedSymbolId),
+                'aria-label': `Select ${item.canonicalName || item.governedSymbolId} for removal`,
+              }),
+              createElement('strong', null, `${item.canonicalName || item.governedSymbolId} · ${symbolDisplayId(item)}`),
+              createElement(SourceBadge, { source: item.source || 'public', organizationWide: item.organizationWide }),
               item.availabilityStatus === 'unavailable'
                 ? createElement('span', { className: 'symbol-set-builder-badge unavailable' }, 'Unavailable')
                 : null,
@@ -354,6 +612,7 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
                 createElement('input', {
                   id: `builder-group-${item.governedSymbolId}`,
                   value: item.groupName || '',
+                  disabled: !editableReady,
                   onChange: (event) => updateField(item.governedSymbolId, 'groupName', event.target.value),
                 }),
               ),
@@ -362,6 +621,7 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
                 createElement('input', {
                   id: `builder-format-${item.governedSymbolId}`,
                   value: item.preferredFormat || '',
+                  disabled: !editableReady,
                   onChange: (event) => updateField(item.governedSymbolId, 'preferredFormat', event.target.value),
                 }),
               ),
@@ -371,19 +631,20 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
               { className: 'set-admin-actions', role: 'group', 'aria-label': `Reorder or remove ${item.canonicalName || item.governedSymbolId}` },
               createElement('button', {
                 type: 'button',
-                disabled: index === 0,
+                disabled: !editableReady || index === 0,
                 onClick: () => moveItem(item.governedSymbolId, -1),
                 'aria-label': `Move ${item.canonicalName || item.governedSymbolId} up`,
               }, 'Move up'),
               createElement('button', {
                 type: 'button',
-                disabled: index === items.length - 1,
+                disabled: !editableReady || index === items.length - 1,
                 onClick: () => moveItem(item.governedSymbolId, 1),
                 'aria-label': `Move ${item.canonicalName || item.governedSymbolId} down`,
               }, 'Move down'),
               createElement('button', {
                 type: 'button',
-                onClick: () => removeItem(item.governedSymbolId),
+                disabled: !editableReady,
+                onClick: () => beginRemoval([item.governedSymbolId]),
                 'aria-label': `Remove ${item.canonicalName || item.governedSymbolId} from this Symbol Set`,
               }, 'Remove'),
             ),
@@ -394,13 +655,13 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
             { className: 'set-admin-actions' },
             createElement('button', {
               type: 'button',
-              disabled: !dirty || saving,
+              disabled: !dirty || saving || !editableReady,
               onClick: saveChanges,
               'aria-label': 'Save Symbol Set changes',
             }, saving ? 'Saving…' : 'Save changes'),
             createElement('button', {
               type: 'button',
-              disabled: !dirty || saving,
+              disabled: !dirty || saving || !editableReady,
               onClick: discardChanges,
               'aria-label': 'Discard Symbol Set changes',
             }, 'Discard changes'),

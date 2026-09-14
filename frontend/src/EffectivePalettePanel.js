@@ -127,7 +127,7 @@ export function EffectivePalettePanel({ auth, api = DEFAULT_API }) {
       createElement('ul', { className: 'set-admin-list', 'aria-label': `Effective palette items in group ${groupName}` },
         groupedItems.map((item) => createElement('li', { key: item.governedSymbolId, className: 'set-admin-item' },
           createElement('div', null,
-            createElement('strong', null, `${item.canonicalName} · ${item.category}`),
+            createElement('strong', null, `${item.canonicalName} · ${item.displayId || item.catalogSymbolId || item.slug || ''} · ${item.category}`),
             createElement(SourceBadge, { source: item.source }),
             createElement('p', { className: 'set-admin-muted' },
               `Discipline: ${item.discipline}`

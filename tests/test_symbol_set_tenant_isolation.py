@@ -203,15 +203,36 @@ def test_effective_palette_includes_the_owning_organizations_own_organization_wi
     assert result["items"][0]["source"] == "organization_wide"
 
 
-def test_a_cross_organization_private_symbol_cannot_become_a_symbol_set_item(two_organizations):
-    """Structural claim in `effective_palette.py`'s module docstring,
-    proven directly: a `SymbolSetItem` can only ever reference a
-    `visibility='public'` governed symbol, so the set-sourced half of the
-    palette union can never carry an organization-private symbol from
-    any organization, including its own."""
+def test_same_organization_approved_private_symbol_can_become_a_set_item_and_palette_entry(two_organizations):
     fixtures = two_organizations
     actor_a = _actor(fixtures.user_a, fixtures.org_a, base_role="admin", capabilities=("contributor", "symbol_reviewer"))
     symbol_id = _organization_wide_symbol(fixtures.engine, actor_a)
+
+    with fixtures.engine.begin() as connection:
+        set_id = _symbol_set(connection, fixtures.org_a, fixtures.user_a, "SET-A")
+        _availability(connection, fixtures.project_a, set_id, fixtures.user_a, default=True)
+
+    request_a = _bound_session_request(fixtures.engine, fixtures.user_a, fixtures.org_a)
+    SessionLocal = sessionmaker(bind=fixtures.engine, autoflush=False, expire_on_commit=False)
+    with SessionLocal.begin() as session:
+        replace_items(
+            session, request_a, fixtures.settings, set_id,
+            SimpleNamespace(items=[SimpleNamespace(
+                governedSymbolId=symbol_id, sortOrder=0, groupName=None, displayLabel=None,
+                notes=None, preferredFormat=None, provenance={},
+            )]),
+        )
+        _, result = effective_palette(session, request_a, fixtures.settings, fixtures.project_a, page=1, page_size=50)
+
+    assert result["total"] == 1
+    assert result["items"][0]["governedSymbolId"] == symbol_id
+    assert result["items"][0]["source"] == "set"
+
+
+def test_cross_organization_private_symbol_cannot_become_a_symbol_set_item(two_organizations):
+    fixtures = two_organizations
+    actor_b = _actor(fixtures.user_b, fixtures.org_b, base_role="admin", capabilities=("contributor", "symbol_reviewer"))
+    symbol_id = _organization_wide_symbol(fixtures.engine, actor_b)
 
     with fixtures.engine.begin() as connection:
         set_id = _symbol_set(connection, fixtures.org_a, fixtures.user_a, "SET-A")

@@ -46,6 +46,8 @@ from .models import GovernedSymbol, SymbolSet, SymbolSetItem
 from .project_service import get_project, normalize_code
 from .public_symbol_eligibility import current_public_symbols
 from .symbol_context_service import _eligible_set, _resolved_set, symbol_set_summary
+from .symbol_eligibility import current_symbol_revisions, eligible_organization_private_symbols
+from .symbol_identity import governed_symbol_human_readable_id
 
 ORGANIZATION_WIDE_GROUP = "Organization-wide"
 
@@ -65,7 +67,13 @@ def _explicit_set(session: Session, principal, project, set_code: str):
     return symbol_set
 
 
-def _set_entries(session: Session, symbol_set: SymbolSet | None) -> list[dict]:
+def _set_entries(
+    session: Session,
+    symbol_set: SymbolSet | None,
+    organization_id: uuid.UUID,
+    *,
+    organization_symbols_enabled: bool,
+) -> list[dict]:
     if symbol_set is None:
         return []
     rows = session.query(SymbolSetItem, GovernedSymbol).join(
@@ -73,7 +81,13 @@ def _set_entries(session: Session, symbol_set: SymbolSet | None) -> list[dict]:
     ).filter(
         SymbolSetItem.symbol_set_id == symbol_set.id,
     ).order_by(SymbolSetItem.sort_order, SymbolSetItem.governed_symbol_id).all()
-    eligible = current_public_symbols(session, [item.governed_symbol_id for item, _ in rows])
+    eligible = current_symbol_revisions(
+        session,
+        [item.governed_symbol_id for item, _ in rows],
+        organization_id,
+        organization_symbols_enabled=organization_symbols_enabled,
+        public_resolver=current_public_symbols,
+    )
     entries = []
     for item, governed in rows:
         if item.governed_symbol_id not in eligible:
@@ -84,6 +98,8 @@ def _set_entries(session: Session, symbol_set: SymbolSet | None) -> list[dict]:
             continue
         entries.append({
             "governedSymbolId": item.governed_symbol_id,
+            "catalogSymbolId": governed.catalog_symbol_id,
+            "displayId": governed_symbol_human_readable_id(session, governed),
             "source": "set",
             "canonicalName": governed.canonical_name,
             "category": governed.category,
@@ -100,15 +116,27 @@ def _set_entries(session: Session, symbol_set: SymbolSet | None) -> list[dict]:
 
 
 def _organization_wide_entries(session: Session, organization_id: uuid.UUID, *, start_sort_order: int) -> list[dict]:
-    rows = session.query(GovernedSymbol).filter(
+    candidate_ids = [symbol_id for symbol_id, in session.query(
+        GovernedSymbol.id,
+    ).filter(
         GovernedSymbol.owner_organization_id == organization_id,
         GovernedSymbol.visibility == "organization_private",
         GovernedSymbol.organization_wide.is_(True),
-    ).order_by(GovernedSymbol.canonical_name, GovernedSymbol.id).all()
+    ).order_by(GovernedSymbol.canonical_name, GovernedSymbol.id).all()]
+    if not candidate_ids:
+        return []
+    rows = eligible_organization_private_symbols(
+        session,
+        organization_id,
+        symbol_ids=candidate_ids,
+        organization_wide=True,
+    )
     entries = []
     for offset, governed in enumerate(rows):
         entries.append({
             "governedSymbolId": governed.id,
+            "catalogSymbolId": governed.catalog_symbol_id,
+            "displayId": governed_symbol_human_readable_id(session, governed),
             "source": "organization_wide",
             "canonicalName": governed.canonical_name,
             "category": governed.category,
@@ -147,9 +175,15 @@ def effective_palette(
         # /org/me/symbol-context`.
         symbol_set, reason = _resolved_set(session, principal, project)
 
-    entries = _set_entries(session, symbol_set)
+    organization_symbols_enabled = bool(getattr(settings, "organization_symbols_enabled", False))
+    entries = _set_entries(
+        session,
+        symbol_set,
+        principal.organization.id,
+        organization_symbols_enabled=organization_symbols_enabled,
+    )
 
-    if settings.organization_symbols_enabled:
+    if organization_symbols_enabled:
         seen_ids = {entry["governedSymbolId"] for entry in entries}
         next_sort_order = max((entry["sortOrder"] for entry in entries), default=-1) + 1
         for entry in _organization_wide_entries(session, principal.organization.id, start_sort_order=next_sort_order):
