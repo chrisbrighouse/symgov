@@ -621,8 +621,76 @@ module), `dist/assets/index-*.js` 651.20 kB against 642.66 kB; the >500 kB
 chunk-size warning is pre-existing. Not committed; nothing pushed, deployed or
 activated.
 
-**WP1.6 — Route-policy matrix, regression and acceptance**
+**WP1.6 — Route-policy matrix, regression and acceptance — DELIVERED 2026-09-14**
 Full portable regression, frontend tests, `npm run build`, a tenant-isolation matrix proving no organisation-private symbol existence leaks through any new endpoint (§14.2, §16.1), and an acceptance pass against the §16.1 criteria this package claims to close.
+
+*Delivered shape.* **No product code.** Two new test files and this plan's
+§7. The router is unchanged, byte for byte
+(`routes/semantic_review.py` `ec81e409b9e1d741…`, verified before and after
+the gates); no route, panel, schema or service function was added, and no
+migration — head unmoved at `20260911_0057`, `backend/alembic` untouched.
+
+- **`tests/test_semantic_review_tenant_matrix.py`** (32 tests, DB-free) — the
+  completeness guard. It counts the **nineteen** route decorators off the
+  `router` object rather than off a hand-kept list, and partitions them into
+  `TENANT_SCOPED` (ten routes, each with the resolver it must call) and
+  `UNSCOPED_BY_DECISION` (nine, each with the written argument for why it
+  carries no tenant predicate). The union must equal the router's own route
+  set, so a twentieth route fails the file until somebody classifies it —
+  which is what turns "unscoped" from an omission into a decision. Each
+  scoped route is then checked to actually *call* its resolver, and each
+  unscoped one to still call none.
+- **`tests/test_semantic_review_tenant_matrix_postgresql.py`** (44 tests) —
+  the sweep. Every symbol-scoped route is probed with a row belonging to
+  another organisation, as three principals, and must answer **404, never
+  403, and never content** (the foreign symbol's name, slug and id are
+  asserted absent from every response body). The three symbol-scoped queues
+  are probed for absence from the listing. `test_the_sweep_probes_every_
+  tenant_scoped_route` compares the probe list against `TENANT_SCOPED`, so
+  neither half can be satisfied by editing the other.
+
+*Two things the sweep measured that the pack did not anticipate, recorded
+rather than smoothed over.*
+
+- **A bare Platform Administrator never reaches the tenant predicate at
+  all.** Seeded the way the product seeds one — a `platform_admin` platform
+  role plus an `admin` base role inside the `symgov` organisation — it holds
+  no *global* `admin`/`reviewer` role, so decision Q2's boundary answers 403
+  "Insufficient role" on every symbol-scoped route before `_scope` is
+  consulted. That 403 is not a §14.2 disclosure: the identical 403 comes back
+  for a revision id that does not exist, so it separates nothing. The sweep's
+  platform principal therefore holds the global `reviewer` role as well,
+  which is the genuinely most-privileged principal that can reach these
+  routes, and `test_the_platform_administrator_probe_is_bound_to_its_own_
+  organisation` pins that its session really is organisation-bound (to
+  `symgov`) rather than personal — otherwise the hardest case would quietly
+  degrade into the easiest. The bare case is pinned in its own test so the
+  403 is on the record as the role boundary rather than mistaken for
+  something else.
+- **The refusal is a refusal, not a rollback.** `test_a_refused_probe_writes_
+  nothing` re-runs all seven single-row probes and compares the OTHER
+  revision's classification, semantic-assignment and rights rows — ids and
+  statuses — before and after. A status code cannot prove this on its own: a
+  route that resolved the row, wrote, and *then* refused would answer 404 and
+  still have written. The RED rehearsal shows the write is real — with the
+  predicate removed, `POST /rights-records` answers **201** and creates a
+  rights record over another organisation's revision — so what this test
+  measures is the residue rather than the answer.
+
+*RED evidence.* The guard and the sweep were both rehearsed against a
+deliberate break rather than assumed to bite. Adding an unclassified route to
+the router at runtime fails `test_every_route_is_classified_as_scoped_or_
+unscoped_by_decision` and `test_the_router_carries_nineteen_routes`;
+declaring a route scoped on a resolver it does not call fails
+`test_every_tenant_scoped_route_resolves_its_scope`. Removing the visibility
+check from `_visible_revision` fails **16** of the 44 PostgreSQL tests across
+all three principals, including the write-nothing check. The product file was
+restored from a pre-edit copy and its SHA-256 re-verified as
+`ec81e409b9e1d741…` before any gate was run.
+
+*Closing evidence.* See §7 for the acceptance pass and §7.3 for the gate
+totals with their arithmetic. Nothing committed by this package without
+explicit approval; nothing pushed, deployed, restarted or activated.
 
 ---
 
@@ -642,6 +710,8 @@ Full portable regression, frontend tests, `npm run build`, a tenant-isolation ma
 | `tests/test_classification_mapping.py` | extend | WP1.5 forecast == what approval writes |
 | `frontend/src/reviewSemanticPreview.test.js` | new | WP1.5 intake panel |
 | `frontend/src/organizationSymbolDrafts.test.js` | extend | WP1.5 Q10 hide-when-ungated |
+| `tests/test_semantic_review_tenant_matrix.py` | new | WP1.6 route-inventory completeness guard |
+| `tests/test_semantic_review_tenant_matrix_postgresql.py` | new | WP1.6 §14.2 tenant-isolation sweep |
 
 Pin every new `*_postgresql.py` fixture at the current head (`20260911_0057`) — the ORM is one global object that always reflects head, and a fixture pinned to an older revision breaks the moment a later migration extends a table its models touch.
 
@@ -728,3 +798,163 @@ Every work package closes on: the focused tests named in §3; the portable backe
 - No seeding of an Industry/Application or process-category scheme.
 - No change to `automation_policy.evaluate_publication_automation_gate` or `provenance_assessments` — the two publication gates coexist and stay strangers.
 - Leave `.claude/settings.local.json` and `UI-Design/` untouched.
+
+---
+
+## 7. Acceptance pass — SM-P1-01 against §16.1 (WP1.6, 2026-09-14)
+
+SM-P1-01 claims two §16.1 criteria. Each is mapped below to **named
+evidence** — a test path and a test name — rather than to a claim. §7.2 then
+records, in the same detail, what this package does *not* close.
+
+### 7.1 The two criteria
+
+**Criterion 1 — "The review workflow can see proposed semantic /
+classification / source assertions with evidence and status." → CLOSED in the
+repository.**
+
+| What a reviewer can see | Named evidence |
+|---|---|
+| The five open-proposal queues execute and are ordered | `tests/test_semantic_review_queries_postgresql.py::test_the_platform_queue_returns_open_proposals_newest_first`, `::test_the_concept_classification_queue_returns_open_proposals`, `::test_the_external_mapping_queue_carries_the_scheme_release` |
+| A queue row carries the human-readable symbol identity, not a UUID | `tests/test_semantic_review_routes_postgresql.py::test_the_queue_renders_the_human_readable_catalog_identifier`; `tests/test_semantic_review_queries_postgresql.py::test_a_queue_row_carries_the_human_readable_symbol_identity` |
+| Status, and the capability that status implies | `tests/test_semantic_review_routes_postgresql.py::test_the_queue_warns_that_a_backfilled_row_can_never_be_verified`; `frontend/src/semanticReview.test.js::"renders controls from the row capabilities, not from its status"` |
+| The node an assignment actually holds | `tests/test_semantic_review_routes_postgresql.py::test_the_queue_row_names_the_node_the_assignment_actually_holds` |
+| Semantic assignments — proposed, then decided, attributed to a person | `tests/test_semantic_review_routes_postgresql.py::test_a_reviewer_assigns_a_concept_to_a_revision_and_verifies_it` |
+| Classification assertions, including the §12.3 remedy | `tests/test_semantic_review_routes_postgresql.py::test_a_reviewer_rejects_a_backfilled_row_then_proposes_afresh`, `::test_the_repropose_journey_runs_on_nothing_but_what_the_api_returned` |
+| External mappings, with the decision kept in the response | `tests/test_semantic_review_routes_postgresql.py::test_an_external_mapping_is_proposed_then_rejected_and_stays_in_the_response` |
+| Source/rights assertions — the "source" third of the sentence | `tests/test_rights_review_routes_postgresql.py::test_a_reviewer_proposes_and_approves_a_permissive_record`, `::test_the_rights_queue_shows_the_reviewers_own_proposal` |
+| Evidence and the whole governed state on one revision | `tests/test_semantic_review_routes_postgresql.py::test_the_revision_detail_returns_the_whole_governed_state`; `frontend/src/semanticReview.test.js::"opens one revision and shows its assignments, classifications, rights and evidence"` |
+| The surface exists for a reviewer in the real application router | `frontend/src/semanticReviewMountedJourney.test.js::"mounts the queue for a reviewer and reads the v1 semantic review API"`, `::"makes section 12.3 remedy reachable end to end through the real router"` |
+| "In Workspace/organisation review" — the §15.2 half WP1.5 covers | `frontend/src/reviewSemanticPreview.test.js::"is reachable in the Reviews focus pane and reads the v1 forecast route"`; `tests/test_classification_mapping_postgresql.py` (the forecast names exactly what the approval proposes) |
+
+**Criterion 2 — "No organisation-private symbol existence is revealed by
+public semantic endpoints." → CLOSED in the repository, and now swept rather
+than sampled.**
+
+| What is proved | Named evidence |
+|---|---|
+| Every symbol-scoped route refuses a foreign row with 404, never 403, never content — as an organisation reviewer, as a personal-mode session, and as a Platform Administrator | `tests/test_semantic_review_tenant_matrix_postgresql.py::test_a_foreign_symbol_scoped_row_is_absent_not_forbidden` (7 routes × 3 principals) |
+| No symbol-scoped queue lists a foreign private row, for any of the three | `::test_no_symbol_scoped_queue_lists_a_foreign_private_row` (3 queues × 3 principals) |
+| The sweep covers **every** symbol-scoped route on the router, not a chosen few | `::test_the_sweep_probes_every_tenant_scoped_route`, against `TENANT_SCOPED` |
+| Every one of the nineteen decorators is classified scoped or unscoped-by-decision, and a new one fails until it is | `tests/test_semantic_review_tenant_matrix.py::test_every_route_is_classified_as_scoped_or_unscoped_by_decision`, `::test_the_router_carries_nineteen_routes` |
+| A route declared scoped actually calls its resolver | `::test_every_tenant_scoped_route_resolves_its_scope` |
+| Platform Admin is not a bypass, at the resolver and on real rows | `::test_platform_admin_is_not_a_bypass_in_the_scope_resolver`; `..._postgresql.py::test_the_platform_administrator_probe_is_bound_to_its_own_organisation` |
+| The unscoped reads' premise holds — their responses name no symbol at all | `..._postgresql.py::test_an_unscoped_read_exposes_no_private_symbol_identity` |
+| The predicate refuses without writing | `..._postgresql.py::test_a_refused_probe_writes_nothing` |
+| The predicate is not universal refusal — a reviewer still reaches its own | `..._postgresql.py::test_an_organisation_reviewer_still_reaches_its_own_private_rows` |
+| The pre-existing samples, unchanged and still green | `tests/test_semantic_review_queries_postgresql.py::test_the_platform_queue_never_reveals_an_organisation_private_symbol`, `::test_an_organisation_scoped_queue_adds_only_its_own_private_symbols`, `::test_the_symbol_semantic_assignment_queue_is_tenant_scoped`, `::test_the_rights_queue_is_tenant_scoped_and_flags_the_unapprovable`; `tests/test_semantic_review_routes_postgresql.py::test_an_organisation_private_symbol_is_invisible_to_a_platform_scoped_queue`, `::test_an_organisation_reviewer_sees_its_own_private_symbols_and_no_others`, `::test_another_organisations_row_is_absent_rather_than_forbidden`, `::test_the_whole_surface_is_absent_when_the_flag_is_off`; `tests/test_rights_review_routes_postgresql.py::test_another_organisations_revision_is_absent_rather_than_forbidden`, `::test_a_decision_on_another_organisations_record_is_absent_rather_than_forbidden`, `::test_a_package_subject_record_is_platform_level_and_needs_no_tenant` |
+
+**The nine routes that carry no tenant predicate, as a closed list.** Each is
+a decision with an argument, held in `UNSCOPED_BY_DECISION` and enforced
+there:
+
+| Route | Why unscoped |
+|---|---|
+| `GET /queues/concept-classifications` | a concept→node assertion names no symbol; §17 made concept governance platform-level |
+| `GET /queues/concept-external-mappings` | a concept→external-release assertion names no symbol |
+| `GET /classification-schemes` | seeded platform reference data naming no symbol |
+| `GET /review-cases/{id}/classification-preview` | a review case names no symbol and no organisation — neither `ReviewCase` nor `ClassificationRecord` nor `IntakeRecord` carries one, and the intake lane feeds the public catalog (Q9) |
+| `POST /concepts`, `POST /concepts/{id}/revisions`, `POST /concept-revisions/{id}/transition` | platform-admin only (Q2), and concepts are platform-level (§17) |
+| `POST /concepts/{id}/external-mappings`, `POST /external-mappings/{id}/decision` | a mapping hangs off a concept, which has no private existence to leak |
+
+Package- and standard-subject rights records are the tenth case and sit
+inside a scoped route: `POST /rights-records` resolves through
+`_visible_revision` **when the body names a symbol revision**, and a
+package- or standard-subject record names none. Withholding those would hide
+exactly the records §9.2's rights dimension needs approved (WP1.3), and
+`tests/test_rights_review_routes_postgresql.py::test_a_package_subject_record_is_platform_level_and_needs_no_tenant`
+pins it.
+
+### 7.2 What this acceptance pass does **not** close
+
+Every item here is measured, not suspected.
+
+1. **Nothing is reachable in production. SM-P1-01 is repo-complete, not in
+   effect.** `SYMGOV_SEMANTIC_REVIEW_ENABLED` is default-off (Q3) and **has
+   never been activated**; it is read at import, so activation needs a
+   process restart, which is a separate operation under its own approval.
+   Production runs release `stage11-56677a9`: the whole semantic review API
+   and both frontend surfaces are undeployed. "Delivered" here means the
+   repository contains it and its tests pass — it does not mean any reviewer
+   can use it. `tests/test_semantic_review_routes_postgresql.py::test_the_whole_surface_is_absent_when_the_flag_is_off`
+   is what that state looks like from outside.
+2. **`ConceptClassificationAssignment` has a queue read and no decision
+   route.** WP1.4 renders that queue read-only and says why
+   (`frontend/src/semanticReview.test.js::"renders concept classifications
+   read-only, because the API exposes no decision for them"`). Criterion 1
+   says "can see", which this satisfies; the asymmetry between the five
+   queues is nonetheless real and belongs on the record.
+3. **External mappings are not in the revision detail**, by
+   `SymbolRevisionSemanticStateResponse`'s own decision. A mapping hangs off
+   a concept, and choosing which of an assigned concept's mappings are "this
+   revision's" would assert a relationship the model does not hold. They are
+   reviewed in their own queue instead.
+4. **The 132 backfilled rows can be seen, rejected and re-proposed, but never
+   verified** — §12.3's `ck_symbol_revision_classifications_backfill_not_verified`
+   is a database CHECK, not a policy. The re-proposal remedy became reachable
+   only with the 2026-09-14 amendment (`2c1aab1`); before it, the queue's own
+   `mustRepropose` advice named an act no route could carry out.
+5. **The classification preview is a forecast, not recorded state** (Q9), and
+   the organisation-page panel is **absent** for a session the router would
+   refuse (Q10). Neither is a claim about what the system has recorded, and
+   the UI says so in words: `frontend/src/reviewSemanticPreview.test.js::"says
+   plainly that it is a forecast of the approval and not recorded state"`.
+6. **Two defects are carried, not fixed. Both need scheduling.**
+   - `propose_external_mapping` lets a duplicate active mapping escape as a
+     500 rather than a 409 or 422 (recorded by the 2026-09-14 amendment). Not
+     reachable from any UI.
+   - `ensure_approved_child_symbol_revision` passes
+     `load_child_classification_record` the child's position among the
+     *approved* children, so approving only some children of a split sheet
+     can match a child against another child's `symbol_region_index`
+     (recorded by WP1.5). This one is in the approval path and is reachable.
+7. **A bare Platform Administrator meets a 403, not a 404** — decision Q2's
+   role boundary, reached before the tenant predicate. It is not a §14.2
+   disclosure (the same 403 answers for a row that does not exist), but it
+   does mean the product's most privileged *role* cannot read the semantic
+   review surface without also holding the global `admin`/`reviewer` role.
+   Whether that is the intended operator model is a product question this
+   package did not open. Pinned by
+   `tests/test_semantic_review_tenant_matrix_postgresql.py::test_a_bare_platform_administrator_meets_the_role_boundary_not_the_tenant_one`.
+8. **Out of scope and unchanged:** `provenance_assessments` and the §13.1
+   publication-gate evaluation (SM-P1-06's); the Industry/Application and
+   process-category schemes (Chris's separate research — no scheme is seeded
+   by anything in SM-P1-01); the *specification's* §7.3
+   `SemanticConceptRelationship`, which is in no work package (§1.6 of this
+   plan); and the cross-target "open proposals" query (§1.8).
+
+### 7.3 Gate totals
+
+Each gate was run **once, on the final bytes**, after §3's matrix was green.
+The arithmetic, not "no regression":
+
+| Gate | Baseline (after WP1.5) | WP1.6 | Delta |
+|---|---|---|---|
+| Backend portable partition | 3988 passed / 3 skipped / 3 deselected (1448s) | **4064 passed / 3 skipped / 3 deselected** (1423.59s) | **+76**, and 76 is exactly what the two new files collect — 32 in `test_semantic_review_tenant_matrix.py` and 44 in `test_semantic_review_tenant_matrix_postgresql.py`. 3988 + 32 + 44 = 4064. Skips and deselects unmoved. |
+| `npm run test:frontend` | 362 passed / 0 failed / 56 suites | **362 passed / 0 failed / 56 suites** (13.3s) | **0** — WP1.6 adds no frontend test and touches no frontend file. |
+| `npm run build` | 87 modules, `index-*.js` 651.22 kB | **87 modules, `index-*.js` 651.22 kB** | **0 modules, 0 bytes** — no source module was added or changed. The >500 kB chunk-size warning is pre-existing. |
+| `git diff --check` | — | exit 0 | clean |
+| `git diff --no-index --check /dev/null -- <path>` on both new files | — | exit 1 each | clean (exit 1 is no-difference; exit 3 would be the whitespace failure) |
+| `git status --porcelain` | `.claude/settings.local.json`, `UI-Design/` | those two, plus this plan and the two new test files | nothing else; both pre-existing items untouched |
+
+**Identity.** The backend partition was identity-stamped before and after in
+one output. `HEAD` `4cf5bc1` unchanged; `backend/symgov_backend/routes/semantic_review.py`
+`ec81e409b9e1d741…` and both new test files (`fc2340a9a50ef5f2…`,
+`8fd76cc666bf40d7…`) byte-identical across the run;
+`git status --porcelain backend/alembic` empty at both ends, head unmoved at
+`20260911_0057`.
+
+**One discrepancy, recorded rather than smoothed.** This plan's own SHA-256
+moved during the run — `46a4ecca7ef9f40b…` at the opening stamp,
+`51b3ff41c689451b…` at the closing one — because two prose corrections were
+made to §2 and §7.2 while the partition was executing, and §7.3's totals
+could only be written after it finished. No test reads this file: the
+suite's only document reader is
+`tests/test_catalog_developer_artifacts.py`, which reads `docs/catalog-api`.
+The 4064 therefore attaches to the three code paths above, all three of which
+are byte-identical across the run, and to nothing in this document.
+
+**Not done, by §6 and by the WP1.6 pack's §9.** No commit of WP1.6's own
+work, no push (`main` is ahead of `origin/main`, which is still at
+`2c1aab1`), no deployment, no service restart, no `build:publish` or
+`publish:static`, no migration, and the feature flag was not activated.
