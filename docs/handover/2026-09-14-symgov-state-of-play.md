@@ -1,0 +1,395 @@
+# Symgov — state of play and account-migration handover
+
+**Written 2026-09-14, at `615e617`, for the move to a new Claude account in a
+different Idox engineering organisation.**
+
+This document exists because a large part of what an assistant knows about
+Symgov currently lives **outside this repository** — in a Claude memory
+directory, a Hermes profile, untracked working trees, and machine-local git
+branches. None of that travels with an account, and some of it does not
+travel with a machine either. §6 is the list of what must be physically
+moved; §7 is what must be re-authorised in the new organisation.
+
+Everything here was verified against the repository and the running
+deployment on 2026-09-14. Where something is unknown, it says so rather than
+guessing.
+
+---
+
+## 1. How to use this in the new account
+
+Read this file first, then `CLAUDE.md` (repo root), then the controlling plan
+for whatever work is being resumed. This document is a **snapshot**, not a
+living contract: if it disagrees with the repository or with a plan document,
+the repository wins and this file should be corrected.
+
+It deliberately does **not** duplicate:
+
+- `CLAUDE.md` — the standing rules for working in this repo.
+- `docs/README.md` — the documentation map and classification scheme.
+- `docs/plans/` — 86 plan, kickoff and decision documents. The programme
+  history is there, not here.
+
+What it *does* carry is the knowledge that was only ever held in assistant
+memory: open defects nobody has scheduled, decisions that are settled and
+should not be re-litigated, and engineering traps that cost real time.
+
+---
+
+## 2. System state, verified 2026-09-14
+
+| Fact | Value |
+|---|---|
+| Branch / HEAD | `main` at `615e617`, level with `origin/main` |
+| Production release | `stage11-615e617`, deployed 2026-09-14 |
+| Alembic head | `20260911_0057` — sole head; the live database is at it |
+| Backend suite | 4064 passed / 3 skipped / 3 deselected (~24 min, Postgres included) |
+| Frontend suite | 362 passed / 0 failed / 56 suites |
+| `npm run build` | 87 modules, `dist/assets/index-*.js` 651.22 kB (the >500 kB chunk warning is pre-existing) |
+
+**Deployment topology** is documented in the `deploy-release` skill
+(`.claude/skills/deploy-release/SKILL.md`, tracked in git — it travels).
+Summary: release worktrees under `/data/symgov-releases/stage11-<sha>/`,
+compose at `/docker/symgov-hermes/docker-compose.yml` which hardcodes the
+release path in **four** places, containers `symgov-hermes-api`,
+`applications-web`, `symgov-postgres`, `symgov-minio`.
+
+### 2.1 What is live versus dormant
+
+The 2026-09-14 deployment shipped eleven commits — the whole of SM-P1-01 plus
+`b157e04`, none of which had been deployed since 2026-09-11.
+
+**Live and observable:** WP1.0's organisation-promotion repair. It is *not*
+flag-gated, so promoting an organisation-private symbol to the public
+catalogue now writes `symbol_revision_classifications` rows and syncs the
+legacy `GovernedSymbol.category`/`.discipline` display columns. Before this
+release it wrote neither.
+
+**Deployed but dormant:** the entire semantic review API and both UI
+surfaces. `SYMGOV_SEMANTIC_REVIEW_ENABLED` is **unset** in
+`/docker/symgov-hermes/docker-compose.yml`, so the flag is false and
+`/api/v1/semantic-review/*` answers **404** — absent rather than forbidden, so
+the surface does not advertise itself. Verified three ways on the running
+container.
+
+To activate: add `SYMGOV_SEMANTIC_REVIEW_ENABLED=true` to the compose
+`environment` block and `docker compose -f … up -d symgov-api`. The flag is
+read at **import**, so it needs that restart; it needs no rebuild and no
+migration. **This has never been switched on in production**, and the 132
+backfilled classification rows would be the surface's first real population.
+
+---
+
+## 3. Programme status
+
+**SM-P0-01 … SM-P0-10 — complete and deployed.** The semantic model data
+layer: concepts, revisions, semantic assignments, classification schemes and
+assignments, source packages, rights records, asset transformations, the
+publication gate, and the classification backfill.
+
+**SM-P1-01 — complete in the repository, not in effect.** WP1.0 through WP1.6,
+delivered 2026-09-12 to 2026-09-14. Controlling plan:
+`docs/plans/2026-09-12-sm-p1-01-semantic-review-implementation-plan.md`, whose
+**§7 is the acceptance pass** against the specification's §16.1 criteria and
+is the most useful single thing to read about what this package does and does
+not close.
+
+The distinction matters and should be repeated to anyone picking this up:
+*delivered* means the repository contains it and its tests pass. Because the
+flag has never been activated, **no reviewer has ever used this surface.**
+
+**Not started:** SM-P1-02 onward, and SM-P2-01/-02 authoritative ingestion.
+Note the standing advice in §5 below — do not plan an ingestion connector
+before the review surface is actually in use, or the first ingest is
+all-waiver or all-blocked.
+
+---
+
+## 4. Open defects and unfinished business
+
+None of these is assigned to a work package. All were measured, not
+suspected.
+
+### 4.1 Carried defects in SM-P1-01 (recorded, deliberately not fixed)
+
+1. **`propose_external_mapping` lets a duplicate active mapping escape as a
+   500** rather than a 409 or 422. Recorded by the 2026-09-14 amendment. Not
+   reachable from any UI, so low urgency.
+2. **`ensure_approved_child_symbol_revision` passes the wrong child index.**
+   It gives `load_child_classification_record` the child's position among the
+   *approved* children, so approving only some children of a split sheet can
+   match a child against another child's `symbol_region_index`. This one is
+   in the live approval path and **is** reachable. Recorded by WP1.5.
+
+### 4.2 Pre-existing defects found during the semantic-model work
+
+3. **Catalogue facet over-matching.** `catalog_search.catalog_symbol_filters`
+   unconditionally ORs a `payload_json` substring match into every facet, so
+   filtering the public catalogue by category `Equipment` or discipline
+   `Process` returns **all 84** published symbols — the facets exclude
+   nothing. Measured 2026-09-11 against production. The likely fix (prefer a
+   governed assignment where the revision has one, fall back to text
+   otherwise) is a behaviour change to the legacy path and needs its own
+   decision, not a quiet tightening. **Do not treat facet counts for those two
+   values as meaningful until this is fixed.**
+4. **`classification_records.industry` is effectively dead.** One writer
+   (`scripts/run_libby_classification.py`), no editor, four hard-coded values
+   — three of which are discipline names duplicating the
+   `ENGINEERING-DISCIPLINE` scheme, and the fourth
+   (`general_industry`) is already listed in `automation_policy.py`'s
+   `PLACEHOLDER_DISCIPLINES` as an absence of a value. The vision LLM never
+   writes it and reviewers cannot edit it, so a wrong value written at intake
+   stays wrong forever. Logged at Chris's instruction in
+   `docs/plans/2026-09-11-classification-industry-field-defect.md`. **Open and
+   unscoped:** whether `industry` is an axis at all, or should be retired in
+   favour of the scheme it duplicates.
+
+### 4.3 Structural gaps
+
+5. **Three of five seeded classification schemes have no writer and no
+   reader** — `USE-CASE`, `DOCUMENT-TYPE`, `REPRESENTATION-TYPE`. Decision Q6
+   of SM-P1-01 deliberately kept them read-only in v1.
+6. **The specification's §7.3 `SemanticConceptRelationship` has no table and
+   is in no work package.** The spec describes it as P0-shaped, but it appears
+   in no §15.1 row. It is why `plan_classification_mapping` can only record
+   `parentEquipmentClass` as a `no_relationship_table` gap. This is a missing
+   P0 table, not a deferral.
+7. **`publication_gate_evaluations` is write-only.** Every publication records
+   all six §13.1 dimensions and nothing reads the table. It is SM-P1-06's data
+   source and is already accumulating.
+8. **The publication gate's scope is unreachable in production.** It fires
+   only on `package_type='authoritative_library'`, and `register_source_package`
+   — the only creator of one — is called from tests only. So the gate is
+   `not_in_scope` for 100% of production traffic.
+9. **`ConceptClassificationAssignment` has a queue read and no decision
+   route.** WP1.4 renders that queue read-only for this reason.
+
+### 4.4 Unknown, and worth establishing
+
+10. **Nobody has written down what database role the deployment actually runs
+    as.** The narrow `symgov_app` role was measured to have *no* privilege on
+    `governed_symbols`, `symbol_revisions`, `source_packages` or any
+    semantic-model table, yet the live intake path writes them on every
+    submission — so `symgov_app` is demonstrably not the role production uses
+    for the core tables. Three production failures on 2026-09-07 came out of
+    this same blind spot. **Consequence for new work:** a new semantic-model
+    table should carry **no** `GRANT`; that matches SM-P0-04 through -08, and
+    adding one would be the anomaly.
+
+---
+
+## 5. Settled decisions — do not re-litigate
+
+Approved by Chris on the dates shown. Re-opening any of these has cost
+sessions before.
+
+- **2026-09-09, the specification's §17 register, approved in full.** Concept
+  governance is **platform-level initially** (organisation-scoped concepts
+  deferred, not rejected). Multilingual `ConceptTerm` deferred; aliases stay
+  JSONB in P0. **No graph database** for P0/P1 — PostgreSQL only; RDF/JSON-LD
+  is P2.
+- **Rights persistence: no durable model existed, so SM-P0-06 created one.**
+  Verified across all 80 tables: `provenance_assessments` is intake-scoped and
+  `hannah_photo_candidates.rights_status` is candidate-scoped; neither binds
+  rights to a governed symbol or revision. **Do not re-litigate this as
+  "extend the existing model".**
+- **2026-09-11, no Industry/Application scheme is seeded.** ICS
+  (International Classification for Standards, ISO edition 7) is the intended
+  source *when the scheme is eventually created*. **Chris is investigating ICS
+  licensing separately and this is to be picked up in a later discussion — the
+  scheme must not be created until that returns.** Both alternatives (the ISO
+  14617 application-area list; Chris supplying nodes himself) were offered and
+  declined. Seeding "from the distinct values already in the column" is closed,
+  not merely unattractive — see defect 4 above.
+- **The process-category vocabulary is likewise Chris's separate research**
+  and out of scope for everything delivered so far.
+- **SM-P1-01's decisions Q1–Q10 are all resolved** and recorded in §4 of its
+  plan. In particular: the review surface is standalone (Q1); concept
+  lifecycle is platform-admin, symbol/classification/mapping decisions are
+  `admin` or `reviewer` (Q2); the flag ships default-off (Q3); the three
+  unused schemes stay read-only (Q6); no route takes step-up re-authentication
+  (Q8); the classification preview is a forecast and must never be presented
+  as recorded state (Q9); the organisation panel is absent rather than
+  erroring for a session the router would refuse (Q10).
+- **CFIHOS may help with `parentEquipmentClass` later** — its 832 equipment
+  classes and 875 tag classes are the likely vocabulary once SM-P2-02 imports
+  them.
+
+---
+
+## 6. What lives OUTSIDE this repository
+
+**This is the section that matters for the move.** Everything below is real,
+current and would be lost or silently degraded if the machine or account
+changed without action.
+
+### 6.1 Assistant memory — 25 files, not in git
+
+`/root/.claude/projects/-docker-openclaw-hz0t-data-symgov/memory/`
+
+Twenty-five files (132 KB on disk, index included) of settled decisions,
+delivery records, defect measurements and engineering traps, accumulated
+2026-09-06 to 2026-09-14, with an index at `MEMORY.md`. **The durable content has been distilled into §3–§5 and §8 of
+this document**, but the per-package delivery records and their reasoning are
+not reproduced here. Copy the directory wholesale if the new account should
+inherit the full history.
+
+### 6.2 Hermes skill profile — not in git
+
+`/root/.hermes/profiles/symgov/skills/symgov/` holds six skills that every
+stage from 4 onward was delivered with:
+
+| Skill | Role |
+|---|---|
+| `symgov-programme-planning` | produced every stage implementation-plan doc |
+| `symgov-feature-implementation` | the delivery skill — worktree discipline, TDD, evidence separation |
+| `symgov-product-planning` | smaller external proposals → testable backlogs |
+| `symgov-release-operations` | integrate / verify / push / migrate / deploy / smoke-test |
+| `symgov-uncommitted-worktree-integration` | exactly the skill for §6.4 below |
+| `api-catalog-authentication` | Catalog API auth specifics |
+
+The in-repo `deploy-release` skill (`.claude/skills/deploy-release/SKILL.md`)
+**is** tracked and travels with git; these six do not.
+
+### 6.3 `UI-Design/` — 488 KB, untracked and *not* gitignored
+
+The Idox design system from Dave Gibson: `design-tokens.css`,
+`component-examples.html`, `idox-design-system.md`, a dist zip, plus his
+written instructions and a UI prompt document. `CLAUDE.md` says to leave it
+untouched, and every session has. It is **not** in `.gitignore` — it is simply
+uncommitted, so it exists only on this machine.
+
+### 6.4 Uncommitted work in a side worktree — the largest single risk
+
+`/docker/openclaw-hz0t/data/symgov-stage6-fixes`, branch
+`fix/stage6-review-remediation-20260902`.
+
+The branch tip (`bcf581c`) has **zero commits not already in `main`** — so the
+branch itself carries nothing. The value is entirely in the **uncommitted
+working tree**: ~1022 insertions across 14 tracked files, plus four untracked
+new modules including `backend/symgov_backend/symbol_identity.py` and
+`symbol_eligibility.py`. Triaged 2026-09-06 as *not* abandoned exploration but
+substantially working, mostly-additive unshipped code. Three pieces were
+judged worth porting on their own merits:
+
+- category/discipline/format search filters on `GET /builder-search`
+  (`main` takes only `q`);
+- human-readable `displayId` surfacing — directly relevant to `CLAUDE.md`'s
+  rule that human-readable symbol IDs stay prominent, which `main` does not
+  satisfy on these responses today;
+- an optimistic-concurrency (ETag/428) guard on
+  `symbol_set_service.replace_items`, guarding a real lost-update race `main`
+  does not.
+
+**There is no second copy of this anywhere.** It is not committed, not
+pushed, and not on any remote.
+
+### 6.5 Local-only git branches — no remote counterpart
+
+These exist on this machine and nowhere else:
+
+```
+docs/current-state-refresh-20260730             510844d
+fix/stage6-review-remediation-20260902          bcf581c
+hermes/langfuse-items-4-5                       19dd58b
+integration/stage11-wp11.1-worktree-integration 3c790be
+merge/llm-consumption-into-main                 47f25bc
+```
+
+### 6.6 Production configuration and secrets
+
+`/docker/symgov-hermes/.env` — mode 0600, seven telemetry variables that exist
+**only** there. Deploying with them empty silently blanks the Langfuse
+credentials, which is why the deploy procedure requires
+`docker compose config | grep -c '\${'` to return **0**. Do not delete this
+file; do not commit it.
+
+Also outside git: `/data/symgov-backups/` (pg_dump custom-format dumps) and
+`/data/symgov-releases/` (release worktrees, including the rollback target).
+
+---
+
+## 7. Account-bound items needing re-authorisation in the new organisation
+
+These are tied to the Claude account/organisation rather than the machine, and
+will need setting up again:
+
+- **MCP connectors** — Atlassian Rovo (Jira/Confluence), Aha!, Microsoft 365.
+  All are OAuth-bound to the current organisation.
+- **Any published Artifacts** created under the old account remain owned by
+  it; they cannot be updated from the new account and would need republishing.
+- **`.claude/settings.local.json`** is tracked but carries a local
+  modification that has been deliberately left uncommitted through every
+  session in this programme. Review it before assuming it should travel.
+- **Scheduled tasks / cron agents**, if any were registered under the old
+  account.
+
+---
+
+## 8. Engineering traps — read before writing tests or migrations
+
+Each of these fails in a way that looks like a product defect but is not.
+
+**Portable (SQLite) route tests — four fixture traps:**
+
+1. `app.routes` exposes **no paths** — this FastAPI version keeps lazy
+   `_IncludedRouter` objects, so a mount assertion against `route.path`
+   passes *vacuously*. Use `create_app().openapi()["paths"]`.
+2. **I-20 feature flags cannot be re-read at runtime.** They are dataclass
+   field defaults evaluated once at import; `monkeypatch.setenv` plus
+   re-instantiation will not flip one.
+3. **Platform Admin is not a role assignment.** It needs an active
+   `platform_admin` `PlatformRoleAssignment` **plus** an `admin` base role in
+   the `symgov` organisation itself, that org must be in
+   `organization_pilot_codes`, its code must be lowercase `symgov` with
+   `is_protected=True` at INSERT, and the membership and assignment must land
+   in one transaction.
+4. **Global roles need a `plus` subscription.** `upsert_user(…, roles=[…])` on
+   a fresh user silently stores nothing. Create, upgrade
+   `UserSubscription.tier` to `plus`, then `upsert_user` again with the roles.
+
+Also: `governed_symbols.visibility` is `organization_private`, not
+`organization`.
+
+**A trap added 2026-09-14:** a *bare* Platform Administrator holds no global
+`admin`/`reviewer` role, so every semantic-review route answers **403** before
+the tenant predicate is reached. Any tenant-isolation probe using a platform
+admin must also grant the global role, or it is testing the authorisation
+boundary while believing it tested tenant isolation.
+
+**The SQLite boundary.** The five `semantic_review.list_open_*` queue queries
+**cannot execute on SQLite at all** — `_CONCEPT_DISPLAY_NAME` is a correlated
+subquery whose `ORDER BY` references the outer `semantic_concepts` row, and
+SQLite reports `no such column: semantic_concepts.current_revision_id` even
+though the column exists. This is a capability limit, not a fixture gap.
+**Never try to make these run in the portable partition** — stub them and put
+the assertion in the `_postgresql.py` file.
+
+**PostgreSQL's 63-character identifier limit** bites migrations two ways: an
+explicit name to `create_foreign_key`/`create_index` raises `IdentifierError`
+and fails the upgrade outright, while a name to `sa.CheckConstraint(name=…)`
+is **silently truncated** with a 4-char hash suffix. Pass a **bare**
+constraint name (`name="status"`, not `name="ck_semantic_concepts_status"`)
+and let `NAMING_CONVENTION` add the prefix. The ORM/DB drift this caused was
+fully repaired by `20260909_0050` and `c373972`; three `_postgresql.py` suites
+assert it stays repaired.
+
+**Test invocation.** `scripts/test-backend.sh` bounds the portable partition
+at `timeout 300s`, which expires at ~53% on this host — a harness limit, not a
+product regression. Run the partition directly with a longer bound; it takes
+~24 minutes.
+
+---
+
+## 9. Standing advice
+
+- **Check whether a code path can create a `verified` row before designing
+  anything that reads one.** This was the same root cause in five separate
+  places: the P0 data model was complete while the entry points were not, so
+  anything gated on a human governance act was inert on delivery. SM-P1-01 is
+  the unblocker — but only once its flag is on.
+- **Do not plan an authoritative-ingestion connector (SM-P2-01/-02) before
+  the review surface is genuinely in use**, or the first ingest is
+  all-§9.2-waiver or all-blocked.
+- **"Delivered" and "in effect" are different claims.** Say which one is
+  meant.

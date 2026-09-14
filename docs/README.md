@@ -15,6 +15,7 @@ The machine-readable file-by-file inventory is [`audit-current-state.json`](audi
 
 ## Canonical current documentation
 
+- [State of play and account-migration handover](handover/2026-09-14-symgov-state-of-play.md) — **start here when resuming Symgov in a new session or account.** Current system state, open defects, settled decisions, engineering traps, and the inventory of Symgov knowledge that lives outside this repository and must be migrated by hand.
 - [Repository overview](../README.md) — source-backed product and implementation overview, quality gates, and deployment boundary.
 - [Product brief](../symgov-product-brief.md) — product purpose, users, boundaries, and £50/year commercial context.
 - [Governance architecture](../symgov-governance-architecture.md) — domain and API architecture; draft/recommended sections remain explicitly non-implemented guidance.
