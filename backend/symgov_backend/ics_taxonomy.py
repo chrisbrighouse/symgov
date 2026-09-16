@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
+import httpx2
 
 from sqlalchemy.orm import Session
 from sqlalchemy import text
@@ -163,7 +163,7 @@ def fetch_official(*, transport=None) -> tuple[bytes, datetime, str | None]:
     """One fixed TLS endpoint; no redirect, proxy, retry or unbounded response."""
     deadline = time.monotonic() + 30
     try:
-        with httpx.Client(transport=transport, verify=True, trust_env=False,
+        with httpx2.Client(transport=transport, verify=True, trust_env=False,
                           follow_redirects=False, timeout=10) as client:
             with client.stream("GET", SOURCE["source_url"], headers={"Accept-Encoding": "identity"}) as response:
                 if response.status_code != 200:
@@ -176,7 +176,7 @@ def fetch_official(*, transport=None) -> tuple[bytes, datetime, str | None]:
                     if len(content) > MAX_BYTES or time.monotonic() > deadline:
                         raise ValueError("Official ICS download exceeds size/time limit")
                 return bytes(content), datetime.now(timezone.utc), response.headers.get("last-modified")
-    except httpx.HTTPError:
+    except httpx2.HTTPError:
         raise ValueError("Official ICS download failed") from None
 
 

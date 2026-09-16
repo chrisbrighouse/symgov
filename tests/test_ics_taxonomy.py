@@ -3,7 +3,7 @@ import importlib
 import importlib.util
 
 import pytest
-import httpx, uuid
+import httpx2, uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -76,7 +76,7 @@ def test_fetch_is_bounded_and_does_not_follow_redirects(status, headers, body):
     requests = []
     def handler(request):
         requests.append(str(request.url))
-        return httpx.Response(status, headers=headers, content=body)
+        return httpx2.Response(status, headers=headers, content=body)
     with pytest.raises(ValueError):
-        api.fetch_official(transport=httpx.MockTransport(handler))
+        api.fetch_official(transport=httpx2.MockTransport(handler))
     assert requests == [api.SOURCE["source_url"]]
