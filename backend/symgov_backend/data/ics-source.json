@@ -1,0 +1,15 @@
+{
+  "dataset": "iso_ics",
+  "edition": 7,
+  "publication_year": 2015,
+  "source_update_year": 2025,
+  "sha256": "67e27bdc6559289c0d576e7b7b0b07023bc054ed87b907cdedf937e3c95e7434",
+  "source_url": "https://isopublicstorageprod.blob.core.windows.net/opendata/_latest/iso_ics/csv/ICS.csv",
+  "page_url": "https://www.iso.org/open-data.html",
+  "browse_url": "https://www.iso.org/standards-catalogue/browse-by-ics.html",
+  "license_url": "https://opendatacommons.org/licenses/by/1-0/",
+  "license": "ODC-By 1.0",
+  "attribution": "Taxonomy classification is based on the International Classification for Standards (ICS), 7th edition (2015), © ISO. Made available under the Open Data Commons Attribution License (ODC-By) v1.0.",
+  "clarification": "ICS codes are used here only as a classification taxonomy. The underlying ISO/IEC standards documents catalogued under each code are separate, copyrighted works and are not reproduced in SymGov.",
+  "limitation": "The official CSV excludes cross-references available in XML/OWL. ICS is a browse taxonomy, not ISO/IEC symbol semantics."
+}

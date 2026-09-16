@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, Numeric, PrimaryKeyConstraint, Text, UniqueConstraint, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, LargeBinary, Numeric, PrimaryKeyConstraint, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -2977,6 +2977,101 @@ class ClassificationScheme(Base):
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class ICSTaxonomyImport(Base):
+    """One immutable, replayable ISO Open Data source snapshot."""
+
+    __tablename__ = "ics_taxonomy_imports"
+    __table_args__ = (
+        CheckConstraint("edition > 0", name="edition"),
+        CheckConstraint("publication_year >= 1900", name="publication_year"),
+        CheckConstraint("source_update_year >= publication_year", name="source_update_year"),
+        CheckConstraint("content_sha256 ~ '^[0-9a-f]{64}$'", name="content_sha256"),
+        UniqueConstraint("scheme_id", "content_sha256"),
+        Index("ix_ics_taxonomy_imports_scheme_retrieved", "scheme_id", "retrieved_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    scheme_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("classification_schemes.id", ondelete="RESTRICT"), nullable=False)
+    dataset: Mapped[str] = mapped_column(Text, nullable=False)
+    edition: Mapped[int] = mapped_column(Integer, nullable=False)
+    publication_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_update_year: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    page_url: Mapped[str] = mapped_column(Text, nullable=False)
+    browse_url: Mapped[str] = mapped_column(Text, nullable=False)
+    license_url: Mapped[str] = mapped_column(Text, nullable=False)
+    license_code: Mapped[str] = mapped_column(Text, nullable=False)
+    attribution: Mapped[str] = mapped_column(Text, nullable=False)
+    clarification: Mapped[str] = mapped_column(Text, nullable=False)
+    limitation: Mapped[str] = mapped_column(Text, nullable=False)
+    retrieved_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_modified: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    source_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class ICSDomainCrosswalk(Base):
+    """A reviewable domain-to-ICS proposal, separate from semantic assignments."""
+
+    __tablename__ = "ics_domain_crosswalks"
+    __table_args__ = (
+        CheckConstraint("relation in ('broader', 'candidate')", name="relation"),
+        CheckConstraint(
+            "review_status in ('initial_broader', 'needs_review', 'approved', 'rejected')",
+            name="review_status",
+        ),
+        CheckConstraint("btrim(reason) <> '' and char_length(reason) <= 4000", name="reason"),
+        CheckConstraint(
+            "review_note is null or (btrim(review_note) <> '' and char_length(review_note) <= 4000)",
+            name="review_note",
+        ),
+        # A disposition names its reviewer and its moment, or it is not a
+        # governance record. Stating it in storage stops a raw SQL status
+        # update from producing an unattributable decision.
+        CheckConstraint(
+            "(review_status in ('initial_broader', 'needs_review')"
+            " and reviewed_by_user_id is null and reviewed_at is null and review_note is null)"
+            " or (review_status in ('approved', 'rejected')"
+            " and reviewed_by_user_id is not null and reviewed_at is not null)",
+            name="disposition_attributed",
+        ),
+        ForeignKeyConstraint(
+            ["source_node_id", "source_scheme_id"],
+            ["classification_nodes.id", "classification_nodes.scheme_id"],
+            ondelete="RESTRICT",
+            name="fk_ics_domain_crosswalks_source_node_scheme",
+        ),
+        ForeignKeyConstraint(
+            ["target_node_id", "target_scheme_id"],
+            ["classification_nodes.id", "classification_nodes.scheme_id"],
+            ondelete="RESTRICT",
+            name="fk_ics_domain_crosswalks_target_node_scheme",
+        ),
+        UniqueConstraint("import_id", "source_node_id", "target_node_id"),
+        Index("ix_ics_domain_crosswalks_source_node", "source_scheme_id", "source_node_id"),
+        Index("ix_ics_domain_crosswalks_target_node", "target_scheme_id", "target_node_id"),
+        Index("ix_ics_domain_crosswalks_import_review_status", "import_id", "review_status"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    import_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("ics_taxonomy_imports.id", ondelete="RESTRICT"), nullable=False)
+    source_scheme_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_node_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    target_scheme_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    target_node_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    relation: Mapped[str] = mapped_column(Text, nullable=False)
+    review_status: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class ClassificationNode(Base):
     """One node of a classification scheme's display hierarchy.
 
@@ -2989,7 +3084,7 @@ class ClassificationNode(Base):
     __tablename__ = "classification_nodes"
     __table_args__ = (
         CheckConstraint(
-            "node_code ~ '^[A-Z0-9][A-Z0-9_]{0,62}[A-Z0-9]$'",
+            "node_code ~ '^([A-Z0-9][A-Z0-9_]{0,62}[A-Z0-9]|[0-9]{2}[.][0-9]{3}([.][0-9]{2})?)$'",
             name="node_code",
         ),
         CheckConstraint(

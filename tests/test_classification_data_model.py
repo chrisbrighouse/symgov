@@ -567,7 +567,10 @@ def test_scheme_orm_metadata_matches_the_migration():
 
 def test_node_orm_metadata_matches_the_migration():
     assert _checks(ClassificationNode) == {
-        "ck_classification_nodes_node_code": "node_code ~ '^[a-z0-9][a-z0-9_]{0,62}[a-z0-9]$'",
+        "ck_classification_nodes_node_code": (
+            "node_code ~ '^([a-z0-9][a-z0-9_]{0,62}[a-z0-9]|"
+            "[0-9]{2}[.][0-9]{3}([.][0-9]{2})?)$'"
+        ),
         "ck_classification_nodes_preferred_label": (
             "btrim(preferred_label) <> '' and char_length(preferred_label) <= 256"
         ),
