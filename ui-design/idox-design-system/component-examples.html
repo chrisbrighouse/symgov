@@ -1,0 +1,1710 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Components</title>
+
+<!-- Tailwind CDN v4 -->
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<!-- TAILWIND ELEMENTS -->
+<script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script>
+<!-- FONT AWESOME -->
+<script src="https://kit.fontawesome.com/84881d618d.js" crossorigin="anonymous"></script>
+<!-- DM SANS FONT -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="assets/favicon180x180.png">
+<link rel="stylesheet" href="design-tokens.css">
+
+<!-- Custom tooltip CSS; no tailwind equivalent at the moment -->
+<style>
+
+  /* ── Tooltip ── */
+    [data-tooltip] { position: relative; }
+    [data-tooltip]::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      left: calc(100% + 0.625rem);
+      top: 50%;
+      transform: translateY(-50%);
+      white-space: nowrap;
+      background: var(--idox-slate-800);
+      color: var(--idox-white);
+      font-size: 0.875rem;
+      font-weight: 500;
+      line-height: 1;
+      padding: 0.3rem 0.5rem;
+      border-radius: 0.3rem;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      z-index: 9999;
+    }
+    [data-tooltip]:hover::after { opacity: 1; }
+
+
+</style>
+
+<!-- Tailwind-processed <style> for @theme config. Required due to the current CDN approach (not a proper build pipeline) -->
+<style type="text/tailwindcss">
+/* ⚠ Keep in sync with page-example.html @theme block.
+   Extraction to a shared file requires a build pipeline — not possible with the Tailwind CDN approach. */
+@theme inline {
+  --color-surface-default: var(--idox-bg-surface-default);
+  --color-surface-light:   var(--idox-bg-surface-light);
+  --color-surface-base:    var(--idox-bg-surface-base);
+  --color-surface-subtle:  var(--idox-bg-surface-subtle);
+  --color-surface-muted:   var(--idox-bg-surface-muted);
+
+  --color-primary:         var(--idox-text-primary);
+  --color-secondary:       var(--idox-text-secondary);
+  --color-tertiary:        var(--idox-text-tertiary);
+  --color-inverse:         var(--idox-text-inverse);
+  --color-brand:           var(--idox-text-brand);
+  --color-brand-accent:    var(--idox-text-brand-accent);
+
+  --color-default:         var(--idox-border-default);
+  --color-subtle:          var(--idox-border-subtle);
+  --color-strong:          var(--idox-border-strong);
+  --color-focus:           var(--idox-border-focus);
+
+  --color-link:            var(--idox-link-default);
+  --color-link-hover:      var(--idox-link-hover);
+  --color-link-active:     var(--idox-link-active);
+
+  --color-interactive-default:          var(--idox-interactive-default);
+  --color-interactive-hover:            var(--idox-interactive-hover);
+  --color-interactive-active:           var(--idox-interactive-active);
+  --color-interactive-text:          var(--idox-interactive-text);
+
+  --color-interactive-subtle:          var(--idox-interactive-subtle);
+  --color-interactive-subtle-hover:    var(--idox-interactive-subtle-hover);
+  --color-interactive-subtle-active:   var(--idox-interactive-subtle-active);
+  --color-interactive-subtle-selected: var(--idox-interactive-subtle-selected);
+
+  --color-list-hover:   var(--idox-list-hover-bg);
+  --color-list-active:  var(--idox-list-active-bg);
+
+  --color-btn-primary:        var(--idox-btn-primary);
+  --color-btn-primary-hover:  var(--idox-btn-primary-hover);
+  --color-btn-primary-active: var(--idox-btn-primary-active);
+  --color-btn-primary-text:   var(--idox-btn-primary-text);
+  --color-btn-secondary:        var(--idox-btn-secondary);
+  --color-btn-secondary-hover:  var(--idox-btn-secondary-hover);
+  --color-btn-secondary-active: var(--idox-btn-secondary-active);
+  --color-btn-secondary-text:   var(--idox-btn-secondary-text);
+
+  --color-overlay:            var(--idox-overlay-bg);
+
+  --color-disabled:          var(--idox-text-disabled);
+  --color-surface-disabled:  var(--idox-bg-disabled);
+
+  --color-navbar-bg:          var(--idox-navbar-bg);
+  --color-navbar-text:        var(--idox-navbar-text);
+  --color-navbar-hover:       var(--idox-navbar-hover);
+  --color-navbar-active:      var(--idox-navbar-active);
+  --color-navbar-icon:        var(--idox-navbar-icon);
+  --color-navbar-icon-hover:  var(--idox-navbar-icon-hover);
+
+  --color-success-bg:            var(--idox-success-bg);
+  --color-success-border:        var(--idox-success-border);
+  --color-success-icon:          var(--idox-success-icon);
+  --color-success-text:          var(--idox-success-text);
+  --color-success-heading:       var(--idox-success-heading);
+  --color-success-text-color:    var(--idox-success-text-color);
+
+  --color-warning-bg:         var(--idox-warning-bg);
+  --color-warning-border:     var(--idox-warning-border);
+  --color-warning-icon:       var(--idox-warning-icon);
+  --color-warning-text:       var(--idox-warning-text);
+  --color-warning-heading:    var(--idox-warning-heading);
+  --color-warning-text-color: var(--idox-warning-text-color);
+
+  --color-error-bg:            var(--idox-error-bg);
+  --color-error-border:        var(--idox-error-border);
+  --color-error-icon:          var(--idox-error-icon);
+  --color-error-text:          var(--idox-error-text);
+  --color-error-heading:       var(--idox-error-heading);
+  --color-error-text-color:    var(--idox-error-text-color);
+
+  --color-info-bg:            var(--idox-info-bg);
+  --color-info-border:        var(--idox-info-border);
+  --color-info-icon:          var(--idox-info-icon);
+  --color-info-text:          var(--idox-info-text);
+  --color-info-heading:       var(--idox-info-heading);
+  --color-info-text-color:    var(--idox-info-text-color);
+
+  --radius-sm:   var(--idox-radius-sm);
+  --radius-md:   var(--idox-radius-md);
+  --radius-lg:   var(--idox-radius-lg);
+  --radius-xl:   var(--idox-radius-xl);
+  --radius-full: var(--idox-radius-full);
+
+  --font-sans: var(--idox-font-family-base);
+  --font-mono: var(--idox-font-family-mono);
+
+  --text-xs:   var(--idox-font-size-xs);
+  --text-sm:   var(--idox-font-size-sm);
+  --text-base: var(--idox-font-size-base);
+  --text-lg:   var(--idox-font-size-lg);
+  --text-xl:   var(--idox-font-size-xl);
+  --text-2xl:  var(--idox-font-size-2xl);
+
+  --font-weight-normal:   var(--idox-font-weight-normal);
+  --font-weight-medium:   var(--idox-font-weight-medium);
+  --font-weight-semibold: var(--idox-font-weight-semibold);
+  --font-weight-bold:     var(--idox-font-weight-bold);
+
+  --leading-tight:   var(--idox-line-height-tight);
+  --leading-normal:  var(--idox-line-height-normal);
+  --leading-relaxed: var(--idox-line-height-relaxed);
+
+  --animate-indeterminate: indeterminate 1.5s ease-in-out infinite;
+
+  @keyframes indeterminate {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(400%); }
+  }
+}
+</style>
+
+</head>
+
+<body class="bg-surface-base text-primary font-sans">
+
+<nav class="shrink-0 sticky top-0 z-10 bg-navbar-bg text-navbar-text" aria-label="Primary navigation">
+  <div class="mx-auto px-4">
+    <div class="relative flex h-14 justify-between">
+      
+      <div class="flex flex-1 items-center sm:items-stretch">
+        <button type="button" class="flex shrink-0 items-center gap-2 rounded-lg cursor-pointer mr-12 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Uniform — home">
+          <img src="assets/idox_logo_reversed.png" alt="Idox" class="h-6 w-auto">
+          <span class="border-l border-white/50 h-7 mx-2" aria-hidden="true"></span>
+          <span class="text-lg font-semibold text-navbar-text">Uniform</span>
+        </button>
+      </div>
+
+
+    </div>
+  </div>
+</nav>
+<header class="max-w-4xl mx-auto px-8 pt-8">
+  <h1 class="text-3xl font-semibold">Component examples</h1>
+ 
+</header>
+
+<main class="max-w-4xl mx-auto px-8 py-10 space-y-14">
+
+<!-- 
+  Maintainer note: in multi-variant examples, labels are documentation only. Copyable implementation markup is only the code between ai-example-start and ai-example-end markers. 
+  -->
+
+<!-- 1. TEXT -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">1. Text</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg space-y-4">
+    <!-- ai-example-start: text-styles -->
+    <h1 class="text-2xl font-bold text-primary">Heading 1</h1>
+    <h2 class="text-lg font-semibold text-primary">Heading 2</h2>
+    <h3 class="text-base font-semibold text-primary">Heading 3</h3>
+    <p class="text-sm text-primary">A sentence of text using text-primary.</p>
+    <p class="text-sm text-secondary">A sentence of text using text-secondary.</p>
+    <p class="text-sm text-tertiary">A sentence of text using text-tertiary.</p>
+    <p class="text-sm text-primary"><strong>Strong text</strong></p>
+    <p class="text-xs text-secondary">Small text with a <a href="#" class="text-link hover:text-link-hover active:text-link-active underline rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">link</a></p>
+    <p><a href="#" class="text-sm text-link hover:text-link-hover active:text-link-active underline rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Link</a></p>
+    <!-- ai-example-end: text-styles -->
+  </div>
+</section>
+
+<!-- 2. COLOR PRIMITIVES -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">2. Color primitives</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg space-y-6">
+    <div>
+      <h3 class="text-sm font-semibold text-primary mb-3">Blue</h3>
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default">
+          <div class="h-16" style="background-color: var(--idox-blue-50);"></div>
+          <div class="p-3 text-xs"><div class="font-semibold text-primary">blue-50</div><div class="text-secondary">#f5f9fe</div></div>
+        </div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default">
+          <div class="h-16" style="background-color: var(--idox-blue-100);"></div>
+          <div class="p-3 text-xs"><div class="font-semibold text-primary">blue-100</div><div class="text-secondary">#ecf3fe</div></div>
+        </div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default">
+          <div class="h-16" style="background-color: var(--idox-blue-200);"></div>
+          <div class="p-3 text-xs"><div class="font-semibold text-primary">blue-200</div><div class="text-secondary">#d2e4fe</div></div>
+        </div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default">
+          <div class="h-16" style="background-color: var(--idox-blue-300);"></div>
+          <div class="p-3 text-xs"><div class="font-semibold text-primary">blue-300</div><div class="text-secondary">#9cc2fc</div></div>
+        </div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default">
+          <div class="h-16" style="background-color: var(--idox-blue-400);"></div>
+          <div class="p-3 text-xs"><div class="font-semibold text-primary">blue-400</div><div class="text-secondary">#67a0fb</div></div>
+        </div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default">
+          <div class="h-16" style="background-color: var(--idox-blue-500);"></div>
+          <div class="p-3 text-xs"><div class="font-semibold text-primary">blue-500</div><div class="text-secondary">#207ff4</div></div>
+        </div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default">
+          <div class="h-16" style="background-color: var(--idox-blue-600);"></div>
+          <div class="p-3 text-xs"><div class="font-semibold text-primary">blue-600</div><div class="text-secondary">#195fd2</div></div>
+        </div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default">
+          <div class="h-16" style="background-color: var(--idox-blue-700);"></div>
+          <div class="p-3 text-xs"><div class="font-semibold text-primary">blue-700</div><div class="text-secondary">#1241b2</div></div>
+        </div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default">
+          <div class="h-16" style="background-color: var(--idox-blue-800);"></div>
+          <div class="p-3 text-xs"><div class="font-semibold text-primary">blue-800</div><div class="text-secondary">#0a1f8f</div></div>
+        </div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default">
+          <div class="h-16" style="background-color: var(--idox-blue-900);"></div>
+          <div class="p-3 text-xs"><div class="font-semibold text-primary">blue-900</div><div class="text-secondary">#050f48</div></div>
+        </div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default">
+          <div class="h-16" style="background-color: var(--idox-blue-950);"></div>
+          <div class="p-3 text-xs"><div class="font-semibold text-primary">blue-950</div><div class="text-secondary">#00050f</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <h3 class="text-sm font-semibold text-primary mb-3">Slate</h3>
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default"><div class="h-16" style="background-color: var(--idox-slate-50);"></div><div class="p-3 text-xs"><div class="font-semibold text-primary">slate-50</div><div class="text-secondary">#f8fafc</div></div></div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default"><div class="h-16" style="background-color: var(--idox-slate-100);"></div><div class="p-3 text-xs"><div class="font-semibold text-primary">slate-100</div><div class="text-secondary">#f1f5f9</div></div></div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default"><div class="h-16" style="background-color: var(--idox-slate-200);"></div><div class="p-3 text-xs"><div class="font-semibold text-primary">slate-200</div><div class="text-secondary">#e2e8f0</div></div></div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default"><div class="h-16" style="background-color: var(--idox-slate-300);"></div><div class="p-3 text-xs"><div class="font-semibold text-primary">slate-300</div><div class="text-secondary">#cbd5e1</div></div></div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default"><div class="h-16" style="background-color: var(--idox-slate-400);"></div><div class="p-3 text-xs"><div class="font-semibold text-primary">slate-400</div><div class="text-secondary">#94a3b8</div></div></div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default"><div class="h-16" style="background-color: var(--idox-slate-500);"></div><div class="p-3 text-xs"><div class="font-semibold text-primary">slate-500</div><div class="text-secondary">#627288</div></div></div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default"><div class="h-16" style="background-color: var(--idox-slate-600);"></div><div class="p-3 text-xs"><div class="font-semibold text-primary">slate-600</div><div class="text-secondary">#475569</div></div></div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default"><div class="h-16" style="background-color: var(--idox-slate-700);"></div><div class="p-3 text-xs"><div class="font-semibold text-primary">slate-700</div><div class="text-secondary">#334155</div></div></div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default"><div class="h-16" style="background-color: var(--idox-slate-800);"></div><div class="p-3 text-xs"><div class="font-semibold text-primary">slate-800</div><div class="text-secondary">#1e293b</div></div></div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default"><div class="h-16" style="background-color: var(--idox-slate-900);"></div><div class="p-3 text-xs"><div class="font-semibold text-primary">slate-900</div><div class="text-secondary">#0f172a</div></div></div>
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default"><div class="h-16" style="background-color: var(--idox-slate-950);"></div><div class="p-3 text-xs"><div class="font-semibold text-primary">slate-950</div><div class="text-secondary">#020617</div></div></div>
+      </div>
+    </div>
+
+    <div>
+      <h3 class="text-sm font-semibold text-primary mb-3">Base</h3>
+      <div class="grid grid-cols-1 sm:grid-cols-5 gap-3">
+        <div class="rounded-lg overflow-hidden border border-default bg-surface-default"><div class="h-16" style="background-color: var(--idox-white);"></div><div class="p-3 text-xs"><div class="font-semibold text-primary">white</div><div class="text-secondary">#ffffff</div></div></div>
+       
+    </div>
+  </div>
+</section>
+
+<!-- 3. TEXT INPUT -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">3. Text input</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: text-input-default -->
+    <label for="uprn" class="block mb-1 text-sm font-medium text-secondary">UPRN</label>
+    <input id="uprn" name="uprn" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary placeholder:text-tertiary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" placeholder="e.g. 123456789012" />
+    <!-- ai-example-end: text-input-default -->
+  </div>
+</section>
+
+<!-- 4. ERROR INPUT -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">4. Text input — error</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: text-input-error -->
+    <label for="appNo" class="block mb-1 text-sm font-medium text-secondary">
+      App. No. <span class="text-error-icon">*</span>
+    </label>
+
+  <input id="appNo" name="appNo" aria-invalid="true" aria-describedby="appNoError" class="w-full rounded-lg border border-error-border bg-surface-default px-3 py-1.5 text-sm text-primary focus:outline-none focus:ring-1 focus:ring-error-border focus:border-error-border" value="14/RUGD/BBB" />
+
+    <p id="appNoError" class="mt-1 text-error-icon text-sm font-medium flex items-center gap-1"><i class="fa-light fa-circle-exclamation" aria-hidden="true"></i>Format incorrect. Hint: ##/#####/##</p>
+    <!-- ai-example-end: text-input-error -->
+  </div>
+</section>
+
+<!-- 5. HINT TEXT -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">5. Hint text</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: text-input-hint -->
+    <label for="appNoHint" class="block mb-1 text-sm font-medium text-secondary">App. No.</label>
+    <input id="appNoHint" name="appNoHint" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" />
+    <p class="mt-1 text-sm text-tertiary">Format: ##/#####/##</p>
+    <!-- ai-example-end: text-input-hint -->
+  </div>
+</section>
+
+<!-- 6. PREFIX INPUT -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">6. Prefix input</h2>
+
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div data-variant-id="prefix-input-text" data-variant-label="Text prefix">
+        <p class="mb-2 text-xs text-tertiary mb-4">Text prefix</p>
+        <label for="mapRefEasting" class="block mb-1 text-sm font-medium text-secondary">Map ref. Easting</label>
+        <!-- ai-example-start: prefix-input-text -->
+        <div class="relative w-full max-w-xs">
+          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-tertiary text-sm">E</span>
+          <input id="mapRefEasting" name="mapRefEasting" class="w-full rounded-lg border border-strong bg-surface-default pl-7 pr-3 py-1.5 text-sm text-primary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" />
+        </div>
+        <!-- ai-example-end: prefix-input-text -->
+      </div>
+
+      <div data-variant-id="prefix-input-icon" data-variant-label="Icon prefix">
+        <p class="mb-2 text-xs text-tertiary mb-4">Icon prefix</p>
+        <label for="plotFilter" class="block mb-1 text-sm font-medium text-secondary">Plot filter</label>
+        <!-- ai-example-start: prefix-input-icon -->
+        <div class="relative w-full max-w-xs">
+          <i class="fa-light fa-magnifying-glass absolute left-2.5 top-1/2 -translate-y-1/2 text-tertiary text-base pointer-events-none" aria-hidden="true"></i>
+          <input id="plotFilter" name="plotFilter" type="text" placeholder="Filter plots..." class="w-full rounded-lg border border-strong bg-surface-default pl-9 pr-3 py-1.5 text-sm text-primary placeholder:text-tertiary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" />
+        </div>
+        <!-- ai-example-end: prefix-input-icon -->
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 7. INPUT WITH ACTION BUTTON -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">7. Input with action button</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: input-action-button -->
+    <label for="applicantName" class="block mb-1 text-sm font-medium text-secondary">Applicant</label>
+    <div class="relative w-full max-w-sm">
+      <input id="applicantName" name="applicantName" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 pr-9 text-sm text-primary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus">
+      <button type="button" class="absolute inset-y-0 right-0 w-9 rounded-r-lg flex items-center justify-center text-secondary hover:text-primary active:text-tertiary cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Add applicant"><i class="fa-light fa-plus text-base" aria-hidden="true"></i></button>
+    </div>
+    <!-- ai-example-end: input-action-button -->
+  </div>
+</section>
+
+<!-- 8. SELECT -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">8. Select menu</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: select-default -->
+    <label for="status" class="block mb-1 text-sm font-medium text-secondary">Status</label>
+    <div class="relative w-full">
+      <select id="status" name="status" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary appearance-none focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus cursor-pointer">
+      <option>REC – Received</option>
+      <option>CMP – Complete</option>
+      </select>
+      <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none text-[10px]" aria-hidden="true"></i>
+    </div>
+    <!-- ai-example-end: select-default -->
+  </div>
+</section>
+
+<!-- 9. DATE PICKER -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">9. Date picker</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: date-picker -->
+    <label for="receivedDate" class="block mb-1 text-sm font-medium text-secondary">Received date</label>
+    <div class="relative w-72">
+      <div class="relative">
+        <input id="receivedDate" name="receivedDate" type="text" class="date-input w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 pr-9 text-sm text-primary placeholder:text-tertiary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" value="26/04/2026" placeholder="dd/mm/yyyy" />
+        <button type="button" class="absolute inset-y-0 right-0 w-9 flex items-center rounded-r-lg justify-center text-secondary hover:text-primary active:text-tertiary cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Open date picker"><i class="fa-light fa-calendar text-base" aria-hidden="true"></i></button>
+      </div>
+      <!-- Date picker panel -->
+      <div class="mt-1 w-72 rounded-lg border border-default bg-surface-default shadow-lg overflow-hidden">
+
+      <!-- Month nav header -->
+      <div class="flex items-center justify-between px-3 py-2 border-b border-subtle">
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Previous month">
+          <i class="fa-light fa-chevron-left text-xs" aria-hidden="true"></i>
+        </button>
+        <span class="text-sm font-semibold text-primary">April 2026</span>
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Next month">
+          <i class="fa-light fa-chevron-right text-xs" aria-hidden="true"></i>
+        </button>
+      </div>
+
+      <!-- Calendar grid -->
+      <div class="p-3">
+
+        <!-- Day-of-week header and week rows -->
+        <div role="grid" aria-label="April 2026" class="grid grid-cols-7 gap-y-0.5">
+
+          <div role="row" class="contents">
+            <span role="columnheader" aria-label="Monday" class="text-center text-xs font-medium text-tertiary py-1">Mo</span>
+            <span role="columnheader" aria-label="Tuesday" class="text-center text-xs font-medium text-tertiary py-1">Tu</span>
+            <span role="columnheader" aria-label="Wednesday" class="text-center text-xs font-medium text-tertiary py-1">We</span>
+            <span role="columnheader" aria-label="Thursday" class="text-center text-xs font-medium text-tertiary py-1">Th</span>
+            <span role="columnheader" aria-label="Friday" class="text-center text-xs font-medium text-tertiary py-1">Fr</span>
+            <span role="columnheader" aria-label="Saturday" class="text-center text-xs font-medium text-tertiary py-1">Sa</span>
+            <span role="columnheader" aria-label="Sunday" class="text-center text-xs font-medium text-tertiary py-1">Su</span>
+          </div>
+
+          <!-- Week 1: 1 Apr starts on Wednesday (col 3) -->
+          <div role="row" class="contents">
+            <span role="gridcell"></span><span role="gridcell"></span>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="1 April 2026">1</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="2 April 2026">2</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="3 April 2026">3</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="4 April 2026">4</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="5 April 2026">5</button>
+          </div>
+
+          <!-- Week 2 -->
+          <div role="row" class="contents">
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="6 April 2026">6</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="7 April 2026">7</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="8 April 2026">8</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="9 April 2026">9</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="10 April 2026">10</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="11 April 2026">11</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="12 April 2026">12</button>
+          </div>
+
+          <!-- Week 3 -->
+          <div role="row" class="contents">
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="13 April 2026">13</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="14 April 2026">14</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="15 April 2026">15</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="16 April 2026">16</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="17 April 2026">17</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="18 April 2026">18</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="19 April 2026">19</button>
+          </div>
+
+          <!-- Week 4 -->
+          <div role="row" class="contents">
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="20 April 2026">20</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="21 April 2026">21</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="22 April 2026">22</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm font-semibold text-interactive-default ring-1 ring-interactive-default hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="23 April 2026" aria-current="date">23</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="24 April 2026">24</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="25 April 2026">25</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm font-semibold bg-interactive-default text-interactive-text hover:bg-interactive-hover active:bg-interactive-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="26 April 2026" aria-selected="true">26</button>
+          </div>
+
+          <!-- Week 5 -->
+          <div role="row" class="contents">
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="27 April 2026">27</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="28 April 2026">28</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="29 April 2026">29</button>
+            <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="30 April 2026">30</button>
+            <span role="gridcell"></span><span role="gridcell"></span><span role="gridcell"></span>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Footer actions -->
+      <div class="flex items-center justify-between px-3 py-2 border-t border-subtle">
+        <button type="button" class="rounded-md px-1 text-sm text-link hover:text-link-hover active:text-link-active font-medium cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Today</button>
+        <button type="button" class="rounded-md px-1 text-sm text-link hover:text-link-hover active:text-link-active font-medium cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Clear</button>
+      </div>
+
+      </div><!-- end picker panel -->
+    </div><!-- end relative wrapper -->
+    <!-- ai-example-end: date-picker -->
+  </div>
+</section>
+
+<!-- 10. TEXTAREA -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">10. Textarea</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: textarea-default -->
+    <label for="proposedWorks" class="block mb-1 text-sm font-medium text-secondary">Proposed works</label>
+    <textarea id="proposedWorks" name="proposedWorks" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-2 text-sm text-primary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" rows="3">Alterations and extension…</textarea>
+    <!-- ai-example-end: textarea-default -->
+  </div>
+</section>
+
+<!-- 11. AUTOCOMPLETE -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">11. Autocomplete / lookup</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg pb-36">
+    <!-- ai-example-start: autocomplete-lookup -->
+    <label for="addressLookup" class="block mb-1 text-sm font-medium text-secondary">Address lookup</label>
+    <div class="relative w-full max-w-md">
+      <input id="addressLookup" name="addressLookup" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 pr-9 text-sm text-primary placeholder:text-tertiary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" placeholder="Start typing a postcode" />
+      <button type="button" class="absolute inset-y-0 right-0 w-9 rounded-r-lg flex items-center justify-center text-base text-secondary hover:text-primary active:text-tertiary cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Clear address"><i class="fa-light fa-xmark text-base" aria-hidden="true"></i></button>
+
+      <ul role="listbox" aria-label="Suggestions" class="absolute z-30 mt-2 w-full rounded-lg border border-default bg-surface-default shadow-lg p-1">
+        <li>
+          <button type="button" class="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            <span class="text-secondary"><i class="fa-light fa-location-dot" aria-hidden="true"></i></span>
+            Bierre Halle, 9 Gordon Street…
+          </button>
+        </li>
+        <li>
+          <button type="button" class="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            <span class="text-secondary"><i class="fa-light fa-location-dot" aria-hidden="true"></i></span>
+            Bierre Halle, 11 Gordon Street…
+          </button>
+        </li>
+        <li>
+          <button type="button" class="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            <span class="text-secondary"><i class="fa-light fa-location-dot" aria-hidden="true"></i></span>
+            Bierre Halle, 13 Gordon Street…
+          </button>
+        </li>
+      </ul>
+    </div>
+    <!-- ai-example-end: autocomplete-lookup -->
+  </div>
+</section>
+
+<!-- 12. BUTTONS -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">12. Buttons</h2>
+  
+
+  <div class="bg-surface-default border border-default rounded-lg overflow-hidden divide-y divide-subtle">
+
+    <!-- Primary -->
+    <div class="px-6 py-5" data-variant-id="buttons-primary" data-variant-label="Primary">
+      <p class="text-xs font-medium text-tertiary mb-3">Primary</p>
+      <!-- ai-example-start: buttons-primary -->
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="bg-btn-primary text-btn-primary-text border border-brand-accent hover:bg-btn-primary-hover active:bg-btn-primary-active rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Label</button>
+        <button type="button" class="inline-flex items-center gap-1.5 bg-btn-primary text-btn-primary-text border border-brand-accent hover:bg-btn-primary-hover active:bg-btn-primary-active rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent"><i class="fa-light fa-floppy-disk text-base" aria-hidden="true"></i><span>With icon</span></button>
+        <button type="button" class="inline-flex items-center gap-2 bg-btn-primary text-btn-primary-text border border-brand-accent rounded-lg px-3 py-1.5 text-sm font-semibold opacity-50 cursor-not-allowed" disabled><span>Disabled</span></button>
+      </div>
+      <p class="mt-3 mb-2 text-xs text-tertiary">Primary small</p>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="bg-btn-primary text-btn-primary-text border border-brand-accent hover:bg-btn-primary-hover active:bg-btn-primary-active rounded-lg px-2 py-1 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Label</button>
+        <button type="button" class="inline-flex items-center gap-1.5 bg-btn-primary text-btn-primary-text border border-brand-accent hover:bg-btn-primary-hover active:bg-btn-primary-active rounded-lg px-2 py-1 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent"><i class="fa-light fa-floppy-disk text-sm" aria-hidden="true"></i>With icon</button>
+        <button type="button" class="bg-btn-primary text-btn-primary-text border border-brand-accent rounded-lg px-2 py-1 text-sm font-semibold opacity-50 cursor-not-allowed" disabled>Disabled</button>
+      </div>
+      <!-- ai-example-end: buttons-primary -->
+    </div>
+
+    <!-- Secondary -->
+    <div class="px-6 py-5" data-variant-id="buttons-secondary" data-variant-label="Secondary">
+      <p class="text-xs font-medium text-tertiary mb-3">Secondary</p>
+      <!-- ai-example-start: buttons-secondary -->
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="bg-btn-secondary text-btn-secondary-text border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Label</button>
+        <button type="button" class="inline-flex items-center gap-1.5 bg-btn-secondary text-btn-secondary-text border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent"><i class="fa-light fa-xmark text-base text-interactive-default" aria-hidden="true"></i><span>With icon</span></button>
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-btn-secondary text-btn-secondary-text border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Print"><i class="fa-light fa-print text-base text-interactive-default" aria-hidden="true"></i></button>
+        <button type="button" class="bg-btn-secondary text-btn-secondary-text border border-strong rounded-lg px-3 py-1.5 text-sm font-semibold opacity-50 cursor-not-allowed" disabled>Disabled</button>
+      </div>
+      <p class="mt-3 mb-2 text-xs text-tertiary">Secondary small</p>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="bg-btn-secondary text-btn-secondary-text border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active rounded-lg px-2 py-1 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Label</button>
+        <button type="button" class="inline-flex items-center gap-1.5 bg-btn-secondary border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active text-btn-secondary-text rounded-lg px-2 py-1 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent"><i class="fa-light fa-at text-sm text-interactive-default" aria-hidden="true"></i>With icon</button>
+        <button type="button" class="inline-flex items-center justify-center w-7 h-7 bg-btn-secondary text-btn-secondary-text border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Print"><i class="fa-light fa-print text-sm text-interactive-default" aria-hidden="true"></i></button>
+        <button type="button" class="bg-btn-secondary text-btn-secondary-text border border-strong rounded-lg px-2 py-1 text-sm font-semibold opacity-50 cursor-not-allowed" disabled>Disabled</button>
+      </div>
+      <!-- ai-example-end: buttons-secondary -->
+    </div>
+
+    <!-- Ghost -->
+    <div class="px-6 py-5" data-variant-id="buttons-ghost" data-variant-label="Ghost">
+      <p class="text-xs font-medium text-tertiary mb-3">Ghost</p>
+      <div class="flex flex-wrap gap-2">
+        <!-- ai-example-start: buttons-ghost -->
+        <button type="button" class="inline-flex items-center gap-1.5 bg-transparent text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent"><i class="fa-light fa-share text-base text-interactive-default" aria-hidden="true"></i><span>With icon</span></button>
+        <!-- ai-example-end: buttons-ghost -->
+      </div>
+    </div>
+
+    <!-- Icon-only -->
+    <div class="px-6 py-5" data-variant-id="buttons-icon-only" data-variant-label="Icon-only">
+      <p class="text-xs font-medium text-tertiary mb-3">Icon-only</p>
+      <div class="flex flex-wrap gap-1">
+        <!-- ai-example-start: buttons-icon-only -->
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Edit"><i class="fa-light fa-pen text-base" aria-hidden="true"></i><span class="sr-only">Edit</span></button>
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-interactive-subtle text-interactive-default hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Bold" aria-pressed="true"><i class="fa-solid fa-bold text-sm" aria-hidden="true"></i><span class="sr-only">Bold</span></button>
+        <!-- ai-example-end: buttons-icon-only -->
+      </div>
+    </div>
+
+    <!-- Split button -->
+    <div class="px-6 py-5" data-variant-id="buttons-split" data-variant-label="Split button">
+      <p class="text-xs font-medium text-tertiary mb-3">Split button</p>
+      <!-- ai-example-start: buttons-split -->
+      <div class="flex flex-wrap gap-3 items-center">
+
+        <!-- Primary split button -->
+        <div class="inline-flex" role="group">
+          <button type="button" class="bg-btn-primary text-btn-primary-text border border-brand-accent border-r-0 hover:bg-btn-primary-hover active:bg-btn-primary-active rounded-l-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Save</button>
+          <span class="w-px self-stretch bg-white/30" aria-hidden="true"></span>
+          <el-dropdown class="relative flex">
+            <button type="button" aria-label="More save options" aria-haspopup="true" class="inline-flex items-center justify-center bg-btn-primary text-btn-primary-text border border-brand-accent hover:bg-btn-primary-hover active:bg-btn-primary-active rounded-r-lg px-2 cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+              <i class="fa-light fa-chevron-down text-[10px]" aria-hidden="true"></i>
+            </button>
+            <el-menu anchor="bottom end" popover class="mt-2 w-52 rounded-lg border border-default bg-surface-default p-1 shadow-lg">
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-floppy-disk w-4 text-center" aria-hidden="true"></i>
+                <span>Save and close</span>
+              </button>
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-pen-to-square w-4 text-center" aria-hidden="true"></i>
+                <span>Save as draft</span>
+              </button>
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-file-plus w-4 text-center" aria-hidden="true"></i>
+                <span>Save and create new</span>
+              </button>
+            </el-menu>
+          </el-dropdown>
+        </div>
+
+        <!-- Secondary split button -->
+        <div class="inline-flex" role="group">
+          <button type="button" class="bg-btn-secondary text-btn-secondary-text border border-strong border-r-0 hover:bg-btn-secondary-hover active:bg-btn-secondary-active rounded-l-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Download</button>
+          <el-dropdown class="relative flex">
+            <button type="button" aria-label="More download options" aria-haspopup="true" class="inline-flex items-center justify-center bg-btn-secondary text-btn-secondary-text border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active rounded-r-lg px-2 cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+              <i class="fa-light fa-chevron-down text-[10px] text-interactive-default" aria-hidden="true"></i>
+            </button>
+            <el-menu anchor="bottom end" popover class="mt-2 w-52 rounded-lg border border-default bg-surface-default p-1 shadow-lg">
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-file-pdf w-4 text-center" aria-hidden="true"></i>
+                <span>Download as PDF</span>
+              </button>
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-file-csv w-4 text-center" aria-hidden="true"></i>
+                <span>Download as CSV</span>
+              </button>
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-file-excel w-4 text-center" aria-hidden="true"></i>
+                <span>Download as Excel</span>
+              </button>
+            </el-menu>
+          </el-dropdown>
+        </div>
+
+        <!-- Disabled primary split button -->
+        <div class="inline-flex opacity-50" role="group">
+          <button type="button" class="bg-btn-primary text-btn-primary-text border border-brand-accent border-r-0 rounded-l-lg px-3 py-1.5 text-sm font-semibold cursor-not-allowed" disabled>Save</button>
+          <button type="button" class="inline-flex items-center justify-center bg-btn-primary text-btn-primary-text border border-brand-accent rounded-r-lg px-2 py-1.5 cursor-not-allowed" disabled aria-label="More save options">
+            <i class="fa-light fa-chevron-down text-[10px]" aria-hidden="true"></i>
+          </button>
+        </div>
+
+      </div>
+      <!-- ai-example-end: buttons-split -->
+    </div>
+
+  </div>
+</section>
+
+<!-- 13. PANEL FORM -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">13. Panel form</h2>
+
+  <!-- ai-example-start: panel-form -->
+  <section class="bg-surface-default border border-default rounded-xl overflow-hidden">
+    <div class="px-5 py-3 border-b border-subtle bg-surface-default flex items-center justify-between gap-2">
+      <h2 class="text-base font-semibold text-primary">Print settings</h2>
+      <button type="button" class="inline-flex items-center gap-1.5 bg-transparent text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+        <i class="fa-light fa-share text-interactive-default text-base" aria-hidden="true"></i>
+        <span>Share</span>
+      </button>
+    </div>
+
+    <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-6">
+      <div>
+        <label for="printMode" class="block mb-1 text-sm font-medium text-secondary">Print mode</label>
+        <div class="relative">
+          <select id="printMode" class="w-full border border-strong bg-surface-default rounded-lg px-3 py-1.5 pr-8 text-sm text-primary appearance-none focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus cursor-pointer">
+            <option>Document for this record</option>
+            <option>All documents</option>
+          </select>
+          <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-secondary pointer-events-none" aria-hidden="true"></i>
+        </div>
+      </div>
+
+      <div>
+        <label for="documentMode" class="block mb-1 text-sm font-medium text-secondary">Document mode</label>
+        <div class="relative">
+          <select id="documentMode" class="w-full border border-strong bg-surface-default rounded-lg px-3 py-1.5 pr-8 text-sm text-primary appearance-none focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus cursor-pointer">
+            <option>View only</option>
+            <option>Edit</option>
+          </select>
+          <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-secondary pointer-events-none" aria-hidden="true"></i>
+        </div>
+      </div>
+
+      <div>
+        <label for="documentType" class="block mb-1 text-sm font-medium text-secondary">Document type</label>
+        <div class="relative">
+          <select id="documentType" class="w-full border border-strong bg-surface-default rounded-lg px-3 py-1.5 pr-8 text-sm text-primary appearance-none focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus cursor-pointer">
+            <option>Document</option>
+            <option>Letter</option>
+            <option>Notice</option>
+          </select>
+          <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-secondary pointer-events-none" aria-hidden="true"></i>
+        </div>
+      </div>
+
+      <div>
+        <label for="copies" class="block mb-1 text-sm font-medium text-secondary">Copies</label>
+        <input id="copies" type="number" min="1" max="99" value="1" class="w-24 border border-strong bg-surface-default rounded-lg px-3 py-1.5 text-sm text-primary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" />
+      </div>
+    </div>
+  </section>
+  <!-- ai-example-end: panel-form -->
+</section>
+
+<!-- 14. TOOLBAR PATTERN -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">14. Toolbar pattern</h2>
+
+  <!-- ai-example-start: toolbar -->
+  <div class="bg-surface-default border border-default rounded-lg px-3 py-2">
+    <div class="flex items-center justify-between gap-2">
+
+      <div class="flex items-center gap-1 flex-wrap">
+        <!-- Single bordered labeled button -->
+        <button type="button" class="inline-flex items-center gap-1.5 bg-btn-secondary text-btn-secondary-text border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-floppy-disk text-base text-interactive-default" aria-hidden="true"></i>
+          <span>Save</span>
+        </button>
+
+        <div class="w-px h-5 bg-default ml-2 mr-1" role="separator" aria-orientation="vertical"></div>
+
+        <!-- Icon-only file actions -->
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="New">
+          <i class="fa-light fa-file text-base" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Open">
+          <i class="fa-light fa-folder-open text-base" aria-hidden="true"></i>
+        </button>
+
+        <div class="w-px h-5 bg-default mx-1" role="separator" aria-orientation="vertical"></div>
+
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Cut">
+          <i class="fa-light fa-scissors text-base" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Copy">
+          <i class="fa-light fa-copy text-base" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Paste">
+          <i class="fa-light fa-clipboard text-base" aria-hidden="true"></i>
+        </button>
+
+        <div class="w-px h-5 bg-default mx-1" role="separator" aria-orientation="vertical"></div>
+
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Undo">
+          <i class="fa-light fa-arrow-rotate-left text-base" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Redo">
+          <i class="fa-light fa-arrow-rotate-right text-base" aria-hidden="true"></i>
+        </button>
+
+        <div class="w-px h-5 bg-default mx-1" role="separator" aria-orientation="vertical"></div>
+
+        <!-- Active icon buttons -->
+        <button type="button" aria-pressed="true" class="inline-flex items-center justify-center w-8 h-8 bg-interactive-subtle text-interactive-default hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Bold">
+          <i class="fa-solid fa-bold text-sm" aria-hidden="true"></i>
+        </button>
+        <button type="button" aria-pressed="false" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Italic">
+          <i class="fa-light fa-italic text-sm" aria-hidden="true"></i>
+        </button>
+        <button type="button" aria-pressed="false" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Underline">
+          <i class="fa-light fa-underline text-sm" aria-hidden="true"></i>
+        </button>
+
+        <div class="w-px h-5 bg-default mx-1" role="separator" aria-orientation="vertical"></div>
+
+        <button type="button" aria-pressed="true" class="inline-flex items-center justify-center w-8 h-8 bg-interactive-subtle text-interactive-default hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Align left">
+          <i class="fa-solid fa-align-left text-sm" aria-hidden="true"></i>
+        </button>
+        <button type="button" aria-pressed="false" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Align center">
+          <i class="fa-light fa-align-center text-sm" aria-hidden="true"></i>
+        </button>
+        <button type="button" aria-pressed="false" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Align right">
+          <i class="fa-light fa-align-right text-sm" aria-hidden="true"></i>
+        </button>
+      </div>
+
+      <div class="flex items-center gap-1">
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Share">
+          <i class="fa-light fa-share text-base" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="More options">
+          <i class="fa-regular fa-ellipsis text-base" aria-hidden="true"></i>
+        </button>
+      </div>
+
+    </div>
+  </div>
+  <!-- ai-example-end: toolbar -->
+</section>
+
+<!-- 15. TABS -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">15. Tabs</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: tabs-default -->
+    <div role="tablist" aria-label="Case sections" class="flex gap-4">
+      <button role="tab" aria-selected="true" class="px-3 py-2 text-sm font-semibold text-primary border-b-2 border-brand-accent -mb-px cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Reception</button>
+      <button role="tab" aria-selected="false" class="px-3 py-2 text-sm text-secondary border-b-2 border-transparent -mb-px hover:border-subtle hover:text-primary cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Decisions</button>
+      <button role="tab" aria-selected="false" class="px-3 py-2 text-sm text-secondary border-b-2 border-transparent -mb-px hover:border-subtle hover:text-primary cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Inspections</button>
+    </div>
+    <!-- ai-example-end: tabs-default -->
+  </div>
+</section>
+
+<!-- 16. TABLE -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">16. Table</h2>
+  <p class="mb-4 text-sm text-secondary">Base table pattern. <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">thead</code> uses <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">bg-surface-base border-b border-subtle</code>; column headers are <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">text-secondary font-semibold</code>. Body rows use <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">divide-y divide-subtle</code> with <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">hover:bg-surface-base</code>. Wrap in <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">overflow-x-auto</code> for responsive overflow. Sortable columns wrap the header text in a <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">&lt;button&gt;</code> with <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">fa-light fa-caret-down</code> (inactive) or <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">fa-solid fa-caret-up/down text-interactive-default</code> (active) and <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">aria-sort</code> on the <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">&lt;th&gt;</code>.</p>
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: table-basic -->
+    <div class="overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead>
+          <tr class="border-b border-subtle bg-surface-base">
+            <th scope="col" class="px-5 py-2 text-left whitespace-nowrap" aria-sort="ascending">
+              <button type="button" class="inline-flex items-center gap-1 font-semibold text-secondary hover:text-primary cursor-pointer rounded-sm focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                Reference
+                <i class="fa-solid fa-caret-up text-interactive-default text-xs" aria-hidden="true"></i>
+              </button>
+            </th>
+            <th scope="col" class="px-5 py-2 text-left whitespace-nowrap">
+              <button type="button" class="inline-flex items-center gap-1 font-semibold text-secondary hover:text-primary cursor-pointer rounded-sm focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                Address
+                <i class="fa-light fa-caret-down text-tertiary text-xs" aria-hidden="true"></i>
+              </button>
+            </th>
+            <th scope="col" class="px-5 py-2 text-left whitespace-nowrap">
+              <button type="button" class="inline-flex items-center gap-1 font-semibold text-secondary hover:text-primary cursor-pointer rounded-sm focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                Status
+                <i class="fa-light fa-caret-down text-tertiary text-xs" aria-hidden="true"></i>
+              </button>
+            </th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-subtle">
+          <tr class="hover:bg-surface-base transition-colors">
+            <td class="px-5 py-3 whitespace-nowrap"><a href="#" class="font-medium text-link hover:text-link-hover active:text-link-active hover:underline rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">14/00142/HH</a></td>
+            <td class="px-5 py-3 whitespace-nowrap text-primary">4 Station Road</td>
+            <td class="px-5 py-3 whitespace-nowrap text-primary">Pending</td>
+          </tr>
+          <tr class="hover:bg-surface-base transition-colors">
+            <td class="px-5 py-3 whitespace-nowrap"><a href="#" class="font-medium text-link hover:text-link-hover active:text-link-active hover:underline rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">14/00287/FUL</a></td>
+            <td class="px-5 py-3 whitespace-nowrap text-primary">12 High Street</td>
+            <td class="px-5 py-3 whitespace-nowrap text-primary">Approved</td>
+          </tr>
+          <tr class="hover:bg-surface-base transition-colors">
+            <td class="px-5 py-3 whitespace-nowrap"><a href="#" class="font-medium text-link hover:text-link-hover active:text-link-active hover:underline rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">14/00391/LB</a></td>
+            <td class="px-5 py-3 whitespace-nowrap text-primary">Old Town Hall</td>
+            <td class="px-5 py-3 whitespace-nowrap text-primary">Refused</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <!-- ai-example-end: table-basic -->
+  </div>
+</section>
+
+<!-- 17. DROPDOWN MENU -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">17. Dropdown menu</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: dropdown-menu -->
+    <el-dropdown class="relative inline-block text-left">
+      <button type="button" class="inline-flex items-center justify-between gap-2 rounded-lg border border-strong bg-btn-secondary px-3 py-1.5 text-sm font-semibold text-btn-secondary-text hover:bg-btn-secondary-hover active:bg-btn-secondary-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+        Actions
+        <i class="fa-light fa-chevron-down text-[10px] text-interactive-default" aria-hidden="true"></i>
+      </button>
+      <el-menu anchor="bottom start" popover class="mt-2 w-60 rounded-lg border border-default bg-surface-default p-1 shadow-lg">
+        <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-pen-to-square w-4 text-center" aria-hidden="true"></i>
+          <span>Edit case details</span>
+        </button>
+        <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-user-plus w-4 text-center" aria-hidden="true"></i>
+          <span>Assign officer</span>
+        </button>
+        <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-calendar-plus w-4 text-center" aria-hidden="true"></i>
+          <span>Add consultation</span>
+        </button>
+        <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-file-arrow-up w-4 text-center" aria-hidden="true"></i>
+          <span>Upload document</span>
+        </button>
+        <hr role="none" class="my-1 border-subtle" />
+        <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-file-export w-4 text-center" aria-hidden="true"></i>
+          <span>Export case</span>
+        </button>
+        <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-print w-4 text-center" aria-hidden="true"></i>
+          <span>Print summary</span>
+        </button>
+        <hr role="none" class="my-1 border-subtle" />
+        <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-box-archive w-4 text-center" aria-hidden="true"></i>
+          <span>Archive case</span>
+        </button>
+        <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-error-icon hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-trash-can w-4 text-center" aria-hidden="true"></i>
+          <span>Delete case</span>
+        </button>
+      </el-menu>
+    </el-dropdown>
+    <!-- ai-example-end: dropdown-menu -->
+  </div>
+</section>
+
+<!-- 18. NAVBAR -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">18. Navbar</h2>
+
+  <div class="bg-surface-default border border-default rounded-lg overflow-hidden">
+    <!-- ai-example-start: navbar -->
+    <nav class="shrink-0 bg-navbar-bg text-navbar-text" aria-label="Navbar example">
+      <div class="mx-auto px-4">
+        <div class="relative flex h-14 justify-between">
+          <div class="absolute inset-y-0 left-0 flex items-center sm:hidden">
+            <button type="button" aria-controls="mobile-menu" aria-expanded="false" class="relative inline-flex items-center justify-center rounded-md p-2 text-navbar-icon hover:bg-navbar-hover hover:text-navbar-icon-hover focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+              <span class="absolute -inset-0.5"></span>
+              <span class="sr-only">Open main menu</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" data-slot="icon" aria-hidden="true" class="size-6">
+                <path d="M3.75 6.75h16.5M3.75 12h16.5m-15.5 5.25h16.5" stroke-linecap="round" stroke-linejoin="round"></path>
+              </svg>
+            </button>
+          </div>
+          <div class="flex flex-1 items-center justify-center sm:items-stretch sm:justify-start">
+            <button type="button" class="flex shrink-0 items-center gap-2 rounded-lg cursor-pointer mr-12 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Uniform — home">
+              <img src="assets/idox_logo_reversed.png" alt="Idox" class="h-6 w-auto">
+              <span class="border-l border-white/50 h-7 mx-2" aria-hidden="true"></span>
+              <span class="text-lg font-semibold text-navbar-text">Uniform</span>
+            </button>
+            <ul class="hidden sm:flex sm:items-center sm:space-x-4" role="list">
+              <li>
+                <a href="#" class="inline-flex items-center rounded px-2 py-1 text-sm font-medium text-navbar-text hover:bg-navbar-hover active:bg-navbar-active outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Modules</a>
+              </li>
+              <li>
+                <a href="#" class="inline-flex items-center rounded px-2 py-1 text-sm font-medium text-navbar-text hover:bg-navbar-hover active:bg-navbar-active outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Maintenance</a>
+              </li>
+              <li>
+                <a href="#" class="inline-flex items-center rounded px-2 py-1 text-sm font-medium text-navbar-text hover:bg-navbar-hover active:bg-navbar-active outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Admin</a>
+              </li>
+              
+            </ul>
+          </div>
+          <div class="absolute inset-y-0 right-0 flex items-center pr-2 sm:static sm:inset-auto sm:ml-6 sm:pr-0 gap-4">
+            <button type="button" class="relative inline-flex h-9 w-9 items-center justify-center rounded-md text-navbar-icon hover:bg-navbar-hover active:bg-navbar-active hover:text-navbar-icon-hover cursor-pointer">
+              <span class="sr-only">Toggle dark mode</span>
+              <i class="fa-light fa-moon block text-lg leading-none" aria-hidden="true"></i>
+            </button>
+            <button type="button" class="relative inline-flex h-9 w-9 items-center justify-center rounded-md text-navbar-icon hover:bg-navbar-hover active:bg-navbar-active hover:text-navbar-icon-hover cursor-pointer">
+              <span class="sr-only">Open messages</span>
+              <i class="fa-light fa-envelope block text-lg leading-none" aria-hidden="true"></i>
+            </button>
+            <button type="button" class="relative inline-flex h-9 w-9 items-center justify-center rounded-md text-navbar-icon hover:bg-navbar-hover active:bg-navbar-active hover:text-navbar-icon-hover cursor-pointer">
+              <span class="sr-only">Open help</span>
+              <i class="fa-light fa-circle-question block text-lg leading-none" aria-hidden="true"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+    <!-- ai-example-end: navbar -->
+  </div>
+</section>
+
+<!-- 19. TOOLTIP -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">19. Tooltip</h2>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: tooltip -->
+    <button type="button" data-tooltip="Toggle layers" aria-label="Toggle layers"
+      class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary rounded-lg hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+      <i class="fa-light fa-layer-group text-base" aria-hidden="true"></i>
+    </button>
+    <!-- ai-example-end: tooltip -->
+  </div>
+</section>
+
+<!-- 20. DIALOG -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">20. Dialog</h2>
+
+  <!-- Static — copyable pattern -->
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: dialog -->
+    <div role="dialog" aria-modal="true" aria-labelledby="dialogTitle" aria-describedby="dialogDesc" class="rounded-lg border border-default bg-surface-default shadow-lg overflow-hidden max-w-xl">
+      <div class="px-6 pt-6 flex items-center justify-between gap-2">
+        <h2 id="dialogTitle" class="text-lg font-semibold text-primary">Confirm task allocation</h2>
+        <button type="button" class="inline-flex h-7 w-7 items-center justify-center rounded text-tertiary hover:text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Close dialog">
+          <i class="fa-light fa-xmark text-sm" aria-hidden="true"></i>
+        </button>
+      </div>
+      <div class="px-6 py-6">
+        <p id="dialogDesc" class="text-sm text-primary">Are you sure you want to re-allocate this task from Bill Collins to James Sealey?</p>
+      </div>
+      <div class="px-6 pb-6 flex justify-start gap-2">
+        <button type="button" class="rounded-lg border border-brand-accent bg-btn-primary px-3 py-1.5 text-sm font-semibold text-btn-primary-text hover:bg-btn-primary-hover active:bg-btn-primary-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          Reallocate
+        </button>
+        <button type="button" class="rounded-lg border border-strong bg-btn-secondary px-3 py-1.5 text-sm font-semibold text-btn-secondary-text hover:bg-btn-secondary-hover active:bg-btn-secondary-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          Cancel
+        </button>
+      </div>
+    </div>
+    <!-- ai-example-end: dialog -->
+  </div>
+
+  <!-- Interactive demo — tests open/close/focus trap/overlay -->
+  <div class="mt-4">
+    <p class="text-xs text-tertiary mb-3">Interactive demo</p>
+    <button id="dialogTrigger" type="button" aria-haspopup="dialog" aria-controls="modal" aria-expanded="false" class="rounded-lg border border-brand-accent bg-btn-primary px-3 py-1.5 text-sm font-semibold text-btn-primary-text hover:bg-btn-primary-hover active:bg-btn-primary-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+      Open confirmation dialog
+    </button>
+    <div id="dialogOverlay" class="fixed inset-0 hidden bg-overlay z-40"></div>
+    <div id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-describedby="modalDesc" tabindex="-1" class="fixed inset-0 hidden flex items-center justify-center z-50 pointer-events-none p-4 sm:p-6">
+      <div class="rounded-lg border border-default bg-surface-default shadow-lg pointer-events-auto w-full max-w-full max-h-full sm:max-w-xl overflow-hidden">
+        <div class="px-6 pt-6 flex items-center justify-between gap-2">
+          <h2 id="modalTitle" class="text-lg font-semibold text-primary">Confirm task allocation</h2>
+          <button type="button" id="dialogClose" class="inline-flex h-7 w-7 items-center justify-center rounded text-tertiary hover:text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Close dialog">
+            <i class="fa-light fa-xmark text-sm" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="px-6 py-6">
+          <p id="modalDesc" class="text-sm text-primary">Are you sure you want to re-allocate this task from Bill Collins to James Sealey?</p>
+        </div>
+        <div class="px-6 pb-6 flex justify-start gap-2">
+          <button type="button" id="dialogConfirm" class="rounded-lg border border-brand-accent bg-btn-primary px-3 py-1.5 text-sm font-semibold text-btn-primary-text hover:bg-btn-primary-hover active:bg-btn-primary-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            Reallocate
+          </button>
+          <button type="button" id="dialogCancel" class="rounded-lg border border-strong bg-btn-secondary px-3 py-1.5 text-sm font-semibold text-btn-secondary-text hover:bg-btn-secondary-hover active:bg-btn-secondary-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 21. CALLOUT PANELS -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">21. Callout panels</h2>
+  <p class="mb-4 text-sm text-secondary">Use to surface contextual information, warnings, or errors inline within a form or page. Span full width when used inside a two-column grid.</p>
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+
+  <div class="space-y-3 max-w-2xl">
+
+    <!-- Success -->
+    <!-- ai-example-start: callout-success -->
+    <div class="flex gap-3 rounded-lg bg-success-bg border border-success-border px-5 py-3">
+      <i class="fa-light fa-circle-check text-success-icon mt-0.5 shrink-0" aria-hidden="true"></i>
+      <div class="text-sm space-y-0.5">
+        <p class="font-medium text-success-heading">Success heading</p>
+        <p class="text-success-text">Use to confirm that an action has completed successfully or that a condition has been met.</p>
+      </div>
+    </div>
+    <!-- ai-example-end: callout-success -->
+
+    <!-- Info -->
+    <!-- ai-example-start: callout-info -->
+    <div class="flex gap-3 rounded-lg bg-info-bg border border-info-border px-5 py-3">
+      <i class="fa-light fa-circle-info text-info-icon mt-0.5 shrink-0" aria-hidden="true"></i>
+      <div class="text-sm space-y-0.5">
+        <p class="font-medium text-info-heading">Informational heading</p>
+        <p class="text-info-text">Use for helpful guidance or contextual notes that do not require immediate action from the user.</p>
+      </div>
+    </div>
+    <!-- ai-example-end: callout-info -->
+
+    <!-- Warning -->
+    <!-- ai-example-start: callout-warning -->
+    <div class="flex gap-3 rounded-lg bg-warning-bg border border-warning-border px-5 py-3">
+      <i class="fa-light fa-triangle-exclamation text-warning-icon mt-0.5 shrink-0" aria-hidden="true"></i>
+      <div class="text-sm space-y-0.5">
+        <p class="font-medium text-warning-heading">Warning heading</p>
+        <p class="text-warning-text">Use when the user should be aware of a potential issue or upcoming action that may affect the system.</p>
+      </div>
+    </div>
+    <!-- ai-example-end: callout-warning -->
+
+    <!-- Error -->
+    <!-- ai-example-start: callout-error -->
+    <div class="flex gap-3 rounded-lg bg-error-bg border border-error-border px-5 py-3">
+      <i class="fa-light fa-circle-exclamation text-error-icon mt-0.5 shrink-0" aria-hidden="true"></i>
+      <div class="text-sm space-y-0.5">
+        <p class="font-medium text-error-heading">Error heading</p>
+        <p class="text-error-text">Use when a critical error has occurred that prevents the user from proceeding or requires immediate attention.</p>
+      </div>
+    </div>
+    <!-- ai-example-end: callout-error -->
+
+  </div>
+  </div>
+</section>
+
+<!-- 22. CHECKBOXES -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">22. Checkboxes</h2>
+  <p class="mb-4 text-sm text-secondary">Custom checkboxes using a hidden native input with peer utilities for checked and focus states.</p>
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+
+  <div class="flex flex-wrap gap-x-4 gap-y-2">
+
+    <!-- Checked -->
+    <!-- ai-example-start: checkbox-checked -->
+    <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+      <span class="relative inline-flex h-5 w-5 shrink-0">
+        <input type="checkbox" name="cb-demo" class="peer sr-only" checked>
+        <span class="absolute inset-0 rounded border border-strong bg-surface-default transition-colors peer-checked:bg-interactive-default peer-checked:border-interactive-default peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface-default"></span>
+        <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity peer-checked:opacity-100">
+          <i class="fa-regular fa-check text-xs text-inverse" aria-hidden="true"></i>
+        </span>
+      </span>
+      <span class="text-sm text-primary">Accept terms and conditions</span>
+    </label>
+    <!-- ai-example-end: checkbox-checked -->
+
+    <!-- Unchecked -->
+    <!-- ai-example-start: checkbox-unchecked -->
+    <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+      <span class="relative inline-flex h-5 w-5 shrink-0">
+        <input type="checkbox" name="cb-demo-2" class="peer sr-only">
+        <span class="absolute inset-0 rounded border border-strong bg-surface-default transition-colors peer-checked:bg-interactive-default peer-checked:border-interactive-default peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface-default"></span>
+        <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity peer-checked:opacity-100">
+          <i class="fa-regular fa-check text-xs text-inverse" aria-hidden="true"></i>
+        </span>
+      </span>
+      <span class="text-sm text-primary">Subscribe to updates</span>
+    </label>
+    <!-- ai-example-end: checkbox-unchecked -->
+
+    <!-- Disabled -->
+    <!-- ai-example-start: checkbox-disabled -->
+    <label class="inline-flex items-center gap-2 cursor-not-allowed select-none opacity-50">
+      <span class="relative inline-flex h-5 w-5 shrink-0">
+        <input type="checkbox" name="cb-demo-3" class="peer sr-only" disabled>
+        <span class="absolute inset-0 rounded border border-strong bg-surface-base transition-colors peer-checked:bg-interactive-default peer-checked:border-interactive-default"></span>
+        <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity peer-checked:opacity-100">
+          <i class="fa-regular fa-check text-xs text-inverse" aria-hidden="true"></i>
+        </span>
+      </span>
+      <span class="text-sm text-primary">Disabled option</span>
+    </label>
+    <!-- ai-example-end: checkbox-disabled -->
+
+  </div>
+  </div>
+</section>
+
+<!-- 23. RADIO BUTTONS -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">23. Radio buttons</h2>
+  <p class="mb-4 text-sm text-secondary">Custom radio buttons using a hidden native input. The outer ring fills on selection; a white dot provides the inner indicator.</p>
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+
+  <div class="flex flex-wrap gap-x-4 gap-y-2">
+
+    <!-- Selected -->
+    <!-- ai-example-start: radio-selected -->
+    <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+      <span class="relative inline-flex h-5 w-5 shrink-0">
+        <input type="radio" name="radio-demo" value="a" class="peer sr-only" checked>
+        <span class="absolute inset-0 rounded-full border border-strong bg-surface-default transition-colors peer-checked:bg-interactive-default peer-checked:border-interactive-default peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface-default"></span>
+        <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity peer-checked:opacity-100">
+          <span class="h-1.5 w-1.5 rounded-full bg-white"></span>
+        </span>
+      </span>
+      <span class="text-sm text-primary">Full application</span>
+    </label>
+    <!-- ai-example-end: radio-selected -->
+
+    <!-- Unselected -->
+    <!-- ai-example-start: radio-unselected -->
+    <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+      <span class="relative inline-flex h-5 w-5 shrink-0">
+        <input type="radio" name="radio-demo" value="b" class="peer sr-only">
+        <span class="absolute inset-0 rounded-full border border-strong bg-surface-default transition-colors peer-checked:bg-interactive-default peer-checked:border-interactive-default peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface-default"></span>
+        <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity peer-checked:opacity-100">
+          <span class="h-1.5 w-1.5 rounded-full bg-white"></span>
+        </span>
+      </span>
+      <span class="text-sm text-primary">Householder application</span>
+    </label>
+    <!-- ai-example-end: radio-unselected -->
+
+    <!-- Unselected -->
+    <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+      <span class="relative inline-flex h-5 w-5 shrink-0">
+        <input type="radio" name="radio-demo" value="c" class="peer sr-only">
+        <span class="absolute inset-0 rounded-full border border-strong bg-surface-default transition-colors peer-checked:bg-interactive-default peer-checked:border-interactive-default peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface-default"></span>
+        <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity peer-checked:opacity-100">
+          <span class="h-1.5 w-1.5 rounded-full bg-white"></span>
+        </span>
+      </span>
+      <span class="text-sm text-primary">Prior approval</span>
+    </label>
+
+    <!-- Disabled -->
+    <!-- ai-example-start: radio-disabled -->
+    <label class="inline-flex items-center gap-2 cursor-not-allowed select-none opacity-50">
+      <span class="relative inline-flex h-5 w-5 shrink-0">
+        <input type="radio" name="radio-demo" value="d" class="peer sr-only" disabled>
+        <span class="absolute inset-0 rounded-full border border-strong bg-surface-base transition-colors peer-checked:bg-interactive-default peer-checked:border-interactive-default"></span>
+        <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity peer-checked:opacity-100">
+          <span class="h-1.5 w-1.5 rounded-full bg-white"></span>
+        </span>
+      </span>
+      <span class="text-sm text-primary">Disabled option</span>
+    </label>
+    <!-- ai-example-end: radio-disabled -->
+
+  </div>
+  </div>
+</section>
+
+<!-- 24. PANEL -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">24. Panel</h2>
+  <p class="mb-4 text-sm text-secondary">Content container with a heading bar and body area. Use <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">rounded-xl</code> and <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">overflow-hidden</code> to clip the header border correctly. Collapsible panels use a full-width <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">&lt;button&gt;</code> as the header; the chevron trails on the right with any badge immediately left of it.</p>
+  <div class="bg-surface-default border border-default p-6 rounded-lg space-y-6">
+
+    <div>
+      <p class="text-xs text-tertiary mb-3">Default</p>
+      <!-- ai-example-start: panel-default -->
+      <section class="bg-surface-default border border-default rounded-xl overflow-hidden">
+        <div class="px-5 py-3 border-b border-subtle">
+          <h2 class="text-base font-semibold text-primary">Panel heading</h2>
+        </div>
+        <div class="p-5">
+          <p class="text-sm text-tertiary">Panel body content goes here.</p>
+        </div>
+      </section>
+      <!-- ai-example-end: panel-default -->
+    </div>
+
+    <div>
+      <p class="text-xs text-tertiary mb-3">Collapsible with badge</p>
+      <!-- ai-example-start: panel-collapsible -->
+      <section class="bg-surface-default border border-default rounded-xl overflow-hidden">
+        <button type="button" aria-expanded="true" class="w-full px-5 py-3 border-b border-subtle flex items-center justify-between gap-2 hover:bg-surface-subtle cursor-pointer text-left">
+          <span class="text-base font-semibold text-primary">Conditions</span>
+          <i class="fa-light fa-chevron-down text-secondary text-sm transition-transform shrink-0" aria-hidden="true"></i>
+        </button>
+        <div class="p-5">
+          <p class="text-sm text-tertiary">Panel body content goes here.</p>
+        </div>
+      </section>
+      <!-- ai-example-end: panel-collapsible -->
+    </div>
+
+  </div>
+</section>
+
+
+<!-- 25. SPINNER -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">25. Spinner</h2>
+
+  <p class="mb-4 text-sm text-secondary">Use <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">animate-spin</code> on a partially-bordered circle. Always include a visually-hidden label and <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">role="status"</code> so screen readers announce the loading state. Respect reduced-motion with <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">motion-reduce:animate-none</code>.</p>
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <div class="flex flex-wrap items-start gap-8">
+
+      <!-- Default (brand) spinner -->
+      <div class="flex flex-col items-center gap-2" data-variant-id="spinner-default" data-variant-label="Default">
+        <span class="mb-4 text-xs text-tertiary">Default</span>
+        <!-- ai-example-start: spinner-default -->
+        <div role="status" aria-label="Loading">
+          <svg class="animate-spin motion-reduce:animate-none w-8 h-8 text-interactive-default" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          </svg>
+          <span class="sr-only">Loading…</span>
+        </div>
+        <!-- ai-example-end: spinner-default -->
+      </div>
+
+      <!-- Small spinner -->
+      <div class="flex flex-col items-center gap-2" data-variant-id="spinner-small" data-variant-label="Small">
+        <span class="mb-4 text-xs text-tertiary">Small</span>
+        <!-- ai-example-start: spinner-small -->
+        <div role="status" aria-label="Loading">
+          <svg class="animate-spin motion-reduce:animate-none w-5 h-5 text-interactive-default" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          </svg>
+          <span class="sr-only">Loading…</span>
+        </div>
+        <!-- ai-example-end: spinner-small -->
+      </div>
+
+      <!-- Spinner inside a button -->
+      <div class="flex flex-col items-center gap-2" data-variant-id="spinner-in-button" data-variant-label="In button">
+        <span class="mb-4 text-xs text-tertiary">In button</span>
+        <!-- ai-example-start: spinner-in-button -->
+        <button type="button" disabled class="inline-flex items-center gap-2 bg-btn-primary text-btn-primary-text border border-brand-accent rounded-lg px-3 py-1.5 text-sm font-semibold cursor-not-allowed">
+          <svg class="animate-spin motion-reduce:animate-none w-4 h-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          </svg>
+          <span>Saving…</span>
+        </button>
+        <!-- ai-example-end: spinner-in-button -->
+      </div>
+
+      <!-- Secondary / muted spinner -->
+      <div class="flex flex-col items-center gap-2" data-variant-id="spinner-muted" data-variant-label="Muted">
+        <span class="mb-4 text-xs text-tertiary">Muted</span>
+        <!-- ai-example-start: spinner-muted -->
+        <div role="status" aria-label="Loading">
+          <svg class="animate-spin motion-reduce:animate-none w-8 h-8 text-tertiary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"/>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+          </svg>
+          <span class="sr-only">Loading…</span>
+        </div>
+        <!-- ai-example-end: spinner-muted -->
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- 26. SKELETON LOADER -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">26. Skeleton loader</h2>
+
+  <p class="mb-4 text-sm text-secondary">Use <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">animate-pulse</code> on placeholder shapes that mirror the real content layout. Wrap the skeleton in a container with <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">role="status"</code> and a visually-hidden "Loading…" label. Prefer skeletons over spinners when the layout is known in advance.</p>
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <div class="flex flex-wrap gap-8">
+
+      <!-- Card skeleton -->
+      <div class="flex flex-col gap-4 w-72" data-variant-id="skeleton-card" data-variant-label="Card skeleton">
+        <span class="text-xs text-tertiary mb-1">Card skeleton</span>
+        <!-- ai-example-start: skeleton-card -->
+        <section class="bg-surface-default border border-default rounded-xl overflow-hidden" role="status" aria-label="Loading content">
+          <span class="sr-only">Loading…</span>
+          <div class="px-5 py-3 border-b border-subtle">
+            <div class="h-4 w-32 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+          </div>
+          <div class="p-5 space-y-3">
+            <div class="h-3 w-full bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+            <div class="h-3 w-5/6 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+            <div class="h-3 w-4/6 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+            <div class="mt-4 flex gap-2">
+              <div class="h-7 w-20 bg-surface-muted rounded-lg animate-pulse motion-reduce:animate-none"></div>
+              <div class="h-7 w-16 bg-surface-muted rounded-lg animate-pulse motion-reduce:animate-none"></div>
+            </div>
+          </div>
+        </section>
+        <!-- ai-example-end: skeleton-card -->
+      </div>
+
+      <!-- Table row skeletons -->
+      <div class="flex flex-col gap-4 flex-1 min-w-64" data-variant-id="skeleton-table-rows" data-variant-label="Table rows skeleton">
+        <span class="text-xs text-tertiary mb-1">Table rows skeleton</span>
+        <!-- ai-example-start: skeleton-table-rows -->
+        <section class="bg-surface-default border border-default rounded-xl overflow-hidden" role="status" aria-label="Loading table data">
+          <span class="sr-only">Loading…</span>
+          <div class="px-5 py-3 border-b border-subtle flex gap-4">
+            <div class="h-3 w-24 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+            <div class="h-3 w-32 bg-surface-muted rounded animate-pulse motion-reduce:animate-none ml-auto"></div>
+          </div>
+          <div class="divide-y divide-subtle">
+            <div class="flex items-center gap-4 px-5 py-3">
+              <div class="h-3 w-16 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+              <div class="h-3 w-28 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+              <div class="h-5 w-12 bg-surface-muted rounded-full animate-pulse motion-reduce:animate-none ml-auto"></div>
+            </div>
+            <div class="flex items-center gap-4 px-5 py-3">
+              <div class="h-3 w-20 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+              <div class="h-3 w-24 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+              <div class="h-5 w-12 bg-surface-muted rounded-full animate-pulse motion-reduce:animate-none ml-auto"></div>
+            </div>
+            <div class="flex items-center gap-4 px-5 py-3">
+              <div class="h-3 w-14 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+              <div class="h-3 w-32 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+              <div class="h-5 w-12 bg-surface-muted rounded-full animate-pulse motion-reduce:animate-none ml-auto"></div>
+            </div>
+          </div>
+        </section>
+        <!-- ai-example-end: skeleton-table-rows -->
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- 27. EMPTY STATE -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">27. Empty state</h2>
+
+  <p class="mb-4 text-sm text-secondary">Use when a list, table, or panel has no content to display. Centre an icon, a short heading, a supporting sentence, and an optional call-to-action. The icon should use <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">text-tertiary</code> and a large size to create visual breathing room without competing with surrounding content.</p>
+  <div class="bg-surface-default border border-default p-6 rounded-lg space-y-6">
+
+    <!-- Empty state -->
+    <div data-variant-id="empty-state" data-variant-label="Empty state">
+      <!-- ai-example-start: empty-state -->
+<div class="flex flex-col items-center justify-center px-6 py-14 text-center">
+      <i class="fa-light fa-inbox fa-3x text-tertiary mb-4" aria-hidden="true"></i>
+      <p class="text-sm font-semibold text-primary mb-1">No items yet</p>
+      <p class="text-sm text-secondary max-w-xs">Add your first item to get started. Items you create will appear here.</p>
+      <div class="mt-4">
+        <button type="button" class="inline-flex items-center gap-1.5 bg-btn-primary text-btn-primary-text border border-brand-accent hover:bg-btn-primary-hover active:bg-btn-primary-active rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-plus text-base" aria-hidden="true"></i>
+          <span>Add item</span>
+        </button>
+      </div>
+    </div>
+      <!-- ai-example-end: empty-state -->
+    </div>
+
+  </div>
+</section>
+
+
+<!-- 28. DISABLED STATES -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">28. Disabled states</h2>
+  <p class="mb-4 text-sm text-secondary">Add <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">disabled:bg-surface-disabled disabled:text-disabled disabled:border-subtle disabled:cursor-not-allowed</code> to the input or select.</p>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg space-y-6">
+
+    <!-- Disabled text input -->
+    <div>
+      <p class="text-xs text-tertiary mb-3">Text input</p>
+      <!-- ai-example-start: input-disabled -->
+      <label for="uprn-disabled" class="block mb-1 text-sm font-medium text-secondary">UPRN</label>
+      <input id="uprn-disabled" name="uprn-disabled" disabled value="100023336956" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary placeholder:text-tertiary disabled:bg-surface-disabled disabled:text-disabled disabled:border-subtle disabled:cursor-not-allowed focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" />
+      <!-- ai-example-end: input-disabled -->
+    </div>
+
+    <!-- Disabled select -->
+    <div>
+      <p class="text-xs text-tertiary mb-3">Select</p>
+      <!-- ai-example-start: select-disabled -->
+      <label for="status-disabled" class="block mb-1 text-sm font-medium text-secondary">Application status</label>
+      <select id="status-disabled" name="status-disabled" disabled class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary disabled:bg-surface-disabled disabled:text-disabled disabled:border-subtle disabled:cursor-not-allowed focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus">
+        <option>Pending determination</option>
+      </select>
+      <!-- ai-example-end: select-disabled -->
+    </div>
+
+  </div>
+</section>
+
+
+<!-- 29. BREADCRUMB BAR -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">29. Breadcrumb bar</h2>
+  <p class="mb-4 text-sm text-secondary">Full-width bar rendered between the navbar and the page header. Height is fixed at <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">h-9</code>. Links use <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">text-link</code>; the current page is <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">font-medium text-primary</code>. Use this pattern instead of Back links for sub-page navigation.</p>
+  <div class="bg-surface-default border border-default rounded-lg overflow-hidden">
+    <!-- ai-example-start: breadcrumb-bar -->
+    <div class="shrink-0 bg-surface-default px-4">
+      <div class="flex items-center h-9">
+        <nav aria-label="Breadcrumb">
+          <ol class="flex flex-wrap items-center gap-1.5 text-sm text-secondary">
+            <li><a href="#" class="text-link hover:text-link-hover active:text-link-active underline rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Dashboard</a></li>
+            <li aria-hidden="true"><i class="fa-light fa-chevron-right text-tertiary text-xs" aria-hidden="true"></i></li>
+            <li><a href="#" class="text-link hover:text-link-hover active:text-link-active underline rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Applications</a></li>
+            <li aria-hidden="true"><i class="fa-light fa-chevron-right text-tertiary text-xs" aria-hidden="true"></i></li>
+            <li class="font-medium text-primary truncate max-w-[320px]">14/00142/HH - 4 Station Road</li>
+          </ol>
+        </nav>
+      </div>
+    </div>
+    <!-- ai-example-end: breadcrumb-bar -->
+  </div>
+</section>
+
+
+<!-- 30. DRAWER -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">30. Drawer</h2>
+  <p class="mb-4 text-sm text-secondary">A panel that slides in from the right edge of the viewport. Sits in a <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">relative overflow-hidden</code> container. Structure: fixed-height header with title + close button, scrollable body, sticky footer with actions. Translate with <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">translate-x-0</code> (open) / <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">translate-x-full</code> (closed) and <code class="text-xs font-mono bg-surface-base border border-subtle px-1 py-0.5 rounded">transition-transform duration-200 ease-out</code>.</p>
+  <div class="relative overflow-hidden rounded-lg bg-surface-base border border-default" style="height: 460px;">
+    <div class="absolute inset-0 p-6">
+      <p class="text-sm text-tertiary">Page content behind drawer…</p>
+    </div>
+    <!-- ai-example-start: drawer -->
+    <div tabindex="-1" class="absolute right-0 top-0 h-full w-full bg-surface-default shadow-2xl border-l border-subtle flex flex-col outline-none transition-transform duration-200 ease-out max-w-sm translate-x-0">
+      <!-- Header -->
+      <div class="px-5 py-3 border-b border-subtle bg-surface-default flex items-start justify-between gap-3 shrink-0">
+        <div class="min-w-0 pt-0.5">
+          <h2 class="text-lg font-semibold text-primary">Filters</h2>
+        </div>
+        <button type="button" aria-label="Close" class="shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-lg bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-xmark text-base" aria-hidden="true"></i>
+        </button>
+      </div>
+      <!-- Body -->
+      <div class="flex-1 overflow-y-auto p-5">
+        <form aria-label="Filter cases" class="space-y-4">
+          <div>
+            <label for="drawer-apptyp" class="block text-sm font-medium text-secondary mb-1">Application type</label>
+            <div class="relative">
+              <button id="drawer-apptyp" type="button" aria-haspopup="listbox" aria-expanded="false" class="w-full rounded-lg border border-strong bg-surface-default pl-3 pr-8 py-1.5 text-sm text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus text-tertiary">
+                <span class="truncate block">All types</span>
+                <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none text-[10px]" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+          <div>
+            <label for="drawer-status" class="block text-sm font-medium text-secondary mb-1">Status</label>
+            <div class="relative">
+              <button id="drawer-status" type="button" aria-haspopup="listbox" aria-expanded="false" class="w-full rounded-lg border border-strong bg-surface-default pl-3 pr-8 py-1.5 text-sm text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus text-tertiary">
+                <span class="truncate block">All statuses</span>
+                <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none text-[10px]" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+          <div>
+            <label for="drawer-officer" class="block text-sm font-medium text-secondary mb-1">Case officer</label>
+            <div class="relative">
+              <button id="drawer-officer" type="button" aria-haspopup="listbox" aria-expanded="false" class="w-full rounded-lg border border-strong bg-surface-default pl-3 pr-8 py-1.5 text-sm text-left cursor-pointer focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus text-tertiary">
+                <span class="truncate block">All officers</span>
+                <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none text-[10px]" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+      <!-- Footer -->
+      <div class="shrink-0 border-t border-subtle px-5 py-3 flex justify-end gap-2 bg-surface-default">
+        <button type="button" class="inline-flex items-center rounded-lg border border-strong px-3 py-1.5 text-sm font-semibold bg-btn-secondary hover:bg-btn-secondary-hover active:bg-btn-secondary-active text-btn-secondary-text focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent cursor-pointer">Clear filters</button>
+        <button type="submit" class="inline-flex items-center rounded-lg px-3 py-1.5 text-sm font-semibold border border-brand-accent bg-btn-primary hover:bg-btn-primary-hover active:bg-btn-primary-active text-btn-primary-text focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent cursor-pointer">Apply filters</button>
+      </div>
+    </div>
+    <!-- ai-example-end: drawer -->
+  </div>
+</section>
+
+
+<!-- 31. BADGES -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">31. Badges</h2>
+  <p class="mb-4 text-sm text-secondary">Small inline labels for communicating status. Each variant maps to a fixed status colour from the design system.</p>
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: badge-semantic -->
+    <div class="flex flex-wrap gap-2">
+      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-surface-subtle border border-default text-secondary">Not started</span>
+      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-info-bg border border-info-border text-info-text-color">In consultation</span>
+      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-success-bg border border-success-border text-success-text-color">Approved</span>
+      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-warning-bg border border-warning-border text-warning-text-color">Pending decision</span>
+      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-error-bg border border-error-border text-error-text-color">Refused</span>
+    </div>
+    <!-- ai-example-end: badge-semantic -->
+  </div>
+</section>
+
+
+<!-- 32. STAT CARDS -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">32. Stat cards</h2>
+  <p class="mb-4 text-sm text-secondary">KPI summary tiles for dashboards and case-list headers. Each card pairs a semantic icon badge with a large count, a short label, and a supporting subtitle. Use the four semantic variants (error, warning, info, neutral) to reinforce status meaning through colour.</p>
+
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: stat-cards -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+
+      <!-- Error / overdue -->
+      <div class="rounded-xl border border-default bg-surface-default p-5">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-error-bg shrink-0">
+            <i class="fa-light fa-circle-exclamation text-error-icon" aria-hidden="true"></i>
+          </span>
+          <p class="text-3xl font-bold text-error-icon leading-none">28</p>
+        </div>
+        <p class="text-sm font-semibold text-primary">Overdue</p>
+        <p class="text-xs text-tertiary mt-0.5">Past target date</p>
+      </div>
+
+      <!-- Neutral / informational -->
+      <div class="rounded-xl border border-default bg-surface-default p-5">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-surface-subtle shrink-0">
+            <i class="fa-light fa-clock text-secondary" aria-hidden="true"></i>
+          </span>
+          <p class="text-3xl font-bold text-secondary leading-none">0</p>
+        </div>
+        <p class="text-sm font-semibold text-primary">Due this week</p>
+        <p class="text-xs text-tertiary mt-0.5">Target within 7 days</p>
+      </div>
+
+      <!-- Warning / attention needed -->
+      <div class="rounded-xl border border-default bg-surface-default p-5">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-warning-bg shrink-0">
+            <i class="fa-light fa-comment-exclamation text-warning-icon" aria-hidden="true"></i>
+          </span>
+          <p class="text-3xl font-bold text-warning-text-color leading-none">38</p>
+        </div>
+        <p class="text-sm font-semibold text-primary">Chasing responses</p>
+        <p class="text-xs text-tertiary mt-0.5">No response received</p>
+      </div>
+
+      <!-- Info / in-progress -->
+      <div class="rounded-xl border border-default bg-surface-default p-5">
+        <div class="flex items-center gap-3 mb-2">
+          <span class="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-info-bg shrink-0">
+            <i class="fa-light fa-hourglass-half text-info-icon" aria-hidden="true"></i>
+          </span>
+          <p class="text-3xl font-bold text-info-text-color leading-none">71</p>
+        </div>
+        <p class="text-sm font-semibold text-primary">Awaiting decision</p>
+        <p class="text-xs text-tertiary mt-0.5">No decision yet</p>
+      </div>
+
+    </div>
+    <!-- ai-example-end: stat-cards -->
+  </div>
+</section>
+
+
+<!-- 33. TOAST NOTIFICATION -->
+<section>
+  <h2 class="text-xl font-semibold mb-4">33. Toast notification</h2>
+  <p class="mb-4 text-sm text-secondary">Short, auto-dismissing messages for feedback on completed actions. Toasts appear bottom-right, stack upward, and dismiss after four seconds or on manual close. The <code class="text-xs font-mono bg-surface-base rounded px-1 py-0.5">showToast(message, type)</code> helper accepts <code class="text-xs font-mono bg-surface-base rounded px-1 py-0.5">success</code>, <code class="text-xs font-mono bg-surface-base rounded px-1 py-0.5">info</code>, <code class="text-xs font-mono bg-surface-base rounded px-1 py-0.5">warning</code>, and <code class="text-xs font-mono bg-surface-base rounded px-1 py-0.5">error</code> variants.</p>
+  <div class="bg-surface-default border border-default p-6 rounded-lg">
+    <!-- ai-example-start: toast-notification -->
+    <div class="flex flex-wrap gap-2">
+      <button type="button" data-toast="success" data-toast-message="Record saved successfully"
+        class="inline-flex items-center gap-2 rounded-md border border-default bg-surface-default px-3.5 py-2 text-sm font-medium text-primary shadow-sm hover:bg-surface-base transition-colors cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+        <i class="fa-light fa-circle-check text-success-icon" aria-hidden="true"></i> Success
+      </button>
+      <button type="button" data-toast="info" data-toast-message="Application assigned to your queue"
+        class="inline-flex items-center gap-2 rounded-md border border-default bg-surface-default px-3.5 py-2 text-sm font-medium text-primary shadow-sm hover:bg-surface-base transition-colors cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+        <i class="fa-light fa-circle-info text-info-icon" aria-hidden="true"></i> Info
+      </button>
+      <button type="button" data-toast="warning" data-toast-message="Changes saved but not yet submitted"
+        class="inline-flex items-center gap-2 rounded-md border border-default bg-surface-default px-3.5 py-2 text-sm font-medium text-primary shadow-sm hover:bg-surface-base transition-colors cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+        <i class="fa-light fa-triangle-exclamation text-warning-icon" aria-hidden="true"></i> Warning
+      </button>
+      <button type="button" data-toast="error" data-toast-message="Failed to save — please try again"
+        class="inline-flex items-center gap-2 rounded-md border border-default bg-surface-default px-3.5 py-2 text-sm font-medium text-primary shadow-sm hover:bg-surface-base transition-colors cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+        <i class="fa-light fa-circle-xmark text-error-icon" aria-hidden="true"></i> Error
+      </button>
+    </div>
+    <!-- ai-example-end: toast-notification -->
+  </div>
+</section>
+
+
+
+</main>
+
+<div id="toast-region" role="status" aria-live="polite" aria-atomic="false" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 items-end pointer-events-none"></div>
+
+<script src="js/component-examples.js"></script>
+
+</body>
+</html>

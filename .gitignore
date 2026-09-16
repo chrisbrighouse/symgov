@@ -1,6 +1,9 @@
 node_modules/
 dist/
 assets/
+# ...except the Idox design-system reference assets, which its HTML and
+# idox-design-system.md both reference by that exact relative path.
+!ui-design/idox-design-system/assets/
 /index.html
 
 /backups/

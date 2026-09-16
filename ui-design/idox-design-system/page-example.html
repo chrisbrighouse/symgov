@@ -1,0 +1,920 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reception | 24/00142/FUL | Uniform</title>
+
+<!-- Tailwind CDN v4 -->
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<!-- TAILWIND ELEMENTS -->
+<script src="https://cdn.jsdelivr.net/npm/@tailwindplus/elements@1" type="module"></script>
+<!-- FONT AWESOME -->
+<script src="https://kit.fontawesome.com/84881d618d.js" crossorigin="anonymous"></script>
+<!-- DM SANS FONT -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" type="image/png" href="assets/favicon180x180.png">
+<link rel="stylesheet" href="design-tokens.css">
+
+
+<style type="text/tailwindcss">
+/* ⚠ Keep in sync with component-examples.html @theme block.
+   Extraction to a shared file requires a build pipeline — not possible with the Tailwind CDN approach. */
+@theme inline {
+  --color-surface-default: var(--idox-bg-surface-default);
+  --color-surface-light:   var(--idox-bg-surface-light);
+  --color-surface-base:    var(--idox-bg-surface-base);
+  --color-surface-subtle:  var(--idox-bg-surface-subtle);
+  --color-surface-muted:   var(--idox-bg-surface-muted);
+
+  --color-primary:         var(--idox-text-primary);
+  --color-secondary:       var(--idox-text-secondary);
+  --color-tertiary:        var(--idox-text-tertiary);
+  --color-inverse:         var(--idox-text-inverse);
+  --color-brand:           var(--idox-text-brand);
+  --color-brand-accent:    var(--idox-text-brand-accent);
+
+  --color-default:         var(--idox-border-default);
+  --color-subtle:          var(--idox-border-subtle);
+  --color-strong:          var(--idox-border-strong);
+  --color-focus:           var(--idox-border-focus);
+
+  --color-link:            var(--idox-link-default);
+  --color-link-hover:      var(--idox-link-hover);
+  --color-link-active:     var(--idox-link-active);
+
+  --color-interactive-default:          var(--idox-interactive-default);
+  --color-interactive-hover:            var(--idox-interactive-hover);
+  --color-interactive-active:           var(--idox-interactive-active);
+  --color-interactive-text:             var(--idox-interactive-text);
+
+  --color-interactive-subtle:        var(--idox-interactive-subtle);
+  --color-interactive-subtle-hover:  var(--idox-interactive-subtle-hover);
+  --color-interactive-subtle-active: var(--idox-interactive-subtle-active);
+  --color-interactive-subtle-selected:  var(--idox-interactive-subtle-selected);
+
+  --color-list-hover:   var(--idox-list-hover-bg);
+  --color-list-active:  var(--idox-list-active-bg);
+
+  --color-btn-primary:        var(--idox-btn-primary);
+  --color-btn-primary-hover:  var(--idox-btn-primary-hover);
+  --color-btn-primary-active: var(--idox-btn-primary-active);
+  --color-btn-primary-text:   var(--idox-btn-primary-text);
+  --color-btn-secondary:        var(--idox-btn-secondary);
+  --color-btn-secondary-hover:  var(--idox-btn-secondary-hover);
+  --color-btn-secondary-active: var(--idox-btn-secondary-active);
+  --color-btn-secondary-text:   var(--idox-btn-secondary-text);
+
+  --color-navbar-bg:          var(--idox-navbar-bg);
+  --color-navbar-text:        var(--idox-navbar-text);
+  --color-navbar-hover:       var(--idox-navbar-hover);
+  --color-navbar-active:      var(--idox-navbar-active);
+  --color-navbar-icon:        var(--idox-navbar-icon);
+  --color-navbar-icon-hover:  var(--idox-navbar-icon-hover);
+
+  --color-overlay:            var(--idox-overlay-bg);
+
+  --color-disabled:          var(--idox-text-disabled);
+  --color-surface-disabled:  var(--idox-bg-disabled);
+
+  --color-success-bg:         var(--idox-success-bg);
+  --color-success-border:     var(--idox-success-border);
+  --color-success-icon:       var(--idox-success-icon);
+  --color-success-text:       var(--idox-success-text);
+  --color-success-heading:    var(--idox-success-heading);
+  --color-success-text-color: var(--idox-success-text-color);
+
+  --color-warning-bg:         var(--idox-warning-bg);
+  --color-warning-border:     var(--idox-warning-border);
+  --color-warning-icon:       var(--idox-warning-icon);
+  --color-warning-text:       var(--idox-warning-text);
+  --color-warning-heading:    var(--idox-warning-heading);
+  --color-warning-text-color: var(--idox-warning-text-color);
+
+  --color-error-bg:           var(--idox-error-bg);
+  --color-error-border:       var(--idox-error-border);
+  --color-error-icon:         var(--idox-error-icon);
+  --color-error-text:         var(--idox-error-text);
+  --color-error-heading:      var(--idox-error-heading);
+  --color-error-text-color:   var(--idox-error-text-color);
+
+  --color-info-bg:            var(--idox-info-bg);
+  --color-info-border:        var(--idox-info-border);
+  --color-info-icon:          var(--idox-info-icon);
+  --color-info-text:          var(--idox-info-text);
+  --color-info-heading:       var(--idox-info-heading);
+  --color-info-text-color:    var(--idox-info-text-color);
+
+  --radius-sm:   var(--idox-radius-sm);
+  --radius-md:   var(--idox-radius-md);
+  --radius-lg:   var(--idox-radius-lg);
+  --radius-xl:   var(--idox-radius-xl);
+  --radius-full: var(--idox-radius-full);
+
+  --font-sans: var(--idox-font-family-base);
+  --font-mono: var(--idox-font-family-mono);
+
+  --text-xs:   var(--idox-font-size-xs);
+  --text-sm:   var(--idox-font-size-sm);
+  --text-base: var(--idox-font-size-base);
+  --text-lg:   var(--idox-font-size-lg);
+  --text-xl:   var(--idox-font-size-xl);
+  --text-2xl:  var(--idox-font-size-2xl);
+
+  --font-weight-normal:   var(--idox-font-weight-normal);
+  --font-weight-medium:   var(--idox-font-weight-medium);
+  --font-weight-semibold: var(--idox-font-weight-semibold);
+  --font-weight-bold:     var(--idox-font-weight-bold);
+
+  --leading-tight:   var(--idox-line-height-tight);
+  --leading-normal:  var(--idox-line-height-normal);
+  --leading-relaxed: var(--idox-line-height-relaxed);
+
+  --animate-indeterminate: indeterminate 1.5s ease-in-out infinite;
+
+  @keyframes indeterminate {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(400%); }
+  }
+}
+
+@layer utilities {
+  /* Headings 
+  h1, h1 + span + span, h2, h3 { color: var(--idox-blue-800); }*/
+
+  /* Nav section toggle and panel summary chevrons */
+  button[data-nav-toggle] i,
+  summary i { color: var(--color-interactive-default); }
+
+
+}
+
+</style>
+</head>
+
+<body class="bg-surface-light text-primary font-sans m-0 h-screen flex flex-col overflow-hidden">
+
+<a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:px-4 focus:py-2 focus:bg-surface-default focus:text-primary focus:rounded-lg focus:shadow-lg focus:outline-solid focus:outline-2 focus:outline-brand-accent">Skip to main content</a>
+
+<!-- ═══════════════════════════════════════════════════════════
+     TOP NAVBAR
+═══════════════════════════════════════════════════════════ -->
+<nav class="shrink-0 bg-navbar-bg text-navbar-text" aria-label="Primary navigation">
+  <div class="px-4">
+    <div class="relative flex h-14 items-center justify-between">
+      <div class="flex items-center gap-5">
+        <button id="nav-hamburger" type="button" class="inline-flex items-center justify-center w-8 h-8 rounded-md text-navbar-icon hover:bg-navbar-hover active:bg-navbar-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Toggle sidebar" aria-expanded="false" aria-controls="app-sidebar">
+          <i class="fa-light fa-bars text-lg" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="flex shrink-0 items-center gap-2 rounded-lg cursor-pointer mr-10 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Uniform — home">
+          <img src="assets/idox_logo_reversed.png" alt="Idox" class="h-6 w-auto">
+          <span class="border-l border-white/50 h-7 mx-2" aria-hidden="true"></span>
+          <span class="text-lg font-semibold text-navbar-text">Uniform</span>
+        </button>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" aria-label="Notifications" class="relative px-2 py-2 inline-flex items-center justify-center rounded-md text-navbar-icon hover:bg-navbar-hover active:bg-navbar-active hover:text-navbar-icon-hover cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-bell text-lg" aria-hidden="true"></i>
+        </button>
+        <button type="button" aria-label="Settings" class="relative px-2 py-2 inline-flex items-center justify-center rounded-md text-navbar-icon hover:bg-navbar-hover active:bg-navbar-active hover:text-navbar-icon-hover cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-gear text-lg" aria-hidden="true"></i>
+        </button>
+        <button type="button" aria-label="Help" class="relative px-2 py-2 inline-flex items-center justify-center rounded-md text-navbar-icon hover:bg-navbar-hover active:bg-navbar-active hover:text-navbar-icon-hover cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <i class="fa-light fa-circle-question text-lg" aria-hidden="true"></i>
+        </button>
+        <button type="button" class="ml-2 w-8 h-8 rounded-full bg-interactive-default hover:bg-interactive-hover active:bg-interactive-active flex items-center justify-center text-interactive-text text-sm font-semibold cursor-pointer transition-shadow focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="User menu">JS</button>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<!-- BREADCRUMB BAR -->
+<div class="shrink-0 bg-surface-default border-b border-subtle px-4">
+  <div class="flex items-center justify-between h-9">
+    <div class="flex items-center gap-2">
+    <nav aria-label="Breadcrumb">
+      <ol class="flex flex-wrap items-center gap-1.5 text-sm text-secondary">
+        <li><a href="#" class="text-link hover:text-link-hover active:text-link-active underline rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Worklist</a></li>
+        <li aria-hidden="true"><i class="fa-light fa-chevron-right text-tertiary text-xs" aria-hidden="true"></i></li>
+        <li><a href="#" class="text-link hover:text-link-hover active:text-link-active underline rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">24/00142/FUL</a></li>
+        <li aria-hidden="true"><i class="fa-light fa-chevron-right text-tertiary text-xs" aria-hidden="true"></i></li>
+        <li class="font-medium text-primary" aria-current="page">Reception</li>
+      </ol>
+    </nav>
+    </div>
+    <div class="flex items-center gap-1">
+      <button id="fullscreen-toggle" type="button" class="inline-flex items-center justify-center w-7 h-7 text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Toggle fullscreen">
+        <i id="fullscreen-icon" class="fa-light fa-expand text-base" aria-hidden="true"></i>
+      </button>
+      <button type="button" class="inline-flex items-center justify-center w-7 h-7 text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Page information">
+        <i class="fa-light fa-circle-info" aria-hidden="true"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════
+     MAIN LAYOUT: SIDE NAV + CONTENT
+═══════════════════════════════════════════════════════════ -->
+<div class="flex flex-1 overflow-hidden">
+
+  <!-- SIDE NAVIGATION -->
+  <aside id="app-sidebar" class="side-nav hidden lg:shrink-0 fixed lg:relative inset-y-0 left-0 z-40 w-72 lg:w-64 bg-surface-default border-r border-subtle overflow-y-auto">
+    <nav class="py-4 px-3" aria-label="Side navigation">
+      <ul class="space-y-0.5 text-sm font-medium">
+        <li class="pb-1">
+          <p role="heading" aria-level="3" class="block px-3 text-xs font-semibold text-tertiary">Applications</p>
+        </li>
+        <li>
+          <a href="#" data-nav-link data-view="default" class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-secondary hover:bg-list-hover hover:text-primary active:bg-list-active focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            <i class="fa-light fa-gauge w-4 text-center text-secondary" aria-hidden="true"></i>
+            <span>Dashboard</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" data-nav-link data-view="reception" aria-current="page" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-interactive-subtle-selected text-interactive-default font-semibold hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            <i class="fa-light fa-inbox w-4 text-center" aria-hidden="true"></i>
+            <span>Reception</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" data-nav-link data-view="search" class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-secondary hover:bg-list-hover hover:text-primary active:bg-list-active focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            <i class="fa-light fa-magnifying-glass w-4 text-center text-secondary" aria-hidden="true"></i>
+            <span>Search</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" data-nav-link data-view="map" class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-secondary hover:bg-list-hover hover:text-primary active:bg-list-active focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            <i class="fa-light fa-map w-4 text-center text-secondary" aria-hidden="true"></i>
+            <span>Map view</span>
+          </a>
+        </li>
+
+        <li class="pt-2">
+          <div class="border-t border-subtle mx-1 mb-4"></div>
+        </li>
+        <li class="pb-1">
+          <p role="heading" aria-level="3" class="block px-3 text-xs font-semibold text-tertiary">Reports</p>
+        </li>
+        <li>
+          <a href="#" data-nav-link data-view="workload" class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-secondary hover:bg-list-hover hover:text-primary active:bg-list-active focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            <i class="fa-light fa-chart-bar w-4 text-center text-secondary" aria-hidden="true"></i>
+            <span>Workload</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" data-nav-link data-view="performance" class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-secondary hover:bg-list-hover hover:text-primary active:bg-list-active focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            <i class="fa-light fa-chart-line w-4 text-center text-secondary" aria-hidden="true"></i>
+            <span>Performance</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" data-nav-link data-view="consultations" class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-secondary hover:bg-list-hover hover:text-primary active:bg-list-active focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            <i class="fa-light fa-comments w-4 text-center text-secondary" aria-hidden="true"></i>
+            <span>Consultations</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" data-nav-link data-view="decisions" class="flex items-center gap-2 px-3 py-1.5 rounded-lg text-secondary hover:bg-list-hover hover:text-primary active:bg-list-active focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            <i class="fa-light fa-gavel w-4 text-center text-secondary" aria-hidden="true"></i>
+            <span>Decisions</span>
+          </a>
+        </li>
+      </ul>
+    </nav>
+  </aside>
+
+  <!-- SCROLLABLE CONTENT AREA -->
+  <main id="main-content" class="flex-1 overflow-y-auto">
+
+    <!-- PAGE HEADER -->
+    <header id="page-header" class="sticky top-0 z-10 bg-surface-light px-4 md:px-8 pt-4 pb-4">
+      <div class="max-w-7xl mx-auto">
+      <div class="flex items-center justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <div class="md:flex md:items-center md:gap-3">
+            <h1 class="min-w-0 text-xl xl:text-2xl font-bold tracking-tight md:truncate lg:whitespace-normal lg:overflow-visible">14 Elmwood Avenue, Harrowgate, HG2 8BN</h1>
+            <div class="flex items-center gap-2 mt-1.5 md:mt-0">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap bg-success-bg border border-success-border text-success-text-color">Approved</span>
+              <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer shrink-0 focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Add to favourites">
+                <i class="fa-light fa-star text-base" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+          <p class="min-w-0 truncate text-sm text-secondary mt-1 lg:max-w-4xl">24/00142/FUL<i class="fa-solid fa-circle-small text-tertiary text-[4px] align-middle mx-1" aria-hidden="true"></i>Erection of a two-storey rear extension and conversion of loft space to habitable use including insertion of dormer windows to rear elevation.</p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <div class="inline-flex" role="group">
+            <button type="button" class="inline-flex items-center gap-1.5 bg-btn-primary text-btn-primary-text border border-brand-accent border-r-0 hover:bg-btn-primary-hover active:bg-btn-primary-active rounded-l-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+              <i class="fa-light fa-floppy-disk text-base" aria-hidden="true"></i>
+              <span>Save</span>
+            </button>
+            <span class="w-px self-stretch bg-white/30" aria-hidden="true"></span>
+            <el-dropdown class="relative flex">
+              <button type="button" aria-label="More save options" aria-haspopup="true" class="inline-flex items-center justify-center bg-btn-primary text-btn-primary-text border border-brand-accent hover:bg-btn-primary-hover active:bg-btn-primary-active rounded-r-lg px-2 cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-chevron-down text-[10px]" aria-hidden="true"></i>
+              </button>
+              <el-menu anchor="bottom end" popover class="mt-2 w-52 rounded-lg border border-default bg-surface-default p-1 shadow-lg">
+                <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                  <i class="fa-light fa-floppy-disk w-4 text-center" aria-hidden="true"></i>
+                  <span>Save and close</span>
+                </button>
+                <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                  <i class="fa-light fa-pen-to-square w-4 text-center" aria-hidden="true"></i>
+                  <span>Save as draft</span>
+                </button>
+                <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                  <i class="fa-light fa-file-plus w-4 text-center" aria-hidden="true"></i>
+                  <span>Save and create new</span>
+                </button>
+              </el-menu>
+            </el-dropdown>
+          </div>
+          <button type="button" class="hidden lg:inline-flex items-center gap-1.5 bg-btn-secondary text-btn-secondary-text border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+            <i class="fa-light fa-user-check text-base text-interactive-default" aria-hidden="true"></i>
+            <span>Assign</span>
+          </button>
+          <button type="button" class="hidden lg:inline-flex items-center justify-center bg-btn-secondary text-btn-secondary-text border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active rounded-lg px-2.5 py-2 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Print">
+            <i class="fa-light fa-print text-base text-interactive-default" aria-hidden="true"></i>
+            <span class="sr-only">Print</span>
+          </button>
+
+          <!-- Ellipsis dropdown -->
+          <el-dropdown class="relative inline-block text-left">
+            <button type="button" class="inline-flex items-center justify-center bg-btn-secondary text-btn-secondary-text border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active rounded-lg px-2.5 py-2 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="More options">
+              <i class="fa-regular fa-ellipsis text-base text-interactive-default" aria-hidden="true"></i>
+            </button>
+            <el-menu anchor="bottom end" popover class="mt-1 w-60 rounded-lg border border-default bg-surface-default p-1 shadow-lg">
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-pen-to-square w-4 text-center" aria-hidden="true"></i>
+                <span>Edit case details</span>
+              </button>
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-user-plus w-4 text-center" aria-hidden="true"></i>
+                <span>Assign officer</span>
+              </button>
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-calendar-plus w-4 text-center" aria-hidden="true"></i>
+                <span>Add consultation</span>
+              </button>
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-file-arrow-up w-4 text-center" aria-hidden="true"></i>
+                <span>Upload document</span>
+              </button>
+              <hr role="none" class="my-1 border-subtle" />
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-file-export w-4 text-center" aria-hidden="true"></i>
+                <span>Export case</span>
+              </button>
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-print w-4 text-center" aria-hidden="true"></i>
+                <span>Print summary</span>
+              </button>
+              <hr role="none" class="my-1 border-subtle" />
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-secondary hover:text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-box-archive w-4 text-center" aria-hidden="true"></i>
+                <span>Archive case</span>
+              </button>
+              <button type="button" class="flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm text-error-icon hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                <i class="fa-light fa-trash-can w-4 text-center" aria-hidden="true"></i>
+                <span>Delete case</span>
+              </button>
+            </el-menu>
+          </el-dropdown>
+        </div>
+      </div>
+      </div><!-- end max-w-7xl -->
+    </header>
+
+    <!-- MAIN CONTENT AREA -->
+    <div class="px-4 md:px-8 pt-6 pb-10">
+    <div class="max-w-7xl mx-auto">
+
+      <!-- ─── PANELS ─── -->
+      <div>
+
+      <!-- ─── CHARGES VIEW ─── -->
+      <div id="view-charges" class="space-y-6">
+
+      <!-- ─── CONSULTATIONS TABLE CONTAINER ─── -->
+      <section class="bg-surface-default border border-default rounded-xl overflow-hidden">
+        <div class="px-5 py-3 border-b border-subtle flex items-center justify-between gap-2">
+          <div class="flex items-baseline gap-1">
+            <h2 class="text-base font-semibold text-primary">Consultations</h2>
+            <span class="text-secondary">(3)</span>
+          </div>
+          <a href="#" class="text-sm text-link hover:text-link-hover active:text-link-active underline font-medium rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">View all</a>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="min-w-full text-sm">
+            <thead>
+              <tr class="bg-surface-base border-b border-subtle">
+                <th scope="col" class="px-5 py-2 text-left whitespace-nowrap" aria-sort="ascending">
+                  <button type="button" class="inline-flex items-center gap-1 font-semibold text-secondary hover:text-primary cursor-pointer rounded-sm focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Consultee <i class="fa-solid fa-caret-up text-interactive-default text-xs" aria-hidden="true"></i></button>
+                </th>
+                <th scope="col" class="px-5 py-2 text-left whitespace-nowrap">
+                  <button type="button" class="inline-flex items-center gap-1 font-semibold text-secondary hover:text-primary cursor-pointer rounded-sm focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Organisation <i class="fa-light fa-caret-down text-tertiary text-xs" aria-hidden="true"></i></button>
+                </th>
+                <th scope="col" class="px-5 py-2 text-left whitespace-nowrap">
+                  <button type="button" class="inline-flex items-center gap-1 font-semibold text-secondary hover:text-primary cursor-pointer rounded-sm focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Role <i class="fa-light fa-caret-down text-tertiary text-xs" aria-hidden="true"></i></button>
+                </th>
+                <th scope="col" class="px-5 py-2 text-left whitespace-nowrap">
+                  <button type="button" class="inline-flex items-center gap-1 font-semibold text-secondary hover:text-primary cursor-pointer rounded-sm focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Consulted <i class="fa-light fa-caret-down text-tertiary text-xs" aria-hidden="true"></i></button>
+                </th>
+                <th scope="col" class="px-5 py-2 text-left whitespace-nowrap">
+                  <button type="button" class="inline-flex items-center gap-1 font-semibold text-secondary hover:text-primary cursor-pointer rounded-sm focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Due <i class="fa-light fa-caret-down text-tertiary text-xs" aria-hidden="true"></i></button>
+                </th>
+                <th scope="col" class="px-5 py-2 text-left whitespace-nowrap">
+                  <button type="button" class="inline-flex items-center gap-1 font-semibold text-secondary hover:text-primary cursor-pointer rounded-sm focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Ref <i class="fa-light fa-caret-down text-tertiary text-xs" aria-hidden="true"></i></button>
+                </th>
+                <th scope="col" class="px-5 py-2 text-left whitespace-nowrap">
+                  <button type="button" class="inline-flex items-center gap-1 font-semibold text-secondary hover:text-primary cursor-pointer rounded-sm focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Method <i class="fa-light fa-caret-down text-tertiary text-xs" aria-hidden="true"></i></button>
+                </th>
+                <th scope="col" class="px-5 py-2 text-left whitespace-nowrap">
+                  <button type="button" class="inline-flex items-center gap-1 font-semibold text-secondary hover:text-primary cursor-pointer rounded-sm focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Status <i class="fa-light fa-caret-down text-tertiary text-xs" aria-hidden="true"></i></button>
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-subtle">
+              <tr class="hover:bg-surface-base transition-colors">
+                <td class="px-5 py-3"><a href="#" class="font-medium text-link hover:text-link-hover active:text-link-active hover:underline rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Highways England</a></td>
+                <td class="px-5 py-3 text-primary">National Highways</td>
+                <td class="px-5 py-3 text-secondary">Statutory</td>
+                <td class="px-5 py-3 text-primary whitespace-nowrap">14 Jan 2026</td>
+                <td class="px-5 py-3 text-primary whitespace-nowrap">28 Jan 2026</td>
+                <td class="px-5 py-3 text-secondary">CON/2026/001</td>
+                <td class="px-5 py-3 text-secondary">Email</td>
+                <td class="px-5 py-3"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold whitespace-nowrap bg-success-bg border border-success-border text-success-text-color">No objection</span></td>
+              </tr>
+              <tr class="hover:bg-surface-base transition-colors">
+                <td class="px-5 py-3"><a href="#" class="font-medium text-link hover:text-link-hover active:text-link-active hover:underline rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Environment Agency</a></td>
+                <td class="px-5 py-3 text-primary">Environment Agency</td>
+                <td class="px-5 py-3 text-secondary">Statutory</td>
+                <td class="px-5 py-3 text-primary whitespace-nowrap">14 Jan 2026</td>
+                <td class="px-5 py-3 text-primary whitespace-nowrap">28 Jan 2026</td>
+                <td class="px-5 py-3 text-secondary">CON/2026/002</td>
+                <td class="px-5 py-3 text-secondary">Email</td>
+                <td class="px-5 py-3"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-warning-bg border border-warning-border text-warning-text-color">Awaiting</span></td>
+              </tr>
+              <tr class="hover:bg-surface-base transition-colors">
+                <td class="px-5 py-3"><a href="#" class="font-medium text-link hover:text-link-hover active:text-link-active hover:underline rounded-sm outline-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Historic England</a></td>
+                <td class="px-5 py-3 text-primary">Historic England</td>
+                <td class="px-5 py-3 text-secondary">Statutory</td>
+                <td class="px-5 py-3 text-primary whitespace-nowrap">14 Jan 2026</td>
+                <td class="px-5 py-3 text-primary whitespace-nowrap">28 Jan 2026</td>
+                <td class="px-5 py-3 text-secondary">CON/2026/003</td>
+                <td class="px-5 py-3 text-secondary">Post</td>
+                <td class="px-5 py-3"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-error-bg border border-error-border text-error-text-color">Objection</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ─── CASE DETAILS FORM PANEL ─── -->
+      <section class="bg-surface-default border border-default rounded-xl">
+        <div class="px-5 py-3 border-b border-subtle">
+          <h2 class="text-base font-semibold text-primary">Charges</h2>
+        </div>
+        <div class="p-5">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 lg:gap-x-16 gap-y-5">
+            <div>
+              <label for="distName" class="block mb-1 text-sm font-medium text-secondary">Case officer</label>
+              <div class="relative">
+                <select id="distName" name="distName" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary appearance-none focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus cursor-pointer">
+                  <option>Sarah Whitfield</option>
+                  <option>James Okafor</option>
+                  <option>Priya Nair</option>
+                  <option>Tom Brennan</option>
+                </select>
+                <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none text-[10px]" aria-hidden="true"></i>
+              </div>
+            </div>
+
+            <div>
+              <label for="defaultRootObject" class="block mb-1 text-sm font-medium text-secondary">Description of development</label>
+              <input id="defaultRootObject" name="defaultRootObject" type="text" placeholder="e.g. Erection of a two-storey rear extension" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary placeholder:text-tertiary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" />
+            </div>
+
+            <div>
+              <label for="priceClass" class="block mb-1 text-sm font-medium text-secondary">Development type</label>
+              <div class="relative">
+                <select id="priceClass" name="priceClass" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary appearance-none focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus cursor-pointer">
+                  <option>Full application</option>
+                  <option>Householder</option>
+                  <option>Change of use</option>
+                  <option>Listed building consent</option>
+                  <option>Prior approval</option>
+                </select>
+                <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none text-[10px]" aria-hidden="true"></i>
+              </div>
+            </div>
+
+            <div>
+              <label for="httpVersion" class="block mb-1 text-sm font-medium text-secondary">Ward</label>
+              <div class="relative">
+                <select id="httpVersion" name="httpVersion" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary appearance-none focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus cursor-pointer">
+                  <option>Harrowgate Central</option>
+                  <option>Harrowgate North</option>
+                  <option>Harrowgate South</option>
+                  <option>Harrowgate East</option>
+                </select>
+                <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none text-[10px]" aria-hidden="true"></i>
+              </div>
+            </div>
+
+            <div class="relative">
+              <label for="targetDate" class="block mb-1 text-sm font-medium text-secondary">Target date</label>
+              <div class="relative">
+                <input id="targetDate" name="targetDate" type="text" placeholder="dd/mm/yyyy" value="26/04/2026" class="date-input w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 pr-9 text-sm text-primary placeholder:text-tertiary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" />
+                <button id="targetDateToggle" type="button" aria-expanded="false" aria-controls="targetDatePicker" class="absolute inset-y-0 right-0 w-9 rounded-r-lg flex items-center justify-center text-secondary hover:text-primary active:text-tertiary cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Open target date picker"><i class="fa-light fa-calendar text-base" aria-hidden="true"></i></button>
+              </div>
+              <!-- Date picker panel -->
+              <div id="targetDatePicker" role="dialog" aria-label="Choose target date" class="hidden absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-default bg-surface-default shadow-lg overflow-hidden">
+                <div class="flex items-center justify-between px-3 py-2 border-b border-subtle">
+                  <button type="button" class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Previous month"><i class="fa-light fa-chevron-left text-xs" aria-hidden="true"></i></button>
+                  <span class="text-sm font-semibold text-primary">April 2026</span>
+                  <button type="button" class="inline-flex items-center justify-center w-8 h-8 rounded-lg text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Next month"><i class="fa-light fa-chevron-right text-xs" aria-hidden="true"></i></button>
+                </div>
+                <div class="p-3">
+                  <div role="grid" aria-label="April 2026" class="grid grid-cols-7 gap-y-0.5">
+                    <div role="row" class="contents">
+                      <span role="columnheader" aria-label="Monday" class="text-center text-xs font-medium text-tertiary py-1">Mo</span>
+                      <span role="columnheader" aria-label="Tuesday" class="text-center text-xs font-medium text-tertiary py-1">Tu</span>
+                      <span role="columnheader" aria-label="Wednesday" class="text-center text-xs font-medium text-tertiary py-1">We</span>
+                      <span role="columnheader" aria-label="Thursday" class="text-center text-xs font-medium text-tertiary py-1">Th</span>
+                      <span role="columnheader" aria-label="Friday" class="text-center text-xs font-medium text-tertiary py-1">Fr</span>
+                      <span role="columnheader" aria-label="Saturday" class="text-center text-xs font-medium text-tertiary py-1">Sa</span>
+                      <span role="columnheader" aria-label="Sunday" class="text-center text-xs font-medium text-tertiary py-1">Su</span>
+                    </div>
+                    <!-- Week 1: 1 Apr starts on Wednesday (col 3) -->
+                    <div role="row" class="contents">
+                      <span role="gridcell"></span><span role="gridcell"></span>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="1 April 2026">1</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="2 April 2026">2</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="3 April 2026">3</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="4 April 2026">4</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="5 April 2026">5</button>
+                    </div>
+                    <!-- Week 2 -->
+                    <div role="row" class="contents">
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="6 April 2026">6</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="7 April 2026">7</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="8 April 2026">8</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="9 April 2026">9</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="10 April 2026">10</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="11 April 2026">11</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="12 April 2026">12</button>
+                    </div>
+                    <!-- Week 3 -->
+                    <div role="row" class="contents">
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="13 April 2026">13</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="14 April 2026">14</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="15 April 2026">15</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="16 April 2026">16</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="17 April 2026">17</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="18 April 2026">18</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="19 April 2026">19</button>
+                    </div>
+                    <!-- Week 4 -->
+                    <div role="row" class="contents">
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="20 April 2026">20</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="21 April 2026">21</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="22 April 2026">22</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm font-semibold text-interactive-default ring-1 ring-interactive-default hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="23 April 2026" aria-current="date">23</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="24 April 2026">24</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="25 April 2026">25</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm font-semibold bg-interactive-default text-interactive-text hover:bg-interactive-hover active:bg-interactive-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="26 April 2026" aria-selected="true">26</button>
+                    </div>
+                    <!-- Week 5 -->
+                    <div role="row" class="contents">
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="27 April 2026">27</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="28 April 2026">28</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="29 April 2026">29</button>
+                      <button role="gridcell" type="button" class="flex items-center justify-center h-8 w-full rounded-lg text-sm text-primary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-brand-accent" aria-label="30 April 2026">30</button>
+                      <span role="gridcell"></span><span role="gridcell"></span><span role="gridcell"></span>
+                    </div>
+                  </div>
+                </div>
+                <div class="flex items-center justify-between px-3 py-2 border-t border-subtle">
+                  <button type="button" class="rounded-md px-1 text-sm text-link hover:text-link-hover active:text-link-active font-medium cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Today</button>
+                  <button type="button" class="rounded-md px-1 text-sm text-link hover:text-link-hover active:text-link-active font-medium cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Clear</button>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label for="decisionLevel" class="block mb-1 text-sm font-medium text-secondary">Decision level</label>
+              <div class="relative">
+                <select id="decisionLevel" name="decisionLevel" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary appearance-none focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus cursor-pointer">
+                  <option>Delegated</option>
+                  <option>Committee</option>
+                  <option>Secretary of State</option>
+                </select>
+                <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none text-[10px]" aria-hidden="true"></i>
+              </div>
+            </div>
+
+            <div class="md:col-span-2">
+              <label for="comment" class="block mb-1 text-sm font-medium text-secondary">Case notes</label>
+              <div class="rounded-lg border border-strong bg-surface-default overflow-hidden focus-within:ring-1 focus-within:ring-focus focus-within:border-focus">
+                <div class="flex items-center gap-1 px-2 py-1.5 border-b border-subtle bg-surface-default" role="toolbar" aria-label="Text formatting">
+                  <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Bold"><i class="fa-light fa-bold text-base" aria-hidden="true"></i></button>
+                  <button type="button" aria-pressed="true" class="inline-flex items-center justify-center w-8 h-8 bg-interactive-subtle text-interactive-default hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Italic"><i class="fa-solid fa-italic text-base" aria-hidden="true"></i></button>
+                  <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Underline"><i class="fa-light fa-underline text-base" aria-hidden="true"></i></button>
+                  <div class="w-px h-5 bg-subtle mx-1" role="separator" aria-orientation="vertical"></div>
+                  <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Bulleted list"><i class="fa-light fa-list-ul text-base" aria-hidden="true"></i></button>
+                  <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Numbered list"><i class="fa-light fa-list-ol text-base" aria-hidden="true"></i></button>
+                  <div class="w-px h-5 bg-subtle mx-1" role="separator" aria-orientation="vertical"></div>
+                  <button type="button" class="inline-flex items-center justify-center w-8 h-8 bg-transparent text-secondary hover:bg-interactive-subtle-hover active:bg-interactive-subtle-active rounded-lg cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Insert link"><i class="fa-light fa-link text-base" aria-hidden="true"></i></button>
+                </div>
+                <textarea id="comment" name="comment" rows="6" placeholder="Optional notes…" class="w-full bg-transparent px-3 py-2 text-sm text-primary placeholder:text-tertiary focus:outline-none resize-none"></textarea>
+              </div>
+              <div class="mt-2 flex items-center gap-2">
+                <button type="button" class="inline-flex items-center gap-1.5 bg-btn-secondary border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active text-btn-secondary-text rounded-lg px-2 py-1 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                  <i class="fa-light fa-clock-rotate-left text-sm text-interactive-default" aria-hidden="true"></i>
+                  History
+                </button>
+                <button type="button" class="inline-flex items-center gap-1.5 bg-btn-secondary border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active text-btn-secondary-text rounded-lg px-2 py-1 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                  <i class="fa-light fa-paperclip text-sm text-interactive-default" aria-hidden="true"></i>
+                  Attach
+                </button>
+                <button type="button" class="inline-flex items-center gap-1.5 bg-btn-secondary border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active text-btn-secondary-text rounded-lg px-2 py-1 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                  <i class="fa-light fa-at text-sm text-interactive-default" aria-hidden="true"></i>
+                  Mention
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="-mx-5 mt-6 border-t border-subtle"></div>
+          <div class="pt-5">
+            <h3 class="text-sm font-semibold text-primary mb-4">Reception and charges</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 lg:gap-x-16 gap-y-5">
+              <div>
+                <label for="receivedDate" class="block mb-1 text-sm font-medium text-secondary">Received date <span class="text-error-icon" aria-hidden="true">*</span></label>
+                <div class="relative w-full">
+                  <input id="receivedDate" name="receivedDate" type="text" placeholder="dd/mm/yyyy" aria-invalid="true" aria-describedby="receivedDateError" class="date-input w-full rounded-lg border border-error-border bg-surface-default px-3 py-1.5 pr-9 text-sm text-primary placeholder:text-tertiary focus:outline-none focus:ring-1 focus:ring-error-border focus:border-error-border" />
+                  <button type="button" class="absolute inset-y-0 right-0 w-9 rounded-r-lg flex items-center justify-center text-secondary hover:text-primary active:text-tertiary cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Open received date picker"><i class="fa-light fa-calendar text-base" aria-hidden="true"></i></button>
+                </div>
+                <p id="receivedDateError" class="mt-1 text-error-icon text-sm font-medium flex items-center gap-1"><i class="fa-light fa-circle-exclamation" aria-hidden="true"></i>Received date is required</p>
+              </div>
+              <div>
+                <label for="validatedDate" class="block mb-1 text-sm font-medium text-secondary">Validated date</label>
+                <div class="relative w-full">
+                  <input id="validatedDate" name="validatedDate" type="text" placeholder="dd/mm/yyyy" class="date-input w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 pr-9 text-sm text-primary placeholder:text-tertiary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" />
+                  <button type="button" class="absolute inset-y-0 right-0 w-9 rounded-r-lg flex items-center justify-center text-secondary hover:text-primary active:text-tertiary cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Open validated date picker"><i class="fa-light fa-calendar text-base" aria-hidden="true"></i></button>
+                </div>
+              </div>
+              <div>
+                <label for="applicationFee" class="block mb-1 text-sm font-medium text-secondary">Application fee</label>
+                <div class="flex items-center gap-2">
+                  <input id="applicationFee" name="applicationFee" type="text" placeholder="e.g. 462.00" class="min-w-0 flex-1 rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary placeholder:text-tertiary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" />
+                  <button type="button" class="shrink-0 bg-btn-secondary text-btn-secondary-text border border-strong hover:bg-btn-secondary-hover active:bg-btn-secondary-active rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">Calculate</button>
+                </div>
+              </div>
+
+              <fieldset>
+                <legend class="block mb-1 text-sm font-medium text-secondary">Application type</legend>
+                <div class="flex flex-wrap gap-x-4 gap-y-2">
+                  <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+                    <span class="relative inline-flex h-5 w-5 shrink-0">
+                      <input type="radio" name="appType" value="full" class="peer sr-only" checked>
+                      <span class="absolute inset-0 rounded-full border border-strong bg-surface-default transition-colors peer-checked:bg-interactive-default peer-checked:border-interactive-default peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface-default"></span>
+                      <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity peer-checked:opacity-100"><span class="h-1.5 w-1.5 rounded-full bg-white"></span></span>
+                    </span>
+                    <span class="text-sm text-primary">Full application</span>
+                  </label>
+                  <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+                    <span class="relative inline-flex h-5 w-5 shrink-0">
+                      <input type="radio" name="appType" value="householder" class="peer sr-only">
+                      <span class="absolute inset-0 rounded-full border border-strong bg-surface-default transition-colors peer-checked:bg-interactive-default peer-checked:border-interactive-default peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface-default"></span>
+                      <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity peer-checked:opacity-100"><span class="h-1.5 w-1.5 rounded-full bg-white"></span></span>
+                    </span>
+                    <span class="text-sm text-primary">Householder</span>
+                  </label>
+
+                  <label class="inline-flex items-center gap-2 cursor-not-allowed select-none opacity-50">
+                    <span class="relative inline-flex h-5 w-5 shrink-0">
+                      <input type="radio" name="appType" value="other" class="peer sr-only" disabled>
+                      <span class="absolute inset-0 rounded-full border border-strong bg-surface-base transition-colors"></span>
+                    </span>
+                    <span class="text-sm text-primary">Other (unavailable)</span>
+                  </label>
+                </div>
+              </fieldset>
+              <div>
+                <label for="paymentStatus" class="block mb-1 text-sm font-medium text-secondary">Fee status</label>
+                <div class="relative">
+                  <select id="paymentStatus" name="paymentStatus" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary appearance-none focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus cursor-pointer">
+                    <option>Pending</option>
+                    <option>Paid</option>
+                    <option>Part paid</option>
+                    <option>Exempt</option>
+                  </select>
+                  <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none text-[10px]" aria-hidden="true"></i>
+                </div>
+              </div>
+
+              <div>
+                <label for="agentLookup" class="block mb-1 text-sm font-medium text-secondary">Agent / applicant</label>
+                <div class="relative">
+                  <input id="agentLookup" name="agentLookup" type="text" role="combobox" aria-expanded="false" aria-controls="agentDropdown" aria-autocomplete="list" autocomplete="off" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 pr-9 text-sm text-primary placeholder:text-tertiary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" placeholder="Search by name or organisation…" value="J. Hargreaves Architecture Ltd" />
+                  <button type="button" class="absolute inset-y-0 right-0 w-9 rounded-r-lg flex items-center justify-center text-secondary hover:text-primary active:text-tertiary cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent" aria-label="Clear agent"><i class="fa-light fa-xmark text-base" aria-hidden="true"></i></button>
+                  <ul id="agentDropdown" role="listbox" aria-label="Agent suggestions" class="hidden absolute z-30 mt-2 w-full rounded-lg border border-default bg-surface-default shadow-lg p-1">
+                    <li role="option" aria-selected="false">
+                      <button type="button" class="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                        <span class="text-secondary shrink-0"><i class="fa-light fa-user" aria-hidden="true"></i></span>
+                        J. Hargreaves Architecture Ltd
+                      </button>
+                    </li>
+                    <li role="option" aria-selected="false">
+                      <button type="button" class="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                        <span class="text-secondary shrink-0"><i class="fa-light fa-user" aria-hidden="true"></i></span>
+                        Hargreaves &amp; Pollard Surveyors
+                      </button>
+                    </li>
+                    <li role="option" aria-selected="false">
+                      <button type="button" class="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm text-primary hover:bg-list-hover active:bg-list-active cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+                        <span class="text-secondary shrink-0"><i class="fa-light fa-building" aria-hidden="true"></i></span>
+                        Harper Planning Consultants
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          
+            <div class="md:col-span-2 mt-8">
+              <div role="status" class="flex gap-3 rounded-lg bg-info-bg border border-info-border px-5 py-3">
+                <i class="fa-light fa-circle-info text-info-icon mt-0.5 shrink-0" aria-hidden="true"></i>
+                <div class="text-sm">
+                  <p class="font-medium text-info-heading">Validation required before determining</p>
+                  <p class="mt-0.5 text-info-text">Ensure the received date, application fee, and agent details are complete before moving this case to a validated status.</p>
+                </div>
+              </div>
+            </div>
+
+        </div>
+      </section>
+
+      <!-- ─── ADDITIONAL SETTINGS EXPANDABLE PANEL ─── -->
+      <details class="group bg-surface-default border border-default rounded-xl">
+        <summary class="flex items-center justify-between gap-2 px-5 py-3 hover:bg-surface-base cursor-pointer list-none select-none rounded-xl group-open:rounded-b-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <h2 class="text-base font-semibold">Additional settings</h2>
+          <i class="fa-light fa-chevron-down text-secondary text-sm transition-transform group-open:rotate-180 shrink-0" aria-hidden="true"></i>
+        </summary>
+        <div class="border-t border-subtle p-5 grid grid-cols-1 md:grid-cols-2 gap-x-12 lg:gap-x-16 gap-y-5 items-start">
+          <div>
+            <label for="sslCert" class="block mb-1 text-sm font-medium text-secondary">Environmental impact assessment</label>
+            <div class="relative">
+              <select id="sslCert" name="sslCert" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary appearance-none focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus cursor-pointer">
+                <option>Not required</option>
+                <option>Screening required</option>
+                <option>Full EIA required</option>
+              </select>
+              <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none text-[10px]" aria-hidden="true"></i>
+            </div>
+          </div>
+          <div>
+            <label for="securityPolicy" class="block mb-1 text-sm font-medium text-secondary">Departure from development plan</label>
+            <div class="relative">
+              <select id="securityPolicy" name="securityPolicy" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary appearance-none focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus cursor-pointer">
+                <option>No</option>
+                <option>Minor departure</option>
+                <option>Significant departure</option>
+              </select>
+              <i class="fa-light fa-chevron-down absolute right-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none text-[10px]" aria-hidden="true"></i>
+            </div>
+          </div>
+          <div>
+            <label for="logBucket" class="block mb-1 text-sm font-medium text-secondary">Planning portal reference</label>
+            <input id="logBucket" name="logBucket" type="text" placeholder="e.g. APP/2024/12345" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary placeholder:text-tertiary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" />
+          </div>
+          <div>
+            <label for="logPrefix" class="block mb-1 text-sm font-medium text-secondary">Parish</label>
+            <input id="logPrefix" name="logPrefix" type="text" placeholder="e.g. Harrowgate" class="w-full rounded-lg border border-strong bg-surface-default px-3 py-1.5 text-sm text-primary placeholder:text-tertiary focus:outline-none focus:ring-1 focus:ring-focus focus:border-focus" />
+            <p class="mt-1 text-sm text-tertiary">Leave blank if the site does not fall within a parish boundary.</p>
+          </div>
+
+          <fieldset>
+            <legend class="block mb-1 text-sm font-medium text-secondary">Consultation notifications</legend>
+            <div class="flex flex-wrap gap-x-4 gap-y-2">
+              <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+                <span class="relative inline-flex h-5 w-5 shrink-0">
+                  <input type="checkbox" name="notif-email" class="peer sr-only" checked>
+                  <span class="absolute inset-0 rounded border border-strong bg-surface-default transition-colors peer-checked:bg-interactive-default peer-checked:border-interactive-default peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface-default"></span>
+                  <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity peer-checked:opacity-100"><i class="fa-regular fa-check text-xs text-inverse" aria-hidden="true"></i></span>
+                </span>
+                <span class="text-sm text-primary">Email notifications</span>
+              </label>
+              <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+                <span class="relative inline-flex h-5 w-5 shrink-0">
+                  <input type="checkbox" name="notif-sms" class="peer sr-only">
+                  <span class="absolute inset-0 rounded border border-strong bg-surface-default transition-colors peer-checked:bg-interactive-default peer-checked:border-interactive-default peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface-default"></span>
+                  <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity peer-checked:opacity-100"><i class="fa-regular fa-check text-xs text-inverse" aria-hidden="true"></i></span>
+                </span>
+                <span class="text-sm text-primary">SMS notifications</span>
+              </label>
+              <label class="inline-flex items-center gap-2 cursor-pointer select-none">
+                <span class="relative inline-flex h-5 w-5 shrink-0">
+                  <input type="checkbox" name="notif-audit" class="peer sr-only" checked>
+                  <span class="absolute inset-0 rounded border border-strong bg-surface-default transition-colors peer-checked:bg-interactive-default peer-checked:border-interactive-default peer-focus-visible:ring-2 peer-focus-visible:ring-focus peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-surface-default"></span>
+                  <span class="absolute inset-0 flex items-center justify-center opacity-0 transition-opacity peer-checked:opacity-100"><i class="fa-regular fa-check text-xs text-inverse" aria-hidden="true"></i></span>
+                </span>
+                <span class="text-sm text-primary">Audit log</span>
+              </label>
+              <label class="inline-flex items-center gap-2 cursor-not-allowed select-none opacity-50">
+                <span class="relative inline-flex h-5 w-5 shrink-0">
+                  <input type="checkbox" name="notif-webhook" class="peer sr-only" disabled>
+                  <span class="absolute inset-0 rounded border border-strong bg-surface-base transition-colors"></span>
+                </span>
+                <span class="text-sm text-primary">Webhook (unavailable)</span>
+              </label>
+            </div>
+          </fieldset>
+        </div>
+      </details>
+
+      <!-- ─── CONSULTEES EXPANDABLE PANEL (empty state) ─── -->
+      <details open class="group bg-surface-default border border-default rounded-xl">
+        <summary class="flex items-center justify-between gap-2 px-5 py-3 hover:bg-surface-base cursor-pointer list-none select-none rounded-xl group-open:rounded-b-none focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+          <h2 class="text-base font-semibold">Consultees</h2>
+          <i class="fa-light fa-chevron-down text-secondary text-sm transition-transform group-open:rotate-180 shrink-0" aria-hidden="true"></i>
+        </summary>
+        <div class="border-t border-subtle">
+          <div class="flex flex-col items-center justify-center px-6 py-14 text-center">
+            <i class="fa-light fa-users-slash text-4xl text-tertiary mb-4" aria-hidden="true"></i>
+            <p class="text-sm font-semibold text-primary mb-1">No consultees added</p>
+            <p class="text-sm text-secondary max-w-xs mb-4">Add organisations or individuals who need to be consulted on this application.</p>
+            <button type="button" class="inline-flex items-center gap-1.5 bg-btn-primary text-btn-primary-text border border-brand-accent hover:bg-btn-primary-hover active:bg-btn-primary-active rounded-lg px-3 py-1.5 text-sm font-semibold cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-accent">
+              <i class="fa-light fa-plus text-base" aria-hidden="true"></i>
+              <span>Add consultee</span>
+            </button>
+          </div>
+        </div>
+      </details>
+
+      <!-- ─── RELATED CASES (skeleton loader) ─── -->
+
+      <section class="bg-surface-default border border-default rounded-xl overflow-hidden" role="status" aria-label="Loading related cases">
+        <span class="sr-only">Loading…</span>
+        <div class="px-5 py-3 border-b border-subtle flex items-center justify-between">
+          <div class="h-4 w-28 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+          <div class="h-7 w-24 bg-surface-muted rounded-lg animate-pulse motion-reduce:animate-none"></div>
+        </div>
+        <div class="divide-y divide-subtle">
+          <div class="flex items-center gap-4 px-5 py-3">
+            <div class="h-3 w-24 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+            <div class="h-3 w-40 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+            <div class="h-5 w-16 bg-surface-muted rounded-full animate-pulse motion-reduce:animate-none ml-auto"></div>
+          </div>
+          <div class="flex items-center gap-4 px-5 py-3">
+            <div class="h-3 w-20 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+            <div class="h-3 w-36 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+            <div class="h-5 w-16 bg-surface-muted rounded-full animate-pulse motion-reduce:animate-none ml-auto"></div>
+          </div>
+          <div class="flex items-center gap-4 px-5 py-3">
+            <div class="h-3 w-28 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+            <div class="h-3 w-44 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+            <div class="h-5 w-16 bg-surface-muted rounded-full animate-pulse motion-reduce:animate-none ml-auto"></div>
+          </div>
+        </div>
+        <div class="px-5 py-3 border-t border-subtle flex justify-end">
+          <div class="h-3 w-20 bg-surface-muted rounded animate-pulse motion-reduce:animate-none"></div>
+        </div>
+      </section>
+
+
+
+      </div><!-- end view-charges -->
+
+      </div>
+      <!-- end panels -->
+
+    </div><!-- end max-w-7xl -->
+    </div>
+    <!-- end main content -->
+  </main>
+
+</div>
+<!-- end layout -->
+
+<!-- Sidebar backdrop (mobile/tablet only) -->
+<div id="sidebarBackdrop" class="hidden fixed inset-0 z-30 bg-overlay lg:hidden"></div>
+
+<!-- Date picker backdrop -->
+<div id="datePickerBackdrop" class="hidden fixed inset-0 z-40"></div>
+
+<div id="toast-region" role="status" aria-live="polite" aria-atomic="false" class="fixed bottom-4 left-4 right-4 md:left-1/2 md:right-auto md:-translate-x-1/2 md:w-80 lg:left-auto lg:right-4 lg:translate-x-0 lg:w-auto z-50 flex flex-col gap-2 items-stretch lg:items-end pointer-events-none"></div>
+
+<script src="js/page-example.js"></script>
+
+</body>
+</html>
+
