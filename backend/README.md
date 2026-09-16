@@ -107,7 +107,7 @@ REPO_ROOT=/path/to/symgov
 "$REPO_ROOT/scripts/test-backend.sh" --full
 ```
 
-The default portable partition is bounded to five minutes. `--external` runs the
+The default portable partition is bounded to thirty minutes. `--external` runs the
 separately managed Libby, Scott, Daisy and Ed workspace tests in isolated pytest
 processes with a two-minute timeout per process; it also checks that the retired Vlad
 runner remains absent at `/data/.openclaw/workspaces/vlad/run_vlad_validation.py`.

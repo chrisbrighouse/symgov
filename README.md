@@ -269,7 +269,7 @@ From the repository root, run:
 ./scripts/test-backend.sh
 ```
 
-The portable gate has a five-minute outer timeout by default. Override it for a
+The portable gate has a thirty-minute outer timeout by default. Override it for a
 diagnostic run with `SYMGOV_BACKEND_TIMEOUT_SECONDS`; do not raise it merely to hide
 a hang. The separately bounded external-workspace partition and the complete
 portable-plus-external sequence are:
