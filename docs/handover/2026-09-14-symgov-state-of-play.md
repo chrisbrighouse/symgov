@@ -137,6 +137,15 @@ suspected.
    otherwise) is a behaviour change to the legacy path and needs its own
    decision, not a quiet tightening. **Do not treat facet counts for those two
    values as meaningful until this is fixed.**
+   **Fixed 2026-09-17.** Root cause: `CAST(payload_json AS TEXT)` renders the
+   JSON *keys* beside the values, so `Equipment` matched the key
+   `parent_equipment_class` and `Process` matched `process_category` in every
+   payload. The five payload-matching facets now name the field they mean;
+   `use_case`, which is derived by `use_cases_for_formats` and stored nowhere,
+   resolves back to the formats that present it. Chris chose the semantics on
+   2026-09-16. Facet counts for those two values are meaningful again, but no
+   production measurement has been taken since the fix. The free-text `q`
+   filter still reads the whole document and so still matches key names.
 4. **`classification_records.industry` is effectively dead.** One writer
    (`scripts/run_libby_classification.py`), no editor, four hard-coded values
    — three of which are discipline names duplicating the

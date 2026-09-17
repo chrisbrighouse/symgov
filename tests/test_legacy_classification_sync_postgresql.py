@@ -469,6 +469,50 @@ def test_the_composed_catalogue_query_executes(session, assignments_enabled):
     assert rows == []
 
 
+def test_a_facet_value_inside_a_payload_key_no_longer_matches(session):
+    """The 2026-09-11 defect, proved and fixed against a real row.
+
+    A published payload always carries the keys `parent_equipment_class` and
+    `process_category`. `CAST(payload_json AS TEXT)` renders those key names
+    beside the values, so the facet values `Equipment` and `Process` matched
+    every published symbol -- all 84 of them, measured against production.
+    This asserts both halves: the new clause does not match this door, and
+    the clause it replaced did.
+    """
+    owner = _user(session, "m5-key-names")
+    symbol, revision = _symbol(session, owner, category="Doors", discipline="Architectural")
+    revision.payload_json = {
+        "classification": {
+            "category": "Doors",
+            "discipline": "Architectural",
+            "symbol_family": "door",
+            # The two keys that did the over-matching, carrying no value.
+            "process_category": None,
+            "parent_equipment_class": None,
+        }
+    }
+    session.flush()
+
+    select = (
+        "SELECT 1 FROM governed_symbols gs"
+        " JOIN symbol_revisions sr ON sr.id = gs.current_revision_id"
+        " WHERE gs.id = :id AND "
+    )
+    for facet, value in (("category", "Equipment"), ("discipline", "Process")):
+        filters, params, _ = catalog_symbol_filters(
+            assignments_enabled=False, **{**FILTER_KWARGS, "discipline": None, "category": None, facet: value}
+        )
+        (clause,) = filters
+        bound = {**params, "id": symbol.id}
+
+        assert session.execute(text(select + clause), bound).all() == []
+
+        superseded = (
+            f"(gs.{facet} ILIKE :{facet} OR CAST(sr.payload_json AS TEXT) ILIKE :{facet})"
+        )
+        assert session.execute(text(select + superseded), bound).all() == [(1,)]
+
+
 def test_the_exists_predicate_matches_a_symbol_by_its_assignment(session):
     """The match logic itself, against real rows and without the publication
     machinery: the same `EXISTS` the catalogue filter appends, applied to a

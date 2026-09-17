@@ -62,13 +62,22 @@ from symgov_backend.symbol_semantic_assignments import SEMANTIC_ASSIGNMENT_METHO
 
 NOW = datetime(2026, 9, 11, 15, 0, tzinfo=timezone.utc)
 
-# The exact strings this module built before SM-P0-09. Written out rather than
-# generated, so the byte-identity claim is checked against a literal.
-HISTORICAL_DISCIPLINE_FILTER = (
-    "(gs.discipline ILIKE :discipline OR CAST(sr.payload_json AS TEXT) ILIKE :discipline)"
+# The exact strings this module builds with the flag off. Written out rather
+# than generated, so the claim is checked against a literal.
+#
+# These were `CAST(sr.payload_json AS TEXT) ILIKE` until 2026-09-17. That cast
+# renders the JSON keys as well as the values, so `Equipment` matched the key
+# `parent_equipment_class` and `Process` matched `process_category` in every
+# payload -- both facets returned all 84 published symbols. The fallback now
+# names the field it means. Section 10.1's compatibility path is kept; what is
+# dropped is matching a field *name* as though it were a value.
+LEGACY_DISCIPLINE_FILTER = (
+    "(gs.discipline ILIKE :discipline"
+    " OR sr.payload_json->'classification'->>'discipline' ILIKE :discipline)"
 )
-HISTORICAL_CATEGORY_FILTER = (
-    "(gs.category ILIKE :category OR CAST(sr.payload_json AS TEXT) ILIKE :category)"
+LEGACY_CATEGORY_FILTER = (
+    "(gs.category ILIKE :category"
+    " OR sr.payload_json->'classification'->>'category' ILIKE :category)"
 )
 
 FILTER_KWARGS = dict(
@@ -212,13 +221,14 @@ def test_the_skip_reasons_are_their_own_diagnostic_vocabulary():
 # --- M5: the catalogue read, and the flag ------------------------------------
 
 
-def test_with_the_flag_off_the_catalogue_sql_is_byte_identical_to_before():
-    """The whole point of section 12.1 M5's staged rollout. If this fails,
-    turning the flag off is no longer a way back."""
+def test_with_the_flag_off_the_catalogue_sql_is_the_legacy_path_alone():
+    """Section 12.1 M5's staged rollout: turning the flag off must remain a
+    way back to the legacy path, with no assignment match in the SQL."""
     filters, params, response_filters = catalog_symbol_filters(
         discipline="Process", category="Doors", assignments_enabled=False, **FILTER_KWARGS
     )
-    assert filters == [HISTORICAL_DISCIPLINE_FILTER, HISTORICAL_CATEGORY_FILTER]
+    assert filters == [LEGACY_DISCIPLINE_FILTER, LEGACY_CATEGORY_FILTER]
+    assert not any("EXISTS (" in clause for clause in filters)
     assert params == {"discipline": "%Process%", "category": "%Doors%"}
     assert response_filters == {"discipline": "Process", "category": "Doors"}
 
@@ -230,13 +240,13 @@ def test_with_the_flag_on_the_legacy_match_is_kept_and_the_assignment_added():
         discipline="Process", category="Doors", assignments_enabled=True, **FILTER_KWARGS
     )
     discipline_filter, category_filter = filters
-    for clause, historical in (
-        (discipline_filter, HISTORICAL_DISCIPLINE_FILTER),
-        (category_filter, HISTORICAL_CATEGORY_FILTER),
+    for clause, legacy in (
+        (discipline_filter, LEGACY_DISCIPLINE_FILTER),
+        (category_filter, LEGACY_CATEGORY_FILTER),
     ):
-        # The historical clause is still there in full, minus its closing
+        # The legacy clause is still there in full, minus its closing
         # bracket, with the assignment match appended inside it.
-        assert clause.startswith(historical[:-1])
+        assert clause.startswith(legacy[:-1])
         assert "OR EXISTS (" in clause
         assert clause.endswith(")")
     assert "cs.scheme_code = :discipline_scheme" in discipline_filter
@@ -316,11 +326,14 @@ def test_the_flag_reads_the_documented_environment_variable():
     assert '{"1", "true", "yes", "on"}' in source[index : index + 200]
 
 
-def test_the_other_filters_are_untouched_by_this_package():
-    """The duplicate hint in `promotion_requests` and the remaining
-    payload-JSON filters are section 10.2's weak legacy signals, to be
-    downgraded when concept-aware signals arrive in SM-P1-05."""
-    filters, _params, _ = catalog_symbol_filters(
+def test_the_use_case_and_format_filters_name_the_fields_that_hold_a_format():
+    """Section 10.2's weak legacy signals, no longer matching key names.
+
+    Both read the format-bearing payload fields. A use case is not stored on
+    a revision at all -- `use_cases_for_formats` derives one from a symbol's
+    formats -- so the filter resolves it back to the formats that present it.
+    """
+    filters, params, _ = catalog_symbol_filters(
         discipline=None,
         category=None,
         q=None,
@@ -332,10 +345,68 @@ def test_the_other_filters_are_untouched_by_this_package():
         updated_since=None,
         assignments_enabled=True,
     )
-    assert filters == [
-        "CAST(sr.payload_json AS TEXT) ILIKE :use_case",
-        "CAST(sr.payload_json AS TEXT) ILIKE :format",
-    ]
+    use_case_filter, format_filter = filters
+    assert "CAST(sr.payload_json AS TEXT)" not in use_case_filter
+    assert "CAST(sr.payload_json AS TEXT)" not in format_filter
+
+    # Exactly the CAD formats `use_cases_for_formats` presents for this label.
+    assert {value.strip("%") for key, value in params.items() if key.startswith("use_case_format_")} == {
+        "DXF",
+        "DWG",
+        "RVT",
+        "RFA",
+        "IFC",
+    }
+    assert params["format"] == "%SVG%"
+    assert format_filter == (
+        "(sr.payload_json->>'format' ILIKE :format"
+        " OR sr.payload_json->>'source_format' ILIKE :format"
+        " OR sr.payload_json->>'content_type' ILIKE :format"
+        " OR sr.payload_json->'classification'->>'format' ILIKE :format)"
+    )
+
+
+def test_a_use_case_outside_the_vocabulary_matches_nothing():
+    """No format presents it, so nothing can carry it. The old whole-document
+    cast answered such a query with whatever happened to contain the words."""
+    filters, params, _ = catalog_symbol_filters(
+        discipline=None,
+        category=None,
+        q=None,
+        use_case="Teleport into the drawing",
+        format_=None,
+        pack=None,
+        symbol_family=None,
+        has_preview=None,
+        updated_since=None,
+        assignments_enabled=False,
+    )
+    assert filters == ["FALSE"]
+    assert not [key for key in params if key.startswith("use_case")]
+
+
+def test_no_facet_matches_a_payload_key_name():
+    """The 2026-09-11 defect, stated as the rule it broke.
+
+    `CAST(payload_json AS TEXT)` renders the JSON keys beside the values, so
+    `Equipment` matched `parent_equipment_class` and `Process` matched
+    `process_category` in every payload. No facet may read the serialized
+    document.
+    """
+    filters, _params, _ = catalog_symbol_filters(
+        discipline="Process",
+        category="Equipment",
+        q=None,
+        use_case="Use in PDF/report",
+        format_="SVG",
+        pack=None,
+        symbol_family="symbol",
+        has_preview=None,
+        updated_since=None,
+        assignments_enabled=True,
+    )
+    for clause in filters:
+        assert "CAST(sr.payload_json AS TEXT)" not in clause
 
 
 def test_the_sync_is_wired_into_both_promotion_paths():

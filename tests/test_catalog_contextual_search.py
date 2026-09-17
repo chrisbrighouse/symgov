@@ -230,7 +230,7 @@ def test_catalog_contextual_search_merges_context_into_ranked_results_and_public
     assert "downloadassets" not in serialized
     assert "downloadurl" not in serialized
     executed_sql, params = session.executed[-1]
-    assert "CAST(sr.payload_json AS TEXT) ILIKE :discipline" in executed_sql
+    assert "sr.payload_json->'classification'->>'discipline' ILIKE :discipline" in executed_sql
     assert params["discipline"] == "%Fire & Life Safety%"
     assert any(event.route_name == "catalog_contextual_search" for event in session.added if isinstance(event, CatalogApiUsageEvent))
     assert session.added[-1].query_text == "smoke detector near stairwell"

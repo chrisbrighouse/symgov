@@ -7,7 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .asset_manifest import list_download_assets
-from .catalog_taxonomy import catalog_taxonomy_for_symbol
+from .catalog_taxonomy import FORMAT_ORDER, catalog_taxonomy_for_symbol, use_cases_for_formats
 from .published_catalog import (
     PUBLISHED_SYMBOLS_SQL,
     choose_published_preview_asset,
@@ -108,6 +108,50 @@ _DISCIPLINE_SCHEME = "ENGINEERING-DISCIPLINE"
 _SYMBOL_CATEGORY_SCHEME = "SYMBOL-CATEGORY-FAMILY"
 
 
+# A facet matches named payload *fields*, never the serialized document.
+#
+# `CAST(sr.payload_json AS TEXT)` renders the JSON keys alongside the values,
+# so any facet value that is a substring of a key name matched every published
+# symbol: `Equipment` inside `parent_equipment_class`, `Process` inside
+# `process_category`. Measured against production on 2026-09-11, both returned
+# all 84 published symbols -- the facets excluded nothing. Naming the field is
+# what makes a facet mean one thing, and it keeps the fallback honest for a
+# revision whose legacy column is empty but whose payload carries the value.
+def _classification_field(field: str) -> str:
+    return f"sr.payload_json->'classification'->>'{field}'"
+
+
+# Where a format can be written. `available_formats_for_symbol` reads the same
+# spread of keys off the assembled catalogue item; these are the ones that
+# exist on a revision payload.
+_FORMAT_FIELDS = (
+    "sr.payload_json->>'format'",
+    "sr.payload_json->>'source_format'",
+    "sr.payload_json->>'content_type'",
+    _classification_field("format"),
+)
+
+
+def _formats_for_use_case(use_case: str) -> list[str]:
+    """Which formats present this use case, from the function that derives it.
+
+    Nothing stores a use case on a revision: `use_cases_for_formats` computes
+    one from a symbol's formats. The old payload-text match could therefore
+    never match a use case by its own name -- only by whatever else in the
+    document happened to contain the words. Inverting the real function keeps
+    this filter and the served facet value in step by construction, rather
+    than restating the mapping and letting the two drift.
+    """
+    wanted = str(use_case or "").strip().casefold()
+    if not wanted:
+        return []
+    return [
+        format_
+        for format_ in FORMAT_ORDER
+        if any(wanted in str(label).casefold() for label in use_cases_for_formats([format_]))
+    ]
+
+
 def _facet_filter(
     *,
     column: str,
@@ -118,11 +162,13 @@ def _facet_filter(
 ) -> str:
     """Build one facet filter, with or without the assignment match.
 
-    With the flag off the string is byte-identical to what this module built
-    before SM-P0-09, and no extra parameter is bound -- which is what makes
-    the rollout stageable and the "same SQL as today" claim checkable.
+    The classification field carries the same name as the governed column for
+    both facets this serves, so one expression covers them.
     """
-    clause = f"(gs.{column} ILIKE :{parameter} OR CAST(sr.payload_json AS TEXT) ILIKE :{parameter}"
+    clause = (
+        f"(gs.{column} ILIKE :{parameter}"
+        f" OR {_classification_field(column)} ILIKE :{parameter}"
+    )
     if assignments_enabled:
         clause += _CLASSIFICATION_MATCH_SQL.format(parameter=parameter)
         params[f"{parameter}_scheme"] = scheme_code
@@ -190,11 +236,21 @@ def catalog_symbol_filters(
         params["category"] = f"%{category}%"
         response_filters["category"] = category
     if use_case:
-        filters.append("CAST(sr.payload_json AS TEXT) ILIKE :use_case")
-        params["use_case"] = f"%{use_case}%"
+        use_case_formats = _formats_for_use_case(use_case)
+        if use_case_formats:
+            clauses = []
+            for position, format_name in enumerate(use_case_formats):
+                parameter = f"use_case_format_{position}"
+                params[parameter] = f"%{format_name}%"
+                clauses.extend(f"{field} ILIKE :{parameter}" for field in _FORMAT_FIELDS)
+            filters.append("(" + " OR ".join(clauses) + ")")
+        else:
+            # A use case outside the served vocabulary presents no formats, so
+            # nothing can carry it. Saying so beats matching the whole catalogue.
+            filters.append("FALSE")
         response_filters["useCase"] = use_case
     if format_:
-        filters.append("CAST(sr.payload_json AS TEXT) ILIKE :format")
+        filters.append("(" + " OR ".join(f"{field} ILIKE :format" for field in _FORMAT_FIELDS) + ")")
         params["format"] = f"%{format_}%"
         response_filters["format"] = format_
     if pack:
@@ -204,7 +260,7 @@ def catalog_symbol_filters(
     if symbol_family:
         filters.append(
             "(gs.slug ILIKE :symbol_family OR gs.canonical_name ILIKE :symbol_family "
-            "OR CAST(sr.payload_json AS TEXT) ILIKE :symbol_family)"
+            f"OR {_classification_field('symbol_family')} ILIKE :symbol_family)"
         )
         params["symbol_family"] = f"%{symbol_family}%"
         response_filters["symbolFamily"] = symbol_family
