@@ -513,6 +513,69 @@ def test_a_facet_value_inside_a_payload_key_no_longer_matches(session):
         assert session.execute(text(select + superseded), bound).all() == [(1,)]
 
 
+def test_the_free_text_query_reads_named_fields_not_the_document(session):
+    """The same defect in the `q` filter, and the recall that must survive it.
+
+    `process` matched the key `process_category` in every payload, and a short
+    hex query matched the UUIDs and SHA-256s the document is full of. The
+    query now reads the fields the catalogue shows -- including array
+    elements, which is the part most easily lost by naming fields.
+    """
+    owner = _user(session, "q-fields")
+    symbol, revision = _symbol(session, owner, category="Doors", discipline="Architectural")
+    revision.payload_json = {
+        "name": "Fire door",
+        "summary": "A door rated for fire compartmentation",
+        "aliases": ["Fire-rated door"],
+        "keywords": ["egress", "compartmentation"],
+        "review_case_id": "8f14e45f-ea8d-4b4a-9a3c-1f7f0a1d2b3c",
+        "classification": {
+            "category": "Doors",
+            "discipline": "Architectural",
+            "process_category": None,
+            "parent_equipment_class": None,
+        },
+    }
+    session.flush()
+
+    # The `q` clause also reads the pack and page aliases of the published
+    # query's FROM chain. They are joined on FALSE so they resolve and match
+    # nothing, leaving the payload matching alone under test.
+    select = (
+        "SELECT 1 FROM governed_symbols gs"
+        " JOIN symbol_revisions sr ON sr.id = gs.current_revision_id"
+        " LEFT JOIN publication_packs pk ON FALSE"
+        " LEFT JOIN published_pages pp ON FALSE"
+        " WHERE gs.id = :id AND "
+    )
+
+    def matches(query: str) -> bool:
+        filters, params, _ = catalog_symbol_filters(
+            **{**FILTER_KWARGS, "q": query, "discipline": None, "category": None},
+            assignments_enabled=False,
+        )
+        (clause,) = filters
+        return session.execute(text(select + clause), {**params, "id": symbol.id}).all() == [(1,)]
+
+    # Recall that must survive: name, summary, and both array fields.
+    assert matches("fire door")
+    assert matches("compartmentation")
+    assert matches("Fire-rated")
+    assert matches("egress")
+
+    # The key name, and an id that is in the document but is not a field the
+    # catalogue shows.
+    assert not matches("process")
+    assert not matches("8f14e45f")
+
+    # Both would have matched the clause this replaced.
+    superseded = "(CAST(sr.payload_json AS TEXT) ILIKE :query)"
+    for query in ("process", "8f14e45f"):
+        assert session.execute(
+            text(select + superseded), {"query": f"%{query}%", "id": symbol.id}
+        ).all() == [(1,)]
+
+
 def test_the_exists_predicate_matches_a_symbol_by_its_assignment(session):
     """The match logic itself, against real rows and without the publication
     machinery: the same `EXISTS` the catalogue filter appends, applied to a

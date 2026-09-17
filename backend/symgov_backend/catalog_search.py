@@ -132,6 +132,52 @@ _FORMAT_FIELDS = (
 )
 
 
+# What a free-text query may read in the payload. The same key-rendering flaw
+# the facets carried: the query `process` matched the key `process_category` in
+# every payload, and the document also holds every UUID, object key and SHA-256
+# the revision was built from -- none of which a reader searches for by
+# accident, but all of which a short hex query matches by accident. These are
+# the fields the catalogue actually shows.
+_SEARCHABLE_TEXT_FIELDS = (
+    "sr.payload_json->>'name'",
+    "sr.payload_json->>'summary'",
+    "sr.payload_json->>'description'",
+    "sr.payload_json->>'display_name'",
+    "sr.payload_json->>'package_display_id'",
+    "sr.payload_json->>'workspace_display_name'",
+)
+
+_SEARCHABLE_CLASSIFICATION_FIELDS = (
+    "category",
+    "discipline",
+    "symbol_family",
+    "process_category",
+    "parent_equipment_class",
+)
+
+# `aliases` and `keywords` are written by both the intake path and the
+# organisation draft path; `search_terms` is the older spelling still read by
+# `row_taxonomy_input`.
+_SEARCHABLE_LIST_FIELDS = ("aliases", "keywords", "search_terms")
+
+
+def _payload_list_match(field: str, parameter: str) -> str:
+    """Match any element of a payload array, without assuming it is one.
+
+    A revision whose `aliases` is absent, null or a bare string would make
+    `jsonb_array_elements_text` raise rather than return no rows, so the type
+    is checked before the expansion.
+    """
+    element = (
+        f"CASE WHEN jsonb_typeof(sr.payload_json->'{field}') = 'array'"
+        f" THEN sr.payload_json->'{field}' ELSE '[]'::jsonb END"
+    )
+    return (
+        f"EXISTS (SELECT 1 FROM jsonb_array_elements_text({element})"
+        f" AS value WHERE value ILIKE :{parameter})"
+    )
+
+
 def _formats_for_use_case(use_case: str) -> list[str]:
     """Which formats present this use case, from the function that derives it.
 
@@ -196,20 +242,23 @@ def catalog_symbol_filters(
     params: dict = {}
     response_filters: dict = {}
     if q:
-        filters.append(
-            """
-            (
-                gs.slug ILIKE :query
-                OR gs.canonical_name ILIKE :query
-                OR gs.category ILIKE :query
-                OR gs.discipline ILIKE :query
-                OR pk.pack_code ILIKE :query
-                OR pk.title ILIKE :query
-                OR pp.page_code ILIKE :query
-                OR CAST(sr.payload_json AS TEXT) ILIKE :query
-            )
-            """
-        )
+        clauses = [
+            "gs.slug ILIKE :query",
+            "gs.canonical_name ILIKE :query",
+            "gs.category ILIKE :query",
+            "gs.discipline ILIKE :query",
+            "pk.pack_code ILIKE :query",
+            "pk.title ILIKE :query",
+            "pp.page_code ILIKE :query",
+            *(f"{field} ILIKE :query" for field in _SEARCHABLE_TEXT_FIELDS),
+            *(
+                f"{_classification_field(field)} ILIKE :query"
+                for field in _SEARCHABLE_CLASSIFICATION_FIELDS
+            ),
+            *(_payload_list_match(field, "query") for field in _SEARCHABLE_LIST_FIELDS),
+        ]
+        joined = "\n                OR ".join(clauses)
+        filters.append(f"\n            (\n                {joined}\n            )\n            ")
         params["query"] = f"%{q}%"
     if discipline:
         filters.append(

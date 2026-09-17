@@ -145,7 +145,12 @@ suspected.
    resolves back to the formats that present it. Chris chose the semantics on
    2026-09-16. Facet counts for those two values are meaningful again, but no
    production measurement has been taken since the fix. The free-text `q`
-   filter still reads the whole document and so still matches key names.
+   filter carried the identical flaw and was fixed the same way on
+   2026-09-17: it reads the named fields the catalogue shows, including the
+   `aliases`, `keywords` and `search_terms` arrays. `source_file` was
+   deliberately dropped from the searchable set — the only recall that change
+   gives up, and still open if operators search by contributor filename.
+   `has_preview` still reads the document on purpose: it matches a key name.
 4. **`classification_records.industry` is effectively dead.** One writer
    (`scripts/run_libby_classification.py`), no editor, four hard-coded values
    — three of which are discipline names duplicating the
