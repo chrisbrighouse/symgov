@@ -342,7 +342,7 @@ def test_the_raw_value_of_an_unmapped_field_survives_in_evidence(session_factory
         assert gaps["industry"]["raw_value"] == "process_engineering"
         assert gaps["industry"]["reason"] == "no_scheme"
         assert gaps["processCategory"]["raw_value"] == "flow_control"
-        assert gaps["parentEquipmentClass"]["reason"] == "no_relationship_table"
+        assert gaps["parentEquipmentClass"]["reason"] == "no_concept_target"
 
 
 def test_an_entirely_unmappable_classification_still_promotes(session_factory):

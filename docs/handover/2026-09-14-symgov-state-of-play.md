@@ -204,11 +204,33 @@ below stays open except item 9.
 5. **Three of five seeded classification schemes have no writer and no
    reader** — `USE-CASE`, `DOCUMENT-TYPE`, `REPRESENTATION-TYPE`. Decision Q6
    of SM-P1-01 deliberately kept them read-only in v1.
-6. **The specification's §7.3 `SemanticConceptRelationship` has no table and
-   is in no work package.** The spec describes it as P0-shaped, but it appears
-   in no §15.1 row. It is why `plan_classification_mapping` can only record
-   `parentEquipmentClass` as a `no_relationship_table` gap. This is a missing
-   P0 table, not a deferral.
+6. ~~**The specification's §7.3 `SemanticConceptRelationship` has no table and
+   is in no work package.**~~
+   **Closed 2026-09-17 (SM-P1-03 WP3.2), on Chris's D6.** Migration
+   `20260917_0060` creates `semantic_concept_relationships` with §7.3's whole
+   relationship vocabulary, and `concept_relationships.py` carries the
+   propose/transition pair and the directed reads. Three things are worth
+   carrying forward. A row is **one directed assertion**: §7.3 ships both
+   directions of each pair, so nothing mints `narrower(B, A)` from
+   `broader(A, B)` or refuses it as a duplicate, and a test pins that absence —
+   inferring one from the other would put an unreviewed assertion in the record
+   (P-07). `method` and `confidence` are carried although §7.3's field list
+   omits them, so §8.4's auto-verification policy has a column to inspect;
+   `legacy_backfill` is deliberately **not** in the vocabulary, because §12.1
+   phase M2 backfills classifications and no relationship backfill exists to
+   write it. And **unlike SM-P0-02, -03 and -04 there is no succession rule** —
+   nothing in §7.3 makes two verified relationships mutually exclusive, so
+   verifying one retires nothing.
+
+   `parentEquipmentClass` still records a gap, but a true one: its reason moved
+   from `no_relationship_table` to `no_concept_target`, because the table now
+   exists and what is missing is a concept to point at. The CFIHOS equipment
+   classes that would supply one wait on SM-P2-02, which waits on the connector,
+   which waits on SM-P1-01 being in use. `no_relationship_table` has left
+   `MAPPING_GAP_REASONS` entirely.
+
+   **P0 completeness:** this was the entity that made "all ten P0 packages are
+   complete" untrue. With the table in, the claim stands again.
 7. **`publication_gate_evaluations` is write-only.** Every publication records
    all six §13.1 dimensions and nothing reads the table. It is SM-P1-06's data
    source and is already accumulating.

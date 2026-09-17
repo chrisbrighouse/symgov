@@ -2,7 +2,9 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-PORTABLE_TIMEOUT=${SYMGOV_BACKEND_TIMEOUT_SECONDS-1800}
+# 1800s sat at 97% of a measured 29:09 sweep on 2026-09-17, so a package that
+# adds tests would have timed the runner out rather than failed anything.
+PORTABLE_TIMEOUT=${SYMGOV_BACKEND_TIMEOUT_SECONDS-2700}
 EXTERNAL_TIMEOUT=${SYMGOV_EXTERNAL_TEST_TIMEOUT_SECONDS-120}
 
 validate_timeout() {

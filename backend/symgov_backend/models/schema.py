@@ -2623,6 +2623,128 @@ class SemanticConceptRevision(Base):
     reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class SemanticConceptRelationship(Base):
+    """A governed, directed relationship between two semantic concepts.
+
+    Specification section 7.3. It is what lets `parentEquipmentClass` and the
+    composite-symbol semantics be recorded as assertions about *meaning*
+    rather than as free text on a payload, and it is the only section 7 entity
+    that appears in no section 15.1 work package -- a specification omission
+    ruled a P0 gap on 2026-09-17 (decision D6) rather than a deferral.
+
+    Three shape decisions are recorded here rather than left implicit.
+
+    * **A row is one directed assertion.** Section 7.3 ships both directions of
+      each pair (`broader`/`narrower`, `component_of`/`has_component`,
+      `function_of`/`has_function`), so nothing here mints the inverse of a
+      stored row, and nothing refuses `narrower(B, A)` as a duplicate of
+      `broader(A, B)`. Asserting the inverse is a separate act with its own
+      review.
+    * **`method` and `confidence` are carried**, matching
+      `concept_classification_assignments` rather than section 7.3's literal
+      field list, so section 8.4's "explicit policy" for auto-verifying a
+      deterministic assertion has somewhere to live. `legacy_backfill` is the
+      one value deliberately *not* carried: section 12.1 phase M2 backfills
+      classifications, and there is no relationship backfill to give it a
+      writer.
+    * **Cycles are not constrained.** `broader` over a graph can close a loop,
+      and no check constraint can see more than one row. The service refuses
+      the one case a single row can express -- a concept related to itself --
+      and a cycle across several rows is a review question.
+    """
+
+    __tablename__ = "semantic_concept_relationships"
+    __table_args__ = (
+        # Section 7.3's controlled vocabulary, entire. Both directions of each
+        # pair are stored values, not derived ones.
+        CheckConstraint(
+            "relationship_type in ('broader', 'narrower', 'related', 'component_of', "
+            "'has_component', 'function_of', 'has_function', 'equivalent_internal')",
+            name="relationship_type",
+        ),
+        CheckConstraint(
+            "status in ('proposed', 'verified', 'rejected', 'retired')",
+            name="status",
+        ),
+        # Section 7.9's vocabulary, minus `legacy_backfill` -- see the class
+        # docstring. A fourth method vocabulary in this model, for the same
+        # reason the third one exists: unifying them is a specification change.
+        CheckConstraint(
+            "method in ('manual', 'source_mapping', 'rule', 'ai_assisted')",
+            name="method",
+        ),
+        CheckConstraint(
+            "confidence is null or (confidence >= 0 and confidence <= 1)",
+            name="confidence",
+        ),
+        # A verification decision must record when it happened. reviewed_by
+        # stays nullable so a deterministic assertion auto-verified under
+        # explicit policy (section 8.4) needs no invented user.
+        CheckConstraint(
+            "status in ('proposed', 'retired') or reviewed_at is not null",
+            name="review_decision",
+        ),
+        # A concept is not broader than, nor a component of, itself. The only
+        # loop a single row can express, and so the only one storage can refuse.
+        CheckConstraint(
+            "source_concept_id <> target_concept_id",
+            name="distinct_concepts",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(evidence_json) = 'object'",
+            name="evidence_json_object",
+        ),
+        # Section 14.3's two read paths: a concept's own assertions, and the
+        # assertions pointing at it.
+        Index("ix_semantic_concept_relationships_source_status", "source_concept_id", "status"),
+        Index("ix_semantic_concept_relationships_target_status", "target_concept_id", "status"),
+        # One live assertion per (source, target, type). Rejected and retired
+        # rows stay out of the index so the governance history of a
+        # relationship survives alongside its replacement.
+        Index(
+            "uq_semantic_concept_relationships_active",
+            "source_concept_id",
+            "target_concept_id",
+            "relationship_type",
+            unique=True,
+            postgresql_where=text("status in ('proposed', 'verified')"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # Every foreign key is named explicitly: the convention appends the
+    # referred table, which would generate 69- to 76-character names against
+    # PostgreSQL's 63-character identifier limit.
+    source_concept_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("semantic_concepts.id", ondelete="RESTRICT", name="fk_semantic_concept_relationships_source_concept_id"),
+        nullable=False,
+    )
+    target_concept_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("semantic_concepts.id", ondelete="RESTRICT", name="fk_semantic_concept_relationships_target_concept_id"),
+        nullable=False,
+    )
+    relationship_type: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'proposed'"))
+    method: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    evidence_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    proposed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_semantic_concept_relationships_proposed_by_user_id"),
+        nullable=True,
+    )
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_semantic_concept_relationships_reviewed_by_user_id"),
+        nullable=True,
+    )
+    reviewed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class SymbolSemanticAssignment(Base):
     """Bridge from a graphical symbol revision to the engineering meaning it carries."""
 

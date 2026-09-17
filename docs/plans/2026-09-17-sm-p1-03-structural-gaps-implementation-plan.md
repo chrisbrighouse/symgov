@@ -140,9 +140,9 @@ unreachable, and the emptiness is silent.
 
 ## 3. Work packages
 
-Ordered by what is safe to do independently. **Only WP3.1 is unblocked
-today**; the rest wait on D6–D8 and, for two of them, on SM-P1-01 being in
-real use.
+Ordered by what is safe to do independently. **WP3.1 and WP3.2 are delivered**
+(2026-09-17); WP3.3 and WP3.4 wait on D7's sequence and on SM-P1-01 being in
+real use, and WP3.5 proposes no work.
 
 ### WP3.1 — A decision route for concept classifications *(item 9, DELIVERED 2026-09-17)*
 
@@ -177,20 +177,49 @@ to `verified` (§12.3). Then the queue stops being read-only and WP1.4's
 *Gate:* `sh scripts/test-backend.sh`, the route-policy matrix extended, and
 the tenant matrix — which interlocks two files, per the WP1.6 finding.
 
-### WP3.2 — `SemanticConceptRelationship` *(item 6, blocked on D6)*
+### WP3.2 — `SemanticConceptRelationship` *(item 6, DELIVERED 2026-09-17)*
 
-If D6 says P0: a table, a migration, the service pair, and the replacement of
-`classification_mapping.py`'s `no_relationship_table` gap with a real
-proposal. CFIHOS's 832 equipment classes are the expected vocabulary, through
-the `ExternalSemanticScheme`/`Version` machinery SM-P2-02 will import.
+**Delivered**, on D6. Migration `20260917_0060` creates
+`semantic_concept_relationships`; `symgov_backend/concept_relationships.py`
+carries the propose/transition pair, the directed reads and the verified
+`broader` walk. Two decisions Chris took at build time are recorded here
+because the code alone does not explain them:
 
-**Note the ordering trap:** this wants CFIHOS imported, which is SM-P2-02,
-which is downstream of the connector, which is downstream of SM-P1-01 being
-in use. The *table* is independent; the *vocabulary* is not.
+- **`method` and `confidence` are carried** although §7.3's field list omits
+  them, matching `concept_classification_assignments` so §8.4's explicit
+  auto-verification policy has a column to inspect. `legacy_backfill` is the
+  one sibling value deliberately left out: §12.1 phase M2 backfills
+  classifications, and a relationship backfill does not exist to write it.
+- **The `no_relationship_table` gap became `no_concept_target`** rather than a
+  real proposal. The ordering trap below is why: the table is independent of
+  CFIHOS, the vocabulary is not, so the honest gap is now "there is no concept
+  to point at", and building the resolution rule would be the vocabulary half.
+  `no_relationship_table` has left `MAPPING_GAP_REASONS`.
 
-*Gate:* `sh scripts/test-backend.sh` including real PostgreSQL; the sole-head
-assertion bump that every migration needs (seven assertions — see the ICS
-crosswalk runbook note).
+Three further notes for whoever builds on it. A row is **one directed
+assertion** and nothing derives, mints or refuses an inverse — a test pins the
+absence of any inverse map, because inferring one would put an unreviewed
+assertion into the record (P-07). **There is no succession rule**: §7.3 makes
+no two verified relationships mutually exclusive, so verifying retires nothing.
+And **cycles are not constrained** — no check constraint sees more than one
+row, so `broader_concept_ids` walks with a visited set and a depth ceiling, and
+the PostgreSQL rehearsal stores a three-row cycle to prove the reader survives
+it.
+
+**No route and no UI**, which is the package as scoped. Nothing in the product
+proposes a relationship yet; the service is reached from tests only, and that
+is the same shape `propose_concept_classification` had between SM-P0-04 and
+WP3.1. It should not be left there indefinitely.
+
+**The ordering trap, unchanged:** the vocabulary wants CFIHOS imported, which is
+SM-P2-02, which is downstream of the connector, which is downstream of SM-P1-01
+being in use. The *table* is independent; the *vocabulary* is not.
+
+*Gate as run:* `sh scripts/test-backend.sh` (full sweep, real PostgreSQL) plus
+the seven sole-head assertions bumped to `20260917_0060`. The runner's portable
+default was raised from 1800s to 2700s in the same change: 1800s sat at 97% of
+a measured 29:09 sweep, so this package's own tests would have timed the runner
+out rather than failed anything.
 
 ### WP3.3 — Gate scope *(item 8, blocked on D7 and on SM-P1-01 usage)*
 
@@ -211,11 +240,12 @@ No work proposed. Listed so the decision has a home.
 
 ## 4. What this plan asserts about P0
 
-Item 6 is the uncomfortable one. **If D6 returns "P0", then the claim that
-all ten P0 packages are complete is wrong** — not by a defect in any
-delivered package, but because a P0-shaped entity was never given one. That
-should be stated plainly wherever P0 completeness is claimed, rather than
-carried as a §4.3 line item.
+Item 6 was the uncomfortable one. D6 returned "P0", so for one day the claim
+that all ten P0 packages were complete was wrong — not by a defect in any
+delivered package, but because a P0-shaped entity had never been given one.
+**WP3.2 closed it on 2026-09-17**, and the claim stands again. What remains
+true, and should be stated wherever P0 completeness is claimed: the table
+exists and nothing in the product writes to it yet.
 
 ---
 

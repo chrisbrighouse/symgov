@@ -111,7 +111,6 @@ MAPPING_GAP_REASONS = frozenset(
         "no_scheme",
         "no_node_match",
         "no_concept_target",
-        "no_relationship_table",
         "no_standard_match",
         "ambiguous_standard_version",
         "no_source_package",
@@ -419,13 +418,16 @@ def plan_classification_mapping(fields: ClassificationFields) -> ClassificationM
     )
 
     # Section 9.3 row 5: parentEquipmentClass -> a broader concept
-    # relationship. Section 7.3's table is not in any section 15.1 package.
+    # relationship. SM-P1-03 WP3.2 gave section 7.3 its table, so the gap is no
+    # longer "nowhere to record this" but "nothing to point at": a `broader`
+    # relationship needs a concept for the parent class, and the CFIHOS
+    # equipment classes that would supply one wait on SM-P2-02.
     gaps.append(
         MappingGap(
             field="parentEquipmentClass",
             raw_value=_clean_text(fields.parent_equipment_class),
-            reason="no_relationship_table",
-            detail="SemanticConceptRelationship (7.3) has no table; CFIHOS equipment classes are the likely vocabulary",
+            reason="no_concept_target",
+            detail="a broader SemanticConceptRelationship (7.3) needs a parent concept; CFIHOS equipment classes are the expected vocabulary and are not imported",
         )
     )
 

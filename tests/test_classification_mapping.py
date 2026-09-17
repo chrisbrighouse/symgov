@@ -224,12 +224,14 @@ def test_process_category_is_a_gap_with_no_concept_to_qualify():
     assert gap.raw_value == "flow_control"
 
 
-def test_parent_equipment_class_waits_on_a_table_that_does_not_exist():
-    """Section 7.3's SemanticConceptRelationship is in no section 15.1
-    package, so building one here would be a scope increase."""
+def test_parent_equipment_class_waits_on_a_concept_to_point_at():
+    """SM-P1-03 WP3.2 gave section 7.3 its table, so "no relationship table" is
+    no longer true. What is still true is that a `broader` relationship needs a
+    concept for the parent class, and the CFIHOS equipment classes that would
+    supply one wait on SM-P2-02."""
     plan = plan_classification_mapping(_fields(parent_equipment_class="valve"))
     (gap,) = [g for g in plan.gaps if g.field == "parentEquipmentClass"]
-    assert gap.reason == "no_relationship_table"
+    assert gap.reason == "no_concept_target"
     assert gap.raw_value == "valve"
 
 
