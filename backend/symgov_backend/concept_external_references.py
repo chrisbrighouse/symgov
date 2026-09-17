@@ -237,7 +237,11 @@ def transition_concept_external_reference(
     _require_aware_timestamp(occurred_at, "external mapping decision time")
     _require_optional_actor(reviewed_by_user_id, "external mapping reviewer")
 
-    reference = session.get(ConceptExternalReference, reference_id, with_for_update=True)
+    # populate_existing: `decide_external_mapping` preloads this row to 404 on
+    # it, so without a refresh the guards below read its pre-lock status.
+    reference = session.get(
+        ConceptExternalReference, reference_id, with_for_update=True, populate_existing=True
+    )
     if reference is None:
         raise LookupError(f"external mapping not found: {reference_id}")
 

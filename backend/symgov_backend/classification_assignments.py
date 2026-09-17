@@ -315,7 +315,13 @@ def _transition(
     _require_aware_timestamp(occurred_at, f"{label} decision time")
     _require_optional_actor(reviewed_by_user_id, f"{label} reviewer")
 
-    assignment = session.get(model, assignment_id, with_for_update=True)
+    # populate_existing: a route that preloaded this row to resolve tenancy
+    # would otherwise keep its pre-lock attributes, and every guard below
+    # would be evaluated against them -- silently, because no isolation_level
+    # is set anywhere, so READ COMMITTED accepts the overwrite.
+    assignment = session.get(
+        model, assignment_id, with_for_update=True, populate_existing=True
+    )
     if assignment is None:
         raise LookupError(f"{label} not found: {assignment_id}")
 

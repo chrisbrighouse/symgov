@@ -216,8 +216,14 @@ def transition_concept_relationship(
     _require_aware_timestamp(occurred_at, "concept relationship decision time")
     _require_optional_actor(reviewed_by_user_id, "concept relationship reviewer")
 
+    # populate_existing: no route reaches this yet, but the four sibling
+    # transitions were all reached by one that preloads, and the trap is the
+    # same -- a lock without a refresh leaves the guards on pre-lock values.
     relationship = session.get(
-        SemanticConceptRelationship, relationship_id, with_for_update=True
+        SemanticConceptRelationship,
+        relationship_id,
+        with_for_update=True,
+        populate_existing=True,
     )
     if relationship is None:
         raise LookupError(f"concept relationship not found: {relationship_id}")

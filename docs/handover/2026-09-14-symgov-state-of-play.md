@@ -262,6 +262,39 @@ below stays open except item 9.
     table should carry **no** `GRANT`; that matches SM-P0-04 through -08, and
     adding one would be the anomaly.
 
+11. **24 further locking reads have never been checked for a caller that
+    preloads.** Closing the unlocked-pre-load race (2026-09-17) fixed five
+    `session.get(..., with_for_update=True)` calls that needed
+    `populate_existing=True`: the four reached by a decision route in
+    `routes/semantic_review.py`, plus `concept_relationships.py`, which has no
+    route yet. A repository-wide sweep at that moment found **29** locking reads
+    in total, so **24 remain unrefreshed** across `promotion_requests.py`,
+    `symbol_demotion.py`, `symbol_set_service.py`, `catalog_symbol_ids.py`,
+    `semantic_concepts.py`, `organization_promotion_handoff.py`,
+    `publication_gate.py`, `standard_sources.py`, `ics_taxonomy.py`,
+    `source_package_acquisition.py` and `agent_queue_worker.py`.
+
+    **This is not 24 defects.** The bug needs a *caller that loads the row
+    before the service locks it*; a service whose callers all enter cold is
+    unaffected. Which of the 24 have such a caller was **not measured** — the
+    semantic-review four were measured because their routes were already known
+    to preload. Establishing that, module by module, is the work; the guard in
+    `tests/test_governed_transition_locking_postgresql.py` deliberately covers
+    only the five, and says so.
+
+    `promotion_requests.py` and `symbol_demotion.py` are the two worth looking
+    at first: both are live production paths that move a governed symbol between
+    visibility states.
+
+    **A second shape of the same trap exists and was checked:**
+    `select(...).with_for_update()` returns identity-mapped instances just as
+    unrefreshed as `Session.get` does, and the two succession helpers
+    (`_retire_superseded_primary`, `_retire_superseded_exact_mapping`) use it.
+    Both were measured clean — they select rows *other* than the one the caller
+    named (`model.id != assignment.id`), and no route loads those rows before
+    the transition — so neither was changed. The guard test does not cover this
+    shape, which is why it is written down here.
+
 ---
 
 ## 5. Settled decisions — do not re-litigate

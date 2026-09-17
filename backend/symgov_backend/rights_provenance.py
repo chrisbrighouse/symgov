@@ -374,7 +374,12 @@ def transition_rights_record(
     normalized_reason = normalize_decision_reason(decision_reason)
     normalized_licence = normalize_licence_reference(licence_reference)
 
-    record = session.get(RightsRecord, record_id, with_for_update=True)
+    # populate_existing: `decide_rights_record` preloads this row through
+    # `_visible_rights_record`, so without a refresh the guards below read its
+    # pre-lock decision status.
+    record = session.get(
+        RightsRecord, record_id, with_for_update=True, populate_existing=True
+    )
     if record is None:
         raise LookupError(f"rights record not found: {record_id}")
 

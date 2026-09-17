@@ -144,7 +144,12 @@ def transition_symbol_semantic_assignment(
     _require_aware_timestamp(occurred_at, "semantic assignment decision time")
     _require_optional_actor(reviewed_by_user_id, "semantic assignment reviewer")
 
-    assignment = session.get(SymbolSemanticAssignment, assignment_id, with_for_update=True)
+    # populate_existing: `decide_semantic_assignment` preloads this row through
+    # `_visible_symbol_row`, so without a refresh the guards below read its
+    # pre-lock status.
+    assignment = session.get(
+        SymbolSemanticAssignment, assignment_id, with_for_update=True, populate_existing=True
+    )
     if assignment is None:
         raise LookupError(f"semantic assignment not found: {assignment_id}")
 
