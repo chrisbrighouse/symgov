@@ -1296,3 +1296,77 @@ def test_a_personal_mode_session_may_read_the_forecast(review_api_database, seed
 
     assert response.status_code == 200, response.text
     assert response.json()["disciplineUsed"] == "Mechanical"
+
+
+def test_proposing_a_live_mapping_again_is_refused_rather_than_faulting(
+    review_api_database, seeded
+):
+    """The 2026-09-14 amendment's carried defect, closed 2026-09-17.
+
+    `uq_concept_external_references_active_mapping` is unique on (concept,
+    release, external identifier) while the status is `proposed` or
+    `verified`. The route used to reach the database only at `session.commit()`
+    -- outside every exception handler -- so this collision escaped as a 500.
+    It is now the same refusal `propose_symbol_classification` gives for its
+    own index, and the reviewer is told which field collided.
+
+    The rejected row afterwards proves the fix did not become a blanket
+    refusal: once the original leaves the index, the identifier is proposable
+    again, which is the remedy the message points at.
+    """
+    platform_client, Session = _client(review_api_database)
+    _platform_admin(Session, email="platform5@example.test")
+    _login(platform_client, "platform5@example.test")
+    concept = platform_client.post(
+        f"{V1}/semantic-review/concepts",
+        json={
+            "conceptKind": "physical_equipment",
+            "preferredName": "Gate Valve",
+            "definition": "A valve opening by lifting a gate.",
+        },
+    ).json()
+
+    reviewer, _Session = _client(review_api_database)
+    _login(reviewer, "reviewer@example.test")
+    body = {
+        "schemeVersionId": str(seeded["scheme_version_id"]),
+        "externalIdentifier": "CFIHOS-4321",
+        "mappingType": "exact",
+        "mappingMethod": "manual",
+    }
+    first = reviewer.post(
+        f"{V1}/semantic-review/concepts/{concept['semanticConceptId']}/external-mappings",
+        json=body,
+    )
+    assert first.status_code == 201, first.text
+    mapping = first.json()["items"][0]
+
+    collision = reviewer.post(
+        f"{V1}/semantic-review/concepts/{concept['semanticConceptId']}/external-mappings",
+        json=body,
+    )
+
+    assert collision.status_code == 422, collision.text
+    assert collision.json()["error"] == "validation_error"
+    # The envelope's `detail` is a constant; the message lives in the issues.
+    issues = collision.json()["issues"]
+    assert any("already has a live mapping" in issue["msg"] for issue in issues), issues
+    assert any(issue["loc"][-1] == "externalIdentifier" for issue in issues), issues
+
+    # The refusal rolled back cleanly: exactly one row, still proposed.
+    listed = reviewer.post(
+        f"{V1}/semantic-review/external-mappings/{mapping['referenceId']}/decision",
+        json={"targetStatus": "rejected"},
+    )
+    assert listed.status_code == 200, listed.text
+    rows = listed.json()["items"]
+    assert len(rows) == 1, rows
+    assert rows[0]["status"] == "rejected"
+
+    # Out of the partial index, so the identifier is available again.
+    afresh = reviewer.post(
+        f"{V1}/semantic-review/concepts/{concept['semanticConceptId']}/external-mappings",
+        json=body,
+    )
+    assert afresh.status_code == 201, afresh.text
+    assert {row["status"] for row in afresh.json()["items"]} == {"rejected", "proposed"}

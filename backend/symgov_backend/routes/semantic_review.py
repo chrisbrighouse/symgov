@@ -250,6 +250,25 @@ def _is_active_node_conflict(exc: IntegrityError) -> bool:
     )
 
 
+def _is_active_mapping_conflict(exc: IntegrityError) -> bool:
+    """Is this the partial unique index on one concept's live mappings?
+
+    `uq_concept_external_references_active_mapping` is unique on
+    (semantic_concept_id, scheme_version_id, external_identifier) while the
+    status is `proposed` or `verified`. Matched by name for the same reason
+    `_is_active_node_conflict` is: a genuine storage fault must still surface
+    as one. The sibling index `uq_concept_external_references_verified_exact`
+    is deliberately not matched here -- it constrains `verified` rows, and
+    `propose_concept_external_reference` writes `proposed` unconditionally,
+    so proposing cannot violate it.
+    """
+    message = str(exc.orig or exc).lower()
+    return (
+        "duplicate key value" in message
+        and "uq_concept_external_references_active_mapping" in message
+    )
+
+
 def _decimal(value: float | None) -> Decimal | None:
     return None if value is None else Decimal(str(value))
 
@@ -1308,10 +1327,28 @@ def propose_external_mapping(
             confidence=_decimal(body.confidence),
             evidence=body.evidence,
         )
+        # Flushed inside the try on purpose. Without it the insert reaches the
+        # database at `session.commit()` below, outside every handler, so a
+        # duplicate active mapping escaped as a 500 -- the defect recorded by
+        # the 2026-09-14 amendment.
+        session.flush()
     except LookupError as exc:
         raise HTTPException(status_code=404, detail="External scheme version was not found.") from exc
     except ValueError as exc:
         raise _invalid(str(exc)) from exc
+    except IntegrityError as exc:
+        # The same reading `propose_symbol_classification` takes of its own
+        # index collision: a reviewer naming a mapping that is already live is
+        # making a refusable request, not provoking a fault, so it wears this
+        # router's 422 envelope rather than a 409 the contract never declares.
+        session.rollback()
+        if not _is_active_mapping_conflict(exc):
+            raise
+        raise _invalid(
+            "this concept already has a live mapping to that identifier in "
+            "that release; decide the existing one before proposing it again",
+            ("body", "externalIdentifier"),
+        ) from exc
     session.commit()
     return _concept_mapping_state(session, concept)
 
