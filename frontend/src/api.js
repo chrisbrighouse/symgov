@@ -1999,6 +1999,21 @@ export async function decideSemanticReviewSymbolClassification(assignmentId, { t
   );
 }
 
+// SM-P1-03 WP3.1. The decision the concept-classification queue lacked: until
+// it existed the queue was a read surface and
+// `transition_concept_classification` was unreachable from production.
+//
+// The response is the concept's whole classification state, not one row:
+// verifying a primary retires the primary verified before it, and a caller
+// given back only the row it named could not see that succession.
+export async function decideSemanticReviewConceptClassification(assignmentId, { targetStatus }) {
+  return semanticReviewWrite(
+    `/concept-classifications/${encodeURIComponent(assignmentId)}/decision`,
+    { targetStatus },
+    'Concept classification decision failed.',
+  );
+}
+
 export async function decideSemanticReviewExternalMapping(referenceId, { targetStatus, verificationBasis = '' }) {
   return semanticReviewWrite(
     `/external-mappings/${encodeURIComponent(referenceId)}/decision`,

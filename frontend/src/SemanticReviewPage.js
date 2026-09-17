@@ -1,6 +1,7 @@
 import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
+  decideSemanticReviewConceptClassification,
   decideSemanticReviewExternalMapping,
   decideSemanticReviewRightsRecord,
   decideSemanticReviewSemanticAssignment,
@@ -47,6 +48,7 @@ const DEFAULT_API = {
   symbolRevision: fetchSemanticReviewSymbolRevision,
   decideSemanticAssignment: decideSemanticReviewSemanticAssignment,
   decideSymbolClassification: decideSemanticReviewSymbolClassification,
+  decideConceptClassification: decideSemanticReviewConceptClassification,
   decideExternalMapping: decideSemanticReviewExternalMapping,
   decideRightsRecord: decideSemanticReviewRightsRecord,
   proposeRightsRecord: proposeSemanticReviewRightsRecord,
@@ -253,6 +255,10 @@ function semanticIdentifier(row) {
 
 function mappingIdentifier(row) {
   return `mapping ${conceptLabel(row.concept)} ${row.externalIdentifier}`;
+}
+
+function conceptClassificationIdentifier(row) {
+  return `concept classification ${conceptLabel(row.concept)} ${row.nodeCode}`;
 }
 
 function rightsIdentifier(row) {
@@ -477,6 +483,20 @@ export function SemanticReviewPage({ auth, api = DEFAULT_API }) {
         const updated = items.find((item) => item.referenceId === row.referenceId);
         if (updated) replaceQueueRow(updated, (candidate) => candidate.referenceId);
         setVerificationBasis('');
+      },
+    );
+  }
+
+  function decideConceptClassification(row, targetStatus) {
+    return runDecision(
+      row.assignmentId,
+      () => api.decideConceptClassification(row.assignmentId, { targetStatus }),
+      (list) => {
+        // The whole concept's classifications come back, because verifying a
+        // primary retires the primary verified before it. Both rows are
+        // replaced, so the queue does not keep showing a retired row as live.
+        const items = Array.isArray(list?.items) ? list.items : [];
+        items.forEach((item) => replaceQueueRow(item, (candidate) => candidate.assignmentId));
       },
     );
   }
@@ -1013,14 +1033,16 @@ export function SemanticReviewPage({ auth, api = DEFAULT_API }) {
         createElement(Fact, { label: 'Proposed', value: formatReviewTimestamp(row.proposedAt) }),
       ),
       createElement(EvidenceBlock, { evidence: row.evidence }),
-      // WP1.2 exposes no decision route for a concept->node assignment, so
-      // this queue is a read surface. Rendering a control here would offer an
-      // act the API cannot perform.
-      createElement(
-        'p',
-        { role: 'note', className: 'form-message semantic-review-blocked' },
-        'No decision control is available for concept classifications in this release; this queue is read-only.',
-      ),
+      // WP3.1 gave this queue its decision route, so the read-only note that
+      // stood here is gone. The controls are still `capabilities`-driven:
+      // a `legacy_backfill` row is barred from `verified` by section 12.3 and
+      // says so, exactly as the symbol classification queue's rows do.
+      createElement(DecisionControls, {
+        identifier: conceptClassificationIdentifier(row),
+        capabilities: row.capabilities,
+        busy: decision.busy === row.assignmentId,
+        onDecide: (targetStatus) => decideConceptClassification(row, targetStatus),
+      }),
     );
   }
 

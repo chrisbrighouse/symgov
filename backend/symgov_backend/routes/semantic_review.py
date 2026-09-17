@@ -76,8 +76,10 @@ from sqlalchemy.orm import Session
 
 from ..auth import AuthenticatedUser
 from ..classification_assignments import (
+    list_concept_classifications,
     list_symbol_revision_classifications,
     propose_symbol_revision_classification,
+    transition_concept_classification,
     transition_symbol_revision_classification,
 )
 from ..classification_mapping import (
@@ -124,6 +126,7 @@ from ..schemas import (
     APIErrorResponse,
     APIValidationErrorResponse,
     ClassificationSchemeOptionsResponse,
+    ConceptClassificationListResponse,
     ConceptClassificationQueueResponse,
     ConceptExternalMappingListResponse,
     ConceptExternalMappingProposeRequest,
@@ -1293,6 +1296,105 @@ def decide_symbol_classification(
     revision_id = updated.symbol_revision_id
     session.commit()
     return symbol_revision_semantic_state(revision_id, session=session, current_user=current_user)
+
+
+# ---------------------------------------------------------------------------
+# Concept classification assignments -- admin or reviewer (decision Q2)
+# ---------------------------------------------------------------------------
+
+
+def _concept_classification_state(
+    session: Session, concept: SemanticConcept
+) -> ConceptClassificationListResponse:
+    """Every classification the concept holds, whatever its status.
+
+    `_concept_mapping_state`'s shape and its reasoning: section 14.4 keeps the
+    decision history with the governed data, and the row just decided is the
+    first thing the caller needs back.
+    """
+    identity = _concept_payload_from_model(session, concept)
+    rows = []
+    for assignment in list_concept_classifications(session, concept.id):
+        node, scheme = session.execute(
+            select(ClassificationNode, ClassificationScheme)
+            .join(ClassificationScheme, ClassificationScheme.id == ClassificationNode.scheme_id)
+            .where(ClassificationNode.id == assignment.classification_node_id)
+        ).one()
+        rows.append(
+            {
+                "assignmentId": str(assignment.id),
+                "concept": identity,
+                "classificationSchemeId": str(assignment.classification_scheme_id),
+                "schemeCode": scheme.scheme_code,
+                "nodeCode": node.node_code,
+                "nodeLabel": node.preferred_label,
+                "assignmentRole": assignment.assignment_role,
+                "status": assignment.status,
+                "method": assignment.method,
+                "confidence": _float(assignment.confidence),
+                "evidence": assignment.evidence_json or {},
+                "proposedAt": assignment.created_at.isoformat(),
+                "capabilities": _capabilities_payload(
+                    classification_decision_capabilities(
+                        status=assignment.status, method=assignment.method
+                    )
+                ),
+            }
+        )
+    return ConceptClassificationListResponse(items=rows)
+
+
+@router.post(
+    "/concept-classifications/{assignment_id}/decision",
+    response_model=ConceptClassificationListResponse,
+    responses=_ERROR_RESPONSES,
+)
+def decide_concept_classification(
+    assignment_id: uuid.UUID,
+    body: SemanticReviewDecisionRequest,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(reviewer),
+) -> ConceptClassificationListResponse:
+    """The decision `concept_classification_queue` has always lacked.
+
+    Without it the queue is read-only and a governance state the model
+    defines is unreachable: `transition_concept_classification` exists and is
+    tested, and nothing in production could call it. WP1.4's `mustRepropose`
+    flag gains a path to act on here too, though the refusal it warns of is
+    the service's, not this route's.
+
+    **No tenant predicate, for `_concept`'s reason** -- section 17 made
+    concept governance platform-level and a concept has no private existence
+    to leak, which is the same call WP1.1 made for the queue this decides on.
+    Verifying a primary assignment retires the previous verified primary in
+    the same scheme; that succession is the service's, so the response lists
+    every row rather than only the one named.
+    """
+    # No unlocked pre-load before the transition, and the absence is the
+    # point. `_transition` re-reads the row `with_for_update=True`, but
+    # SQLAlchemy's `get()` does not pass `populate_existing` with it: an
+    # instance already in the identity map keeps the attribute values of the
+    # earlier, unlocked read, so the lock would be taken and every guard --
+    # the transition table, the section 12.3 backfill bar, the primary
+    # succession branch -- still evaluated against the pre-lock snapshot. Two
+    # reviewers deciding the same assignment could then overwrite each other
+    # silently under READ COMMITTED. The service's own `LookupError` is the
+    # 404 here, so nothing needs to read the row first.
+    try:
+        updated = transition_concept_classification(
+            session,
+            assignment_id,
+            target_status=body.targetStatus,
+            occurred_at=_now(),
+            reviewed_by_user_id=_actor(current_user),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Concept classification was not found.") from exc
+    except ValueError as exc:
+        raise _invalid(str(exc)) from exc
+    concept_id = updated.semantic_concept_id
+    session.commit()
+    return _concept_classification_state(session, _concept(session, concept_id))
 
 
 # ---------------------------------------------------------------------------

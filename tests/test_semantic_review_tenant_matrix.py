@@ -13,8 +13,9 @@ routes (`test_semantic_review_queries_postgresql.py`,
 somebody adds a *new* symbol-scoped route and forgets the predicate, because
 each names the routes it probes. That is the gap this file closes.
 
-**The router carries nineteen route decorators, not seventeen.**
-`SEMANTIC_REVIEW_ROUTES` in `test_semantic_review_routes.py` holds seventeen
+**The router carries twenty route decorators, not eighteen.**
+`SEMANTIC_REVIEW_ROUTES` in `test_semantic_review_routes.py` holds eighteen
+-- seventeen from SM-P1-01 plus WP3.1's concept-classification decision --
 and `RIGHTS_REVIEW_ROUTES` in `test_rights_review_routes.py` holds the other
 two; WP1.3's rights writes share this router but have their own policy
 matrix. Prose in the implementation plan says "sixteenth route" and
@@ -23,7 +24,7 @@ decorators. This file counts decorators, off the router object itself.
 
 **Every route is in exactly one of two tables.** `TENANT_SCOPED` names the
 ten routes that resolve a symbol-scoped row and the predicate each must use;
-`UNSCOPED_BY_DECISION` names the nine that carry no tenant predicate *by
+`UNSCOPED_BY_DECISION` names the ten that carry no tenant predicate *by
 decision*, each with the argument for why. The union must equal the router's
 own route set, so a new route fails this file until somebody classifies it --
 which is the point. "Unscoped" is then always a recorded decision and never
@@ -114,6 +115,10 @@ UNSCOPED_BY_DECISION = {
         "concept lifecycle is platform-admin only and concepts are platform-level "
         "(decision Q2, section 17)"
     ),
+    ("POST", "/semantic-review/concept-classifications/{assignment_id}/decision"): (
+        "a concept-to-node assertion names no symbol; the same argument WP1.1 "
+        "made for the queue this decides on (WP3.1)"
+    ),
     ("POST", "/semantic-review/concepts/{concept_id}/external-mappings"): (
         "a mapping hangs off a concept, which has no private existence to leak"
     ),
@@ -139,14 +144,16 @@ def _source(method, path):
     raise AssertionError(f"{method} {path} is not on the router")
 
 
-def test_the_router_carries_nineteen_routes():
+def test_the_router_carries_twenty_routes():
     """Counted off the decorators, which is the only total that is a fact.
 
-    Seventeen of them are in `SEMANTIC_REVIEW_ROUTES` and two -- WP1.3's
-    rights writes -- are in `RIGHTS_REVIEW_ROUTES`. A change to this number
-    is a change to the surface section 14.2 governs, and should be noticed.
+    Eighteen of them are in `SEMANTIC_REVIEW_ROUTES` -- seventeen from
+    SM-P1-01, plus WP3.1's concept-classification decision, which was added
+    to that same matrix -- and two, WP1.3's rights writes, are in
+    `RIGHTS_REVIEW_ROUTES`. A change to this number is a change to the
+    surface section 14.2 governs, and should be noticed.
     """
-    assert len(_router_routes()) == 19
+    assert len(_router_routes()) == 20
 
 
 def test_every_route_is_classified_as_scoped_or_unscoped_by_decision():
@@ -155,7 +162,7 @@ def test_every_route_is_classified_as_scoped_or_unscoped_by_decision():
     A new symbol-scoped route added without a predicate fails here before it
     can reach production: it is in neither table, so the union no longer
     equals the router. Putting it in `UNSCOPED_BY_DECISION` is possible, but
-    it costs the author a written argument sitting beside eight others -- the
+    it costs the author a written argument sitting beside nine others -- the
     difference between a decision and an omission.
     """
     classified = set(TENANT_SCOPED) | set(UNSCOPED_BY_DECISION)

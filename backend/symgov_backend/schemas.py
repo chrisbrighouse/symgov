@@ -1800,6 +1800,17 @@ class ConceptExternalMappingQueueResponse(BaseModel):
     offset: int
 
 
+class ConceptClassificationListResponse(BaseModel):
+    """A concept's classifications after a decision -- not a queue page.
+
+    `ConceptExternalMappingListResponse`' reasoning, for the same reason: the
+    queue lists only `proposed` rows, so a reviewer who had just rejected an
+    assignment would get back a response that did not contain it.
+    """
+
+    items: list[ConceptClassificationReviewRowResponse]
+
+
 class ConceptExternalMappingListResponse(BaseModel):
     """A concept's mappings after a write -- not a queue page.
 

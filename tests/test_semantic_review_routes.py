@@ -238,6 +238,10 @@ SEMANTIC_REVIEW_ROUTES = (
     ("POST", "/semantic-review/semantic-assignments/{assignment_id}/decision", "reviewer_admin"),
     ("POST", "/semantic-review/symbol-revisions/{symbol_revision_id}/classifications", "reviewer_admin"),
     ("POST", "/semantic-review/symbol-classifications/{assignment_id}/decision", "reviewer_admin"),
+    # WP3.1 (§4.3 item 9): the decision the concept-classification queue had
+    # no route for, so the queue was read-only and
+    # `transition_concept_classification` was unreachable from production.
+    ("POST", "/semantic-review/concept-classifications/{assignment_id}/decision", "reviewer_admin"),
     ("POST", "/semantic-review/concepts/{concept_id}/external-mappings", "reviewer_admin"),
     ("POST", "/semantic-review/external-mappings/{reference_id}/decision", "reviewer_admin"),
     ("GET", "/semantic-review/classification-schemes", "reviewer_admin"),

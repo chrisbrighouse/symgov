@@ -156,6 +156,16 @@ test('a symbol classification decision posts to its own path', async () => {
   assert.deepEqual(JSON.parse(fetchCalls[0].options.body), { targetStatus: 'rejected' });
 });
 
+test('a concept classification decision posts to its own path (WP3.1)', async () => {
+  reset({ items: [] });
+
+  await api.decideSemanticReviewConceptClassification('cc-1', { targetStatus: 'verified' });
+
+  assert.equal(fetchCalls[0].url, `${ROOT}/semantic-review/concept-classifications/cc-1/decision`);
+  assert.equal(fetchCalls[0].options.method, 'POST');
+  assert.deepEqual(JSON.parse(fetchCalls[0].options.body), { targetStatus: 'verified' });
+});
+
 test('an external mapping verification carries its basis and drops an empty one', async () => {
   reset({ items: [] });
   await api.decideSemanticReviewExternalMapping('m-1', { targetStatus: 'verified', verificationBasis: 'published crosswalk' });

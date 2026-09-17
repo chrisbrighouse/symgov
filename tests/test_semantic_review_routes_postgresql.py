@@ -51,6 +51,7 @@ from symgov_backend.app import create_app  # noqa: E402
 from symgov_backend.auth import upsert_user  # noqa: E402
 from symgov_backend.catalog_symbol_ids import ensure_catalog_symbol_id  # noqa: E402
 from symgov_backend.classification_assignments import (  # noqa: E402
+    propose_concept_classification,
     propose_symbol_revision_classification,
 )
 from symgov_backend.dependencies import get_db_session  # noqa: E402
@@ -793,6 +794,239 @@ def test_an_external_mapping_is_proposed_then_rejected_and_stays_in_the_response
     assert returned[mapping["referenceId"]]["status"] == "rejected"
 
 
+def test_proposing_a_live_mapping_again_is_refused_rather_than_faulting(
+    review_api_database, seeded
+):
+    """The 2026-09-14 amendment's carried defect, closed 2026-09-17.
+
+    `uq_concept_external_references_active_mapping` is unique on (concept,
+    release, external identifier) while the status is `proposed` or
+    `verified`. The route used to reach the database only at `session.commit()`
+    -- outside every exception handler -- so this collision escaped as a 500.
+    It is now the same refusal `propose_symbol_classification` gives for its
+    own index, and the reviewer is told which field collided.
+
+    The rejected row afterwards proves the fix did not become a blanket
+    refusal: once the original leaves the index, the identifier is proposable
+    again, which is the remedy the message points at.
+    """
+    platform_client, Session = _client(review_api_database)
+    _platform_admin(Session, email="platform5@example.test")
+    _login(platform_client, "platform5@example.test")
+    concept = platform_client.post(
+        f"{V1}/semantic-review/concepts",
+        json={
+            "conceptKind": "physical_equipment",
+            "preferredName": "Gate Valve",
+            "definition": "A valve opening by lifting a gate.",
+        },
+    ).json()
+
+    reviewer, _Session = _client(review_api_database)
+    _login(reviewer, "reviewer@example.test")
+    body = {
+        "schemeVersionId": str(seeded["scheme_version_id"]),
+        "externalIdentifier": "CFIHOS-4321",
+        "mappingType": "exact",
+        "mappingMethod": "manual",
+    }
+    first = reviewer.post(
+        f"{V1}/semantic-review/concepts/{concept['semanticConceptId']}/external-mappings",
+        json=body,
+    )
+    assert first.status_code == 201, first.text
+    mapping = first.json()["items"][0]
+
+    collision = reviewer.post(
+        f"{V1}/semantic-review/concepts/{concept['semanticConceptId']}/external-mappings",
+        json=body,
+    )
+
+    assert collision.status_code == 422, collision.text
+    assert collision.json()["error"] == "validation_error"
+    # The envelope's `detail` is a constant; the message lives in the issues.
+    issues = collision.json()["issues"]
+    assert any("already has a live mapping" in issue["msg"] for issue in issues), issues
+    assert any(issue["loc"][-1] == "externalIdentifier" for issue in issues), issues
+
+    # The refusal rolled back cleanly: exactly one row, still proposed.
+    listed = reviewer.post(
+        f"{V1}/semantic-review/external-mappings/{mapping['referenceId']}/decision",
+        json={"targetStatus": "rejected"},
+    )
+    assert listed.status_code == 200, listed.text
+    rows = listed.json()["items"]
+    assert len(rows) == 1, rows
+    assert rows[0]["status"] == "rejected"
+
+    # Out of the partial index, so the identifier is available again.
+    afresh = reviewer.post(
+        f"{V1}/semantic-review/concepts/{concept['semanticConceptId']}/external-mappings",
+        json=body,
+    )
+    assert afresh.status_code == 201, afresh.text
+    assert {row["status"] for row in afresh.json()["items"]} == {"rejected", "proposed"}
+
+
+def _concept_with_classification(
+    review_api_database, *, email, node_code="MECHANICAL", method="manual", role="primary"
+):
+    """A concept carrying one classification assignment, seeded by the service.
+
+    There is deliberately no propose *route* for a concept classification:
+    WP3.1 closes the decision half of section 4.3 item 9 only. The writer is
+    the industry-axis plan's WP2.2, whose shape depends on decision D1, so
+    seeding through `propose_concept_classification` is what a caller of this
+    route will actually be deciding on.
+    """
+    platform_client, Session = _client(review_api_database)
+    _platform_admin(Session, email=email)
+    _login(platform_client, email)
+    concept = platform_client.post(
+        f"{V1}/semantic-review/concepts",
+        json={
+            "conceptKind": "physical_equipment",
+            "preferredName": "Globe Valve",
+            "definition": "A valve regulating flow with a movable plug.",
+        },
+    ).json()
+    concept_id = uuid.UUID(concept["semanticConceptId"])
+
+    with Session() as session:
+        node = _node(session, scheme_code="ENGINEERING-DISCIPLINE", node_code=node_code)
+        assignment = propose_concept_classification(
+            session,
+            semantic_concept_id=concept_id,
+            classification_node_id=node.id,
+            assignment_role=role,
+            method=method,
+            proposed_at=_now(),
+        )
+        session.commit()
+        return concept_id, assignment.id, node.id
+
+
+def test_a_concept_classification_can_be_verified_and_comes_back_decided(
+    review_api_database, seeded
+):
+    """Section 4.3 item 9, closed 2026-09-17 (WP3.1).
+
+    `transition_concept_classification` existed and was tested from the start;
+    what was missing was any way to reach it, so the queue was read-only and
+    a governance state the model defines was unreachable in production.
+    """
+    _concept_id, assignment_id, _node_id = _concept_with_classification(
+        review_api_database, email="platform6@example.test"
+    )
+    reviewer, _Session = _client(review_api_database)
+    _login(reviewer, "reviewer@example.test")
+
+    response = reviewer.post(
+        f"{V1}/semantic-review/concept-classifications/{assignment_id}/decision",
+        json={"targetStatus": "verified"},
+    )
+
+    assert response.status_code == 200, response.text
+    rows = {row["assignmentId"]: row for row in response.json()["items"]}
+    assert rows[str(assignment_id)]["status"] == "verified"
+    assert rows[str(assignment_id)]["schemeCode"] == "ENGINEERING-DISCIPLINE"
+    assert rows[str(assignment_id)]["nodeCode"] == "MECHANICAL"
+    # The queue lists only `proposed` rows, which is why the response is the
+    # concept's whole classification state rather than a queue page.
+    queued = reviewer.get(f"{V1}/semantic-review/queues/concept-classifications").json()
+    assert str(assignment_id) not in {row["assignmentId"] for row in queued["items"]}
+
+
+def test_verifying_a_primary_retires_the_primary_verified_before_it(
+    review_api_database, seeded
+):
+    """Succession, not refusal -- the rule `transition_concept_classification`
+    documents and SM-P0-02/-03 already use. The response has to carry both
+    rows for a reviewer to see that the first one moved.
+    """
+    concept_id, first_id, _node_id = _concept_with_classification(
+        review_api_database, email="platform7@example.test"
+    )
+    reviewer, Session = _client(review_api_database)
+    _login(reviewer, "reviewer@example.test")
+    assert (
+        reviewer.post(
+            f"{V1}/semantic-review/concept-classifications/{first_id}/decision",
+            json={"targetStatus": "verified"},
+        ).status_code
+        == 200
+    )
+    with Session() as session:
+        node = _node(session, scheme_code="ENGINEERING-DISCIPLINE", node_code="PROCESS")
+        second = propose_concept_classification(
+            session,
+            semantic_concept_id=concept_id,
+            classification_node_id=node.id,
+            assignment_role="primary",
+            method="manual",
+            proposed_at=_now(),
+        )
+        session.commit()
+        second_id = second.id
+
+    response = reviewer.post(
+        f"{V1}/semantic-review/concept-classifications/{second_id}/decision",
+        json={"targetStatus": "verified"},
+    )
+
+    assert response.status_code == 200, response.text
+    rows = {row["assignmentId"]: row["status"] for row in response.json()["items"]}
+    assert rows[str(second_id)] == "verified"
+    assert rows[str(first_id)] == "retired"
+
+
+def test_a_backfilled_concept_classification_is_refused_as_the_queue_warned(
+    review_api_database, seeded
+):
+    """Section 12.3, surfaced as this router's 422 rather than a fault.
+
+    WP1.4's `mustRepropose` flag warns of exactly this before a reviewer
+    tries; until WP3.1 there was no route for the warning to be about.
+    """
+    _concept_id, assignment_id, _node_id = _concept_with_classification(
+        review_api_database, email="platform8@example.test", method="legacy_backfill"
+    )
+    reviewer, _Session = _client(review_api_database)
+    _login(reviewer, "reviewer@example.test")
+
+    response = reviewer.post(
+        f"{V1}/semantic-review/concept-classifications/{assignment_id}/decision",
+        json={"targetStatus": "verified"},
+    )
+
+    assert response.status_code == 422, response.text
+    issues = response.json()["issues"]
+    assert any("cannot be verified" in issue["msg"] for issue in issues), issues
+
+    # Rejecting it is the remedy the message points at, and it is allowed.
+    rejected = reviewer.post(
+        f"{V1}/semantic-review/concept-classifications/{assignment_id}/decision",
+        json={"targetStatus": "rejected"},
+    )
+    assert rejected.status_code == 200, rejected.text
+    rows = {row["assignmentId"]: row["status"] for row in rejected.json()["items"]}
+    assert rows[str(assignment_id)] == "rejected"
+
+
+def test_an_unknown_concept_classification_is_absent_not_forbidden(
+    review_api_database, seeded
+):
+    reviewer, _Session = _client(review_api_database)
+    _login(reviewer, "reviewer@example.test")
+
+    response = reviewer.post(
+        f"{V1}/semantic-review/concept-classifications/{uuid.uuid4()}/decision",
+        json={"targetStatus": "verified"},
+    )
+
+    assert response.status_code == 404, response.text
+
+
 def test_an_exact_mapping_cannot_be_verified_on_string_similarity(review_api_database, seeded):
     """Section 16.2, enforced by the service and surfaced as the 422 envelope.
 
@@ -1296,77 +1530,3 @@ def test_a_personal_mode_session_may_read_the_forecast(review_api_database, seed
 
     assert response.status_code == 200, response.text
     assert response.json()["disciplineUsed"] == "Mechanical"
-
-
-def test_proposing_a_live_mapping_again_is_refused_rather_than_faulting(
-    review_api_database, seeded
-):
-    """The 2026-09-14 amendment's carried defect, closed 2026-09-17.
-
-    `uq_concept_external_references_active_mapping` is unique on (concept,
-    release, external identifier) while the status is `proposed` or
-    `verified`. The route used to reach the database only at `session.commit()`
-    -- outside every exception handler -- so this collision escaped as a 500.
-    It is now the same refusal `propose_symbol_classification` gives for its
-    own index, and the reviewer is told which field collided.
-
-    The rejected row afterwards proves the fix did not become a blanket
-    refusal: once the original leaves the index, the identifier is proposable
-    again, which is the remedy the message points at.
-    """
-    platform_client, Session = _client(review_api_database)
-    _platform_admin(Session, email="platform5@example.test")
-    _login(platform_client, "platform5@example.test")
-    concept = platform_client.post(
-        f"{V1}/semantic-review/concepts",
-        json={
-            "conceptKind": "physical_equipment",
-            "preferredName": "Gate Valve",
-            "definition": "A valve opening by lifting a gate.",
-        },
-    ).json()
-
-    reviewer, _Session = _client(review_api_database)
-    _login(reviewer, "reviewer@example.test")
-    body = {
-        "schemeVersionId": str(seeded["scheme_version_id"]),
-        "externalIdentifier": "CFIHOS-4321",
-        "mappingType": "exact",
-        "mappingMethod": "manual",
-    }
-    first = reviewer.post(
-        f"{V1}/semantic-review/concepts/{concept['semanticConceptId']}/external-mappings",
-        json=body,
-    )
-    assert first.status_code == 201, first.text
-    mapping = first.json()["items"][0]
-
-    collision = reviewer.post(
-        f"{V1}/semantic-review/concepts/{concept['semanticConceptId']}/external-mappings",
-        json=body,
-    )
-
-    assert collision.status_code == 422, collision.text
-    assert collision.json()["error"] == "validation_error"
-    # The envelope's `detail` is a constant; the message lives in the issues.
-    issues = collision.json()["issues"]
-    assert any("already has a live mapping" in issue["msg"] for issue in issues), issues
-    assert any(issue["loc"][-1] == "externalIdentifier" for issue in issues), issues
-
-    # The refusal rolled back cleanly: exactly one row, still proposed.
-    listed = reviewer.post(
-        f"{V1}/semantic-review/external-mappings/{mapping['referenceId']}/decision",
-        json={"targetStatus": "rejected"},
-    )
-    assert listed.status_code == 200, listed.text
-    rows = listed.json()["items"]
-    assert len(rows) == 1, rows
-    assert rows[0]["status"] == "rejected"
-
-    # Out of the partial index, so the identifier is available again.
-    afresh = reviewer.post(
-        f"{V1}/semantic-review/concepts/{concept['semanticConceptId']}/external-mappings",
-        json=body,
-    )
-    assert afresh.status_code == 201, afresh.text
-    assert {row["status"] for row in afresh.json()["items"]} == {"rejected", "proposed"}

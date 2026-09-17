@@ -167,6 +167,14 @@ function stubApi(overrides = {}) {
     symbolRevision: record('symbolRevision', async () => revisionState()),
     decideSemanticAssignment: record('decideSemanticAssignment', async () => revisionState()),
     decideSymbolClassification: record('decideSymbolClassification', async () => revisionState()),
+    decideConceptClassification: record('decideConceptClassification', async () => ({
+      // The concept's whole classification state, which is the point of the
+      // route: verifying a primary retires the primary verified before it.
+      items: [
+        conceptClassificationRow({ status: 'verified', capabilities: capabilities({ canVerify: false, canReject: false }) }),
+        conceptClassificationRow({ assignmentId: 'cc-0', nodeCode: 'DRAWING', nodeLabel: 'Drawing', status: 'retired', capabilities: capabilities({ canVerify: false, canReject: false, canRetire: false }) }),
+      ],
+    })),
     decideExternalMapping: record('decideExternalMapping', async () => ({ items: [mappingRow({ status: 'verified', capabilities: capabilities({ canVerify: false, canReject: false }) })] })),
     decideRightsRecord: record('decideRightsRecord', async () => rightsRow({ status: 'rejected', capabilities: capabilities({ canVerify: false, canReject: false, canRetire: false, mustRepropose: false, blockedReason: null }) })),
     proposeRightsRecord: record('proposeRightsRecord', async () => rightsRow({ recordId: 'rr-2', determinationMethod: 'manual', status: 'proposed', capabilities: capabilities() })),
@@ -454,14 +462,77 @@ describe('SemanticReviewPage decision controls', () => {
     await act(async () => renderer.unmount());
   });
 
-  it('renders concept classifications read-only, because the API exposes no decision for them', async () => {
+  it('decides a concept classification against its own endpoint (WP3.1)', async () => {
+    // This queue was read-only until SM-P1-03 WP3.1 gave it a decision route:
+    // `transition_concept_classification` existed all along with nothing able
+    // to call it. The response is the concept's whole classification state,
+    // because verifying a primary retires the primary verified before it.
     const api = stubApi();
     const renderer = await renderPage(api);
 
     await click(renderer, 'Concept classifications queue');
-    assert.equal(allByLabel(renderer, 'Verify concept classification C-0001 USE-CASE PID').length, 0);
-    assert.equal(allByLabel(renderer, 'Reject concept classification C-0001 USE-CASE PID').length, 0);
-    assert.match(markup(renderer), /No decision control is available/);
+    await click(renderer, 'Verify concept classification C-0001 PID');
+    const decision = api.calls.find(([name]) => name === 'decideConceptClassification');
+    assert.deepEqual(decision.slice(1), ['cc-1', { targetStatus: 'verified' }]);
+
+    // The decided row re-rendered from the response rather than from a second
+    // read, and its verify control is gone because `capabilities` says so.
+    assert.equal(allByLabel(renderer, 'Verify concept classification C-0001 PID').length, 0);
+    assert.match(markup(renderer), /verified/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('writes back every row the decision returned, not only the one clicked', async () => {
+    // The response carries the concept's whole classification state because
+    // verifying a primary retires the primary verified before it. A handler
+    // that replaced only the clicked row would leave the retired predecessor
+    // rendering as live.
+    const api = stubApi({
+      conceptClassifications: async (params = {}) => ({
+        items: [
+          conceptClassificationRow(),
+          conceptClassificationRow({ assignmentId: 'cc-0', nodeCode: 'DRAWING', nodeLabel: 'Drawing', status: 'verified' }),
+        ],
+        limit: params.limit ?? 50,
+        offset: params.offset ?? 0,
+      }),
+    });
+    const renderer = await renderPage(api);
+
+    await click(renderer, 'Concept classifications queue');
+    await click(renderer, 'Verify concept classification C-0001 PID');
+
+    // The predecessor is the row the reviewer never touched; the response
+    // moved it to `retired` and the queue has to show that.
+    await click(renderer, 'Open C-0001 USE-CASE · DRAWING — Drawing');
+    assert.match(markup(renderer), /retired/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('bars a backfilled concept classification from verification, as section 12.3 requires', async () => {
+    // The controls are `capabilities`-driven, not status-driven: the row is
+    // `proposed` and permanently unverifiable, which is the whole production
+    // population the queue was built for.
+    const api = stubApi({
+      conceptClassifications: async (params = {}) => ({
+        items: [conceptClassificationRow({
+          method: 'legacy_backfill',
+          capabilities: capabilities({
+            canVerify: false,
+            mustRepropose: true,
+            blockedReason: 'a legacy_backfill classification cannot be verified (section 12.3); reject it and propose afresh with a real method',
+          }),
+        })],
+        limit: params.limit ?? 50,
+        offset: params.offset ?? 0,
+      }),
+    });
+    const renderer = await renderPage(api);
+
+    await click(renderer, 'Concept classifications queue');
+    assert.equal(allByLabel(renderer, 'Verify concept classification C-0001 PID').length, 0);
+    assert.equal(allByLabel(renderer, 'Reject concept classification C-0001 PID').length, 1);
+    assert.match(markup(renderer), /cannot be verified \(section 12\.3\)/);
     await act(async () => renderer.unmount());
   });
 
