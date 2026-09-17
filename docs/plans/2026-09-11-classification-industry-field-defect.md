@@ -88,16 +88,57 @@ would be three disciplines and a placeholder.
   copyright in ICS (ISBN 978-92-67-10652-6) and the publication page
   refuses automated fetches, so the terms for embedding node labels in
   the product UI and API are unconfirmed. The scheme should not be
-  created until that returns.
+  created until that returns. **Closed 2026-09-17 — see below.**
+
+## Decisions taken 2026-09-17 (Chris)
+
+* **The licensing question is closed: ODC-By v1.0 via ISO Open Data is
+  the answer.** ICS edition 7 is published as the `iso_ics` dataset on
+  ISO Open Data (`https://www.iso.org/open-data.html#iso_ics`) under the
+  Open Data Commons Attribution License v1.0 — a different distribution
+  channel from the paywalled publication page that refused automated
+  fetches. That licence permits embedding the node labels and scope
+  notes in the product UI and API. The vendored
+  `backend/symgov_backend/data/ICS.csv` on public `main` is therefore
+  correctly redistributed, and no history rewrite is needed.
+  Provenance, licence URL, attribution and the codes-only clarification
+  are pinned in `ICS.manifest.json` and stored per import by
+  `ics_taxonomy.py` (`license_code`, `license_url`, `attribution`).
+* **`industry` *is* an axis.** Item 1 of "Wanted" below is answered: the
+  field is not retired in favour of `ENGINEERING-DISCIPLINE`. It stays,
+  and ICS becomes its governed vocabulary. What remains wrong is
+  everything else about it — the four hard-coded heuristic branches, the
+  absence of any writer that can select from a scheme, and the absence
+  of any reviewer correction path.
+* **Creating the Industry/Application scheme is unblocked.** The ICS
+  ingestion machinery already exists (`ics_import`, `ics_taxonomy`,
+  `ics_review`, migration `20260916_0059`) and seeds `ISO-ICS-7` as a
+  **draft** scheme. Activation is separate governance, not part of this
+  unblocking.
+* **Attribution-in-UI is a gate on activation, not a fix to make now.**
+  ODC-By obliges the attribution notice to travel with the data wherever
+  it is conveyed. No ICS *label* is conveyed today: the scheme is draft and
+  excluded from the SME options route. The general notice **is** already
+  carried — `frontend/src/SupportDataSources.jsx` renders the attribution,
+  the codes-only clarification and the ODC-By link on the Support route, and
+  has since `e6cd860`; an earlier draft of this bullet said otherwise and was
+  wrong. What is missing is the notice travelling *with the labels*, read
+  from the stored import rather than the vendored JSON.
+  **Before any ICS label is surfaced in the UI
+  or returned by a public API response, the ODC-By attribution and the
+  codes-only clarification must be surfaced with it.** Recorded here so
+  activation cannot quietly skip it.
 
 ## Wanted
 
 Not scoped, and deliberately not folded into SM-P0-07:
 
-1. Decide whether `industry` is an industry axis at all, or whether the
+1. ~~Decide whether `industry` is an industry axis at all, or whether the
    field should be retired in favour of the discipline scheme it
-   currently duplicates.
-2. If it stays, give it a real vocabulary (ICS, pending licensing) and a
-   writer that can select from it — the current four branches cannot.
+   currently duplicates.~~ **Answered 2026-09-17: it is an axis and it
+   stays.**
+2. If it stays, give it a real vocabulary (ICS, ~~pending licensing~~
+   **licensing cleared 2026-09-17**) and a writer that can select from
+   it — the current four branches cannot.
 3. Give reviewers a way to correct it, as they can for `category` and
    `discipline`.

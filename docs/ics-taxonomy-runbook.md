@@ -38,6 +38,22 @@ PYTHONPATH=backend uv run --isolated --with-requirements backend/requirements.tx
 
 The CLI never runs migrations. It owns a transaction around the service import. The service validates again before mutation, serializes imports with a transaction advisory lock, and wraps writes in a savepoint; the caller must commit. It creates deterministic `ISO-ICS-7` scheme and node IDs and writes two durable records. `ics_taxonomy_imports` holds one immutable snapshot per `(scheme_id, content_sha256)`: raw source bytes plus each provenance field — dataset, edition, publication and source-update year, source/page/browse/license URLs, license code, attribution, clarification, limitation, `retrieved_at`, `Last-Modified` and digest — as separately queryable, constrained columns rather than one JSON blob. A database trigger rejects any UPDATE or DELETE on that table. `ics_domain_crosswalks` holds one row per domain-to-ICS proposal, each with composite foreign keys to both governed nodes, a `relation` of `broader` or `candidate`, a `review_status`, and a reason. These are browse proposals, **not** semantic concept/symbol assignments: they live in their own table and write nothing to `concept_classification_assignments` or `symbol_revision_classifications`. There is no name matching or auto-verification. Repeated identical imports retain the first successful pull provenance and do not duplicate rows or promote statuses. Each new external archive still records that pull's time.
 
+**Attribution is a gate on activation (decided by Chris, 2026-09-17).** The
+ICS licensing question is closed in SymGov's favour — ODC-By v1.0 via ISO Open
+Data — and that licence obliges the attribution notice to travel with the data
+wherever it is conveyed. The attribution and the codes-only clarification are
+stored per import (`license_code`, `license_url`, `attribution`, and both
+strings in the scheme description), and the general notice is already carried
+in the UI: `frontend/src/SupportDataSources.jsx` renders the attribution, the
+codes-only clarification and the ODC-By link on the Support route, as the
+verification section below already records. It reads them from the vendored
+`data/ics-source.json` rather than from the stored `ics_taxonomy_imports` row,
+so a re-import can leave it asserting a stale licence. No ICS *label* is
+conveyed today, because the scheme is draft and excluded from the SME options
+route. **Before any ICS label is surfaced in the UI or returned by a public
+API response, the ODC-By attribution and the codes-only clarification must
+travel with it, read from the stored import.**
+
 All imported schemes and nodes begin as **draft**. Existing governance is unchanged. Activation requires separate governance authority; importing does not make these nodes review-assignment choices. Existing `list_classification_nodes(session, scheme_id, top_level_only=True)` and `parent_node_id=...` reads retain all hierarchy levels. The SME options route intentionally continues restricting choices to its existing allowed active schemes; no unrelated taxonomy or file-format/use-case facets are replaced.
 
 Read back through an approved read-only SQL session:

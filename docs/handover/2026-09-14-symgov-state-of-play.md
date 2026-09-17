@@ -115,6 +115,20 @@ suspected.
 1. **`propose_external_mapping` lets a duplicate active mapping escape as a
    500** rather than a 409 or 422. Recorded by the 2026-09-14 amendment. Not
    reachable from any UI, so low urgency.
+   **Fixed 2026-09-17.** Root cause: the insert reached the database only at
+   `session.commit()`, outside every exception handler, so
+   `uq_concept_external_references_active_mapping` raised a bare
+   `IntegrityError`. The route now flushes inside the `try` and matches that
+   index by name, exactly as `propose_symbol_classification` already did for
+   `uq_symbol_revision_classifications_active_node`. **422, not 409**, by that
+   precedent and because 409 is not in the router's declared
+   `_ERROR_RESPONSES`; a reviewer naming an already-live mapping is making a
+   refusable request, not provoking a fault. The sibling index
+   `uq_concept_external_references_verified_exact` is deliberately not matched
+   — proposing always writes `proposed`, so it cannot be violated here.
+   Regression cover:
+   `test_proposing_a_live_mapping_again_is_refused_rather_than_faulting`,
+   verified RED (bare `IntegrityError`) before the fix and GREEN after.
 2. **`ensure_approved_child_symbol_revision` passes the wrong child index.**
    It gives `load_child_classification_record` the child's position among the
    *approved* children, so approving only some children of a split sheet can
@@ -159,9 +173,31 @@ suspected.
    `PLACEHOLDER_DISCIPLINES` as an absence of a value. The vision LLM never
    writes it and reviewers cannot edit it, so a wrong value written at intake
    stays wrong forever. Logged at Chris's instruction in
-   `docs/plans/2026-09-11-classification-industry-field-defect.md`. **Open and
+   `docs/plans/2026-09-11-classification-industry-field-defect.md`. ~~**Open and
    unscoped:** whether `industry` is an axis at all, or should be retired in
-   favour of the scheme it duplicates.
+   favour of the scheme it duplicates.~~
+   **Axis question answered 2026-09-17 (Chris): `industry` *is* an axis and
+   stays; it is not retired in favour of `ENGINEERING-DISCIPLINE`.** ICS
+   licensing is also closed the same day (ODC-By v1.0 via ISO Open Data), so
+   the Industry/Application scheme is unblocked and ICS is its vocabulary.
+   **The defect itself is still open**: the four hard-coded branches, the
+   absent scheme-selecting writer and the absent reviewer correction path are
+   all unchanged and unscoped. Decisions recorded in the defect doc's
+   "Decisions taken 2026-09-17" section.
+
+**Both §4.2 item 4 and all of §4.3 now have written implementation plans
+(2026-09-17):**
+`docs/plans/2026-09-17-sm-p1-02-industry-axis-implementation-plan.md` and
+`docs/plans/2026-09-17-sm-p1-03-structural-gaps-implementation-plan.md`.
+Each carried the decisions still needed from Chris (D1–D4 and D5–D8).
+**All eight were answered by Chris on 2026-09-17**, each as recommended, with
+D3 additionally instructing that `ISO-ICS-7` be activated as
+`chris.brighouse@hotmail.co.uk` — an act that cannot be performed today, for
+four measured reasons recorded under "D3, as answered" in the industry plan
+(ICS is not deployed to production; no code path activates a scheme; the only
+actor column on `ClassificationScheme` records who created it, so a status
+change cannot be attributed; that account's production role is unverified). Writing a plan closes nothing; every item
+below stays open except item 9.
 
 ### 4.3 Structural gaps
 
@@ -180,8 +216,17 @@ suspected.
    only on `package_type='authoritative_library'`, and `register_source_package`
    — the only creator of one — is called from tests only. So the gate is
    `not_in_scope` for 100% of production traffic.
-9. **`ConceptClassificationAssignment` has a queue read and no decision
-   route.** WP1.4 renders that queue read-only for this reason.
+9. ~~**`ConceptClassificationAssignment` has a queue read and no decision
+   route.** WP1.4 renders that queue read-only for this reason.~~
+   **Closed 2026-09-17 (SM-P1-03 WP3.1), on Chris's D8.**
+   `POST /semantic-review/concept-classifications/{assignment_id}/decision`,
+   modelled on `decide_symbol_classification`, with the frontend's read-only
+   notice replaced by `capabilities`-driven `DecisionControls`. The response
+   is the concept's whole classification state rather than the row named,
+   because verifying a `primary` retires the primary verified before it and a
+   single-row response would hide that succession. Unscoped by decision and
+   registered as such in the tenant matrix: a concept-to-node assertion names
+   no symbol (§17, and WP1.1's identical call for the queue it decides on).
 
 ### 4.4 Unknown, and worth establishing
 
@@ -214,12 +259,29 @@ sessions before.
   "extend the existing model".**
 - **2026-09-11, no Industry/Application scheme is seeded.** ICS
   (International Classification for Standards, ISO edition 7) is the intended
-  source *when the scheme is eventually created*. **Chris is investigating ICS
+  source *when the scheme is eventually created*. ~~**Chris is investigating ICS
   licensing separately and this is to be picked up in a later discussion — the
-  scheme must not be created until that returns.** Both alternatives (the ISO
+  scheme must not be created until that returns.**~~ Both alternatives (the ISO
   14617 application-area list; Chris supplying nodes himself) were offered and
   declined. Seeding "from the distinct values already in the column" is closed,
   not merely unattractive — see defect 4 above.
+- **2026-09-17, ICS licensing is closed and the scheme is unblocked.** ICS
+  edition 7 is published as the `iso_ics` dataset on ISO Open Data under
+  **ODC-By v1.0** — a different channel from the paywalled page that refused
+  automated fetches — so embedding node labels in the UI and API is permitted
+  and the vendored `ICS.csv` on public `main` is correctly redistributed. In
+  the same decision, **`industry` is confirmed as a real axis**: it is not
+  retired in favour of `ENGINEERING-DISCIPLINE`, and ICS becomes its governed
+  vocabulary. **Gate carried forward:** ODC-By requires the attribution notice
+  to travel with the data, and nothing under `frontend/src` currently carries
+  it. **Corrected 2026-09-17:** `frontend/src/SupportDataSources.jsx` has
+  carried the attribution, the codes-only clarification and the ODC-By link on
+  the Support route since `e6cd860`, so the general notice is present; it
+  reads the vendored `data/ics-source.json` rather than the stored import row.
+  What is still owed is the notice travelling **with** the labels, before any
+  ICS label reaches the UI or a public API response. No ICS label is conveyed
+  today — `ISO-ICS-7` is a draft scheme excluded from the SME options route —
+  so this is a precondition on activation, not a live breach.
 - **The process-category vocabulary is likewise Chris's separate research**
   and out of scope for everything delivered so far.
 - **SM-P1-01's decisions Q1–Q10 are all resolved** and recorded in §4 of its
