@@ -13,7 +13,9 @@ now seeds a durable proposed `RightsRecord` from the intake assessment.
 Migration `20260911_0057` is purely additive -- two new tables, no column on
 any existing one -- so every `*_postgresql.py` fixture constant pinned below
 head still opens a `Session` against models it does not touch. What does move
-is the seven sole-head assertions, which now read `20260911_0057`.
+is the seven sole-head assertions, which now read `20260916_0059` after the
+equally additive ICS taxonomy (`20260915_0058`) and crosswalk review
+disposition (`20260916_0059`) migrations landed on top.
 """
 
 from __future__ import annotations

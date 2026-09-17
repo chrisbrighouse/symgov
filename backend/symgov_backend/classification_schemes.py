@@ -35,6 +35,7 @@ from .models import ClassificationNode, ClassificationScheme
 
 SCHEME_CODE_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.-]{0,62}[A-Z0-9]$")
 NODE_CODE_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9_]{0,62}[A-Z0-9]$")
+ICS_NODE_CODE_PATTERN = re.compile(r"^[0-9]{2}(?:\.[0-9]{3}(?:\.[0-9]{2})?)?$")
 
 # Section 14.1: platform admin manages schemes, and organisation-specific
 # schemes are named as a future extension. The deferral is deliberate and
@@ -131,6 +132,23 @@ def classification_node_seed_id(scheme_code: str, node_code: str) -> uuid.UUID:
     )
 
 
+def classification_import_id(scheme_id: uuid.UUID, content_sha256: str) -> uuid.UUID:
+    """Return the stable identity of one immutable taxonomy source snapshot."""
+    return uuid.uuid5(
+        uuid.NAMESPACE_URL, f"urn:symgov:classification-import:{scheme_id}:{content_sha256}"
+    )
+
+
+def classification_crosswalk_id(
+    import_id: uuid.UUID, source_node_id: uuid.UUID, target_node_id: uuid.UUID
+) -> uuid.UUID:
+    """Return the stable identity of one source-node to target-node proposal."""
+    return uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"urn:symgov:classification-crosswalk:{import_id}:{source_node_id}:{target_node_id}",
+    )
+
+
 def _require_aware_timestamp(value: object, label: str) -> datetime:
     if not isinstance(value, datetime) or value.utcoffset() is None:
         raise ValueError(f"{label} must be timezone-aware")
@@ -190,6 +208,14 @@ def normalize_classification_node_code(value: object) -> str:
             f"classification node code does not match the required grammar: {value!r}"
         )
     return normalized_code
+
+
+def normalize_ics_node_code(value: object) -> str:
+    """Validate a literal ISO ICS identifier without removing dots or zeroes."""
+    code = _normalize_required_text(value, "ICS node code", NODE_CODE_MAX_LENGTH)
+    if not code.isascii() or not ICS_NODE_CODE_PATTERN.fullmatch(code):
+        raise ValueError(f"ICS node code does not match the required grammar: {value!r}")
+    return code
 
 
 def derive_classification_node_code(label: object) -> str:
@@ -289,11 +315,6 @@ def add_classification_node(
     normalized_label = _normalize_required_text(
         preferred_label, "classification node label", NODE_LABEL_MAX_LENGTH
     )
-    normalized_code = (
-        derive_classification_node_code(normalized_label)
-        if node_code is None
-        else normalize_classification_node_code(node_code)
-    )
     normalized_description = _normalize_optional_text(
         description, "classification node description", DESCRIPTION_MAX_LENGTH
     )
@@ -306,6 +327,18 @@ def add_classification_node(
         raise LookupError(f"classification scheme not found: {scheme_id}")
     if scheme.status in CLOSED_SCHEME_STATUSES:
         raise ValueError(f"classification scheme is {scheme.status} and accepts no new nodes")
+
+    normalized_code = (
+        derive_classification_node_code(normalized_label)
+        if node_code is None
+        else (
+            normalize_ics_node_code(node_code)
+            if scheme.scheme_code.startswith("ISO-ICS-")
+            and isinstance(node_code, str)
+            and "." in node_code
+            else normalize_classification_node_code(node_code)
+        )
+    )
 
     identifier = node_id or uuid.uuid4()
     if parent_node_id is not None:

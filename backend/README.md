@@ -107,14 +107,26 @@ REPO_ROOT=/path/to/symgov
 "$REPO_ROOT/scripts/test-backend.sh" --full
 ```
 
-The default portable partition is bounded to five minutes. `--external` runs the
+The default portable partition is bounded to thirty minutes. `--external` runs the
 separately managed Libby, Scott, Daisy and Ed workspace tests in isolated pytest
 processes with a two-minute timeout per process; it also checks that the retired Vlad
 runner remains absent at `/data/.openclaw/workspaces/vlad/run_vlad_validation.py`.
 `--full` runs both partitions without skipping failures. This process isolation is
-intentional: the DXF external-workspace tests replace imported `symgov_backend`
-modules during collection, which caused the old monolithic suite to stall in the
-agent-worker test until its ten-minute outer timeout.
+intentional: these tests read scripts and fixtures from agent workspaces outside the
+repository, and each gets its own short timeout so one absent workspace cannot stall
+the run.
+
+The DXF tests used to do more damage than that. `test_dxf_phase1.py` loads direct-runner
+modules that prepend the legacy compatibility backend path, and it used to clear *every*
+`symgov_backend` entry from `sys.modules` afterwards -- including the correct repository
+modules that test modules imported earlier in collection were already holding. In a
+single-process run a later `monkeypatch.setattr` then landed on one module object while
+the code under test used another, which silently unpatched an OpenRouter call (so the
+suite reached the network) and stalled the agent-worker test until its outer timeout.
+It now evicts only modules whose `__file__` lies outside `backend/`, the same provenance
+filter `tests/test_tracy_provenance_flow.py` uses, so a monolithic `pytest tests` run
+completes. Prefer `scripts/test-backend.sh` regardless -- it is the supported entry
+point, and the external partition still needs those workspaces present.
 
 ## User subscriptions and privileged roles
 

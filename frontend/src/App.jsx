@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import SupportDataSources from './SupportDataSources.jsx';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   createAdminUser,
@@ -7611,6 +7612,7 @@ function SupportPage() {
         </button>
         {submitted ? <p className="success-text">Support request captured locally. Ed workflow integration will be added later.</p> : null}
       </form>
+      <SupportDataSources />
     </section>
   );
 }

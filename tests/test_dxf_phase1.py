@@ -29,33 +29,65 @@ def load_module(name: str, path: Path):
     return module
 
 
-scott_runner = load_module("scott_runner_dxf_phase1", SCOTT_RUNNER_PATH)
-# Scott's direct-runner module prepends the legacy compatibility backend path while
-# importing. Keep the test process pointed back at the repo backend so later tests
-# do not accidentally import stale compatibility modules.
+# Scott's and Vlad's direct-runner modules prepend the legacy compatibility
+# backend path while importing, which rebinds every `symgov_backend` entry in
+# `sys.modules` to a module loaded from that path.
 LEGACY_BACKEND_ROOT = str(Path("/data/.openclaw/workspace/symgov/backend"))
 LEGACY_BACKEND_PREFIX = f"{LEGACY_BACKEND_ROOT}/"
-for path_entry in list(sys.path):
-    if path_entry == LEGACY_BACKEND_ROOT or path_entry.startswith(LEGACY_BACKEND_PREFIX):
-        sys.path.remove(path_entry)
-for module_name in list(sys.modules):
-    if module_name == "symgov_backend" or module_name.startswith("symgov_backend."):
-        del sys.modules[module_name]
-if str(BACKEND_ROOT) in sys.path:
-    sys.path.remove(str(BACKEND_ROOT))
-sys.path.insert(0, str(BACKEND_ROOT))
 
-scott_downstream = load_module("scott_downstream_dxf_phase1", SCOTT_DOWNSTREAM_PATH)
-vlad_runner = load_module("vlad_runner_dxf_phase1", VLAD_RUNNER_PATH)
-for path_entry in list(sys.path):
-    if path_entry == LEGACY_BACKEND_ROOT or path_entry.startswith(LEGACY_BACKEND_PREFIX):
-        sys.path.remove(path_entry)
-for module_name in list(sys.modules):
-    if module_name == "symgov_backend" or module_name.startswith("symgov_backend."):
-        del sys.modules[module_name]
-if str(BACKEND_ROOT) in sys.path:
-    sys.path.remove(str(BACKEND_ROOT))
-sys.path.insert(0, str(BACKEND_ROOT))
+
+def _drop_modules_loaded_outside_the_repo_backend() -> None:
+    """Evict only what the legacy compatibility path supplied.
+
+    The same provenance filter `test_tracy_provenance_flow.py` uses: a module
+    is stale precisely when its `__file__` sits outside this repository's
+    backend. Dropping the `symgov_backend` entries wholesale -- which is what
+    this file did before -- also evicted the *correct* repo modules, leaving
+    every test module imported earlier in collection holding objects that
+    `sys.modules` no longer agreed with. A later `monkeypatch.setattr` then
+    landed on one module object while the code under test used another, which
+    silently unpatched an OpenRouter call and hung the agent-worker test for
+    its whole outer timeout.
+    """
+    repo_backend = BACKEND_ROOT.resolve()
+    for module_name, module in list(sys.modules.items()):
+        if module_name != "symgov_backend" and not module_name.startswith("symgov_backend."):
+            continue
+        module_file = getattr(module, "__file__", None)
+        if module_file is None:
+            continue
+        try:
+            Path(module_file).resolve().relative_to(repo_backend)
+        except ValueError:
+            del sys.modules[module_name]
+
+
+def _point_sys_path_at_the_repo_backend() -> None:
+    for path_entry in list(sys.path):
+        if path_entry == LEGACY_BACKEND_ROOT or path_entry.startswith(LEGACY_BACKEND_PREFIX):
+            sys.path.remove(path_entry)
+    if str(BACKEND_ROOT) in sys.path:
+        sys.path.remove(str(BACKEND_ROOT))
+    sys.path.insert(0, str(BACKEND_ROOT))
+
+
+def load_runner_module(name: str, path: Path):
+    """Load a direct-runner module without stranding the rest of the session.
+
+    This file is collected in the same process as every other test module when
+    someone runs `pytest tests` directly instead of going through
+    `scripts/test-backend.sh`, which isolates it by design.
+    """
+    try:
+        return load_module(name, path)
+    finally:
+        _drop_modules_loaded_outside_the_repo_backend()
+        _point_sys_path_at_the_repo_backend()
+
+
+scott_runner = load_runner_module("scott_runner_dxf_phase1", SCOTT_RUNNER_PATH)
+scott_downstream = load_runner_module("scott_downstream_dxf_phase1", SCOTT_DOWNSTREAM_PATH)
+vlad_runner = load_runner_module("vlad_runner_dxf_phase1", VLAD_RUNNER_PATH)
 
 
 def minimal_dxf() -> str:

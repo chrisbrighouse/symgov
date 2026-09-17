@@ -1,0 +1,140 @@
+{
+  "register": "ICS domain crosswalk review decisions",
+  "decided_on": "2026-09-16",
+  "governing_reading": "The crosswalk points at the discipline's subject matter, not at the standards governing the discipline's symbols. Electrical therefore resolves to 29 Electrical engineering rather than to 01.080.40 Graphical symbols for use on electrical and electronics engineering drawings.",
+  "scope": "Browse proposals only. An approved row is not a semantic equivalence and creates no concept or symbol assignment.",
+  "decisions": [
+    {
+      "domain": "Electrical",
+      "ics_code": "29",
+      "decision": "approved",
+      "note": "The subject-matter field for the discipline."
+    },
+    {
+      "domain": "Fire & Life Safety",
+      "ics_code": "13.220",
+      "decision": "approved",
+      "note": "Precise; its children already cover fire-fighting, fire protection, ignitability and fire resistance."
+    },
+    {
+      "domain": "Fire & Life Safety",
+      "ics_code": "13",
+      "decision": "rejected",
+      "note": "Redundant as a browse entry - 13.220 is its child, so wider life safety is reachable through the parent chain."
+    },
+    {
+      "domain": "Piping / P&ID",
+      "ics_code": "23",
+      "decision": "approved",
+      "note": "The physical discipline. P&ID is the notation, not the subject."
+    },
+    {
+      "domain": "Piping / P&ID",
+      "ics_code": "01.100",
+      "decision": "rejected",
+      "note": "Drawing conventions, and 01.100 has no P&ID subgroup."
+    },
+    {
+      "domain": "Process",
+      "ics_code": "71",
+      "decision": "approved",
+      "note": "Process is genuinely cross-sector; one target would misfile the others."
+    },
+    {
+      "domain": "Process",
+      "ics_code": "75",
+      "decision": "approved",
+      "note": "Process is genuinely cross-sector; one target would misfile the others."
+    },
+    {
+      "domain": "Process",
+      "ics_code": "27",
+      "decision": "approved",
+      "note": "Process is genuinely cross-sector; one target would misfile the others."
+    },
+    {
+      "domain": "Instrumentation & Controls",
+      "ics_code": "25.040.40",
+      "decision": "approved",
+      "note": "Exactly the discipline, and the only subgroup-level target in the set."
+    },
+    {
+      "domain": "Instrumentation & Controls",
+      "ics_code": "17",
+      "decision": "rejected",
+      "note": "Measurement as a science, not plant instrumentation."
+    },
+    {
+      "domain": "Mechanical",
+      "ics_code": "21",
+      "decision": "approved",
+      "note": "A symbol library draws components, not production processes."
+    },
+    {
+      "domain": "Mechanical",
+      "ics_code": "25",
+      "decision": "rejected",
+      "note": "About making parts; would also overlap Instrumentation & Controls, whose target sits under 25."
+    },
+    {
+      "domain": "HVAC",
+      "ics_code": "91.140.10",
+      "decision": "approved",
+      "note": "Building services; covers the H, including burners and boilers."
+    },
+    {
+      "domain": "HVAC",
+      "ics_code": "91.140.30",
+      "decision": "approved",
+      "note": "Building services; covers the V and the AC, including ducts."
+    },
+    {
+      "domain": "HVAC",
+      "ics_code": "27",
+      "decision": "rejected",
+      "note": "Thermal engineering, adjacent but not a building system."
+    },
+    {
+      "domain": "Civil / Structural",
+      "ics_code": "91",
+      "decision": "approved",
+      "note": "Serves the structural/materials half of a deliberately double-barrelled domain."
+    },
+    {
+      "domain": "Civil / Structural",
+      "ics_code": "93",
+      "decision": "approved",
+      "note": "Serves the civil half - earthworks, roads, bridges, hydraulic construction."
+    },
+    {
+      "domain": "Architectural",
+      "ics_code": "91",
+      "decision": "approved",
+      "note": "Subject-matter field. Shares 91 with Civil / Structural, which is acceptable for a browse crosswalk: one ICS field may serve two disciplines."
+    },
+    {
+      "domain": "Safety / Signage",
+      "ics_code": "13",
+      "decision": "approved",
+      "note": "The safety half."
+    },
+    {
+      "domain": "Safety / Signage",
+      "ics_code": "01.080",
+      "decision": "approved",
+      "note": "The signage half; 01.080.10 Public information symbols. Signs. Plates. Labels is a direct hit. This is the one domain whose name genuinely carries both readings."
+    },
+    {
+      "domain": "General / Annotation",
+      "ics_code": "01.100",
+      "decision": "approved",
+      "note": "Annotation is a drawing convention - dimensioning, tolerancing, title blocks, line types."
+    },
+    {
+      "domain": "General / Annotation",
+      "ics_code": "01.080",
+      "decision": "rejected",
+      "note": "Keeps 01.080 to Safety / Signage."
+    }
+  ]
+}
