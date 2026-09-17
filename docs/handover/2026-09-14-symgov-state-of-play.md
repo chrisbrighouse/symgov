@@ -120,6 +120,11 @@ suspected.
    *approved* children, so approving only some children of a split sheet can
    match a child against another child's `symbol_region_index`. This one is
    in the live approval path and **is** reachable. Recorded by WP1.5.
+   **Fixed 2026-09-16.** The approval path now resolves the child's manifest
+   ordinal through `publication_handoff.split_item_region_index`, which WP1.5's
+   forecast already used and which is now shared by both so they cannot drift.
+   Regression cover:
+   `test_approving_only_the_second_child_reaches_the_second_child_record`.
 
 ### 4.2 Pre-existing defects found during the semantic-model work
 

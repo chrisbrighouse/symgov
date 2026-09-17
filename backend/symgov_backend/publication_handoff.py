@@ -289,6 +289,27 @@ def derive_symbol_name(context: dict[str, Any], slug: str) -> str:
     return title
 
 
+def split_item_region_index(split_item: ReviewSplitItem) -> int:
+    """The child's ordinal in the sheet's derivative manifest.
+
+    `ensure_split_items` stores it one-based as `package_symbol_sequence`;
+    `ClassificationRecord.symbol_region_index` is zero-based, which is what
+    `load_child_classification_record` matches on.
+
+    This is the identity that exists before any decision. A child's position
+    among the *approved* children is not it: it is not knowable before the
+    reviewer decides, and when only some children of a sheet are approved it
+    is not this ordinal either -- approving child 3 alone would enumerate it
+    as 0 and match child 1's record. Shared with the WP1.5 forecast so the
+    panel and the writer resolve the same record.
+    """
+    payload = split_item.payload_json if isinstance(split_item.payload_json, dict) else {}
+    try:
+        return max(int(payload.get("package_symbol_sequence")) - 1, 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def load_child_classification_record(
     session: Session,
     *,
@@ -807,7 +828,16 @@ def ensure_approved_child_symbol_revision(
             child_decision.get("childId"),
         )
         or None,
-        index=index,
+        # The manifest ordinal, not `index`: `index` is this child's position
+        # among the children the reviewer approved, so a partial approval
+        # matches a child against another child's record. Falls back to
+        # `index` only when no split item resolved, where nothing better
+        # exists and the child key remains the exact match.
+        index=(
+            split_item_region_index(reviewed_split_item)
+            if reviewed_split_item is not None
+            else index
+        ),
     )
 
     symbol = session.query(GovernedSymbol).filter_by(slug=slug).one_or_none()

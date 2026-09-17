@@ -595,6 +595,102 @@ def test_the_child_split_path_uses_its_own_classification_record(session_factory
         assert "Valves" in labels
 
 
+def test_approving_only_the_second_child_reaches_the_second_child_record(session_factory):
+    """A partial approval must not match a child against another child's record.
+
+    `approved_revisions_for_decision` enumerates the *approved* children, so a
+    reviewer who approves only the second child of a sheet passes `index=0`.
+    Matching on that ordinal found the child whose `symbol_region_index` is 0 --
+    the first child, which was not approved. The manifest ordinal on the split
+    item is the identity that survives a partial approval.
+    """
+    with session_factory() as session:
+        review_case, decision = _seed_case(
+            session,
+            label="split-partial",
+            classification={
+                **FULL_CLASSIFICATION,
+                "category": "symbol_sheet",
+                "symbol_family": "mixed_symbol_set",
+                "process_category": "review_required",
+                "parent_equipment_class": "mixed_equipment",
+            },
+        )
+
+        for sequence, key in ((1, "partial-child-1"), (2, "partial-child-2")):
+            session.add(
+                ReviewSplitItem(
+                    id=uuid.uuid4(),
+                    review_case_id=review_case.id,
+                    child_key=key,
+                    proposed_symbol_id=f"SG-{key.upper()}",
+                    proposed_symbol_name=f"Child {sequence}",
+                    file_name=f"{key}.svg",
+                    parent_file_name="split-partial.svg",
+                    attachment_object_key=f"raw/{key}.svg",
+                    payload_json={"package_symbol_sequence": sequence},
+                    created_at=NOW,
+                    updated_at=NOW,
+                )
+            )
+
+        # Region indices are zero-based, so child one is 0 and child two is 1.
+        # The two records carry different families so the assertion can only
+        # pass by reaching the right one.
+        for region_index, key, family in (
+            (0, "partial-child-1", "valve"),
+            (1, "partial-child-2", "door"),
+        ):
+            session.add(
+                ClassificationRecord(
+                    id=uuid.uuid4(),
+                    review_case_id=None,
+                    parent_review_case_id=review_case.id,
+                    symbol_key=key,
+                    symbol_region_index=region_index,
+                    status="current",
+                    classification_status="provisional",
+                    source_id=review_case.id,
+                    source_type="review_case",
+                    category="Pumps",
+                    discipline="Process",
+                    symbol_family=family,
+                    process_category="flow_control",
+                    parent_equipment_class=family,
+                    industry="process_engineering",
+                    confidence=Decimal("0.77"),
+                    libby_approved=False,
+                    created_at=NOW + timedelta(minutes=1),
+                    updated_at=NOW + timedelta(minutes=1),
+                )
+            )
+        session.flush()
+
+        # The reviewer approved the second child only: it is the sole entry, so
+        # the handoff enumerates it as 0 -- the first child's region index.
+        revision = ensure_approved_child_symbol_revision(
+            session,
+            review_case=review_case,
+            decision=decision,
+            child_decision={
+                "childId": "partial-child-2",
+                "proposedSymbolId": "SG-PARTIAL-CHILD-2",
+            },
+            child_manifest={
+                "proposed_symbol_id": "SG-PARTIAL-CHILD-2",
+                "file_name": "partial-child-2.svg",
+            },
+            index=0,
+        )
+        session.commit()
+
+        stored = revision.payload_json["classification"]
+        assert stored["symbol_family"] == "door"
+        assert stored["parent_equipment_class"] == "door"
+        # The unapproved first child's record, which the enumeration index hit.
+        assert stored["symbol_family"] != "valve"
+
+
 def test_a_child_with_no_record_of_its_own_inherits_nothing(session_factory):
     with session_factory() as session:
         review_case, decision = _seed_case(

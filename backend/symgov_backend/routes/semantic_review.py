@@ -113,6 +113,7 @@ from ..publication_handoff import (
     load_child_classification_record,
     load_review_context,
     load_review_symbol_properties,
+    split_item_region_index,
 )
 from ..rights_provenance import (
     list_rights_records,
@@ -678,26 +679,6 @@ def _split_item_for(
     return split_item
 
 
-def _split_item_region_index(split_item: ReviewSplitItem) -> int:
-    """The child's ordinal in the sheet's derivative manifest.
-
-    `ensure_split_items` stores it one-based as `package_symbol_sequence`;
-    `ClassificationRecord.symbol_region_index` is zero-based, which is what
-    `load_child_classification_record` matches on.
-
-    The approval handoff instead passes this child's position among the
-    *approved* children, which is not knowable before the decision and, when a
-    reviewer approves only some children, is not this ordinal either. Using
-    the manifest position is the identity that exists now; the child key is
-    the fallback in `load_child_classification_record` and is exact.
-    """
-    payload = split_item.payload_json if isinstance(split_item.payload_json, dict) else {}
-    try:
-        return max(int(payload.get("package_symbol_sequence")) - 1, 0)
-    except (TypeError, ValueError):
-        return 0
-
-
 @router.get(
     "/review-cases/{review_case_id}/classification-preview",
     response_model=ReviewCaseClassificationPreviewResponse,
@@ -770,7 +751,7 @@ def review_case_classification_preview(
             session,
             review_case=review_case,
             child_key=split_item.child_key,
-            index=_split_item_region_index(split_item),
+            index=split_item_region_index(split_item),
         )
     )
 
