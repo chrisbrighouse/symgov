@@ -107,7 +107,7 @@ def _disposable_database(name_prefix: str, database: str, *revisions: str):
     finally:
         if engine is not None:
             engine.dispose()
-        _docker("rm", "--force", name, check=False)
+        _docker("rm", "--force", "--volumes", name, check=False)
 
 
 @pytest.fixture(scope="module")
@@ -1833,7 +1833,7 @@ def empty_wp1_database():
     finally:
         if engine is not None:
             engine.dispose()
-        _docker("rm", "--force", name, check=False)
+        _docker("rm", "--force", "--volumes", name, check=False)
 
 
 def test_wp1_empty_database_downgrades_and_reupgrades_without_stage4_objects(empty_wp1_database):

@@ -188,7 +188,7 @@ def disposable_postgres() -> Generator[DisposablePostgres, None, None]:
             migrated_ordinary_token,
         )
     finally:
-        _docker("rm", "--force", name, check=False)
+        _docker("rm", "--force", "--volumes", name, check=False)
 
 
 def _seed_forced_user(Session) -> tuple[uuid.UUID, str]:

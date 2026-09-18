@@ -91,7 +91,20 @@ def _database(name_prefix: str):
     finally:
         if engine is not None:
             engine.dispose()
-        _docker("rm", "--force", name, check=False)
+        # `--volumes` is load-bearing, not tidiness. `postgres:16-alpine`
+        # declares a VOLUME for its data directory, so every disposable
+        # database here creates an anonymous volume, and force-removing the
+        # container does not take it -- `--rm` would have, but this explicit
+        # removal pre-empts it. Without this flag each module strands one
+        # volume per run. By 2026-09-18 that was 1,971 of them and 108 GB,
+        # which filled the root filesystem to 100%.
+        #
+        # The failure that causes is worth recognising, because it does not
+        # look like a disk problem: docker cannot start the container, and the
+        # sweep reports `psycopg.OperationalError: connection refused` at the
+        # fixtures of whatever `*_postgresql` modules happen to run. Check
+        # `df -h /` before believing a sweep that fails that way.
+        _docker("rm", "--force", "--volumes", name, check=False)
 
 
 @pytest.fixture(scope="module")

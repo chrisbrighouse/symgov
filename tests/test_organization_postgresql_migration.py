@@ -155,7 +155,7 @@ def organization_database() -> Generator[Engine, None, None]:
     finally:
         if engine is not None:
             engine.dispose()
-        _docker("rm", "--force", name, check=False)
+        _docker("rm", "--force", "--volumes", name, check=False)
 
 
 def _insert_user(engine: Engine, email: str) -> uuid.UUID:

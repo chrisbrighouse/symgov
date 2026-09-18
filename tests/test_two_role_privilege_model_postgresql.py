@@ -173,7 +173,7 @@ def _role_split_database():
             "owner_id": owner_id,
         }
     finally:
-        _docker("rm", "--force", name, check=False)
+        _docker("rm", "--force", "--volumes", name, check=False)
 
 
 @pytest.fixture(scope="module")

@@ -191,7 +191,7 @@ def publication_database():
     finally:
         if engine is not None:
             engine.dispose()
-        _docker("rm", "--force", name, check=False)
+        _docker("rm", "--force", "--volumes", name, check=False)
 
 
 @pytest.fixture(scope="module")

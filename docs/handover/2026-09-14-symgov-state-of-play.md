@@ -243,14 +243,25 @@ Two facts about this box that cost time on 2026-09-18 and are worth keeping:
   mounts `/data/symgov-releases/stage11-615e617/dist`; the repo root's own
   `assets/` is stale published output and says nothing about production. The
   API listens on **8010**.
-- **The PostgreSQL test fixtures leak a docker volume per module per run.**
+- **The PostgreSQL test fixtures leaked a docker volume per module per run.**
   1,971 orphaned anonymous volumes had filled the 193 GB root filesystem to
   100% (11 MB free), which does not present as a disk error: docker simply
   cannot start the disposable Postgres, and the sweep reports failures and
-  setup errors in unrelated `_postgresql` modules. Cleared on 2026-09-18 to
-  48%. **It will refill** -- `_database()` in
-  `test_organization_symbol_postgresql.py` does not remove its volume on
-  teardown, and that is the actual defect.
+  setup errors in unrelated `_postgresql` modules. **Check `df -h /` before
+  believing a sweep that fails that way.** Cleared on 2026-09-18 to 48%.
+
+  **Fixed the same day.** Eight teardown sites across seven files called
+  `docker rm --force` without `--volumes`. The containers *are* started with
+  `--rm`, which would have removed the anonymous volume on exit, but the
+  explicit force-remove pre-empts it. `test_stage_2c_auth.py` proves the
+  point by contrast: it tears down with `docker stop`, lets `--rm` do the
+  work, and leaks nothing. Measured at +1 volume per module before and 0
+  after; a full sweep after the fix stranded zero.
+
+  **Still not self-healing:** a *killed* sweep orphans its container and
+  volume regardless, which is what the two stale containers found that day
+  were. A session-scoped sweep of leftover `symgov-*` containers would close
+  it; not scoped.
 
 ### 4.3 Structural gaps
 

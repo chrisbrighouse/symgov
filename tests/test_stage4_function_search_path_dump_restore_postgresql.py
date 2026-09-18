@@ -167,7 +167,7 @@ def _dump_restore_container(target_revision: str):
 
         yield {"restore": restore, "counts": counts, "proconfig": proconfig}
     finally:
-        _docker("rm", "--force", name, check=False)
+        _docker("rm", "--force", "--volumes", name, check=False)
 
 
 @pytest.fixture(scope="module")
