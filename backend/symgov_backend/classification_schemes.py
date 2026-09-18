@@ -57,8 +57,27 @@ CLASSIFICATION_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
 # A scheme in one of these states accepts no new nodes.
 CLOSED_SCHEME_STATUSES = frozenset({"withdrawn"})
 
-# A node in one of these states accepts no new assignments.
+# A node in one of these states accepts no new children.
 CLOSED_NODE_STATUSES = frozenset({"withdrawn"})
+
+# A node in one of these states accepts no new assignments.
+#
+# `draft` is here and deliberately *not* in `CLOSED_NODE_STATUSES`, because the
+# two guards are not the same question. A draft node must still accept
+# children -- `ics_taxonomy` builds the whole 1381-node ICS hierarchy as draft
+# before any governance authority activates it, so closing draft to parenting
+# would refuse the import outright. What a draft node must not accept is an
+# *assignment*: an unactivated vocabulary is exactly what section 12 means by
+# a node no reviewer may be offered, and `classification_scheme_options` has
+# always filtered its picker to `active`. Until now nothing enforced the same
+# rule on the write, so a caller naming the identifier directly could assign a
+# node the UI never showed. Ruled by Chris 2026-09-18 for SM-P1-02 WP2.1, and
+# placed in the service rather than the route on the 2026-09-17 precedent:
+# the guarantee belongs to the transition, not to each caller's discipline.
+#
+# `deprecated` stays assignable, unchanged. Discouraging a node is not the
+# same as closing it, and narrowing that was not asked for.
+UNASSIGNABLE_NODE_STATUSES = CLOSED_NODE_STATUSES | frozenset({"draft"})
 
 SCHEME_CODE_MAX_LENGTH = 64
 NODE_CODE_MAX_LENGTH = 64

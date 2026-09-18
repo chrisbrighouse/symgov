@@ -1190,6 +1190,48 @@ def test_a_withdrawn_node_accepts_no_new_assignments(session, author_id):
         )
 
 
+def test_a_draft_node_accepts_no_new_assignments(session, author_id):
+    """SM-P1-02 WP2.1: an unactivated vocabulary is not assignable.
+
+    `CLOSED_NODE_STATUSES` held only `withdrawn`, so a draft node was
+    assignable and the only thing standing between a reviewer and an
+    unactivated scheme was the picker's `status="active"` filter -- a read,
+    not a control. This matters the moment a large draft vocabulary exists:
+    `ics_taxonomy` creates all 1381 ICS nodes as draft, precisely because
+    activation is a separate governance act.
+
+    Proved through the *concept* path on purpose. Concept classifications have
+    no propose route, so a guard written in `routes/semantic_review.py` could
+    never have covered them; this one does.
+    """
+    scheme = _scheme(session, author_id)
+    node = _node(session, scheme.id, "Draft node", status="draft")
+    concept_id = _concept(session, author_id, "Against a draft node")
+    with pytest.raises(ValueError, match="accepts no new assignments"):
+        propose_concept_classification(
+            session,
+            semantic_concept_id=concept_id,
+            classification_node_id=node.id,
+            assignment_role="primary",
+            method="manual",
+            proposed_at=NOW,
+        )
+
+
+def test_a_draft_node_still_accepts_children(session, author_id):
+    """The distinction the two closed-status sets exist to keep.
+
+    Parenting and assignment ask different questions, and conflating them
+    would have refused the ICS import outright: it builds a three-level
+    hierarchy entirely in draft before anything activates it.
+    """
+    scheme = _scheme(session, author_id)
+    parent = _node(session, scheme.id, "Draft parent", status="draft")
+    child = _node(session, scheme.id, "Draft child", status="draft", parent_node_id=parent.id)
+
+    assert child.parent_node_id == parent.id
+
+
 def test_a_deprecated_node_keeps_its_existing_assignments(session, author_id):
     """A classification that was made stays made; retiring the node does not
     make it untrue."""

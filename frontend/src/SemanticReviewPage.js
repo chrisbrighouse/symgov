@@ -407,8 +407,10 @@ export function SemanticReviewPage({ auth, api = DEFAULT_API }) {
     };
   }, [api, revisionId]);
 
-  // Once per session, not once per row: the two assignable schemes are
-  // seeded reference data holding 31 nodes between them.
+  // Once per session, not once per row: the assignable schemes are seeded
+  // reference data. SM-P1-02 WP2.1 added ISO-ICS-7, so this is 472 nodes
+  // rather than 31 -- which is why it is read once and cached, and why the
+  // flat picker below is WP2.3's to replace with a searchable control.
   useEffect(() => {
     if (schemes.loaded || queue.detail !== 'revision') return undefined;
     let cancelled = false;

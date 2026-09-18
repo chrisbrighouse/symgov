@@ -199,6 +199,59 @@ actor column on `ClassificationScheme` records who created it, so a status
 change cannot be attributed; that account's production role is unverified). Writing a plan closes nothing; every item
 below stays open except item 9.
 
+**SM-P1-02 WP2.1 delivered 2026-09-18.** `ISO-ICS-7` is now in
+`REVIEWER_ASSIGNABLE_SCHEME_CODES`, bounded by decision D4's depth rule
+(`REVIEWER_ASSIGNABLE_MAX_DEPTH`), enforced on the propose route as well as
+the picker. Two decisions were taken on the day and are recorded as D5 and D6
+in §7 of the industry plan: the options response stays a single unpaginated
+read, and a `draft` node accepts no assignment. **Item 4 is not closed** —
+`industry` still has no writer that can select from a scheme (WP2.2, which
+turns on D1) and the four heuristic branches in `run_libby_classification.py`
+are untouched (WP2.4). What WP2.1 closed is the narrower absence: there was no
+governed vocabulary a reviewer could assign from at all.
+
+Two findings from it worth carrying beyond the plan:
+
+- **`CLOSED_NODE_STATUSES` was doing two jobs.** It gated both "may this node
+  take a child" and "may this node take an assignment". Adding `draft` to it
+  as literally instructed would have refused the ICS import, which builds all
+  1381 nodes as draft before activation. Split into a second constant,
+  `UNASSIGNABLE_NODE_STATUSES`. Any future status rule should ask which of the
+  two questions it is answering.
+- **The draft hole was reachable for every scheme, and for concepts.** Concept
+  classifications have no propose route at all, so a route-level guard could
+  never have covered them. This is the same shape as the 2026-09-17 pre-load
+  ruling and was fixed the same way.
+
+**SM-P1-01 was activated in production on 2026-09-18.**
+`SYMGOV_SEMANTIC_REVIEW_ENABLED: "1"` on the `symgov-api` service, container
+recreated; the surface moved 404 -> 401. No migration ran and production is
+still at `20260911_0057`. Rollback is removing the one line and recreating.
+
+It was activated **knowingly on `stage11-615e617`**, which predates four
+fixes that are therefore not live: `c26ce1b` (a duplicate live external
+mapping 500s instead of 422 -- reachable by a single reviewer, the likeliest
+bite), `3e1776b` (split child resolved by the wrong index), `261193a` (WP3.1's
+decide path) and `09b2b13` (the silent-overwrite race). Chris weighed these
+against a release that would run migrations `20260915_0058`/`_0059`/`_0060`
+against production, and chose activation. **The next release closes all four
+at once**, and is worth cutting before the surface has a second reviewer.
+
+Two facts about this box that cost time on 2026-09-18 and are worth keeping:
+
+- **The served frontend is a release worktree, not the repository.** nginx
+  mounts `/data/symgov-releases/stage11-615e617/dist`; the repo root's own
+  `assets/` is stale published output and says nothing about production. The
+  API listens on **8010**.
+- **The PostgreSQL test fixtures leak a docker volume per module per run.**
+  1,971 orphaned anonymous volumes had filled the 193 GB root filesystem to
+  100% (11 MB free), which does not present as a disk error: docker simply
+  cannot start the disposable Postgres, and the sweep reports failures and
+  setup errors in unrelated `_postgresql` modules. Cleared on 2026-09-18 to
+  48%. **It will refill** -- `_database()` in
+  `test_organization_symbol_postgresql.py` does not remove its volume on
+  teardown, and that is the actual defect.
+
 ### 4.3 Structural gaps
 
 5. **Three of five seeded classification schemes have no writer and no

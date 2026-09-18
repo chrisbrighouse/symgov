@@ -54,6 +54,10 @@ from symgov_backend.classification_assignments import (  # noqa: E402
     propose_concept_classification,
     propose_symbol_revision_classification,
 )
+from symgov_backend.classification_schemes import (  # noqa: E402
+    add_classification_node,
+    register_classification_scheme,
+)
 from symgov_backend.dependencies import get_db_session  # noqa: E402
 from symgov_backend.models import (  # noqa: E402
     ClassificationNode,
@@ -75,7 +79,11 @@ from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E40
 
 # Must track head: this API reads tables SM-P0-04 added and the ORM is one
 # global object that always reflects head.
-MIGRATION_HEAD = "20260911_0057"
+# Moved to head for SM-P1-02 WP2.1. `20260915_0058` is what admits ICS's
+# dotted node codes -- below it the grammar check refuses `13.220` outright --
+# so a fixture pinned under that revision cannot hold the vocabulary this
+# module now has to exercise. Same move nine fixtures made in SM-P0-08.
+MIGRATION_HEAD = "20260917_0060"
 
 V1 = "/api/v1"
 
@@ -377,9 +385,53 @@ def seeded(review_api_database):
             method="legacy_backfill",
             proposed_at=now,
         )
+        # SM-P1-02 WP2.1. A miniature ICS, under the real scheme code, with
+        # real ICS codes at all three of its real levels. The production
+        # vocabulary is 1381 nodes imported by `ics_taxonomy`; importing it
+        # here would cost minutes to prove a rule that four nodes prove
+        # exactly as well, and the rule under test is depth, not breadth.
+        #
+        # Seeded `active` deliberately: the shipped import creates every node
+        # `draft`, and this fixture stands for the state *after* the
+        # governance activation decision D3 calls for. `13.220.20` is the node
+        # decision D4 says no reviewer may assign, and `13.240` is the one the
+        # new service guard must refuse whatever its depth -- it sits at group
+        # level, which D4 allows.
+        ics = register_classification_scheme(
+            session,
+            scheme_code="ISO-ICS-7",
+            name="International Classification for Standards (ICS)",
+            registered_at=now,
+            status="active",
+        )
+        session.flush()
+        ics_field = add_classification_node(
+            session, scheme_id=ics.id, node_code="13", status="active", added_at=now,
+            preferred_label="Environment. Health protection. Safety",
+        )
+        session.flush()
+        ics_group = add_classification_node(
+            session, scheme_id=ics.id, node_code="13.220", status="active", added_at=now,
+            preferred_label="Protection against fire", parent_node_id=ics_field.id,
+        )
+        session.flush()
+        ics_subgroup = add_classification_node(
+            session, scheme_id=ics.id, node_code="13.220.20", status="active", added_at=now,
+            preferred_label="Fire protection", parent_node_id=ics_group.id,
+        )
+        ics_draft_group = add_classification_node(
+            session, scheme_id=ics.id, node_code="13.240", status="draft", added_at=now,
+            preferred_label="Protection against excessive pressure", parent_node_id=ics_field.id,
+        )
+        session.flush()
+
         session.commit()
 
         return {
+            "ics_field_node_id": ics_field.id,
+            "ics_group_node_id": ics_group.id,
+            "ics_subgroup_node_id": ics_subgroup.id,
+            "ics_draft_group_node_id": ics_draft_group.id,
             "acme_organization_id": acme.id,
             "public_revision_id": public_revision.id,
             "public_symbol_id": public_symbol.id,
@@ -1093,7 +1145,7 @@ def test_a_reviewer_discovers_the_assignable_nodes_over_http(reviewer_client):
 
     schemes = {scheme["schemeCode"]: scheme for scheme in response.json()["items"]}
 
-    assert set(schemes) == {"ENGINEERING-DISCIPLINE", "SYMBOL-CATEGORY-FAMILY"}
+    assert set(schemes) == {"ENGINEERING-DISCIPLINE", "SYMBOL-CATEGORY-FAMILY", "ISO-ICS-7"}
     # Decision Q6: the three read-only schemes are not offered as choices.
     assert "USE-CASE" not in schemes
     assert "DOCUMENT-TYPE" not in schemes
@@ -1530,3 +1582,97 @@ def test_a_personal_mode_session_may_read_the_forecast(review_api_database, seed
 
     assert response.status_code == 200, response.text
     assert response.json()["disciplineUsed"] == "Mechanical"
+
+
+# --- SM-P1-02 WP2.1: ICS becomes assignable, bounded by decision D4 -------
+#
+# The scheme is reviewer-populated only. WP2.2 decides whether anything
+# proposes into it automatically, and that turns on decision D1; nothing here
+# anticipates it. What these tests fix is the boundary: which ICS nodes a
+# reviewer may be offered, which they may assign, and the fact that the two
+# answers are the same one.
+
+
+def test_the_ics_picker_stops_at_group_level(reviewer_client, seeded):
+    """Decision D4, proved on the read.
+
+    ICS is 40 fields, 401 groups and 940 subgroups. A reviewer assigns at
+    field level and may descend to group level; subgroup is never offered.
+    The plan's gate names this test specifically, because widening the scheme
+    allowlist alone would have returned all three levels.
+    """
+    client, _Session = reviewer_client
+
+    schemes = {s["schemeCode"]: s for s in client.get(
+        f"{V1}/semantic-review/classification-schemes"
+    ).json()["items"]}
+
+    codes = {node["nodeCode"] for node in schemes["ISO-ICS-7"]["nodes"]}
+
+    assert "13" in codes, "the field level is assignable"
+    assert "13.220" in codes, "the group level is assignable"
+    assert "13.220.20" not in codes, "the subgroup level is never offered"
+    # And the draft node is absent for a different reason than depth: it sits
+    # at group level, which D4 allows, but no unactivated node is a choice.
+    assert "13.240" not in codes
+
+
+def test_a_reviewer_assigns_an_ics_group_and_is_refused_its_subgroup(reviewer_client, seeded):
+    """The same rule on the write, which is the one that is actually a control.
+
+    A picker that omits a node is not a refusal: a caller naming the
+    identifier directly would otherwise reach a subgroup the UI never showed.
+    """
+    client, _Session = reviewer_client
+    revision_id = str(seeded["public_revision_id"])
+
+    allowed = client.post(
+        f"{V1}/semantic-review/symbol-revisions/{revision_id}/classifications",
+        json={
+            "classificationNodeId": str(seeded["ics_group_node_id"]),
+            "assignmentRole": "primary",
+            "method": "manual",
+            "evidence": {"reviewedBecause": "the source standard is a fire protection standard"},
+        },
+    )
+    assert allowed.status_code == 201, allowed.text
+
+    refused = client.post(
+        f"{V1}/semantic-review/symbol-revisions/{revision_id}/classifications",
+        json={
+            "classificationNodeId": str(seeded["ics_subgroup_node_id"]),
+            "assignmentRole": "primary",
+            "method": "manual",
+        },
+    )
+    assert refused.status_code == 422, refused.text
+    assert "more specific than a reviewer may assign" in refused.text
+
+
+def test_a_draft_node_is_refused_however_a_caller_reaches_it(reviewer_client, seeded):
+    """The hole SM-P1-02 WP2.1 found and closed.
+
+    `CLOSED_NODE_STATUSES` held only `withdrawn`, so `draft` was assignable
+    and only the picker's `status="active"` filter stood between a reviewer
+    and an unactivated vocabulary. That filter is a read, not a control. The
+    refusal now lives in `classification_assignments`, so it holds for every
+    caller and for concept classifications too -- which have no propose route
+    at all, and so could never have been protected by one.
+
+    The node below is at group level, which decision D4 allows: this test
+    fails for status alone, never for depth.
+    """
+    client, _Session = reviewer_client
+
+    response = client.post(
+        f"{V1}/semantic-review/symbol-revisions/{seeded['public_revision_id']}/classifications",
+        json={
+            "classificationNodeId": str(seeded["ics_draft_group_node_id"]),
+            "assignmentRole": "primary",
+            "method": "manual",
+        },
+    )
+
+    assert response.status_code == 422, response.text
+    assert "draft" in response.text
+    assert "accepts no new assignments" in response.text

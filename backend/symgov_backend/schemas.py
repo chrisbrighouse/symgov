@@ -1766,11 +1766,14 @@ class ClassificationSchemeOptionsResponse(BaseModel):
     Decision Q6 keeps `USE-CASE`, `DOCUMENT-TYPE` and `REPRESENTATION-TYPE`
     read-only in v1, and the propose route already refuses them. Listing them
     here as choices would invite a 422 the caller could have been spared, so
-    this read offers only the two schemes
-    `classification_mapping.plan_classification_mapping` maps into.
+    this read offers only the schemes a reviewer may actually assign into.
 
-    No pagination: the two seeded schemes hold 11 and 20 nodes, so a page
-    bound would be ceremony over a list that fits in one response.
+    No pagination, re-decided rather than inherited. SM-P1-02 WP2.1 added
+    `ISO-ICS-7`, whose 1381 nodes decision D4 bounds to the 441 at field and
+    group level; with the two original schemes' 31 that is 472 nodes in about
+    75 KB, read once per session. Chris ruled on 2026-09-18 that this stays a
+    single response and that the flat-picker problem is answered by a
+    searchable control in WP2.3, not by a paged contract here.
     """
 
     items: list[ClassificationSchemeOptionResponse]

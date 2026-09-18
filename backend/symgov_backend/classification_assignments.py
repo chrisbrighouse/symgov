@@ -34,7 +34,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .classification_schemes import CLOSED_NODE_STATUSES
+from .classification_schemes import UNASSIGNABLE_NODE_STATUSES
 from .models import (
     ClassificationNode,
     ConceptClassificationAssignment,
@@ -130,7 +130,7 @@ def _validated_node(session: Session, classification_node_id: uuid.UUID) -> Clas
     node = session.get(ClassificationNode, classification_node_id)
     if node is None:
         raise LookupError(f"classification node not found: {classification_node_id}")
-    if node.status in CLOSED_NODE_STATUSES:
+    if node.status in UNASSIGNABLE_NODE_STATUSES:
         raise ValueError(f"classification node is {node.status} and accepts no new assignments")
     return node
 

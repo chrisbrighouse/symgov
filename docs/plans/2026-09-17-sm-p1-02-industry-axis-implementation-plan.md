@@ -310,3 +310,101 @@ a live breach.
 - **The three dead schemes** (`USE-CASE`, `DOCUMENT-TYPE`,
   `REPRESENTATION-TYPE`) — decision Q6 keeps them read-only; see the
   companion plan.
+
+---
+
+## 7. WP2.1 delivered — 2026-09-18
+
+`ISO-ICS-7` is assignable, bounded by decision D4's depth rule, and the rule
+is enforced on the write as well as on the picker. Gated on the full backend
+sweep and `npm run test:frontend` (366 passed).
+
+### 7.1 Two decisions taken on the day
+
+Neither was settled by §2, and both were put to Chris rather than assumed.
+
+**D5 — the options response stays a single unpaginated read.** D4's depth rule
+cuts ICS's 1381 nodes to the 441 at field and group level; with the two
+original schemes' 31 that is 472 nodes in about 75 KB, read once per session.
+The two alternatives offered — a `parentNodeId` drill-down, and a `schemeCode`
+filter — were declined. The flat-picker problem is real but is a *control*
+problem, answered by a searchable component in WP2.3, not by a paged contract
+here. §1.2's warning that "1381 nodes in one response is a contract change
+worth bounding" is therefore answered by the depth rule alone.
+
+**D6 — a draft node accepts no assignment, and the refusal lives in the
+service.** Measured while implementing: `CLOSED_NODE_STATUSES` held only
+`withdrawn`, so `propose_symbol_revision_classification` accepted a `draft`
+node. `classification_scheme_options` has always filtered its picker to
+`active`, but a picker is a read, not a control — a caller naming the
+identifier directly reached straight past it. Adding `ISO-ICS-7` to the
+allowlist would have made that reachable for a 1381-node unactivated
+vocabulary. Placed in the service on the 2026-09-17 pre-load precedent: the
+guarantee belongs to the transition, not to each caller's discipline.
+
+### 7.2 One correction to D6 as put
+
+The question was put as "add `draft` to `CLOSED_NODE_STATUSES`", and that
+literal edit would have **broken the ICS import outright**. The constant is
+read by two guards, not one:
+
+| Site | Question it asks |
+| --- | --- |
+| `classification_schemes.py:384` | may this node accept a **child**? |
+| `classification_assignments.py:133` | may this node accept an **assignment**? |
+
+`ics_taxonomy` builds the entire 1381-node hierarchy as draft before any
+governance authority activates it, so closing draft to parenting would refuse
+the import. The intent — service-layer, cross-scheme, every caller — is kept;
+only the mechanism changed. `CLOSED_NODE_STATUSES` keeps its parenting meaning
+and a new `UNASSIGNABLE_NODE_STATUSES` carries the assignment meaning.
+`deprecated` stays assignable, unchanged: discouraging a node is not closing
+it, and narrowing that was not asked for.
+
+### 7.3 Depth is depth, not spelling
+
+The rule is expressed as `REVIEWER_ASSIGNABLE_MAX_DEPTH = {"ISO-ICS-7": 2}`
+and evaluated by walking `parent_node_id`, **not** by counting dots in
+`node_code`. ICS's dotted numerics are a spelling only ICS uses; depth is a
+property every scheme's hierarchy has. A scheme absent from the map is
+unbounded, which is accurate for the two original schemes because both are
+flat.
+
+The options route reads *every* node of a bounded scheme rather than only the
+active ones, because depth is a fact about ancestry and an inactive parent
+would otherwise make its children read as roots.
+
+### 7.4 A fixture had to move to head
+
+`tests/test_semantic_review_routes_postgresql.py` pinned `MIGRATION_HEAD` at
+`20260911_0057`, below `20260915_0058` — the migration that admits ICS's
+dotted codes. Under that pin the grammar check refuses `13.220` outright, so
+the fixture could not hold the vocabulary the module now exercises. Moved to
+`20260917_0060`, the same move nine fixtures made in SM-P0-08. All 34 tests in
+the module pass at head.
+
+### 7.5 What changed
+
+| File | Change |
+| --- | --- |
+| `backend/symgov_backend/classification_schemes.py` | `UNASSIGNABLE_NODE_STATUSES`; `CLOSED_NODE_STATUSES` re-commented as the parenting guard |
+| `backend/symgov_backend/classification_assignments.py` | the assignment guard reads the new set |
+| `backend/symgov_backend/routes/semantic_review.py` | `ISO-ICS-7` in the allowlist; `REVIEWER_ASSIGNABLE_MAX_DEPTH`; depth helpers; depth refusal on the propose route |
+| `backend/symgov_backend/schemas.py` | the no-pagination docstring records D5 rather than the stale 31-node justification |
+| `frontend/src/SemanticReviewPage.js` | comment only — it asserted 31 nodes |
+| `tests/test_semantic_review_routes.py` | the pinned allowlist |
+| `tests/test_semantic_review_routes_postgresql.py` | head bump; a miniature three-level ICS in the module fixture; 3 new tests |
+| `tests/test_classification_data_model_postgresql.py` | 2 new tests: draft refuses an assignment, draft still accepts a child |
+
+### 7.6 What WP2.1 does *not* do
+
+ICS is now **reviewer-populated only**. Nothing proposes into it
+automatically: that is WP2.2 and it turns on D1, untouched here. Nor does this
+activate anything in production — the scheme does not exist there, and D3's
+four blockers are unchanged. Every ICS fact above is a fact about the code and
+the test database.
+
+**The ODC-By gate is still ahead, and still binds WP2.3** (§4). WP2.1 makes
+ICS labels *reachable* by an authenticated reviewer through the API, but
+nothing renders one: no frontend change ships here beyond a corrected comment.
+The obligation bites where a label reaches a human, which remains WP2.3.

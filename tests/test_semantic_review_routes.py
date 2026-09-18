@@ -522,7 +522,7 @@ def test_the_scheme_read_offers_only_the_schemes_a_reviewer_may_assign_into():
     from symgov_backend.routes.semantic_review import REVIEWER_ASSIGNABLE_SCHEME_CODES
 
     assert REVIEWER_ASSIGNABLE_SCHEME_CODES == frozenset(
-        {"ENGINEERING-DISCIPLINE", "SYMBOL-CATEGORY-FAMILY"}
+        {"ENGINEERING-DISCIPLINE", "SYMBOL-CATEGORY-FAMILY", "ISO-ICS-7"}
     )
 
     schemas = create_app().openapi()["components"]["schemas"]

@@ -179,10 +179,80 @@ router = APIRouter(prefix="/semantic-review", tags=["semantic-review"])
 # read-only in v1. Existing assignments in them are displayed; nothing
 # creates one. The decision is written as a statement about the UI, but a
 # control the API still honours is not read-only -- so the refusal lives
-# here, at the layer that can actually enforce it. Only the two schemes
-# `classification_mapping.plan_classification_mapping` already maps into can
-# receive a reviewer's proposal.
-REVIEWER_ASSIGNABLE_SCHEME_CODES = frozenset({"ENGINEERING-DISCIPLINE", "SYMBOL-CATEGORY-FAMILY"})
+# here, at the layer that can actually enforce it.
+#
+# `ISO-ICS-7` was added by SM-P1-02 WP2.1, on the 2026-09-17 ruling that
+# `industry` is a real axis and ICS is its governed vocabulary. Unlike the
+# other two it is *not* a scheme `plan_classification_mapping` maps into --
+# that is WP2.2's job and depends on D1 -- so until then ICS is a
+# reviewer-populated axis and nothing proposes into it automatically.
+REVIEWER_ASSIGNABLE_SCHEME_CODES = frozenset(
+    {"ENGINEERING-DISCIPLINE", "SYMBOL-CATEGORY-FAMILY", "ISO-ICS-7"}
+)
+
+# Decision D4 (SM-P1-02, Chris 2026-09-17): ICS is three levels -- 40 fields,
+# 401 groups, 940 subgroups. A reviewer assigns at field level, may descend to
+# group level where precision is wanted, and never to subgroup. Expressed as a
+# maximum depth so the rule is one number rather than a shape test on
+# `node_code`: depth is a property of the hierarchy every scheme has, whereas
+# ICS's dotted numerics are a spelling only ICS uses.
+#
+# A scheme absent from this map is unbounded. The two original schemes are
+# flat -- every node is a root -- so the absence is accurate, not an oversight.
+REVIEWER_ASSIGNABLE_MAX_DEPTH: dict[str, int] = {"ISO-ICS-7": 2}
+
+
+def _node_depth_from_parents(node_id: uuid.UUID, parents: dict[uuid.UUID, uuid.UUID | None]) -> int:
+    """Depth of one node: 1 for a root, 2 for its child, and so on.
+
+    Terminates because `add_classification_node` refuses a parent chain that
+    would close a cycle, and because the composite (parent_node_id, scheme_id)
+    foreign key keeps every parent inside the map it was built from.
+    """
+    depth = 1
+    parent_id = parents.get(node_id)
+    while parent_id is not None:
+        depth += 1
+        parent_id = parents.get(parent_id)
+    return depth
+
+
+def _assignable_nodes(session: Session, scheme: ClassificationScheme) -> list[ClassificationNode]:
+    """A scheme's offerable nodes: active, and no deeper than D4 allows.
+
+    The depth map is read over *every* node of the scheme, not only the active
+    ones, because a node's depth is a fact about its ancestry and an inactive
+    parent would otherwise make its children read as roots.
+    """
+    max_depth = REVIEWER_ASSIGNABLE_MAX_DEPTH.get(scheme.scheme_code)
+    if max_depth is None:
+        return list_classification_nodes(session, scheme.id, status="active")
+    nodes = list_classification_nodes(session, scheme.id)
+    parents = {node.id: node.parent_node_id for node in nodes}
+    return [
+        node
+        for node in nodes
+        if node.status == "active" and _node_depth_from_parents(node.id, parents) <= max_depth
+    ]
+
+
+def _node_depth(session: Session, node: ClassificationNode) -> int:
+    """Depth of a single node, walked through storage.
+
+    The options route can build a parent map because it already holds the
+    whole scheme; a proposal names one node and must walk. Bounded by the
+    scheme's height for the same no-cycle reason.
+    """
+    depth = 1
+    parent_id = node.parent_node_id
+    while parent_id is not None:
+        depth += 1
+        parent = session.get(ClassificationNode, parent_id)
+        if parent is None:
+            break
+        parent_id = parent.parent_node_id
+    return depth
+
 
 _ERROR_RESPONSES = {
     401: {"model": APIErrorResponse},
@@ -648,6 +718,10 @@ def classification_scheme_options(
     three schemes are display-only in v1 and the propose route refuses them,
     so offering them as choices would invite a refusal.
 
+    `ISO-ICS-7` joined that set in SM-P1-02 WP2.1 and is bounded by decision
+    D4's depth rule, which is what keeps this response a list rather than a
+    download: ICS holds 1381 nodes, of which 441 are field or group level.
+
     No tenant predicate: schemes and nodes are seeded platform reference data
     naming no symbol, so section 14.2 -- which is about private symbol
     existence -- has nothing to say here. Only active nodes are offered; a
@@ -672,7 +746,7 @@ def classification_scheme_options(
                         "nodeLabel": node.preferred_label,
                         "parentNodeId": str(node.parent_node_id) if node.parent_node_id else None,
                     }
-                    for node in list_classification_nodes(session, scheme.id, status="active")
+                    for node in _assignable_nodes(session, scheme)
                 ],
             }
             for scheme in schemes
@@ -1213,11 +1287,22 @@ def propose_symbol_classification(
     ).first()
     if node_row is None:
         raise HTTPException(status_code=404, detail="Classification node was not found.")
-    _node, scheme = node_row
+    node, scheme = node_row
     if scheme.scheme_code not in REVIEWER_ASSIGNABLE_SCHEME_CODES:
         raise _invalid(
             f"the {scheme.scheme_code} scheme is read-only in this release; "
             "its existing assignments are displayed but none may be created",
+            ("body", "classificationNodeId"),
+        )
+
+    # D4 again, on the write. The options route never offers a node below the
+    # scheme's assignable depth, but a picker is not a control: a caller naming
+    # the identifier directly would otherwise reach one.
+    max_depth = REVIEWER_ASSIGNABLE_MAX_DEPTH.get(scheme.scheme_code)
+    if max_depth is not None and _node_depth(session, node) > max_depth:
+        raise _invalid(
+            f"the {scheme.scheme_code} scheme is assignable to a depth of "
+            f"{max_depth}; this node is more specific than a reviewer may assign",
             ("body", "classificationNodeId"),
         )
 
