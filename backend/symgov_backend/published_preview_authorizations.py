@@ -83,11 +83,12 @@ def _is_trusted_preview_lineage(session: Session, *, revision: SymbolRevision, a
 
     if attachment.parent_type == "validation_report":
         attachment_report = session.get(ValidationReport, attachment.parent_id)
-        if attachment_report is None:
-            return False
-
         validation_id = _coerce_uuid(lineage.get("validation_report_id"))
-        if validation_id is not None and validation_id == attachment.parent_id:
+        if (
+            validation_id is not None
+            and validation_id == attachment.parent_id
+            and attachment_report is not None
+        ):
             return True
 
         return _matches_persisted_validation_report_split_lineage(

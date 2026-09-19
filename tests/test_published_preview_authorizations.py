@@ -228,6 +228,78 @@ def test_ensure_preview_authorization_rejects_validation_report_split_lineage_mi
     assert session.flushed == 0
 
 
+def test_ensure_preview_authorization_accepts_validation_report_split_lineage_with_dangling_report_owner():
+    revision_id = uuid.uuid4()
+    split_item_id = uuid.uuid4()
+    review_case_id = uuid.uuid4()
+    dangling_report_id = uuid.uuid4()
+    key = "previews/split-lineage-dangling.svg"
+    revision = _revision(
+        revision_id=revision_id,
+        object_key=key,
+        lineage={
+            "validation_report_id": str(dangling_report_id),
+            "review_split_item_id": str(split_item_id),
+            "parent_sheet_review_case_id": str(review_case_id),
+            "reviewed_attachment_object_key": key,
+        },
+    )
+    attachment = _attachment(object_key=key, parent_type="validation_report", parent_id=dangling_report_id)
+    split_item = SimpleNamespace(
+        id=split_item_id,
+        review_case_id=review_case_id,
+        attachment_object_key=key,
+    )
+    session = _FakeSession(
+        query_map={Attachment: deque([attachment])},
+        get_map={(ReviewSplitItem, split_item_id): split_item},
+    )
+
+    result = ensure_preview_authorization(session, revision=revision, source="legacy_backfill")
+
+    assert result.status == "created"
+    assert session.flushed == 1
+    assert len(session.added) == 1
+
+
+@pytest.mark.parametrize("mismatch", ["split_item", "review_case", "object_key"])
+def test_ensure_preview_authorization_rejects_dangling_validation_report_split_lineage_mismatch(mismatch: str):
+    revision_id = uuid.uuid4()
+    split_item_id = uuid.uuid4()
+    review_case_id = uuid.uuid4()
+    dangling_report_id = uuid.uuid4()
+    key = "previews/split-lineage-dangling-mismatch.svg"
+    lineage_split_item_id = split_item_id if mismatch != "split_item" else uuid.uuid4()
+    lineage_review_case_id = review_case_id if mismatch != "review_case" else uuid.uuid4()
+    lineage_key = key if mismatch != "object_key" else "previews/other.svg"
+    revision = _revision(
+        revision_id=revision_id,
+        object_key=key,
+        lineage={
+            "validation_report_id": str(dangling_report_id),
+            "review_split_item_id": str(lineage_split_item_id),
+            "parent_sheet_review_case_id": str(lineage_review_case_id),
+            "reviewed_attachment_object_key": lineage_key,
+        },
+    )
+    attachment = _attachment(object_key=key, parent_type="validation_report", parent_id=dangling_report_id)
+    split_item = SimpleNamespace(
+        id=split_item_id,
+        review_case_id=review_case_id,
+        attachment_object_key=key,
+    )
+    session = _FakeSession(
+        query_map={Attachment: deque([attachment])},
+        get_map={(ReviewSplitItem, split_item_id): split_item},
+    )
+
+    result = ensure_preview_authorization(session, revision=revision, source="legacy_backfill")
+
+    assert result == PreviewAuthorizationResult(status="untrusted_lineage", object_key=key)
+    assert session.added == []
+    assert session.flushed == 0
+
+
 def test_ensure_preview_authorization_accepts_external_submission_batch_with_intake_lineage():
     from symgov_backend import published_preview_authorizations as module
 
