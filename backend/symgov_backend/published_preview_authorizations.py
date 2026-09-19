@@ -37,35 +37,15 @@ def _coerce_uuid(value: str | uuid.UUID | None) -> uuid.UUID | None:
 
 def _lineage_payload(revision: SymbolRevision) -> dict:
     payload = revision.payload_json if isinstance(revision.payload_json, dict) else {}
-    lineage = payload.get("lineage") if isinstance(payload.get("lineage"), dict) else {}
-    return {"payload": payload, "lineage": lineage}
-
-
-def _attachment_keys_from_payload(payload: dict) -> set[str]:
-    keys: set[str] = set()
-
-    def visit(value: object) -> None:
-        if isinstance(value, dict):
-            for key, child in value.items():
-                if key.endswith("object_key") and isinstance(child, str) and child.strip():
-                    keys.add(child.strip())
-                else:
-                    visit(child)
-        elif isinstance(value, list):
-            for child in value:
-                visit(child)
-
-    visit(payload)
-    return keys
+    lineage = payload.get("lineage")
+    return lineage if isinstance(lineage, dict) else {}
 
 
 def _is_trusted_preview_lineage(session: Session, *, revision: SymbolRevision, attachment: Attachment) -> bool:
     if attachment.parent_type == "symbol_revision" and attachment.parent_id == revision.id:
         return True
 
-    payload_parts = _lineage_payload(revision)
-    payload = payload_parts["payload"]
-    lineage = payload_parts["lineage"]
+    lineage = _lineage_payload(revision)
 
     if attachment.parent_type == "validation_report":
         validation_id = _coerce_uuid(lineage.get("validation_report_id"))
@@ -91,7 +71,7 @@ def _is_trusted_preview_lineage(session: Session, *, revision: SymbolRevision, a
             for value in (normalized.get("attachment_ids") or [])
             if str(value).strip()
         }
-        attachment_keys = _attachment_keys_from_payload(payload)
+        attachment_keys: set[str] = set()
         if intake.raw_object_key:
             attachment_keys.add(str(intake.raw_object_key).strip())
         for key in ("raw_object_key", "origin_object_key", "source_object_key"):

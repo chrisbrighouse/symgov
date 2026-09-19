@@ -175,6 +175,48 @@ def test_ensure_preview_authorization_accepts_external_submission_batch_with_int
     assert len(session.added) == 1
 
 
+def test_ensure_preview_authorization_rejects_external_submission_payload_recursed_object_key():
+    from symgov_backend import published_preview_authorizations as module
+
+    revision_id = uuid.uuid4()
+    intake_id = uuid.uuid4()
+    batch_token = "subext-20260919T151500Z"
+    parent_batch_id = module._coerce_uuid(batch_token)
+    trusted_key = "external-submissions/subext-20260919T151500Z/01-trusted.svg"
+    foreign_key = "external-submissions/subext-20260919T151500Z/99-foreign.svg"
+    revision = _revision(
+        revision_id=revision_id,
+        object_key=foreign_key,
+        lineage={"intake_record_id": str(intake_id)},
+    )
+    revision.payload_json["companion_files"] = [{"object_key": foreign_key}]
+
+    attachment = _attachment(object_key=foreign_key, parent_type="external_submission_batch", parent_id=parent_batch_id)
+    intake = SimpleNamespace(
+        id=intake_id,
+        raw_object_key=trusted_key,
+        normalized_submission_json={
+            "submission_batch_id": batch_token,
+            "attachment_ids": [],
+            "raw_object_key": trusted_key,
+            "origin_object_key": trusted_key,
+            "source_object_key": trusted_key,
+        },
+    )
+    session = _FakeSession(
+        query_map={
+            Attachment: deque([attachment]),
+        },
+        get_map={(IntakeRecord, intake_id): intake},
+    )
+
+    result = ensure_preview_authorization(session, revision=revision, source="legacy_backfill")
+
+    assert result == PreviewAuthorizationResult(status="untrusted_lineage", object_key=foreign_key)
+    assert session.added == []
+    assert session.flushed == 0
+
+
 def test_backfill_apply_rolls_back_and_marks_not_applied_on_failure(monkeypatch):
     revisions = [SimpleNamespace(id=uuid.uuid4()), SimpleNamespace(id=uuid.uuid4())]
     session = _FakeSession(revisions=revisions)
