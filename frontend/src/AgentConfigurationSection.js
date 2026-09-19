@@ -6,7 +6,7 @@ function ErrorMessage({ message }) {
   if (!message) return null;
   return createElement(
     'p',
-    { role: 'alert', style: { color: '#dc2626', background: '#fee2e2', border: '1px solid #fca5a5', borderRadius: '6px', padding: '8px 12px', marginBottom: '12px', fontSize: '0.875rem' } },
+    { role: 'alert', style: { color: 'var(--idox-error-text-color)', background: 'var(--idox-error-bg)', border: '1px solid var(--idox-error-border)', borderRadius: '6px', padding: '8px 12px', marginBottom: '12px', fontSize: '0.875rem' } },
     message
   );
 }
@@ -158,7 +158,7 @@ export function AgentConfigurationSection({ protect, organizations }) {
     loading ? createElement('p', { role: 'status' }, 'Loading agent configurations…') : null,
     ErrorMessage({ message: error }),
     !loading && configs.length === 0
-      ? createElement('p', { style: { color: '#6b7280' } }, 'No agent configurations exist yet.')
+      ? createElement('p', { style: { color: 'var(--idox-text-tertiary)' } }, 'No agent configurations exist yet.')
       : null,
     !loading && configs.length > 0
       ? createElement(

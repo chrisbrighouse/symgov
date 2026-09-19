@@ -364,7 +364,7 @@ function AuthProvider({ children }) {
     ...result,
     ok: false,
     stale: true,
-    message: 'Authentication state changed. Please try again.',
+    message: 'Authentication state changed. Sign in again.',
     session: null
   });
 
@@ -2010,11 +2010,11 @@ function StandardsPage() {
               <table>
                 <thead>
                   <tr>
-                    <th aria-label="Select symbols" className="select-column">Select</th>
-                    <th aria-label="Favourites">Favourite</th>
-                    <th>Preview</th>
+                    <th scope="col" aria-label="Select symbols" className="select-column">Select</th>
+                    <th scope="col" aria-label="Favourites">Favourite</th>
+                    <th scope="col">Preview</th>
                     {standardsColumns.map(([key, label]) => (
-                      <th key={key}>
+                      <th scope="col" key={key}>
                         <button type="button" className="column-sort-button" onClick={() => toggleSort(key)}>
                           {label}
                           {sortState.key === key ? <span>{sortState.direction === 'asc' ? '↑' : '↓'}</span> : null}
@@ -2871,7 +2871,7 @@ function WorkspacePage() {
             </div>
             <div className="workspace-content-tools">
               {searchStatusText ? <span className="search-inline-status">{searchStatusText}</span> : null}
-              <div className="search-mode-toggle" style={{ marginRight: '1rem', display: 'flex', gap: '0.25rem', padding: '0.2rem', background: 'rgba(29, 43, 54, 0.05)', border: '1px solid var(--stroke)', borderRadius: 'var(--radius-md)', height: '2.35rem', alignItems: 'center' }}>
+              <div className="search-mode-toggle" style={{ marginRight: '1rem', display: 'flex', gap: '0.25rem', padding: '0.2rem', background: 'var(--idox-bg-surface-subtle)', border: '1px solid var(--stroke)', borderRadius: 'var(--radius-md)', height: '2.35rem', alignItems: 'center' }}>
                 <button
                   type="button"
                   className={`action-button compact ${scottSearchMode === 'discovery' ? 'primary' : 'ghost'}`}
@@ -2893,7 +2893,7 @@ function WorkspacePage() {
                 <select 
                   className="field compact" 
                   style={{ 
-                    background: '#ffffff', 
+                    background: 'var(--idox-bg-surface-default)', 
                     color: 'var(--text-main)', 
                     border: '1px solid var(--stroke)', 
                     borderRadius: 'var(--radius-md)', 
@@ -2908,7 +2908,7 @@ function WorkspacePage() {
                   onChange={(e) => setScottSeedQuery(e.target.value)}
                 >
                   {scottAvailableSeedQueries.map((q) => (
-                    <option key={q} value={q} style={{ background: '#ffffff', color: 'var(--text-main)' }}>{q}</option>
+                    <option key={q} value={q} style={{ background: 'var(--idox-bg-surface-default)', color: 'var(--text-main)' }}>{q}</option>
                   ))}
                 </select>
               </div>

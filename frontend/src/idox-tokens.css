@@ -1,0 +1,235 @@
+/*
+ * Idox design-system tokens — vendored copy.
+ *
+ * Source: ui-design/idox-design-system/design-tokens.css
+ * Do not hand-edit. Re-sync from the source file when Idox ships a new version:
+ *   cp ui-design/idox-design-system/design-tokens.css frontend/src/idox-tokens.css
+ *   (then re-apply this header)
+ *
+ * symgov consumes these tokens directly as CSS custom properties. The Idox
+ * skill targets Tailwind v4 utility aliases; symgov has no Tailwind, so
+ * styles.css maps these tokens onto the existing class-based stylesheet.
+ */
+:root {
+  /* Color palette */
+  --idox-blue-50:  #f5f9fe;
+  --idox-blue-100: #ecf3fe;
+  --idox-blue-200: #d2e4fe;
+  --idox-blue-300: #9cc2fc;
+  --idox-blue-400: #67a0fb;
+  --idox-blue-500: #207ff4;
+  --idox-blue-600: #195fd2;
+  --idox-blue-700: #1241b2;
+  --idox-blue-800: #0a1f8f;
+  --idox-blue-900: #050f48;
+  --idox-blue-950: #00050f;
+
+  --idox-slate-25:  #fcfdfe; /* Half the lightness of slate-50 */
+  --idox-slate-50:  #f8fafc;
+  --idox-slate-100: #f1f5f9;
+  --idox-slate-200: #e2e8f0;
+  --idox-slate-300: #cbd5e1;
+  --idox-slate-400: #94a3b8;
+  --idox-slate-500: #627288;
+  --idox-slate-600: #475569;
+  --idox-slate-700: #334155;
+  --idox-slate-800: #1e293b;
+  --idox-slate-900: #0f172a;
+  --idox-slate-950: #020617;
+
+  --idox-white: #ffffff;
+
+  --idox-green-50:  #f0fdf4;
+  --idox-green-100: #dcfce7;
+  --idox-green-200: #bbf7d0;
+  --idox-green-300: #86efac;
+  --idox-green-400: #4ade80;
+  --idox-green-500: #22c55e;
+  --idox-green-600: #16a34a;
+  --idox-green-700: #15803d;
+  --idox-green-800: #166534;
+  --idox-green-900: #14532d;
+  --idox-green-950: #052e16;
+
+  --idox-amber-50:  #fffbeb;
+  --idox-amber-100: #fef3c7;
+  --idox-amber-200: #fde68a;
+  --idox-amber-300: #fcd34d;
+  --idox-amber-400: #fbbf24;
+  --idox-amber-500: #f59e0b;
+  --idox-amber-600: #d97706;
+  --idox-amber-700: #b45309;
+  --idox-amber-800: #92400e;
+  --idox-amber-900: #78350f;
+  --idox-amber-950: #451a03;
+
+  --idox-red-50:  #fef2f2;
+  --idox-red-100: #fee2e2;
+  --idox-red-200: #fecaca;
+  --idox-red-300: #fca5a5;
+  --idox-red-400: #f87171;
+  --idox-red-500: #ef4444;
+  --idox-red-600: #dc2626;
+  --idox-red-700: #b91c1c;
+  --idox-red-800: #991b1b;
+  --idox-red-900: #7f1d1d;
+  --idox-red-950: #450a0a;
+
+  /* Surfaces */
+  --idox-bg-surface-default: var(--idox-white);
+  --idox-bg-surface-light: var(--idox-slate-25);
+  --idox-bg-surface-base:    var(--idox-slate-50);
+  --idox-bg-surface-subtle:  var(--idox-slate-100);
+  --idox-bg-surface-muted:   var(--idox-slate-200);
+
+  /* Brand */
+  --idox-color-brand:        var(--idox-blue-800);
+  --idox-color-brand-accent: var(--idox-blue-600);
+
+  /* Text */
+  --idox-text-primary:      var(--idox-slate-900);
+  --idox-text-secondary:    var(--idox-slate-700);
+  --idox-text-tertiary:     var(--idox-slate-500);
+  --idox-text-inverse:      var(--idox-white);
+  --idox-text-brand:        var(--idox-color-brand);
+  --idox-text-brand-accent: var(--idox-color-brand-accent);
+
+  /* Borders */
+  --idox-border-default:  var(--idox-slate-300);
+  --idox-border-subtle:   var(--idox-slate-200);
+  --idox-border-strong:   var(--idox-slate-400);
+  --idox-border-focus:    var(--idox-blue-600);
+  --idox-border-selected: var(--idox-blue-600);
+  --idox-border-accent:   var(--idox-color-brand-accent);
+
+  /* Strong interaction */
+  --idox-interactive-default: var(--idox-blue-600);
+  --idox-interactive-hover:   var(--idox-blue-700);
+  --idox-interactive-active:  var(--idox-blue-800);
+  --idox-interactive-text:    var(--idox-text-inverse);
+
+  /* Subtle interaction */
+  --idox-interactive-subtle:        var(--idox-blue-50);
+  --idox-interactive-subtle-hover:  var(--idox-blue-100);
+  --idox-interactive-subtle-active: var(--idox-blue-200);
+  --idox-interactive-subtle-selected:  var(--idox-blue-100);
+
+  /* Links */
+  --idox-link-default: var(--idox-blue-600);
+  --idox-link-hover:   var(--idox-blue-700);
+  --idox-link-active:  var(--idox-blue-800);
+
+  /* Lists */
+  --idox-list-hover-bg:  var(--idox-interactive-subtle-hover);
+  --idox-list-active-bg: var(--idox-interactive-subtle-active);
+
+  /* Buttons */
+  --idox-btn-primary:        var(--idox-interactive-default);
+  --idox-btn-primary-hover:  var(--idox-interactive-hover);
+  --idox-btn-primary-active: var(--idox-interactive-active);
+  --idox-btn-primary-text:   var(--idox-interactive-text);
+
+  --idox-btn-secondary:        var(--idox-bg-surface-base);
+  --idox-btn-secondary-hover:  var(--idox-interactive-subtle-hover);
+  --idox-btn-secondary-active: var(--idox-interactive-subtle-active);
+  --idox-btn-secondary-text:   var(--idox-text-primary);
+
+  /* Semantic status — success */
+  --idox-success-bg:            var(--idox-green-50);
+  --idox-success-border:        var(--idox-green-600);
+  --idox-success-icon:          var(--idox-green-600);
+  --idox-success-text:          var(--idox-text-primary);
+  --idox-success-heading:       var(--idox-text-primary);
+  --idox-success-text-color:    var(--idox-green-700);  /* 5.0:1 on white — AA for text use */
+
+  /* Semantic status — warning */
+  --idox-warning-bg:         var(--idox-amber-50);
+  --idox-warning-border:     var(--idox-amber-500);
+  --idox-warning-icon:       var(--idox-amber-500);
+  --idox-warning-text:       var(--idox-text-primary);
+  --idox-warning-heading:    var(--idox-text-primary);
+  --idox-warning-text-color: var(--idox-amber-700);  /* 4.8:1 on white, 4.8:1 on amber-50 — AA */
+
+  /* Semantic status — error */
+  --idox-error-bg:              var(--idox-red-50);
+  --idox-error-border:          var(--idox-red-700);
+  --idox-error-icon:            var(--idox-red-700);
+  --idox-error-text:            var(--idox-text-primary);
+  --idox-error-heading:         var(--idox-text-primary);
+  --idox-error-text-color:      var(--idox-red-700);   /* 5.9:1 on white, 5.9:1 on red-50 — AA */
+
+  /* Semantic status — info (Idox blue palette) */
+  --idox-info-bg:            var(--idox-blue-50);
+  --idox-info-border:        var(--idox-blue-500);
+  --idox-info-icon:          var(--idox-blue-500);
+  --idox-info-text:          var(--idox-text-primary);
+  --idox-info-heading:       var(--idox-text-primary);
+  --idox-info-text-color:    var(--idox-blue-600);   /* 5.8:1 on white — AA for text use */
+
+  /* Overlay / scrim */
+  --idox-overlay-bg: rgba(2, 6, 23, 0.5); /* slate-950 at 50% */
+
+  /* Disabled states */
+  --idox-text-disabled:   var(--idox-slate-400);
+  --idox-bg-disabled:     var(--idox-slate-100);
+  --idox-border-disabled: var(--idox-slate-200);
+
+  /* Border radius */
+  --idox-radius-sm:   0.25rem;  /* 4px  — badges, chips, tooltips */
+  --idox-radius-md:   0.375rem; /* 6px  — compact navbar icon buttons */
+  --idox-radius-lg:   0.5rem;   /* 8px  — inputs, buttons, dropdowns, selects */
+  --idox-radius-xl:   0.75rem;  /* 12px — panels, cards, modals */
+  --idox-radius-full: 9999px;   /* pill — avatars, pill badges */
+
+  /* Spacing scale */
+  --idox-space-0-5: 0.125rem;  /*  2px */
+  --idox-space-1:   0.25rem;   /*  4px */
+  --idox-space-1-5: 0.375rem;  /*  6px */
+  --idox-space-2:   0.5rem;    /*  8px */
+  --idox-space-2-5: 0.625rem;  /* 10px */
+  --idox-space-3:   0.75rem;   /* 12px */
+  --idox-space-3-5: 0.875rem;  /* 14px */
+  --idox-space-4:   1rem;      /* 16px */
+  --idox-space-5:   1.25rem;   /* 20px */
+  --idox-space-6:   1.5rem;    /* 24px */
+  --idox-space-7:   1.75rem;   /* 28px */
+  --idox-space-8:   2rem;      /* 32px */
+  --idox-space-9:   2.25rem;   /* 36px */
+  --idox-space-10:  2.5rem;    /* 40px */
+  --idox-space-11:  2.75rem;   /* 44px */
+  --idox-space-12:  3rem;      /* 48px */
+  --idox-space-14:  3.5rem;    /* 56px */
+  --idox-space-16:  4rem;      /* 64px */
+
+  /* Typography — families */
+  --idox-font-family-base: 'DM Sans', system-ui, sans-serif;
+  --idox-font-family-mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+
+  /* Typography — sizes (Tailwind defaults) */
+  --idox-font-size-xs:   0.75rem;   /* 12px — labels, captions */
+  --idox-font-size-sm:   0.875rem;  /* 14px — form labels, table cells */
+  --idox-font-size-base: 1rem;      /* 16px — body, inputs */
+  --idox-font-size-lg:   1.125rem;  /* 18px — panel headings */
+  --idox-font-size-xl:   1.25rem;   /* 20px — page titles */
+  --idox-font-size-2xl:  1.5rem;    /* 24px — dashboard figures */
+
+  /* Typography — weights */
+  --idox-font-weight-normal:   400;
+  --idox-font-weight-medium:   500;
+  --idox-font-weight-semibold: 600;
+  --idox-font-weight-bold:     700;
+
+  /* Typography — line heights */
+  --idox-line-height-tight:   1.25;  /* headings */
+  --idox-line-height-normal:  1.5;   /* UI text */
+  --idox-line-height-relaxed: 1.625; /* body prose */
+
+  /* Navbar */
+  --idox-navbar-bg:          var(--idox-blue-800);
+  --idox-navbar-text:        var(--idox-white);
+  --idox-navbar-hover:       var(--idox-blue-700);
+  --idox-navbar-active:      var(--idox-blue-600);
+  --idox-navbar-icon:        var(--idox-white);
+  --idox-navbar-icon-hover:  var(--idox-white);
+}
+

@@ -23,9 +23,9 @@ function ErrorMessage({ message }) {
     {
       role: 'alert',
       style: {
-        color: '#dc2626',
-        background: '#fee2e2',
-        border: '1px solid #fca5a5',
+        color: 'var(--idox-error-text-color)',
+        background: 'var(--idox-error-bg)',
+        border: '1px solid var(--idox-error-border)',
         borderRadius: '6px',
         padding: '8px 12px',
         marginBottom: '12px',
@@ -36,7 +36,7 @@ function ErrorMessage({ message }) {
   );
 }
 
-const SEVERITY_ACCENT = { low: '#6b7280', medium: '#d97706', high: '#dc2626', critical: '#991b1b' };
+const SEVERITY_ACCENT = { low: 'var(--idox-text-tertiary)', medium: 'var(--idox-warning-text-color)', high: 'var(--idox-error-text-color)', critical: 'var(--idox-error-text-color)' };
 
 function DismissForm({ onDismiss, busy }) {
   const [reason, setReason] = useState('');
@@ -133,8 +133,8 @@ function FindingCard({ finding, actions }) {
     'div',
     {
       style: {
-        border: '1px solid #e5e7eb',
-        borderLeft: `4px solid ${SEVERITY_ACCENT[finding.severity] || '#6b7280'}`,
+        border: '1px solid var(--idox-border-subtle)',
+        borderLeft: `4px solid ${SEVERITY_ACCENT[finding.severity] || 'var(--idox-text-tertiary)'}`,
         borderRadius: '6px',
         padding: '12px 16px',
         marginBottom: '12px',
@@ -146,14 +146,14 @@ function FindingCard({ finding, actions }) {
       createElement('h3', { style: { margin: 0, fontSize: '0.95rem' } }, describeAgentFindingType(finding.findingType)),
       createElement(
         'span',
-        { style: { fontSize: '0.8rem', color: SEVERITY_ACCENT[finding.severity] || '#6b7280', fontWeight: 600 } },
+        { style: { fontSize: '0.8rem', color: SEVERITY_ACCENT[finding.severity] || 'var(--idox-text-tertiary)', fontWeight: 600 } },
         `${describeAgentFindingSeverity(finding.severity)} · ${describeAgentFindingStatus(finding.status)}`
       )
     ),
     createElement('p', { style: { margin: '8px 0' } }, finding.summary),
     createElement(
       'dl',
-      { style: { display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 16px', margin: '0 0 8px', fontSize: '0.8rem', color: '#4b5563' } },
+      { style: { display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 16px', margin: '0 0 8px', fontSize: '0.8rem', color: 'var(--idox-text-secondary)' } },
       createElement('dt', null, 'First seen'),
       createElement('dd', null, new Date(finding.firstSeenAt).toLocaleString()),
       createElement('dt', null, 'Last seen'),
@@ -243,7 +243,7 @@ function FindingsDashboardBody({ headingId, title, fetchFindings, runLabel, onRu
     ),
     loading ? createElement('p', { role: 'status' }, 'Loading findings…') : null,
     ErrorMessage({ message: error }),
-    !loading && findings.length === 0 ? createElement('p', { style: { color: '#6b7280' } }, 'No findings recorded.') : null,
+    !loading && findings.length === 0 ? createElement('p', { style: { color: 'var(--idox-text-tertiary)' } }, 'No findings recorded.') : null,
     !loading && activeFindings.length > 0
       ? createElement('div', null, activeFindings.map((finding) => createElement(FindingCard, { key: finding.id, finding, actions: wrappedActions })))
       : null,

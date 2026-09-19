@@ -59,11 +59,11 @@ export function addExistingOrganizationMember({ userId, baseRole, protect }) {
 
 function StatusBadge({ status }) {
   const styles = {
-    active: { background: '#d1fae5', color: '#065f46' },
-    inactive: { background: '#fee2e2', color: '#991b1b' },
-    invited: { background: '#e0f2fe', color: '#075985' },
+    active: { background: 'var(--idox-success-bg)', color: 'var(--idox-success-text-color)' },
+    inactive: { background: 'var(--idox-error-bg)', color: 'var(--idox-error-text-color)' },
+    invited: { background: 'var(--idox-info-bg)', color: 'var(--idox-info-text-color)' },
   };
-  const s = styles[status] || { background: '#f3f4f6', color: '#374151' };
+  const s = styles[status] || { background: 'var(--idox-bg-surface-subtle)', color: 'var(--idox-text-secondary)' };
   return createElement(
     'span',
     {
@@ -86,8 +86,8 @@ function RoleBadge({ role }) {
     'span',
     {
       style: {
-        background: isAdmin ? '#dbeafe' : '#f3f4f6',
-        color: isAdmin ? '#1e40af' : '#374151',
+        background: isAdmin ? 'var(--idox-info-bg)' : 'var(--idox-bg-surface-subtle)',
+        color: isAdmin ? 'var(--idox-info-text-color)' : 'var(--idox-text-secondary)',
         fontSize: '0.75rem',
         padding: '2px 8px',
         borderRadius: '9999px',
@@ -106,9 +106,9 @@ function ErrorMessage({ message }) {
     {
       role: 'alert',
       style: {
-        color: '#dc2626',
-        background: '#fee2e2',
-        border: '1px solid #fca5a5',
+        color: 'var(--idox-error-text-color)',
+        background: 'var(--idox-error-bg)',
+        border: '1px solid var(--idox-error-border)',
         borderRadius: '6px',
         padding: '8px 12px',
         marginBottom: '12px',
@@ -307,7 +307,7 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
       createElement(
         'div',
         null,
-        createElement('p', { style: { margin: '0 0 8px', fontSize: '0.875rem', color: '#6b7280' } },
+        createElement('p', { style: { margin: '0 0 8px', fontSize: '0.875rem', color: 'var(--idox-text-tertiary)' } },
           org.hasCustomIcon ? 'Custom icon' : 'Generated fallback icon'
         ),
         org.iconUrl
@@ -316,14 +316,14 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
               alt: `${org.displayName} icon`,
               width: 64,
               height: 64,
-              style: { borderRadius: '8px', border: '1px solid #e5e7eb', display: 'block' },
+              style: { borderRadius: '8px', border: '1px solid var(--idox-border-subtle)', display: 'block' },
             })
           : createElement('div', {
               style: {
                 width: '64px', height: '64px', borderRadius: '8px',
-                background: '#f3f4f6', border: '1px solid #e5e7eb',
+                background: 'var(--idox-bg-surface-subtle)', border: '1px solid var(--idox-border-subtle)',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '0.7rem', color: '#9ca3af', textAlign: 'center',
+                fontSize: '0.7rem', color: 'var(--idox-text-disabled)', textAlign: 'center',
               },
             }, 'Generated'),
         canManage && org.hasCustomIcon
@@ -332,7 +332,7 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
               {
                 onClick: handleRemove,
                 disabled: removing,
-                style: { marginTop: '8px', fontSize: '0.8rem', color: '#dc2626', display: 'block' },
+                style: { marginTop: '8px', fontSize: '0.8rem', color: 'var(--idox-error-text-color)', display: 'block' },
                 'aria-label': 'Remove custom icon',
               },
               removing ? 'Removing…' : 'Remove icon'
@@ -361,7 +361,7 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
                   alt: 'Icon preview',
                   width: 64,
                   height: 64,
-                  style: { borderRadius: '8px', border: '1px solid #e5e7eb' },
+                  style: { borderRadius: '8px', border: '1px solid var(--idox-border-subtle)' },
                 })
               : null,
             createElement(
@@ -371,7 +371,7 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
             ),
             createElement(
               'p',
-              { style: { fontSize: '0.75rem', color: '#9ca3af', margin: 0 } },
+              { style: { fontSize: '0.75rem', color: 'var(--idox-text-disabled)', margin: 0 } },
               'PNG, JPEG or WEBP · max 512 KB · 32–1024 px per side'
             )
           )
@@ -433,7 +433,7 @@ function MemberRow({ member, isAdmin, onRoleChange, onCapabilityChange, onDeacti
         alignItems: 'center',
         gap: '8px',
         padding: '10px 0',
-        borderBottom: '1px solid #e5e7eb',
+        borderBottom: '1px solid var(--idox-border-subtle)',
       },
     },
     createElement(
@@ -441,15 +441,15 @@ function MemberRow({ member, isAdmin, onRoleChange, onCapabilityChange, onDeacti
       { style: { flex: '1 1 200px' } },
       createElement('strong', null, member.displayName),
       createElement('br', null),
-      createElement('small', { style: { color: '#6b7280' } }, member.email)
+      createElement('small', { style: { color: 'var(--idox-text-tertiary)' } }, member.email)
     ),
     createElement('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' } },
       StatusBadge({ status: member.status }),
       RoleBadge({ role: member.baseRole }),
-      hasContributor && createElement('span', { style: { fontSize: '0.7rem', background: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '9999px' } }, 'contributor'),
-      hasReviewer && createElement('span', { style: { fontSize: '0.7rem', background: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '9999px' } }, 'reviewer')
+      hasContributor && createElement('span', { style: { fontSize: '0.7rem', background: 'var(--idox-warning-bg)', color: 'var(--idox-warning-text-color)', padding: '2px 6px', borderRadius: '9999px' } }, 'contributor'),
+      hasReviewer && createElement('span', { style: { fontSize: '0.7rem', background: 'var(--idox-warning-bg)', color: 'var(--idox-warning-text-color)', padding: '2px 6px', borderRadius: '9999px' } }, 'reviewer')
     ),
-    error ? createElement('span', { style: { color: '#dc2626', fontSize: '0.8rem', width: '100%' } }, error) : null,
+    error ? createElement('span', { style: { color: 'var(--idox-error-text-color)', fontSize: '0.8rem', width: '100%' } }, error) : null,
     isAdmin && member.status === 'active'
       ? createElement(
           'div',
@@ -487,7 +487,7 @@ function MemberRow({ member, isAdmin, onRoleChange, onCapabilityChange, onDeacti
             {
               onClick: handleDeactivate,
               disabled: busy,
-              style: { fontSize: '0.8rem', color: '#dc2626' },
+              style: { fontSize: '0.8rem', color: 'var(--idox-error-text-color)' },
               'aria-label': `Remove ${member.displayName}`,
             },
             'Remove'
@@ -622,7 +622,7 @@ function MemberListSection({ isAdmin, protect }) {
         })
       )
     ),
-    total === 0 && createElement('p', { style: { color: '#6b7280' } }, 'No members found.'),
+    total === 0 && createElement('p', { style: { color: 'var(--idox-text-tertiary)' } }, 'No members found.'),
     totalPages > 1
       ? createElement(
           'nav',

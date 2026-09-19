@@ -60,9 +60,9 @@ function ErrorMessage({ message }) {
     {
       role: 'alert',
       style: {
-        color: '#dc2626',
-        background: '#fee2e2',
-        border: '1px solid #fca5a5',
+        color: 'var(--idox-error-text-color)',
+        background: 'var(--idox-error-bg)',
+        border: '1px solid var(--idox-error-border)',
         borderRadius: '6px',
         padding: '8px 12px',
         marginBottom: '12px',
@@ -99,7 +99,7 @@ function AdminRow({ admin, onRevoke }) {
         alignItems: 'center',
         gap: '8px',
         padding: '10px 0',
-        borderBottom: '1px solid #e5e7eb',
+        borderBottom: '1px solid var(--idox-border-subtle)',
       },
     },
     createElement(
@@ -107,22 +107,22 @@ function AdminRow({ admin, onRevoke }) {
       { style: { flex: '1 1 200px' } },
       createElement('strong', null, admin.displayName),
       createElement('br', null),
-      createElement('small', { style: { color: '#6b7280' } }, admin.email)
+      createElement('small', { style: { color: 'var(--idox-text-tertiary)' } }, admin.email)
     ),
     !admin.userIsActive
       ? createElement(
           'span',
-          { style: { fontSize: '0.75rem', background: '#fee2e2', color: '#991b1b', padding: '2px 8px', borderRadius: '9999px' } },
+          { style: { fontSize: '0.75rem', background: 'var(--idox-error-bg)', color: 'var(--idox-error-text-color)', padding: '2px 8px', borderRadius: '9999px' } },
           'inactive user'
         )
       : null,
-    error ? createElement('span', { style: { color: '#dc2626', fontSize: '0.8rem', width: '100%' } }, error) : null,
+    error ? createElement('span', { style: { color: 'var(--idox-error-text-color)', fontSize: '0.8rem', width: '100%' } }, error) : null,
     createElement(
       'button',
       {
         onClick: handleRevoke,
         disabled: busy,
-        style: { fontSize: '0.8rem', color: '#dc2626' },
+        style: { fontSize: '0.8rem', color: 'var(--idox-error-text-color)' },
         'aria-label': `Revoke platform admin for ${admin.displayName}`,
       },
       'Revoke'
@@ -159,7 +159,7 @@ function OrganizationRow({ organization, onSuspend, onReactivate, onViewMembers,
         alignItems: 'center',
         gap: '8px',
         padding: '10px 0',
-        borderBottom: '1px solid #e5e7eb',
+        borderBottom: '1px solid var(--idox-border-subtle)',
       },
     },
     createElement(
@@ -167,15 +167,15 @@ function OrganizationRow({ organization, onSuspend, onReactivate, onViewMembers,
       { style: { flex: '1 1 200px' } },
       createElement('strong', null, organization.displayName),
       createElement('br', null),
-      createElement('small', { style: { color: '#6b7280' } }, organization.code)
+      createElement('small', { style: { color: 'var(--idox-text-tertiary)' } }, organization.code)
     ),
     createElement(
       'span',
       {
         style: {
           fontSize: '0.75rem',
-          background: suspended ? '#fee2e2' : '#dcfce7',
-          color: suspended ? '#991b1b' : '#166534',
+          background: suspended ? 'var(--idox-error-bg)' : 'var(--idox-success-bg)',
+          color: suspended ? 'var(--idox-error-text-color)' : 'var(--idox-success-text-color)',
           padding: '2px 8px',
           borderRadius: '9999px',
         },
@@ -185,11 +185,11 @@ function OrganizationRow({ organization, onSuspend, onReactivate, onViewMembers,
     organization.isProtected
       ? createElement(
           'span',
-          { style: { fontSize: '0.75rem', color: '#6b7280' } },
+          { style: { fontSize: '0.75rem', color: 'var(--idox-text-tertiary)' } },
           'protected'
         )
       : null,
-    error ? createElement('span', { style: { color: '#dc2626', fontSize: '0.8rem', width: '100%' } }, error) : null,
+    error ? createElement('span', { style: { color: 'var(--idox-error-text-color)', fontSize: '0.8rem', width: '100%' } }, error) : null,
     organization.isProtected
       ? null
       : createElement(
@@ -197,7 +197,7 @@ function OrganizationRow({ organization, onSuspend, onReactivate, onViewMembers,
           {
             onClick: handleToggle,
             disabled: busy,
-            style: { fontSize: '0.8rem', color: suspended ? '#166534' : '#dc2626' },
+            style: { fontSize: '0.8rem', color: suspended ? 'var(--idox-success-text-color)' : 'var(--idox-error-text-color)' },
             'aria-label': `${suspended ? 'Reactivate' : 'Suspend'} organization ${organization.displayName}`,
           },
           suspended ? 'Reactivate' : 'Suspend'
@@ -324,7 +324,7 @@ function ProtectedMemberRow({ member, onRoleChange, onDeactivate }) {
   if (member.status !== 'active') return createElement('li', null, `${member.displayName} — inactive`);
   const nextRole = member.baseRole === 'admin' ? 'user' : 'admin';
   const roleVerb = member.baseRole === 'admin' ? 'Demote' : 'Promote';
-  return createElement('li', { style: { padding: '10px 0', borderBottom: '1px solid #e5e7eb' } },
+  return createElement('li', { style: { padding: '10px 0', borderBottom: '1px solid var(--idox-border-subtle)' } },
     createElement('strong', null, member.displayName), createElement('span', null, ` — ${member.email} — ${member.baseRole}`),
     createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end' } },
       createElement('label', { htmlFor: `protected-member-mutation-reason-${member.membershipId}` }, 'Mutation reason',
@@ -599,7 +599,7 @@ function DemotionConsole({ protect }) {
     preview
       ? createElement(
           'div',
-          { role: 'group', 'aria-labelledby': 'demotion-preview-heading', style: { border: '1px solid #e5e7eb', borderRadius: '6px', padding: '12px', marginBottom: '16px' } },
+          { role: 'group', 'aria-labelledby': 'demotion-preview-heading', style: { border: '1px solid var(--idox-border-subtle)', borderRadius: '6px', padding: '12px', marginBottom: '16px' } },
           createElement('h3', { id: 'demotion-preview-heading', style: { marginTop: 0 } }, `Impact preview: ${preview.governedSymbolId}`),
           createElement('p', null, preview.eligible ? 'Eligible for demotion.' : 'Not eligible for demotion.'),
           preview.reasons.length > 0
@@ -629,7 +629,7 @@ function DemotionConsole({ protect }) {
                   type: 'button',
                   onClick: handleDemote,
                   disabled: demoting || !validReason,
-                  style: { color: '#dc2626', marginTop: '8px' },
+                  style: { color: 'var(--idox-error-text-color)', marginTop: '8px' },
                   'aria-label': `Demote governed symbol ${preview.governedSymbolId}`,
                 }, demoting ? 'Demoting…' : 'Demote symbol')
               )
@@ -688,7 +688,7 @@ function PromotionReviewPanel() {
     'section',
     { 'aria-labelledby': 'promotion-review-heading', style: { marginBottom: '32px' } },
     createElement('h2', { id: 'promotion-review-heading', style: { marginBottom: '8px' } }, 'Review a promotion request'),
-    createElement('p', { style: { color: '#6b7280', fontSize: '0.875rem' } },
+    createElement('p', { style: { color: 'var(--idox-text-tertiary)', fontSize: '0.875rem' } },
       'Enter the governed symbol ID and promotion request ID provided by the submitting organization’s admin. Accept-only: reject/changes-requested handling is not yet built.'),
     createElement('form', { onSubmit: handleOpenReview, style: { display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '16px' } },
       createElement('label', { htmlFor: 'promotion-review-symbol-id' },
@@ -719,7 +719,7 @@ function PromotionReviewPanel() {
     request
       ? createElement(
           'div',
-          { role: 'group', 'aria-labelledby': 'promotion-review-request-heading', style: { border: '1px solid #e5e7eb', borderRadius: '6px', padding: '12px' } },
+          { role: 'group', 'aria-labelledby': 'promotion-review-request-heading', style: { border: '1px solid var(--idox-border-subtle)', borderRadius: '6px', padding: '12px' } },
           createElement('h3', { id: 'promotion-review-request-heading', style: { marginTop: 0 } }, `Promotion request: ${request.id}`),
           createElement('p', null, `Status: ${request.status}`),
           createElement('p', null, `Reason given: ${request.reason}`),
@@ -956,7 +956,7 @@ export function PlatformAdminPage({ auth }) {
             )
           )
         : null,
-      organizations && orgTotal === 0 && createElement('p', { style: { color: '#6b7280' } }, 'No organizations found.'),
+      organizations && orgTotal === 0 && createElement('p', { style: { color: 'var(--idox-text-tertiary)' } }, 'No organizations found.'),
       orgTotalPages > 1
         ? createElement(
             'nav',
@@ -1008,7 +1008,7 @@ export function PlatformAdminPage({ auth }) {
         { style: { listStyle: 'none', padding: 0, margin: 0 } },
         admins.map((a) => createElement(AdminRow, { key: a.userId, admin: a, onRevoke: handleRevoke }))
       ),
-      total === 0 && createElement('p', { style: { color: '#6b7280' } }, 'No platform admins found.'),
+      total === 0 && createElement('p', { style: { color: 'var(--idox-text-tertiary)' } }, 'No platform admins found.'),
       totalPages > 1
         ? createElement(
             'nav',

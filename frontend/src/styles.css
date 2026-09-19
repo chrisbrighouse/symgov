@@ -1,22 +1,51 @@
+@import './idox-tokens.css';
+
+/*
+ * symgov application styles, built on the Idox design system.
+ *
+ * Colour, spacing, radius, typography and status semantics all resolve to the
+ * --idox-* tokens in idox-tokens.css. The Idox skill expresses its components
+ * as Tailwind v4 utility aliases; symgov has no Tailwind, so the component
+ * specifications are applied here against the existing class names instead.
+ *
+ * Prefer --idox-* tokens directly in new rules. The legacy aliases below exist
+ * only so that pre-existing rules resolve to Idox values.
+ */
+
 :root {
   color-scheme: light;
-  --mint: #5ebd93;
-  --cyan: #2e7fb8;
-  --teal: #2f8c7b;
-  --rose: #d46b7d;
-  --blue: #2f6fa7;
-  --beige: #ece4d6;
-  --text-main: #1d2b36;
-  --text-soft: #64717b;
-  --stroke: rgba(29, 43, 54, 0.14);
-  --stroke-strong: rgba(29, 43, 54, 0.28);
-  --glass-light: rgba(255, 255, 255, 0.78);
-  --panel-bg: #ffffff;
-  --panel-soft: #f5f7f7;
-  --shadow: 0 16px 38px rgba(51, 69, 84, 0.12);
-  --radius-xl: 12px;
-  --radius-lg: 10px;
-  --radius-md: 8px;
+
+  /* Legacy palette aliases, remapped onto Idox tokens. */
+  --mint: var(--idox-green-600);
+  --cyan: var(--idox-blue-500);
+  --teal: var(--idox-interactive-default);
+  --rose: var(--idox-red-600);
+  --blue: var(--idox-interactive-default);
+  --beige: var(--idox-bg-surface-subtle);
+
+  --text-main: var(--idox-text-primary);
+  --text-soft: var(--idox-text-tertiary);
+
+  --stroke: var(--idox-border-default);
+  --stroke-strong: var(--idox-border-strong);
+  --stroke-subtle: var(--idox-border-subtle);
+
+  --glass-light: var(--idox-bg-surface-default);
+  --panel-bg: var(--idox-bg-surface-default);
+  --panel-soft: var(--idox-bg-surface-base);
+
+  /* Idox panels carry a border, not a shadow. */
+  --shadow: none;
+
+  /* Idox radius scale: rounded-lg for controls, rounded-xl for panels. */
+  --radius-sm: var(--idox-radius-sm);
+  --radius-md: var(--idox-radius-lg);
+  --radius-lg: var(--idox-radius-lg);
+  --radius-xl: var(--idox-radius-xl);
+
+  /* Idox focus-visible treatment. */
+  --focus-outline: 2px solid var(--idox-color-brand-accent);
+  --focus-offset: 2px;
 }
 
 * {
@@ -30,9 +59,12 @@ html {
 body {
   margin: 0;
   min-height: 100vh;
-  font-family: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
-  background: linear-gradient(180deg, #f5f8fa 0%, #eef3f5 55%, #e8edf0 100%);
-  color: var(--text-main);
+  font-family: var(--idox-font-family-base);
+  font-size: var(--idox-font-size-sm);
+  line-height: var(--idox-line-height-normal);
+  background: var(--idox-bg-surface-light);
+  color: var(--idox-text-primary);
+  -webkit-font-smoothing: antialiased;
 }
 
 button,
@@ -51,15 +83,96 @@ a {
   text-decoration: none;
 }
 
-.user-identity-link {
-  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+/* Content links that carry no component class take the Idox link treatment. */
+a:not([class]) {
+  color: var(--idox-link-default);
+  text-decoration: underline;
 }
 
-.user-identity-link:hover,
-.user-identity-link:focus-visible {
-  border-color: rgba(47, 140, 123, 0.55);
-  box-shadow: 0 0 0 3px rgba(94, 189, 147, 0.16);
-  transform: translateY(-1px);
+a:not([class]):hover {
+  color: var(--idox-link-hover);
+}
+
+a:not([class]):active {
+  color: var(--idox-link-active);
+}
+
+/*
+ * Idox requires a visible focus indicator on every interactive control.
+ * :where() keeps specificity at zero so component rules can still override.
+ */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * Ghost button — Idox §buttons-ghost. This class was used in the header, the
+ * profile page and the developer hub but had no rule of any kind, so those
+ * controls rendered as unstyled browser buttons.
+ */
+.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border: 0;
+  border-radius: var(--idox-radius-lg);
+  padding: 0.375rem 0.75rem;
+  background: transparent;
+  color: var(--idox-text-primary);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.ghost-button:hover {
+  background: var(--idox-interactive-subtle-hover);
+}
+
+.ghost-button:active {
+  background: var(--idox-interactive-subtle-active);
+}
+
+.ghost-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* On the navbar surface, ghost buttons take navbar tokens. */
+.glass-header .ghost-button {
+  color: var(--idox-navbar-text);
+}
+
+.glass-header .ghost-button:hover {
+  background: var(--idox-navbar-hover);
+}
+
+.glass-header .ghost-button:active {
+  background: var(--idox-navbar-active);
+}
+
+.user-identity-link {
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.glass-header .user-identity-link:hover,
+.glass-header .user-identity-link:focus-visible {
+  border-color: var(--idox-navbar-active);
+  background: var(--idox-navbar-active);
 }
 
 .profile-page {
@@ -114,12 +227,11 @@ a {
   gap: 0.2rem;
 }
 
+/* Idox writing guideline: sentence case for UI text. */
 .profile-details dt {
-  color: var(--text-soft);
-  font-size: 0.82rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-medium);
 }
 
 .profile-details dd {
@@ -138,7 +250,7 @@ a {
 .profile-subscription-action label {
   display: grid;
   gap: 0.35rem;
-  font-weight: 700;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .profile-subscription-action select {
@@ -163,13 +275,13 @@ a {
 
 .profile-confirmation {
   padding: 1rem;
-  border: 1px solid rgba(47, 140, 123, 0.34);
+  border: 1px solid var(--idox-success-border);
   border-radius: var(--radius-lg);
-  background: rgba(94, 189, 147, 0.08);
+  background: var(--idox-success-bg);
 }
 
 .danger-zone {
-  border-top-color: rgba(212, 107, 125, 0.4);
+  border-top-color: var(--idox-error-border);
 }
 
 @media (max-width: 760px) {
@@ -190,72 +302,31 @@ a {
   overflow: hidden;
 }
 
+/*
+ * The ambient orb/haze backdrop is retired under the Idox design system, which
+ * uses flat surfaces. The element is kept hidden so existing markup is inert.
+ */
 .ambient-backdrop {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
   display: none;
 }
 
-.orb {
-  position: absolute;
-  border-radius: 999px;
-  filter: blur(24px);
-  opacity: 0.75;
-}
-
-.orb-one {
-  top: 6rem;
-  left: -4rem;
-  width: 24rem;
-  height: 24rem;
-  background: rgba(83, 188, 167, 0.18);
-}
-
-.orb-two {
-  top: 20rem;
-  right: -6rem;
-  width: 28rem;
-  height: 28rem;
-  background: rgba(255, 200, 219, 0.14);
-}
-
-.orb-three {
-  bottom: -6rem;
-  left: 25%;
-  width: 30rem;
-  height: 30rem;
-  background: rgba(138, 217, 255, 0.14);
-}
-
-.grid-haze {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
-  background-size: 42px 42px;
-  mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.9), transparent 92%);
-}
-
+/* Top navigation — Idox navbar (§navbar). */
 .glass-header {
   position: sticky;
   top: 0;
   z-index: 20;
   width: 100%;
   margin: 0;
-  padding: 0.85rem clamp(1rem, 3vw, 2.4rem);
+  min-height: 3.5rem;
+  padding: 0.6rem clamp(1rem, 3vw, 2.4rem);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
   border: 0;
-  border-bottom: 1px solid rgba(29, 43, 54, 0.12);
   border-radius: 0;
-  background: rgba(251, 253, 254, 0.94);
-  color: #102636;
-  backdrop-filter: blur(20px) saturate(145%);
-  box-shadow: 0 10px 28px rgba(51, 69, 84, 0.12);
+  background: var(--idox-navbar-bg);
+  color: var(--idox-navbar-text);
 }
 
 .brand-block {
@@ -264,6 +335,7 @@ a {
   gap: 0.9rem;
 }
 
+/* Idox type scale: h1 text-2xl/bold, h2 text-lg/semibold, h3 text-base/semibold. */
 .brand-block h1,
 .hero-panel h2,
 .section-heading h3,
@@ -271,136 +343,201 @@ a {
 .empty-state h4,
 .copy-block h4 {
   margin: 0;
-  font-family: "Gill Sans", "Trebuchet MS", sans-serif;
-  letter-spacing: 0.01em;
+  font-family: var(--idox-font-family-base);
+  letter-spacing: normal;
+  line-height: var(--idox-line-height-tight);
 }
 
-.brand-mark,
-.build-chip,
-.nav-pill,
-.status-pill,
-.priority-chip,
-.health-chip,
-.tag-chip,
-.action-button,
-.metric-card,
-.fact-card,
-.symbol-card,
-.queue-card,
-.context-card,
-.result-card {
-  backdrop-filter: blur(18px) saturate(140%);
+.brand-block h1 {
+  font-size: var(--idox-font-size-xl);
+  font-weight: var(--idox-font-weight-semibold);
+  color: var(--idox-navbar-text);
+}
+
+.hero-panel h2 {
+  font-size: var(--idox-font-size-lg);
+  font-weight: var(--idox-font-weight-semibold);
+  color: var(--idox-text-primary);
+}
+
+.section-heading h3,
+.detail-heading h3,
+.empty-state h4,
+.copy-block h4 {
+  font-size: var(--idox-font-size-base);
+  font-weight: var(--idox-font-weight-semibold);
+  color: var(--idox-text-primary);
 }
 
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 3rem;
-  height: 3rem;
-  border-radius: 0.85rem;
-  background: rgba(255, 255, 255, 0.68);
-  border: 1px solid rgba(16, 38, 54, 0.18);
-  font-weight: 700;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-bg-surface-default);
+  border: 0;
+  color: var(--idox-color-brand);
+  font-weight: var(--idox-font-weight-bold);
 }
 
 .brand-mark svg {
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 1.75rem;
+  height: 1.75rem;
   fill: none;
-  stroke: #17685d;
+  stroke: var(--idox-color-brand-accent);
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 3.5;
 }
 
 .eyebrow {
-  margin: 0 0 0.2rem;
-  font-size: 0.78rem;
-  letter-spacing: 0.18em;
+  margin: 0 0 0.15rem;
+  font-size: var(--idox-font-size-xs);
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-soft);
+  font-weight: var(--idox-font-weight-medium);
+  color: var(--idox-text-tertiary);
 }
 
 .top-nav {
   display: flex;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.25rem;
 }
 
 .header-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.55rem;
+  gap: 0.5rem;
 }
 
-.nav-pill,
+/* Status chips and tags — Idox semantic badge (§badge-semantic). */
 .build-chip,
-.icon-button,
 .tag-chip,
 .status-pill,
-.priority-chip,
-.health-chip {
+.priority-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--idox-radius-full);
+  border: 1px solid var(--idox-border-default);
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
+  white-space: nowrap;
+}
+
+/*
+ * Navbar links — Idox navbar item. No component currently renders .nav-pill;
+ * primary navigation is the side rail. Kept for the navbar pattern.
+ */
+.nav-pill {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.72rem 1rem;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--stroke);
-  background: var(--glass-light);
-  color: var(--text-main);
+  padding: 0.35rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: var(--idox-radius-sm);
+  background: transparent;
+  color: var(--idox-navbar-text);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-medium);
+  transition: background-color 140ms ease;
+}
+
+.nav-pill:hover {
+  background: var(--idox-navbar-hover);
+}
+
+.nav-pill:active {
+  background: var(--idox-navbar-active);
+}
+
+.nav-pill.active,
+.glass-header .nav-pill.active {
+  background: var(--idox-navbar-active);
+  border-color: var(--idox-navbar-active);
+  color: var(--idox-navbar-text);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .glass-header .eyebrow {
-  color: rgba(16, 38, 54, 0.62);
-}
-
-.glass-header .nav-pill,
-.glass-header .build-chip,
-.glass-header .icon-button {
-  border-color: rgba(16, 38, 54, 0.16);
-  background: rgba(255, 255, 255, 0.58);
-  color: #102636;
+  color: var(--idox-blue-300);
 }
 
 .glass-header .nav-pill {
-  min-width: 8rem;
+  min-width: 7rem;
   justify-content: center;
-  font-weight: 700;
 }
 
-.glass-header .nav-pill.active {
-  background: #17685d;
-  border-color: #17685d;
-  color: #f4fffb;
+/* Chips sitting on the dark navbar keep navbar colours. */
+.glass-header .build-chip {
+  border-color: var(--idox-navbar-active);
+  background: var(--idox-navbar-hover);
+  color: var(--idox-navbar-text);
 }
 
-.nav-pill.active {
-  background: #17685d;
-  border-color: #17685d;
-  color: #ffffff;
-}
-
+/* Icon-only button — Idox §buttons-icon-only. */
 .icon-button {
-  width: 2.85rem;
-  height: 2.85rem;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
+  width: 2rem;
+  height: 2rem;
   padding: 0;
+  border: 0;
+  border-radius: var(--idox-radius-lg);
+  background: transparent;
+  color: var(--idox-text-secondary);
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.icon-button:hover {
+  background: var(--idox-interactive-subtle-hover);
+  color: var(--idox-text-primary);
+}
+
+.icon-button:active {
+  background: var(--idox-interactive-subtle-active);
+}
+
+/* Navbar icon button — Idox uses rounded-md and navbar hover on the navbar. */
+.glass-header .icon-button {
+  border-radius: var(--idox-radius-md);
+  background: transparent;
+  color: var(--idox-navbar-icon);
+}
+
+.glass-header .icon-button:hover {
+  background: var(--idox-navbar-hover);
+  color: var(--idox-navbar-icon-hover);
+}
+
+.glass-header .icon-button:active {
+  background: var(--idox-navbar-active);
 }
 
 .icon-button svg {
-  width: 1.2rem;
-  height: 1.2rem;
+  width: 1.1rem;
+  height: 1.1rem;
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.9;
+  stroke-width: 1.5;
 }
 
+/*
+ * Side rail — a symgov-specific component with no Idox equivalent. Styled as
+ * an Idox panel with sidebar-item interaction tokens.
+ */
 .side-rail {
   position: fixed;
-  top: 5.65rem;
+  top: 5.15rem;
   bottom: 1rem;
   left: clamp(0.55rem, 1.5vw, 1rem);
   z-index: 18;
@@ -409,21 +546,19 @@ a {
   justify-content: space-between;
   width: 4.15rem;
   padding: 0.45rem;
-  border: 1px solid rgba(16, 38, 54, 0.14);
-  border-radius: 1.05rem;
-  background: rgba(251, 253, 254, 0.9);
-  box-shadow: 0 16px 36px rgba(51, 69, 84, 0.14);
-  backdrop-filter: blur(20px) saturate(145%);
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-xl);
+  background: var(--idox-bg-surface-default);
 }
 
 .rail-nav {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.35rem;
 }
 
 .rail-nav-admin {
-  padding-top: 0.6rem;
-  border-top: 1px solid rgba(16, 38, 54, 0.12);
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--idox-border-subtle);
 }
 
 .rail-link {
@@ -433,25 +568,23 @@ a {
   width: 3.15rem;
   height: 3.15rem;
   border: 1px solid transparent;
-  border-radius: 0.86rem;
-  color: rgba(16, 38, 54, 0.68);
+  border-radius: var(--idox-radius-lg);
+  color: var(--idox-text-secondary);
   outline: none;
-  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, transform 160ms ease;
+  transition: background-color 140ms ease, color 140ms ease;
 }
 
 .rail-link:hover,
 .rail-link:focus-visible {
-  border-color: rgba(23, 104, 93, 0.22);
-  background: rgba(23, 104, 93, 0.08);
-  color: #17685d;
-  transform: translateX(1px);
+  background: var(--idox-interactive-subtle-hover);
+  color: var(--idox-text-primary);
 }
 
+/* Idox: selected sidebar item uses the subtle-selected fill with blue text. */
 .rail-link.active {
-  border-color: #17685d;
-  background: #17685d;
-  color: #ffffff;
-  box-shadow: 0 10px 22px rgba(23, 104, 93, 0.22);
+  background: var(--idox-interactive-subtle-selected);
+  border-color: var(--idox-border-selected);
+  color: var(--idox-interactive-default);
 }
 
 .rail-link svg {
@@ -461,41 +594,31 @@ a {
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.9;
+  stroke-width: 1.5;
 }
 
+/* Tooltip — Idox §tooltip. */
 .rail-tooltip {
   position: absolute;
-  left: calc(100% + 0.7rem);
+  left: calc(100% + 0.625rem);
   top: 50%;
   z-index: 40;
   pointer-events: none;
-  transform: translate(-0.25rem, -50%);
+  transform: translateY(-50%);
   opacity: 0;
   white-space: nowrap;
-  padding: 0.45rem 0.65rem;
-  border-radius: 0.55rem;
-  background: #102636;
-  color: #ffffff;
-  font-size: 0.78rem;
-  font-weight: 800;
-  box-shadow: 0 12px 26px rgba(16, 38, 54, 0.22);
-  transition: opacity 140ms ease, transform 140ms ease;
-}
-
-.rail-tooltip::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  right: 100%;
-  transform: translateY(-50%);
-  border: 0.35rem solid transparent;
-  border-right-color: #102636;
+  padding: 0.3rem 0.5rem;
+  border-radius: 0.3rem;
+  background: var(--idox-slate-800);
+  color: var(--idox-white);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-medium);
+  line-height: 1;
+  transition: opacity 150ms ease;
 }
 
 .rail-link:hover .rail-tooltip,
 .rail-link:focus-visible .rail-tooltip {
-  transform: translate(0, -50%);
   opacity: 1;
 }
 
@@ -541,25 +664,27 @@ a {
   min-width: 0;
 }
 
+/* Content panels — Idox §panel-default. */
 .glass-panel {
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-xl);
-  background: var(--panel-bg);
-  box-shadow: var(--shadow);
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-xl);
+  background: var(--idox-bg-surface-default);
 }
 
+/* Page header panel — Idox panel header padding (px-5 py-3). */
 .hero-panel {
   display: flex;
   align-items: end;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1.2rem 1.35rem;
+  padding: 0.75rem 1.25rem;
 }
 
 .hero-panel h2 {
   max-width: 48rem;
-  font-size: clamp(1.45rem, 2.5vw, 2.25rem);
-  line-height: 1.1;
+  font-size: var(--idox-font-size-xl);
+  font-weight: var(--idox-font-weight-semibold);
+  line-height: var(--idox-line-height-tight);
 }
 
 .page-title-row {
@@ -567,25 +692,26 @@ a {
 }
 
 .title-support {
-  margin: 0.4rem 0 0;
-  color: var(--text-soft);
-  font-weight: 700;
+  margin: 0.25rem 0 0;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-normal);
 }
 
 .page-status-text {
   margin: -0.35rem 0 0.1rem;
-  color: var(--text-soft);
-  font-size: 0.88rem;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-sm);
 }
 
 .status-live,
 .status-ok {
-  color: #17685d;
+  color: var(--idox-success-text-color);
 }
 
 .status-error,
 .status-offline {
-  color: #a33d4c;
+  color: var(--idox-error-text-color);
 }
 
 .queue-monitor-shell {
@@ -639,17 +765,17 @@ a {
   height: 1.9rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
   color: var(--text-main);
   font-size: 1.05rem;
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
   line-height: 1;
   cursor: pointer;
 }
 
 .monitor-screen-chevron:hover,
 .monitor-screen-chevron:focus-visible {
-  border-color: rgba(47, 111, 167, 0.34);
+  border-color: var(--idox-border-focus);
   color: var(--blue);
   outline: none;
 }
@@ -669,7 +795,7 @@ a {
   padding: 0.42rem 0.55rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--idox-bg-surface-default);
 }
 
 .duration-stepper-part {
@@ -679,7 +805,7 @@ a {
 
 .duration-stepper-part span {
   font-size: 0.68rem;
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-soft);
@@ -690,23 +816,23 @@ a {
   padding: 0.42rem 0.5rem;
   border: 1px solid var(--stroke);
   border-radius: 0.55rem;
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
   text-align: center;
 }
 
 .duration-stepper-separator {
   align-self: center;
   margin-bottom: 0.1rem;
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
   color: var(--text-soft);
 }
 
 .search-inline-status {
   max-width: min(42rem, 44vw);
   overflow: hidden;
-  color: var(--text-muted);
+  color: var(--idox-text-tertiary);
   font-size: 0.82rem;
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -726,9 +852,9 @@ a {
   gap: 0.25rem;
   max-width: 100%;
   padding: 0.25rem;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-bg-surface-default);
 }
 
 .workspace-tab,
@@ -739,8 +865,8 @@ a {
   border-radius: 0.55rem;
   padding: 0.55rem 0.95rem;
   background: transparent;
-  color: var(--text-muted);
-  font-weight: 900;
+  color: var(--idox-text-tertiary);
+  font-weight: var(--idox-font-weight-bold);
   cursor: pointer;
 }
 
@@ -748,7 +874,7 @@ a {
   display: inline-flex;
   align-items: center;
   border: 1px solid var(--stroke);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--idox-bg-surface-default);
   text-decoration: none;
 }
 
@@ -762,8 +888,8 @@ a {
 
 .workspace-tab.active,
 .workspace-admin-link:hover {
-  background: #17685d;
-  color: #ffffff;
+  background: var(--idox-interactive-default);
+  color: var(--idox-text-inverse);
 }
 
 .monitor-screen-tabs {
@@ -784,35 +910,86 @@ a {
   min-width: min(100%, 24rem);
 }
 
+/* Form fields — Idox §3 text input, §8 select, §10 textarea. */
 .field {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.25rem;
 }
 
+/* Field label — Idox "block mb-1 text-sm font-medium text-secondary". */
 .field span {
-  font-size: 0.86rem;
-  color: var(--text-soft);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-medium);
+  color: var(--idox-text-secondary);
 }
 
 .field input,
 .field select,
 .field textarea {
   width: 100%;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-md);
-  padding: 0.95rem 1rem;
-  color: var(--text-main);
-  background: #ffffff;
+  border: 1px solid var(--idox-border-strong);
+  border-radius: var(--idox-radius-lg);
+  padding: 0.375rem 0.75rem;
+  font-size: var(--idox-font-size-sm);
+  color: var(--idox-text-primary);
+  background: var(--idox-bg-surface-default);
+  outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.field textarea {
+  padding: 0.5rem 0.75rem;
+}
+
+/* Idox focus for inputs: focus:ring-1 focus:ring-focus focus:border-focus. */
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--idox-border-focus);
+  box-shadow: 0 0 0 1px var(--idox-border-focus);
   outline: none;
 }
 
+.field input:disabled,
+.field select:disabled,
+.field textarea:disabled {
+  background: var(--idox-bg-disabled);
+  border-color: var(--idox-border-disabled);
+  color: var(--idox-text-disabled);
+  cursor: not-allowed;
+}
+
+.field input[aria-invalid='true'],
+.field select[aria-invalid='true'],
+.field textarea[aria-invalid='true'] {
+  border-color: var(--idox-error-border);
+}
+
+.field input[aria-invalid='true']:focus,
+.field select[aria-invalid='true']:focus,
+.field textarea[aria-invalid='true']:focus {
+  border-color: var(--idox-error-border);
+  box-shadow: 0 0 0 1px var(--idox-error-border);
+}
+
+/*
+ * Idox draws the select chevron with a Font Awesome icon. symgov has no Font
+ * Awesome licence in the app, so the same chevron is inlined as a background
+ * image in the design-system stroke colour. Flagged as an icon gap.
+ */
 .field select {
   appearance: none;
+  padding-right: 2rem;
+  cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23334155' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 0.75rem;
 }
 
 .field input::placeholder,
 .field textarea::placeholder {
-  color: #9aa5ad;
+  color: var(--idox-text-tertiary);
 }
 
 .three-pane-grid,
@@ -907,8 +1084,7 @@ a {
   overflow: hidden;
   border: 1px solid var(--stroke);
   border-radius: 0.8rem;
-  background: #ffffff;
-  box-shadow: 0 12px 28px rgba(51, 69, 84, 0.1);
+  background: var(--idox-bg-surface-default);
 }
 
 .monitor-column-header {
@@ -919,7 +1095,7 @@ a {
   min-height: 4.05rem;
   padding: 0.68rem 0.68rem 0.58rem;
   border-bottom: 1px solid var(--stroke);
-  background: #f4f7f9;
+  background: var(--idox-bg-surface-base);
 }
 
 .monitor-column-header h3,
@@ -953,11 +1129,11 @@ a {
   min-width: 1.55rem;
   height: 1.55rem;
   border-radius: var(--radius-md);
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
   border: 1px solid var(--stroke);
   color: var(--text-main);
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .monitor-column-body {
@@ -981,11 +1157,11 @@ a {
   padding: 0 0.45rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
   color: var(--text-main);
   cursor: pointer;
   font-size: 0.68rem;
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
   list-style: none;
   text-transform: uppercase;
 }
@@ -1007,8 +1183,8 @@ a {
   padding: 0.42rem;
   border: 1px solid var(--stroke);
   border-radius: 0.65rem;
-  background: #ffffff;
-  box-shadow: 0 18px 34px rgba(51, 69, 84, 0.16);
+  background: var(--idox-bg-surface-default);
+  box-shadow: 0 10px 15px -3px rgba(2, 6, 23, 0.1), 0 4px 6px -4px rgba(2, 6, 23, 0.1);
 }
 
 .monitor-status-filter-menu label {
@@ -1017,10 +1193,9 @@ a {
   align-items: center;
   gap: 0.35rem;
   min-height: 1.45rem;
-  color: var(--text-main);
-  font-size: 0.68rem;
-  font-weight: 800;
-  text-transform: uppercase;
+  color: var(--idox-text-primary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-medium);
 }
 
 .monitor-status-filter-menu input {
@@ -1047,7 +1222,7 @@ a {
   border: 1px solid var(--stroke);
   border-left: 3px solid var(--blue);
   border-radius: 0.55rem;
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
   color: inherit;
   text-align: left;
 }
@@ -1059,9 +1234,9 @@ a {
 
 .monitor-card-clickable:hover,
 .monitor-card-clickable:focus-visible {
-  border-color: rgba(47, 111, 167, 0.34);
+  border-color: var(--idox-border-focus);
   border-left-color: var(--teal);
-  background: #eef6fb;
+  background: var(--idox-interactive-subtle);
   outline: none;
 }
 
@@ -1104,13 +1279,13 @@ a {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 0.35rem;
-  color: var(--text-muted);
+  color: var(--idox-text-tertiary);
   font-size: 0.65rem;
   line-height: 1.1;
 }
 
 .monitor-card-tools span {
-  font-weight: 700;
+  font-weight: var(--idox-font-weight-semibold);
   text-transform: uppercase;
 }
 
@@ -1118,7 +1293,7 @@ a {
   min-width: 0;
   overflow: hidden;
   color: var(--text-main);
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1128,7 +1303,7 @@ a {
   width: fit-content;
   color: var(--text-main);
   font-size: 0.65rem;
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
   text-transform: uppercase;
 }
 
@@ -1141,15 +1316,15 @@ a {
 }
 
 .monitor-dot.priority-high {
-  background: #ffdf94;
+  background: var(--idox-warning-icon);
 }
 
 .monitor-dot.priority-medium {
-  background: var(--mint);
+  background: var(--idox-info-icon);
 }
 
 .monitor-dot.priority-low {
-  background: #b6d8ff;
+  background: var(--idox-info-border);
 }
 
 .monitor-empty {
@@ -1163,69 +1338,45 @@ a {
 .monitor-status-completed,
 .monitor-status-approved,
 .monitor-status-pass {
-  border-left-color: var(--mint);
+  border-left-color: var(--idox-success-border);
 }
 
 .monitor-status-running,
 .monitor-status-processing {
-  border-left-color: var(--cyan);
+  border-left-color: var(--idox-info-border);
 }
 
 .monitor-status-queued,
 .monitor-status-waiting,
 .monitor-status-review,
 .monitor-status-in-review {
-  border-left-color: #ffd166;
+  border-left-color: var(--idox-warning-border);
 }
 
 .monitor-status-escalated,
 .monitor-status-request-changes,
 .monitor-status-high {
-  border-left-color: var(--rose);
+  border-left-color: var(--idox-error-border);
 }
 
-.monitor-intake .monitor-column-header {
-  background: #e8f4ef;
-}
-
-.monitor-validation .monitor-column-header {
-  background: #e8f2fa;
-}
-
-.monitor-provenance .monitor-column-header {
-  background: #f6f1e4;
-}
-
-.monitor-classification .monitor-column-header {
-  background: #eaf6ef;
-}
-
-.monitor-coordination .monitor-column-header {
-  background: #f7ecef;
-}
-
-.monitor-human .monitor-column-header {
-  background: #eef1f3;
-}
-
-.monitor-publication .monitor-column-header {
-  background: #eeeef8;
-}
-
-.monitor-feedback .monitor-column-header {
-  background: #f3efe7;
-}
-
-.monitor-curation .monitor-column-header {
-  background: #eef6ea;
-}
-
-.monitor-control .monitor-column-header {
-  background: #f1edf8;
-}
-
+/*
+ * TOKEN GAP: the workspace board previously gave each processing lane its own
+ * identity tint. The Idox system defines only the four semantic status ramps
+ * (info, success, warning, error) and has no categorical palette, so lane
+ * headers are uniform. Lanes remain distinguishable by heading and position.
+ */
+.monitor-intake .monitor-column-header,
+.monitor-validation .monitor-column-header,
+.monitor-provenance .monitor-column-header,
+.monitor-classification .monitor-column-header,
+.monitor-coordination .monitor-column-header,
+.monitor-human .monitor-column-header,
+.monitor-publication .monitor-column-header,
+.monitor-feedback .monitor-column-header,
+.monitor-curation .monitor-column-header,
+.monitor-control .monitor-column-header,
 .monitor-intelligence .monitor-column-header {
-  background: #e9f4f4;
+  background: var(--idox-bg-surface-base);
 }
 
 .review-filter-grid {
@@ -1326,59 +1477,70 @@ a {
   height: 2rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
   color: var(--text-main);
   font-size: 1rem;
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
   line-height: 1;
 }
 
 .icon-nav-button:disabled {
-  color: #aab3b9;
+  color: var(--idox-text-disabled);
   cursor: not-allowed;
   opacity: 0.62;
 }
 
+/*
+ * Segmented control. Idox has no segmented-control component, so this keeps
+ * its existing form and takes Idox selection tokens. Flagged as an extension.
+ */
 .segmented-control {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.35rem;
+  gap: 0.25rem;
   padding: 0.25rem;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-md);
-  background: var(--panel-soft);
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-bg-surface-base);
 }
 
 .segmented-control button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
-  min-height: 2.1rem;
+  gap: 0.375rem;
+  min-height: 2rem;
   border: 0;
-  border-radius: 0.38rem;
+  border-radius: var(--idox-radius-md);
   background: transparent;
-  color: var(--text-soft);
-  font-weight: 800;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
+.segmented-control button:hover {
+  background: var(--idox-interactive-subtle-hover);
+  color: var(--idox-text-primary);
+}
+
+/* Count badge inside a segment — Idox §badge-semantic, neutral variant. */
 .segmented-control button span {
   display: inline-grid;
   place-items: center;
   min-width: 1.35rem;
   height: 1.35rem;
-  padding: 0 0.35rem;
-  border: 1px solid var(--stroke);
-  border-radius: 999px;
-  background: #ffffff;
-  color: var(--text-main);
-  font-size: 0.72rem;
+  padding: 0 0.5rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-full);
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .segmented-control button.active {
-  background: #ffffff;
-  color: var(--blue);
-  box-shadow: 0 4px 12px rgba(51, 69, 84, 0.12);
+  background: var(--idox-interactive-subtle-selected);
+  color: var(--idox-interactive-default);
 }
 
 .review-list-card {
@@ -1448,12 +1610,13 @@ a {
   display: grid;
   place-items: center;
   min-height: 10.5rem;
-  border: 1px solid var(--stroke);
-  border-radius: 0.65rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  /* Transparency checkerboard for symbol previews, in the Idox slate ramp. */
   background:
-    linear-gradient(45deg, rgba(47, 111, 167, 0.05) 25%, transparent 25%),
-    linear-gradient(-45deg, rgba(47, 111, 167, 0.05) 25%, transparent 25%),
-    #ffffff;
+    linear-gradient(45deg, var(--idox-bg-surface-subtle) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--idox-bg-surface-subtle) 25%, transparent 25%),
+    var(--idox-bg-surface-default);
   background-size: 1.1rem 1.1rem;
   overflow: hidden;
 }
@@ -1488,7 +1651,7 @@ a {
   padding: 0.75rem;
   border: 1px solid var(--stroke);
   border-radius: 0.65rem;
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
 }
 
 .symbol-property-editor-left,
@@ -1535,11 +1698,11 @@ a {
 
 .property-combo-field select {
   border: 1px solid var(--stroke);
-  background: #f8fafc;
+  background: var(--idox-bg-surface-base);
   color: var(--text-main);
   font: inherit;
   font-size: 0.82rem;
-  font-weight: 700;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .symbol-description-field {
@@ -1560,7 +1723,7 @@ a {
   padding: 0.45rem 0.6rem;
   border: 1px solid var(--stroke);
   border-radius: 0.55rem;
-  background: #f8fafc;
+  background: var(--idox-bg-surface-base);
   color: var(--text-main);
 }
 
@@ -1576,7 +1739,7 @@ a {
 .property-format-indicator span {
   color: var(--text-soft);
   font-size: 0.72rem;
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
   text-transform: uppercase;
 }
 
@@ -1599,7 +1762,7 @@ a {
 .symbol-property-actions small {
   color: var(--text-soft);
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .compact-save-button {
@@ -1667,98 +1830,100 @@ a {
   padding: 0.22rem 0.5rem;
   border: 1px solid var(--stroke);
   border-radius: 999px;
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
   color: var(--text-soft);
   font-size: 0.7rem;
-  font-weight: 850;
+  font-weight: var(--idox-font-weight-bold);
   white-space: nowrap;
 }
 
 .case-decision-button {
   min-height: 2.15rem;
-  padding: 0.46rem 0.68rem;
-  border-color: var(--stroke);
-  background: #ffffff;
-  font-size: 0.75rem;
-  font-weight: 800;
-  line-height: 1.1;
+  padding: 0.375rem 0.75rem;
+  border-color: var(--idox-border-strong);
+  background: var(--idox-btn-secondary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
+  line-height: var(--idox-line-height-tight);
 }
 
+/*
+ * Selected decision — colour-coded with the Idox semantic status ramps.
+ * TOKEN GAP: the previous palette used purple for "rename and classify" and
+ * orange for "duplicate". Idox defines only info, success, warning and error,
+ * so those two fall back to neutral and error respectively.
+ */
 .case-decision-button.selected {
-  color: #08131a;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.4),
-    0 0.55rem 1.2rem rgba(0, 0, 0, 0.2);
+  color: var(--idox-text-primary);
+  box-shadow: inset 0 0 0 1px var(--idox-bg-surface-default);
 }
 
-.case-decision-child_actions_submitted.selected {
-  border-color: rgba(138, 217, 255, 0.95);
-  background: #8ad9ff;
+.case-decision-child_actions_submitted.selected,
+.case-decision-more_evidence.selected {
+  border-color: var(--idox-info-border);
+  background: var(--idox-info-bg);
+  color: var(--idox-info-text-color);
 }
 
 .case-decision-approve.selected,
 .case-decision-approved.selected {
-  border-color: rgba(167, 255, 216, 0.95);
-  background: #a7ffd8;
+  border-color: var(--idox-success-border);
+  background: var(--idox-success-bg);
+  color: var(--idox-success-text-color);
 }
 
 .case-decision-reject.selected,
 .case-decision-rejected.selected,
-.case-decision-deleted.selected {
-  border-color: rgba(255, 200, 219, 0.95);
-  background: #ffc8db;
+.case-decision-deleted.selected,
+.case-decision-duplicate.selected {
+  border-color: var(--idox-error-border);
+  background: var(--idox-error-bg);
+  color: var(--idox-error-text-color);
 }
 
 .case-decision-request_changes.selected {
-  border-color: rgba(255, 223, 148, 0.95);
-  background: #ffdf94;
+  border-color: var(--idox-warning-border);
+  background: var(--idox-warning-bg);
+  color: var(--idox-warning-text-color);
 }
 
-.case-decision-more_evidence.selected {
-  border-color: rgba(138, 217, 255, 0.95);
-  background: #8ad9ff;
-}
-
-.case-decision-rename_classify.selected {
-  border-color: rgba(205, 190, 255, 0.95);
-  background: #cdbeff;
-}
-
-.case-decision-duplicate.selected {
-  border-color: rgba(255, 185, 150, 0.95);
-  background: #ffb996;
-}
-
+.case-decision-rename_classify.selected,
 .case-decision-defer.selected {
-  border-color: rgba(212, 221, 226, 0.95);
-  background: #d4dde2;
+  border-color: var(--idox-border-strong);
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
 }
 
+/* Record review — Idox §buttons-primary with status feedback states. */
 .record-review-button {
   width: 100%;
-  min-height: 2.75rem;
-  border-color: #17685d;
-  background: #17685d;
-  color: #ffffff;
-  font-weight: 900;
+  min-height: 2.5rem;
+  border-color: var(--idox-color-brand-accent);
+  background: var(--idox-btn-primary);
+  color: var(--idox-btn-primary-text);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.record-review-button:hover:not(:disabled) {
+  background: var(--idox-btn-primary-hover);
 }
 
 .record-review-button.recording {
-  border-color: rgba(255, 223, 148, 0.82);
-  background: #ffdf94;
-  color: #08131a;
+  border-color: var(--idox-warning-border);
+  background: var(--idox-warning-bg);
+  color: var(--idox-warning-text-color);
 }
 
 .record-review-button.recorded {
-  border-color: rgba(167, 255, 216, 0.95);
-  background: #a7ffd8;
-  color: #08131a;
+  border-color: var(--idox-success-border);
+  background: var(--idox-success-bg);
+  color: var(--idox-success-text-color);
 }
 
 .record-review-button.failed {
-  border-color: rgba(255, 200, 219, 0.95);
-  background: #ffc8db;
-  color: #08131a;
+  border-color: var(--idox-error-border);
+  background: var(--idox-error-bg);
+  color: var(--idox-error-text-color);
 }
 
 .submission-grid {
@@ -1808,10 +1973,9 @@ a {
   align-items: center;
   gap: 0.75rem;
   flex: 0 0 auto;
-  font-size: 0.82rem;
-  font-weight: 900;
-  color: var(--text-muted);
-  text-transform: uppercase;
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
+  color: var(--idox-text-tertiary);
 }
 
 .workspace-sources-tab {
@@ -1830,7 +1994,7 @@ a {
   overflow-y: auto;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.76);
+  background: var(--idox-bg-surface-default);
   overscroll-behavior-x: contain;
 }
 
@@ -1849,8 +2013,8 @@ a {
   min-width: 9.5rem;
   padding: 0.55rem;
   border-bottom: 1px solid var(--stroke);
-  border-right: 1px solid rgba(23, 49, 61, 0.1);
-  background: rgba(246, 250, 249, 0.98);
+  border-right: 1px solid var(--idox-border-subtle);
+  background: var(--idox-bg-surface-base);
   text-align: left;
   vertical-align: top;
 }
@@ -1888,16 +2052,16 @@ a {
   gap: 0.5rem;
   border: 0;
   background: transparent;
-  color: var(--text);
+  color: var(--idox-text-primary);
   font: inherit;
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
   text-align: left;
   cursor: pointer;
 }
 
 .source-sort-indicator {
   min-width: 2.2rem;
-  color: var(--text-muted);
+  color: var(--idox-text-tertiary);
   font-size: 0.68rem;
   text-align: right;
   text-transform: uppercase;
@@ -1907,9 +2071,9 @@ a {
   width: 100%;
   margin-top: 0.45rem;
   padding: 0.45rem 0.5rem;
-  border: 1px solid rgba(23, 49, 61, 0.18);
+  border: 1px solid var(--idox-border-default);
   border-radius: 0.45rem;
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
   font: inherit;
 }
 
@@ -1917,9 +2081,9 @@ a {
   width: 100%;
   margin-top: 0.45rem;
   padding: 0.45rem 0.5rem;
-  border: 1px solid rgba(23, 49, 61, 0.18);
+  border: 1px solid var(--idox-border-default);
   border-radius: 0.45rem;
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
   font: inherit;
 }
 
@@ -1930,10 +2094,10 @@ a {
 
 .source-status-filter summary {
   padding: 0.45rem 0.5rem;
-  border: 1px solid rgba(23, 49, 61, 0.18);
+  border: 1px solid var(--idox-border-default);
   border-radius: 0.45rem;
-  background: #ffffff;
-  color: var(--text);
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-primary);
   cursor: pointer;
   font: inherit;
   list-style: none;
@@ -1951,10 +2115,10 @@ a {
   margin-top: 0.35rem;
   padding: 0.45rem;
   gap: 0.35rem;
-  border: 1px solid rgba(23, 49, 61, 0.18);
+  border: 1px solid var(--idox-border-default);
   border-radius: 0.45rem;
-  background: #ffffff;
-  box-shadow: var(--shadow-soft);
+  background: var(--idox-bg-surface-default);
+  box-shadow: 0 10px 15px -3px rgba(2, 6, 23, 0.1), 0 4px 6px -4px rgba(2, 6, 23, 0.1);
 }
 
 .source-status-filter-menu label {
@@ -1962,7 +2126,7 @@ a {
   align-items: center;
   gap: 0.45rem;
   font-size: 0.78rem;
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
 }
 
 .source-status-editor {
@@ -1973,19 +2137,19 @@ a {
 .source-status-editor select {
   min-width: 8.5rem;
   padding: 0.42rem 0.5rem;
-  border: 1px solid rgba(23, 49, 61, 0.18);
+  border: 1px solid var(--idox-border-default);
   border-radius: 0.45rem;
-  background: #ffffff;
-  color: var(--text);
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-primary);
   font: inherit;
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
   text-transform: none;
 }
 
 .source-status-saving {
-  color: var(--text-muted);
+  color: var(--idox-text-tertiary);
   font-size: 0.74rem;
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .source-next-run-toggle {
@@ -1993,13 +2157,13 @@ a {
   grid-template-columns: auto 1fr;
   align-items: center;
   gap: 0.35rem 0.5rem;
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
 }
 
 .source-next-run-toggle input {
   width: 1rem;
   height: 1rem;
-  accent-color: var(--accent-strong);
+  accent-color: var(--idox-interactive-default);
 }
 
 .source-next-run-toggle .source-prompt-error {
@@ -2016,10 +2180,10 @@ a {
   min-width: 18rem;
   resize: vertical;
   padding: 0.5rem;
-  border: 1px solid rgba(23, 49, 61, 0.18);
+  border: 1px solid var(--idox-border-default);
   border-radius: 0.45rem;
-  background: #ffffff;
-  color: var(--text);
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-primary);
   font: inherit;
   line-height: 1.35;
 }
@@ -2030,17 +2194,25 @@ a {
   gap: 0.5rem;
 }
 
+/* Small action — Idox secondary button, small. --accent-strong was undefined. */
 .mini-action-button {
-  border: 1px solid rgba(25, 85, 96, 0.28);
-  border-radius: 0.45rem;
-  background: rgba(25, 85, 96, 0.1);
-  color: var(--accent-strong);
+  border: 1px solid var(--idox-border-strong);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-btn-secondary);
+  color: var(--idox-btn-secondary-text);
   font: inherit;
-  font-size: 0.74rem;
-  font-weight: 900;
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
   cursor: pointer;
-  padding: 0.35rem 0.55rem;
-  text-transform: uppercase;
+  padding: 0.25rem 0.5rem;
+}
+
+.mini-action-button:hover {
+  background: var(--idox-btn-secondary-hover);
+}
+
+.mini-action-button:active {
+  background: var(--idox-btn-secondary-active);
 }
 
 .mini-action-button:disabled {
@@ -2049,44 +2221,44 @@ a {
 }
 
 .mini-action-button-secondary {
-  background: rgba(23, 49, 61, 0.05);
-  color: var(--text-muted);
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-tertiary);
 }
 
 .source-prompt-disabled {
-  color: var(--text-muted);
-  font-weight: 800;
+  color: var(--idox-text-tertiary);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .source-prompt-error {
-  color: #a13d32;
+  color: var(--idox-error-text-color);
   font-size: 0.74rem;
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .source-prompt-success {
-  color: #2f7d4c;
+  color: var(--idox-success-text-color);
   font-size: 0.74rem;
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
 }
 
 .scott-sources-grid td {
   max-width: 18rem;
   padding: 0.62rem 0.55rem;
-  border-bottom: 1px solid rgba(23, 49, 61, 0.08);
-  border-right: 1px solid rgba(23, 49, 61, 0.08);
-  color: var(--text);
+  border-bottom: 1px solid var(--idox-border-subtle);
+  border-right: 1px solid var(--idox-border-subtle);
+  color: var(--idox-text-primary);
   vertical-align: top;
   overflow-wrap: anywhere;
 }
 
 .source-cell-status {
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
   text-transform: capitalize;
 }
 
 .source-cell-title {
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .source-cell-evidence {
@@ -2096,15 +2268,15 @@ a {
 
 .source-cell-sourceUrl a,
 .source-cell-imageUrl a {
-  color: var(--accent-strong);
-  font-weight: 800;
+  color: var(--idox-link-default);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .source-empty-cell,
 .source-loading-row {
   padding: 1rem;
-  color: var(--text-muted);
-  font-weight: 800;
+  color: var(--idox-text-tertiary);
+  font-weight: var(--idox-font-weight-semibold);
   text-align: center;
 }
 
@@ -2113,8 +2285,8 @@ a {
   padding: 0.58rem 0.72rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.72);
-  font-weight: 900;
+  background: var(--idox-bg-surface-default);
+  font-weight: var(--idox-font-weight-bold);
   text-align: center;
 }
 
@@ -2154,7 +2326,7 @@ a {
   padding: 0.85rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.66);
+  background: var(--idox-bg-surface-default);
 }
 
 .catalog-preference-card h4 {
@@ -2165,7 +2337,7 @@ a {
 .checkbox-row.compact {
   gap: 0.45rem;
   font-size: 0.86rem;
-  font-weight: 650;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .saved-view-row {
@@ -2188,7 +2360,7 @@ a {
   padding: 0.55rem 0.65rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-sm);
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
   color: var(--text-main);
   font: inherit;
   line-height: 1.35;
@@ -2198,7 +2370,7 @@ a {
   margin: 0;
   color: var(--text-soft);
   font-size: 0.78rem;
-  font-weight: 750;
+  font-weight: var(--idox-font-weight-semibold);
   line-height: 1.35;
 }
 
@@ -2237,7 +2409,7 @@ a {
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  background: rgba(238, 246, 251, 0.68);
+  background: var(--idox-interactive-subtle);
 }
 
 .catalog-clipboard-item > div {
@@ -2285,7 +2457,7 @@ a {
   align-items: center;
   gap: 0.55rem;
   color: var(--text-main);
-  font-weight: 650;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .checkbox-row input {
@@ -2332,29 +2504,35 @@ a {
   gap: 0.18rem;
 }
 
+/* View toggle — Idox §buttons-icon-only, selected state. */
 .catalog-view-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 0.2rem;
-  padding: 0.22rem;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.82);
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-bg-surface-default);
 }
 
 .catalog-view-toggle button {
   border: 0;
-  border-radius: 0.55rem;
-  padding: 0.45rem 0.7rem;
+  border-radius: var(--idox-radius-md);
+  padding: 0.25rem 0.5rem;
   background: transparent;
-  color: var(--text-soft);
-  font-size: 0.82rem;
-  font-weight: 900;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.catalog-view-toggle button:hover {
+  background: var(--idox-interactive-subtle-hover);
+  color: var(--idox-text-primary);
 }
 
 .catalog-view-toggle button.active {
-  background: #17685d;
-  color: #ffffff;
+  background: var(--idox-interactive-subtle-selected);
+  color: var(--idox-interactive-default);
 }
 
 .standards-result-meta strong {
@@ -2369,7 +2547,7 @@ a {
   padding: 0.85rem 1rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  background: rgba(238, 246, 251, 0.72);
+  background: var(--idox-interactive-subtle);
 }
 
 .published-command-bar > div:first-child {
@@ -2399,7 +2577,7 @@ a {
 
 .catalog-download-format span {
   font-size: 0.78rem;
-  font-weight: 700;
+  font-weight: var(--idox-font-weight-semibold);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -2408,25 +2586,33 @@ a {
   min-width: 8.5rem;
 }
 
+/* Inline status — Idox §callout. */
 .inline-status {
   margin: 0;
-  padding: 0.65rem 0.8rem;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--stroke);
-  background: rgba(255, 255, 255, 0.78);
-  color: var(--text-soft);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--idox-radius-lg);
+  border: 1px solid var(--idox-info-border);
+  background: var(--idox-info-bg);
+  color: var(--idox-info-text-color);
+  font-size: var(--idox-font-size-sm);
 }
 
 .inline-status.error {
-  border-color: rgba(171, 44, 44, 0.32);
-  background: rgba(255, 237, 237, 0.9);
-  color: #8d2020;
+  border-color: var(--idox-error-border);
+  background: var(--idox-error-bg);
+  color: var(--idox-error-text-color);
 }
 
 .inline-status.success {
-  border-color: rgba(25, 126, 84, 0.3);
-  background: rgba(232, 249, 240, 0.92);
-  color: #196d49;
+  border-color: var(--idox-success-border);
+  background: var(--idox-success-bg);
+  color: var(--idox-success-text-color);
+}
+
+.inline-status.warning {
+  border-color: var(--idox-warning-border);
+  background: var(--idox-warning-bg);
+  color: var(--idox-warning-text-color);
 }
 
 .approved-symbol-grid {
@@ -2434,8 +2620,7 @@ a {
   overflow: auto;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, #ffffff 0%, #f9fcfb 100%);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85), 0 18px 34px rgba(12, 24, 38, 0.08);
+  background: linear-gradient(180deg, var(--idox-bg-surface-default) 0%, var(--idox-bg-surface-default) 100%);
 }
 
 .catalog-card-grid {
@@ -2455,7 +2640,7 @@ a {
   padding: 0.72rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.88);
+  background: var(--idox-bg-surface-default);
   color: inherit;
   cursor: pointer;
   transition: border-color 140ms ease, background 140ms ease, transform 140ms ease, box-shadow 140ms ease;
@@ -2464,9 +2649,8 @@ a {
 .catalog-symbol-card:hover,
 .catalog-symbol-card:focus-visible,
 .catalog-symbol-card.active {
-  border-color: rgba(47, 111, 167, 0.44);
-  background: #eef6fb;
-  box-shadow: 0 12px 24px rgba(51, 69, 84, 0.11);
+  border-color: var(--idox-border-focus);
+  background: var(--idox-interactive-subtle);
   outline: none;
   transform: translateY(-1px);
 }
@@ -2483,10 +2667,10 @@ a {
   width: 2rem;
   height: 2rem;
   padding: 0;
-  border: 1px solid rgba(29, 43, 54, 0.18);
+  border: 1px solid var(--idox-border-default);
   border-radius: 999px;
-  background: #ffffff;
-  color: #60717d;
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-tertiary);
   cursor: pointer;
   font-size: 1.2rem;
   line-height: 1;
@@ -2494,13 +2678,13 @@ a {
 
 .catalog-favourite-button:hover,
 .catalog-favourite-button.selected {
-  border-color: #a66d00;
-  background: #fff7d6;
-  color: #9a6500;
+  border-color: var(--idox-warning-border);
+  background: var(--idox-warning-bg);
+  color: var(--idox-warning-text-color);
 }
 
 .catalog-favourite-button:focus-visible {
-  outline: 3px solid rgba(47, 111, 167, 0.55);
+  outline: var(--focus-outline);
   outline-offset: 2px;
 }
 
@@ -2561,7 +2745,7 @@ a {
 .catalog-card-body p {
   color: var(--text-soft);
   font-size: 0.78rem;
-  font-weight: 700;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .catalog-card-chip-row {
@@ -2575,20 +2759,20 @@ a {
   min-height: 1.45rem;
   max-width: 100%;
   padding: 0.22rem 0.48rem;
-  border: 1px solid rgba(29, 43, 54, 0.1);
+  border: 1px solid var(--idox-border-subtle);
   border-radius: 999px;
-  background: rgba(29, 43, 54, 0.06);
+  background: var(--idox-bg-surface-subtle);
   color: var(--text-soft);
   font-size: 0.68rem;
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .catalog-card-chip-row span.format-chip {
-  background: rgba(23, 104, 93, 0.1);
-  color: #17685d;
+  background: var(--idox-interactive-subtle);
+  color: var(--idox-text-brand-accent);
 }
 
 .approved-symbol-grid table {
@@ -2597,10 +2781,15 @@ a {
   border-collapse: collapse;
 }
 
+/*
+ * Data tables — Idox §table-basic. Idox specifies px-5 for a three-column
+ * table; symgov's operator grids run to a dozen columns, so horizontal padding
+ * uses space-3 instead. Vertical rhythm and all colours follow the system.
+ */
 .approved-symbol-grid th,
 .approved-symbol-grid td {
-  padding: 0.72rem 0.75rem;
-  border-bottom: 1px solid var(--stroke);
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--idox-border-subtle);
   text-align: left;
   vertical-align: middle;
 }
@@ -2613,7 +2802,7 @@ a {
 .approved-symbol-grid .select-column input {
   width: 1rem;
   height: 1rem;
-  accent-color: var(--blue);
+  accent-color: var(--idox-interactive-default);
 }
 
 .table-icon-indicator {
@@ -2622,14 +2811,15 @@ a {
   justify-content: center;
   width: 1.85rem;
   height: 1.85rem;
-  border-radius: 999px;
-  font-size: 0.95rem;
-  background: rgba(16, 72, 92, 0.08);
+  border-radius: var(--idox-radius-full);
+  font-size: var(--idox-font-size-sm);
+  color: var(--idox-text-secondary);
+  background: var(--idox-bg-surface-subtle);
 }
 
 .table-icon-indicator.positive {
-  color: #0f6d54;
-  background: rgba(214, 245, 232, 0.95);
+  color: var(--idox-success-icon);
+  background: var(--idox-success-bg);
 }
 
 .table-icon-indicator.muted {
@@ -2637,50 +2827,78 @@ a {
   filter: grayscale(1);
 }
 
+/* Table header — Idox "border-b border-subtle bg-surface-base". */
 .approved-symbol-grid th {
   position: sticky;
   top: 0;
   z-index: 2;
-  background: linear-gradient(180deg, #eaf4f0 0%, #dcebef 100%);
-  color: #183446;
-  box-shadow: 0 1px 0 var(--stroke);
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  background: var(--idox-bg-surface-base);
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
+  box-shadow: 0 1px 0 var(--idox-border-subtle);
 }
 
 .approved-symbol-grid tr {
   cursor: pointer;
 }
 
-.approved-symbol-grid tbody tr:hover,
-.approved-symbol-grid tbody tr.active {
-  background: #eef6fb;
+/*
+ * Idox tables use row hover only, with no zebra striping. The previous
+ * even-row tint is removed for system fidelity.
+ */
+.approved-symbol-grid tbody tr {
+  transition: background-color 120ms ease;
 }
 
-.approved-symbol-grid tbody tr:nth-child(even):not(.active) {
-  background: rgba(248, 252, 251, 0.72);
+.approved-symbol-grid tbody tr:hover {
+  background: var(--idox-bg-surface-base);
+}
+
+.approved-symbol-grid tbody tr.active {
+  background: var(--idox-interactive-subtle-selected);
 }
 
 .approved-symbol-grid tbody tr:focus-visible {
-  outline: 2px solid var(--blue);
+  outline: var(--focus-outline);
   outline-offset: -2px;
 }
 
+/* Column filter input inside a header cell — Idox input, small. */
 .approved-symbol-grid th input {
   width: 100%;
-  margin-top: 0.35rem;
-  border: 1px solid var(--stroke);
-  border-radius: 0.35rem;
-  padding: 0.38rem 0.45rem;
+  margin-top: 0.25rem;
+  border: 1px solid var(--idox-border-strong);
+  border-radius: var(--idox-radius-lg);
+  padding: 0.25rem 0.5rem;
+  font-size: var(--idox-font-size-sm);
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-primary);
 }
 
+.approved-symbol-grid th input:focus {
+  border-color: var(--idox-border-focus);
+  box-shadow: 0 0 0 1px var(--idox-border-focus);
+  outline: none;
+}
+
+/* Sortable column header — Idox table header button. */
 .column-sort-button {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.25rem;
   border: 0;
   padding: 0;
   background: transparent;
-  color: var(--text-main);
-  font-weight: 900;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.column-sort-button:hover {
+  color: var(--idox-text-primary);
 }
 
 .standards-detail-panel {
@@ -2693,30 +2911,40 @@ a {
   overflow: auto;
 }
 
+/* Detail tabs — Idox §tabs-default. */
 .published-detail-tabs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.45rem;
+  display: flex;
+  gap: 1rem;
   margin: 1rem 0;
-  padding: 0.25rem;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-sm);
-  background: rgba(238, 246, 251, 0.58);
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--idox-border-subtle);
+  border-radius: 0;
+  background: transparent;
 }
 
 .published-detail-tabs button {
+  margin-bottom: -1px;
   border: 0;
-  border-radius: 0.55rem;
-  padding: 0.65rem 0.75rem;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0.5rem 0.75rem;
   background: transparent;
-  color: var(--text-soft);
-  font-weight: 900;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-normal);
+}
+
+.published-detail-tabs button:hover {
+  border-bottom-color: var(--idox-border-subtle);
+  color: var(--idox-text-primary);
 }
 
 .published-detail-tabs button.active {
-  background: #ffffff;
-  color: var(--text-main);
-  box-shadow: 0 1px 4px rgba(30, 58, 75, 0.12);
+  border-bottom-color: var(--idox-color-brand-accent);
+  background: transparent;
+  color: var(--idox-text-primary);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .comment-history-list {
@@ -2730,7 +2958,7 @@ a {
   padding: 0.9rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--idox-bg-surface-default);
 }
 
 .comment-history-card p {
@@ -2765,6 +2993,7 @@ a {
   gap: 0.55rem;
 }
 
+/* Dialog — Idox §dialog, backdrop uses the overlay token. */
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -2772,19 +3001,18 @@ a {
   display: grid;
   place-items: center;
   padding: 1.5rem;
-  background: rgba(7, 20, 32, 0.48);
-  backdrop-filter: blur(5px);
+  background: var(--idox-overlay-bg);
 }
 
 .modal-card {
   width: min(42rem, 100%);
   max-height: calc(100vh - 3rem);
   overflow: auto;
-  padding: 1.25rem;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, #ffffff 0%, #f7fbfa 100%);
-  box-shadow: 0 22px 80px rgba(7, 20, 32, 0.28);
+  padding: 1.5rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-bg-surface-default);
+  box-shadow: 0 10px 15px -3px rgba(2, 6, 23, 0.1), 0 4px 6px -4px rgba(2, 6, 23, 0.1);
 }
 
 .published-command-dialog {
@@ -2807,7 +3035,7 @@ a {
   padding: 0.65rem 0.8rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-sm);
-  background: rgba(238, 246, 251, 0.62);
+  background: var(--idox-interactive-subtle);
 }
 
 .selected-symbol-list span {
@@ -2840,7 +3068,7 @@ a {
   overflow-x: auto;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.76);
+  background: var(--idox-bg-surface-default);
 }
 
 .admin-users-grid {
@@ -2854,16 +3082,16 @@ a {
 .admin-users-grid th,
 .admin-users-grid td {
   padding: 0.62rem 0.7rem;
-  border-bottom: 1px solid rgba(23, 49, 61, 0.08);
+  border-bottom: 1px solid var(--idox-border-subtle);
   text-align: left;
   vertical-align: middle;
 }
 
 .admin-users-grid th {
-  background: rgba(246, 250, 249, 0.98);
-  border-right: 1px solid rgba(23, 49, 61, 0.1);
+  background: var(--idox-bg-surface-base);
+  border-right: 1px solid var(--idox-border-subtle);
   color: var(--text-main);
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
 }
 
 .admin-users-grid th:first-child,
@@ -2901,20 +3129,20 @@ a {
   min-height: 1.8rem;
   padding: 0.32rem 0.6rem;
   border-radius: 999px;
-  background: rgba(29, 43, 54, 0.08);
+  background: var(--idox-bg-surface-subtle);
   color: var(--text-soft);
   font-size: 0.78rem;
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
 }
 
 .admin-status-pill.active {
-  background: rgba(23, 104, 93, 0.12);
-  color: #17685d;
+  background: var(--idox-interactive-subtle);
+  color: var(--idox-text-brand-accent);
 }
 
 .admin-status-pill.inactive {
-  background: rgba(184, 34, 34, 0.1);
-  color: #9d1d1d;
+  background: var(--idox-error-bg);
+  color: var(--idox-error-text-color);
 }
 
 .admin-user-row-actions {
@@ -2930,36 +3158,36 @@ a {
   gap: 0.65rem;
 }
 
+/* Subscription badge — Idox §badge-semantic, warning variant. */
 .plus-subscription-badge,
 .subscription-tier-pill {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
-  padding: 0.2rem 0.5rem;
-  background: rgba(193, 139, 28, 0.16);
-  color: #79530a;
-  font-size: 0.72rem;
-  font-weight: 900;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  border-radius: var(--idox-radius-full);
+  padding: 0.125rem 0.5rem;
+  background: var(--idox-warning-bg);
+  border: 1px solid var(--idox-warning-border);
+  color: var(--idox-warning-text-color);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .subscription-tier-pill.free {
-  background: rgba(29, 43, 54, 0.08);
+  background: var(--idox-bg-surface-subtle);
   color: var(--text-soft);
 }
 
 .subscription-tier-pill.plus {
-  border-color: rgba(80, 200, 160, 0.45);
-  background: rgba(80, 200, 160, 0.14);
-  color: #17685d;
+  border-color: var(--idox-success-border);
+  background: var(--idox-success-bg);
+  color: var(--idox-text-brand-accent);
 }
 
 .protected-owner-label {
   align-self: center;
   color: var(--text-soft);
   font-size: 0.78rem;
-  font-weight: 700;
+  font-weight: var(--idox-font-weight-semibold);
   white-space: nowrap;
 }
 
@@ -2986,11 +3214,11 @@ a {
 .effective-palette-panel,
 .organization-projects-panel,
 .organization-symbol-sets-panel {
-  border: 1px solid #dbe2ea;
+  border: 1px solid var(--idox-border-default);
   border-radius: 10px;
   padding: 14px;
   margin-bottom: 18px;
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
 }
 
 .project-context-title-row,
@@ -3016,13 +3244,13 @@ a {
 .project-context-alert,
 .project-admin-status.error,
 .set-admin-status.error {
-  color: #991b1b;
+  color: var(--idox-error-text-color);
 }
 
 .project-context-status,
 .project-admin-muted,
 .set-admin-muted {
-  color: #4b5563;
+  color: var(--idox-text-secondary);
   font-size: 0.92rem;
 }
 
@@ -3040,7 +3268,7 @@ a {
   align-items: flex-start;
   gap: 10px;
   padding: 10px 0;
-  border-bottom: 1px solid #eceff3;
+  border-bottom: 1px solid var(--idox-border-subtle);
 }
 
 .project-admin-form,
@@ -3073,12 +3301,12 @@ a {
 }
 
 .organization-symbol-review-layout .set-admin-list button.active {
-  border-color: #2563eb;
-  background: #eff6ff;
+  border-color: var(--idox-border-selected);
+  background: var(--idox-interactive-subtle-selected);
 }
 
 .organization-symbol-review-detail {
-  border: 1px solid #eceff3;
+  border: 1px solid var(--idox-border-subtle);
   border-radius: 8px;
   padding: 14px;
 }
@@ -3108,32 +3336,34 @@ a {
   margin-left: 6px;
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
-  border: 1px solid rgba(23, 104, 93, 0.35);
+  border: 1px solid var(--idox-info-border);
   font-size: 0.68rem;
-  font-weight: 700;
-  color: #17685d;
-  background: #fff;
+  font-weight: var(--idox-font-weight-semibold);
+  color: var(--idox-text-brand-accent);
+  background: var(--idox-bg-surface-default);
 }
 
 .symbol-set-builder-badge.public {
-  border-color: rgba(37, 99, 235, 0.35);
-  color: #2563eb;
+  border-color: var(--idox-info-border);
+  color: var(--idox-text-brand-accent);
 }
 
 .symbol-set-builder-badge.organization-wide {
-  border-color: #17685d;
-  background: #17685d;
-  color: #fff;
+  border-color: var(--idox-interactive-default);
+  background: var(--idox-interactive-default);
+  color: var(--idox-text-inverse);
 }
 
+/* TOKEN GAP: Idox defines no purple ramp; set membership falls back to neutral. */
 .symbol-set-builder-badge.set-item {
-  border-color: rgba(107, 33, 168, 0.35);
-  color: #6b21a8;
+  border-color: var(--idox-border-default);
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
 }
 
 .symbol-set-builder-badge.unavailable {
-  border-color: rgba(29, 43, 54, 0.12);
-  background: rgba(29, 43, 54, 0.05);
+  border-color: var(--idox-border-subtle);
+  background: var(--idox-bg-surface-subtle);
   color: var(--text-soft);
 }
 
@@ -3149,27 +3379,29 @@ a {
   margin-left: 6px;
   padding: 0.1rem 0.4rem;
   border-radius: 999px;
-  border: 1px solid rgba(23, 104, 93, 0.35);
+  border: 1px solid var(--idox-info-border);
   font-size: 0.68rem;
-  font-weight: 700;
-  color: #17685d;
-  background: #fff;
+  font-weight: var(--idox-font-weight-semibold);
+  color: var(--idox-text-brand-accent);
+  background: var(--idox-bg-surface-default);
 }
 
 .catalog-scope-badge.public {
-  border-color: rgba(37, 99, 235, 0.35);
-  color: #2563eb;
+  border-color: var(--idox-info-border);
+  color: var(--idox-text-brand-accent);
 }
 
 .catalog-scope-badge.organization-private {
-  border-color: #17685d;
-  background: #17685d;
-  color: #fff;
+  border-color: var(--idox-interactive-default);
+  background: var(--idox-interactive-default);
+  color: var(--idox-text-inverse);
 }
 
+/* TOKEN GAP: Idox defines no purple ramp; status scope falls back to neutral. */
 .catalog-scope-badge.status {
-  border-color: rgba(107, 33, 168, 0.35);
-  color: #6b21a8;
+  border-color: var(--idox-border-default);
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
 }
 
 .symbol-set-builder-item-list .set-admin-item {
@@ -3231,7 +3463,7 @@ a {
   border: 1px solid transparent;
   border-radius: var(--radius-lg);
   padding: 0.9rem;
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
   color: inherit;
 }
 
@@ -3243,9 +3475,9 @@ a {
 .queue-card.active,
 .symbol-card:hover,
 .queue-card:hover {
-  border-color: rgba(47, 111, 167, 0.42);
+  border-color: var(--idox-border-focus);
   transform: translateY(-1px);
-  background: #eef6fb;
+  background: var(--idox-interactive-subtle);
 }
 
 .queue-card-topline {
@@ -3286,8 +3518,8 @@ a {
   height: 3.2rem;
   object-fit: contain;
   border-radius: 0.35rem;
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(12, 24, 38, 0.12);
+  background: var(--idox-bg-surface-default);
+  border: 1px solid var(--idox-border-default);
 }
 
 .published-symbol-preview-control {
@@ -3321,13 +3553,13 @@ a {
   min-height: 1.25rem;
   margin: 0;
   padding: 0.14rem 0.34rem;
-  border: 1px solid rgba(23, 104, 93, 0.35);
+  border: 1px solid var(--idox-info-border);
   border-radius: 999px;
-  background: #fff;
-  color: #17685d;
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-brand-accent);
   font: inherit;
   font-size: 0.6rem;
-  font-weight: 900;
+  font-weight: var(--idox-font-weight-bold);
   line-height: 1;
 }
 
@@ -3336,7 +3568,7 @@ button.catalog-preview-format-badge {
 }
 
 button.catalog-preview-format-badge:hover {
-  background: rgba(23, 104, 93, 0.12);
+  background: var(--idox-interactive-subtle);
 }
 
 button.catalog-preview-format-badge:focus-visible {
@@ -3345,15 +3577,14 @@ button.catalog-preview-format-badge:focus-visible {
 }
 
 .catalog-preview-format-badge.active {
-  border-color: #17685d;
-  background: #17685d;
-  color: #fff;
-  box-shadow: 0 0 0 2px rgba(23, 104, 93, 0.14);
+  border-color: var(--idox-interactive-default);
+  background: var(--idox-interactive-default);
+  color: var(--idox-text-inverse);
 }
 
 .catalog-preview-format-badge.unavailable {
-  border-color: rgba(29, 43, 54, 0.12);
-  background: rgba(29, 43, 54, 0.05);
+  border-color: var(--idox-border-subtle);
+  background: var(--idox-bg-surface-subtle);
   color: var(--text-soft);
   opacity: 0.72;
 }
@@ -3387,13 +3618,13 @@ button.catalog-preview-format-badge:focus-visible {
   object-fit: cover;
   border: 1px solid var(--stroke);
   border-radius: 0.35rem;
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--idox-bg-surface-default);
 }
 
 .supplemental-photo-card span {
   color: var(--text-soft);
   font-size: 0.78rem;
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
   line-height: 1.25;
 }
 
@@ -3463,17 +3694,17 @@ button.catalog-preview-format-badge:focus-visible {
   gap: 0.45rem;
 }
 
+/* Process chip — Idox §badge-semantic, neutral variant. */
 .split-process-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 2rem;
-  padding: 0.42rem 0.68rem;
-  border: 1px solid var(--stroke);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.075);
-  font-size: 0.76rem;
-  font-weight: 800;
-  text-transform: capitalize;
+  padding: 0.125rem 0.5rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-full);
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .daisy-heading {
@@ -3501,7 +3732,7 @@ button.catalog-preview-format-badge:focus-visible {
 .daisy-lane-item {
   border: 1px solid var(--stroke);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--idox-bg-surface-default);
 }
 
 .daisy-report-card {
@@ -3545,30 +3776,30 @@ button.catalog-preview-format-badge:focus-visible {
   padding: 1rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--idox-bg-surface-default);
 }
 
 .split-review-card.action-approved {
-  border-color: rgba(167, 255, 216, 0.38);
+  border-color: var(--idox-success-border);
 }
 
 .split-review-card.action-request_changes {
-  border-color: rgba(255, 223, 148, 0.42);
+  border-color: var(--idox-warning-border);
 }
 
-.split-review-card.action-deleted {
-  border-color: rgba(255, 200, 219, 0.38);
-}
-
+.split-review-card.action-deleted,
 .split-review-card.action-rejected,
 .split-review-card.action-duplicate {
-  border-color: rgba(255, 200, 219, 0.38);
+  border-color: var(--idox-error-border);
 }
 
-.split-review-card.action-more_evidence,
+.split-review-card.action-more_evidence {
+  border-color: var(--idox-info-border);
+}
+
 .split-review-card.action-rename_classify,
 .split-review-card.action-defer {
-  border-color: rgba(255, 223, 148, 0.38);
+  border-color: var(--idox-border-strong);
 }
 
 .processing-lane-list {
@@ -3584,7 +3815,7 @@ button.catalog-preview-format-badge:focus-visible {
   padding: 1rem;
   border: 1px solid var(--stroke);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--idox-bg-surface-default);
 }
 
 .processing-lane p,
@@ -3596,30 +3827,30 @@ button.catalog-preview-format-badge:focus-visible {
 .processing-lane-marker {
   display: grid;
   place-items: center;
-  width: 2.6rem;
-  height: 2.6rem;
-  border: 1px solid var(--stroke-strong);
-  border-radius: 0.9rem;
-  background: rgba(138, 217, 255, 0.12);
-  color: var(--mint);
-  font-weight: 700;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-info-bg);
+  color: var(--idox-info-icon);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .lane-completed {
-  border-color: rgba(167, 255, 216, 0.32);
+  border-color: var(--idox-success-border);
 }
 
 .lane-running {
-  border-color: rgba(138, 217, 255, 0.36);
+  border-color: var(--idox-info-border);
 }
 
 .lane-queued,
 .lane-waiting {
-  border-color: rgba(255, 255, 255, 0.14);
+  border-color: var(--idox-border-default);
 }
 
 .lane-escalated {
-  border-color: rgba(255, 223, 148, 0.42);
+  border-color: var(--idox-warning-border);
 }
 
 .split-card-preview,
@@ -3627,11 +3858,9 @@ button.catalog-preview-format-badge:focus-visible {
   display: grid;
   place-items: center;
   min-height: 12rem;
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-lg);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
-    linear-gradient(145deg, rgba(138, 217, 255, 0.08), rgba(83, 188, 167, 0.05));
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-bg-surface-base);
 }
 
 .split-symbol-image {
@@ -3674,79 +3903,91 @@ button.catalog-preview-format-badge:focus-visible {
   gap: 0.75rem;
 }
 
+/* Review outcome — Idox §badge-semantic. */
 .review-status {
   display: inline-flex;
   align-items: center;
-  padding: 0.65rem 0.9rem;
-  border-radius: 999px;
-  border: 1px solid var(--stroke);
-  background: rgba(255, 255, 255, 0.08);
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--idox-radius-full);
+  border: 1px solid var(--idox-border-default);
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
   white-space: nowrap;
 }
 
-.review-approved {
-  border-color: rgba(167, 255, 216, 0.4);
-  color: var(--mint);
+.review-approved,
+.review-completed {
+  border-color: var(--idox-success-border);
+  background: var(--idox-success-bg);
+  color: var(--idox-success-text-color);
 }
 
 .review-request_changes,
-.review-more_evidence,
-.review-rename_classify,
-.review-defer,
 .review-escalated,
 .review-running {
-  border-color: rgba(255, 223, 148, 0.45);
-  color: #ffdf94;
+  border-color: var(--idox-warning-border);
+  background: var(--idox-warning-bg);
+  color: var(--idox-warning-text-color);
+}
+
+.review-more_evidence {
+  border-color: var(--idox-info-border);
+  background: var(--idox-info-bg);
+  color: var(--idox-info-text-color);
 }
 
 .review-rejected,
 .review-deleted,
 .review-duplicate {
-  border-color: rgba(255, 200, 219, 0.45);
-  color: var(--rose);
+  border-color: var(--idox-error-border);
+  background: var(--idox-error-bg);
+  color: var(--idox-error-text-color);
 }
 
+.review-rename_classify,
+.review-defer,
 .review-pending,
 .review-queued,
 .review-waiting {
-  color: var(--text-soft);
+  border-color: var(--idox-border-default);
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
 }
 
-.review-completed {
-  border-color: rgba(167, 255, 216, 0.4);
-  color: var(--mint);
-}
-
+/* Rights disposition — Idox §badge-semantic. */
 .rights-disposition {
   display: inline-flex;
   align-items: center;
-  padding: 0.25rem 0.6rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--idox-radius-full);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
   letter-spacing: 0.02em;
-  border: 1px solid transparent;
+  border: 1px solid var(--idox-border-default);
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
 }
 
 .rights-cleared {
-  background: rgba(167, 255, 216, 0.1);
-  border-color: rgba(167, 255, 216, 0.3);
-  color: var(--mint);
+  background: var(--idox-success-bg);
+  border-color: var(--idox-success-border);
+  color: var(--idox-success-text-color);
 }
 
 .rights-unknown_warning {
-  background: rgba(255, 223, 148, 0.1);
-  border-color: rgba(255, 223, 148, 0.3);
-  color: #ffdf94;
+  background: var(--idox-warning-bg);
+  border-color: var(--idox-warning-border);
+  color: var(--idox-warning-text-color);
 }
 
 .rights-restricted,
 .rights-conflict,
 .rights-failed {
-  background: rgba(255, 200, 219, 0.1);
-  border-color: rgba(255, 200, 219, 0.3);
-  color: var(--rose);
+  background: var(--idox-error-bg);
+  border-color: var(--idox-error-border);
+  color: var(--idox-error-text-color);
 }
 
 .split-actions {
@@ -3763,70 +4004,66 @@ button.catalog-preview-format-badge:focus-visible {
 
 .split-action-button {
   min-height: 2rem;
-  padding: 0.42rem 0.62rem;
-  border-color: var(--stroke);
-  background: #ffffff;
-  color: var(--text-main);
-  font-size: 0.75rem;
-  font-weight: 800;
+  padding: 0.25rem 0.5rem;
+  border-color: var(--idox-border-strong);
+  background: var(--idox-btn-secondary);
+  color: var(--idox-btn-secondary-text);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
   line-height: 1;
 }
 
 .split-action-button:hover,
 .split-action-button:focus-visible {
-  border-color: rgba(47, 111, 167, 0.4);
-  background: #eef6fb;
+  border-color: var(--idox-border-focus);
+  background: var(--idox-interactive-subtle);
   outline: none;
 }
 
+/* Selected split action — same status mapping as the case decision buttons. */
 .split-action-button.selected {
-  color: #08131a;
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.45),
-    0 0.45rem 1rem rgba(51, 69, 84, 0.14);
+  color: var(--idox-text-primary);
+  box-shadow: inset 0 0 0 1px var(--idox-bg-surface-default);
 }
 
 .split-action-approved.selected {
-  border-color: rgba(167, 255, 216, 0.95);
-  background: #a7ffd8;
+  border-color: var(--idox-success-border);
+  background: var(--idox-success-bg);
+  color: var(--idox-success-text-color);
 }
 
 .split-action-rejected.selected,
-.split-action-deleted.selected {
-  border-color: rgba(255, 200, 219, 0.95);
-  background: #ffc8db;
+.split-action-deleted.selected,
+.split-action-duplicate.selected {
+  border-color: var(--idox-error-border);
+  background: var(--idox-error-bg);
+  color: var(--idox-error-text-color);
 }
 
 .split-action-request_changes.selected {
-  border-color: rgba(255, 223, 148, 0.95);
-  background: #ffdf94;
+  border-color: var(--idox-warning-border);
+  background: var(--idox-warning-bg);
+  color: var(--idox-warning-text-color);
 }
 
 .split-action-more_evidence.selected {
-  border-color: rgba(138, 217, 255, 0.95);
-  background: #8ad9ff;
+  border-color: var(--idox-info-border);
+  background: var(--idox-info-bg);
+  color: var(--idox-info-text-color);
 }
 
-.split-action-rename_classify.selected {
-  border-color: rgba(205, 190, 255, 0.95);
-  background: #cdbeff;
-}
-
-.split-action-duplicate.selected {
-  border-color: rgba(255, 185, 150, 0.95);
-  background: #ffb996;
-}
-
+.split-action-rename_classify.selected,
 .split-action-defer.selected {
-  border-color: rgba(212, 221, 226, 0.95);
-  background: #d4dde2;
+  border-color: var(--idox-border-strong);
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
 }
 
 .split-decision-status {
   min-height: 2rem;
   padding: 0.42rem 0.7rem;
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .tag-row {
@@ -3838,10 +4075,9 @@ button.catalog-preview-format-badge:focus-visible {
 
 .context-label {
   margin: 0 0 0.5rem;
-  color: var(--text-soft);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  font-size: 0.74rem;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-medium);
 }
 
 .action-stack.horizontal {
@@ -3849,82 +4085,151 @@ button.catalog-preview-format-badge:focus-visible {
   flex-wrap: wrap;
 }
 
+/* Buttons — Idox §buttons-secondary is the default treatment. */
 .action-button {
-  border: 1px solid var(--stroke);
-  border-radius: var(--radius-md);
-  padding: 0.95rem 1.15rem;
-  background: #ffffff;
-  color: inherit;
-  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border: 1px solid var(--idox-border-strong);
+  border-radius: var(--idox-radius-lg);
+  padding: 0.375rem 0.75rem;
+  background: var(--idox-btn-secondary);
+  color: var(--idox-btn-secondary-text);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
+  transition: background-color 140ms ease, border-color 140ms ease;
 }
 
+.action-button:hover {
+  background: var(--idox-btn-secondary-hover);
+}
+
+.action-button:active {
+  background: var(--idox-btn-secondary-active);
+}
+
+/* Small size — Idox "secondary small" (px-2 py-1). */
 .action-button.compact {
-  min-height: 2.35rem;
-  padding: 0.58rem 0.72rem;
-  font-size: 0.78rem;
-  font-weight: 800;
+  min-height: 0;
+  padding: 0.25rem 0.5rem;
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
+/* Idox §buttons-primary. Budget: one primary per panel or form. */
 .action-button.primary {
-  background: #17685d;
-  border-color: #17685d;
-  color: #ffffff;
+  background: var(--idox-btn-primary);
+  border-color: var(--idox-color-brand-accent);
+  color: var(--idox-btn-primary-text);
+}
+
+.action-button.primary:hover {
+  background: var(--idox-btn-primary-hover);
+}
+
+.action-button.primary:active {
+  background: var(--idox-btn-primary-active);
 }
 
 .action-button.secondary.selected,
 .action-button.primary.selected {
-  border-color: rgba(167, 255, 216, 0.48);
-  box-shadow: inset 0 0 0 1px rgba(167, 255, 216, 0.18);
+  border-color: var(--idox-border-selected);
+  box-shadow: inset 0 0 0 1px var(--idox-border-selected);
 }
 
+/* Unselected toggle segment — Idox §buttons-ghost. */
+.action-button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--idox-text-primary);
+}
+
+.action-button.ghost:hover {
+  background: var(--idox-interactive-subtle-hover);
+}
+
+.action-button.ghost:active {
+  background: var(--idox-interactive-subtle-active);
+}
+
+/*
+ * Destructive action. Idox defines no danger button, so this is assembled from
+ * the error status tokens. Flagged as a documented extension to the system.
+ */
 .action-button.danger {
-  border-color: rgba(255, 200, 219, 0.28);
+  border-color: var(--idox-error-border);
+  color: var(--idox-error-text-color);
+}
+
+.action-button.danger:hover {
+  background: var(--idox-error-bg);
 }
 
 .action-button.danger.solid {
-  border-color: #b82222;
-  background: #b82222;
-  color: #ffffff;
+  border-color: var(--idox-error-border);
+  background: var(--idox-error-border);
+  color: var(--idox-text-inverse);
+}
+
+.action-button.danger.solid:hover {
+  background: var(--idox-red-800);
 }
 
 .action-button.danger.selected {
-  border-color: rgba(255, 200, 219, 0.5);
-  background: rgba(255, 200, 219, 0.14);
+  border-color: var(--idox-error-border);
+  background: var(--idox-error-bg);
 }
 
 .action-button:disabled {
-  opacity: 0.45;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
 .priority-high {
-  color: #925c00;
+  color: var(--idox-warning-text-color);
 }
 
 .priority-medium {
-  color: #17685d;
+  color: var(--idox-info-text-color);
 }
 
 .priority-low {
-  color: #2f6fa7;
+  color: var(--idox-text-tertiary);
+}
+
+/* Service health — Idox §callout, sized down for inline toolbar use. */
+.health-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  max-width: 34rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-bg-surface-base);
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .health-live {
-  border-color: rgba(167, 255, 216, 0.48);
+  border-color: var(--idox-success-border);
+  background: var(--idox-success-bg);
+  color: var(--idox-success-text-color);
+}
+
+.health-unconfigured {
+  border-color: var(--idox-warning-border);
+  background: var(--idox-warning-bg);
+  color: var(--idox-warning-text-color);
 }
 
 .health-offline,
-.health-error,
-.health-unconfigured {
-  border-color: rgba(255, 200, 219, 0.4);
-}
-
-.health-chip {
-  min-height: 2.95rem;
-  align-items: center;
-  border-radius: 0.7rem;
-  padding: 0.78rem 0.9rem;
-  max-width: 34rem;
+.health-error {
+  border-color: var(--idox-error-border);
+  background: var(--idox-error-bg);
+  color: var(--idox-error-text-color);
 }
 
 .workspace-titlebar-tools .health-chip {
@@ -3939,11 +4244,11 @@ button.catalog-preview-format-badge:focus-visible {
 }
 
 .error-text {
-  color: #a33d4c;
+  color: var(--idox-error-text-color);
 }
 
 .success-text {
-  color: #17685d;
+  color: var(--idox-success-text-color);
 }
 
 .clean-list {
@@ -3991,62 +4296,37 @@ button.catalog-preview-format-badge:focus-visible {
   min-height: min(44rem, calc(100vh - 10rem));
   padding: clamp(1rem, 3vw, 2rem);
   overflow: hidden;
-  border: 1px solid rgba(29, 43, 54, 0.12);
-  border-radius: 1.35rem;
-  background:
-    radial-gradient(circle at 15% 15%, rgba(94, 189, 147, 0.24), transparent 34%),
-    radial-gradient(circle at 78% 20%, rgba(47, 127, 184, 0.2), transparent 36%),
-    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(241, 247, 249, 0.86));
-  box-shadow: 0 24px 64px rgba(51, 69, 84, 0.16);
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-xl);
+  background: var(--idox-bg-surface-light);
 }
 
+/* Decorative orbits are retired under the Idox flat-surface system. */
 .auth-orbit {
-  position: absolute;
-  z-index: -1;
-  border-radius: 999px;
-  filter: blur(10px);
-  opacity: 0.8;
-}
-
-.auth-orbit-one {
-  left: -5rem;
-  bottom: -6rem;
-  width: 18rem;
-  height: 18rem;
-  background: rgba(94, 189, 147, 0.18);
-}
-
-.auth-orbit-two {
-  right: 18rem;
-  top: -7rem;
-  width: 22rem;
-  height: 22rem;
-  background: rgba(138, 217, 255, 0.18);
+  display: none;
 }
 
 .auth-hero-card,
 .auth-card {
-  border: 1px solid rgba(255, 255, 255, 0.68);
-  border-radius: 1.15rem;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 20px 52px rgba(51, 69, 84, 0.14);
-  backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-xl);
+  background: var(--idox-bg-surface-default);
 }
 
+/* Sign-in hero uses the Idox navbar surface, the system's one dark surface. */
 .auth-hero-card {
   display: grid;
   align-content: space-between;
   min-height: 32rem;
   padding: clamp(1.35rem, 3vw, 2.4rem);
   overflow: hidden;
-  background:
-    linear-gradient(145deg, rgba(16, 38, 54, 0.92), rgba(23, 104, 93, 0.8)),
-    radial-gradient(circle at top right, rgba(138, 217, 255, 0.42), transparent 34%);
-  color: #ffffff;
+  border-color: var(--idox-navbar-bg);
+  background: var(--idox-navbar-bg);
+  color: var(--idox-navbar-text);
 }
 
 .auth-hero-card .eyebrow {
-  color: rgba(255, 255, 255, 0.68);
+  color: var(--idox-blue-300);
 }
 
 .auth-hero-copy h2,
@@ -4065,9 +4345,9 @@ button.catalog-preview-format-badge:focus-visible {
 .auth-hero-copy p:not(.eyebrow) {
   max-width: 32rem;
   margin: 1rem 0 0;
-  color: rgba(255, 255, 255, 0.78);
-  font-size: 1.08rem;
-  line-height: 1.6;
+  color: var(--idox-navbar-text);
+  font-size: var(--idox-font-size-base);
+  line-height: var(--idox-line-height-relaxed);
 }
 
 .auth-signal-grid {
@@ -4077,20 +4357,22 @@ button.catalog-preview-format-badge:focus-visible {
   max-width: 34rem;
 }
 
+/* Signal tiles sit on the navbar surface, so they take navbar tokens. */
 .auth-signal {
   min-height: 4.6rem;
   padding: 0.85rem;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 0.9rem;
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.74);
-  font-weight: 800;
+  border: 1px solid var(--idox-navbar-hover);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-navbar-hover);
+  color: var(--idox-blue-300);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-medium);
 }
 
 .auth-signal.active {
-  border-color: rgba(167, 255, 216, 0.36);
-  background: rgba(167, 255, 216, 0.14);
-  color: #ffffff;
+  border-color: var(--idox-navbar-active);
+  background: var(--idox-navbar-active);
+  color: var(--idox-navbar-text);
 }
 
 .auth-card {
@@ -4110,19 +4392,19 @@ button.catalog-preview-format-badge:focus-visible {
 .auth-lock-mark {
   display: inline-grid;
   place-items: center;
-  width: 3.15rem;
-  height: 3.15rem;
-  border-radius: 0.95rem;
-  background: #17685d;
-  color: #ffffff;
-  font-size: 1.8rem;
-  font-weight: 900;
-  box-shadow: 0 12px 24px rgba(23, 104, 93, 0.28);
+  width: 3rem;
+  height: 3rem;
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-interactive-subtle);
+  color: var(--idox-text-brand-accent);
+  font-size: var(--idox-font-size-xl);
+  font-weight: var(--idox-font-weight-bold);
 }
 
 .auth-card h3 {
-  font-size: 1.55rem;
-  line-height: 1.05;
+  font-size: var(--idox-font-size-xl);
+  font-weight: var(--idox-font-weight-semibold);
+  line-height: var(--idox-line-height-tight);
 }
 
 .auth-field {
@@ -4130,31 +4412,32 @@ button.catalog-preview-format-badge:focus-visible {
   gap: 0.5rem;
 }
 
+/* Field label — Idox form label, sentence case rather than all caps. */
 .auth-field > span {
-  color: var(--text-soft);
-  font-size: 0.82rem;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-medium);
+  letter-spacing: normal;
 }
 
 .auth-field input {
   width: 100%;
-  min-height: 3.3rem;
-  border: 1px solid rgba(29, 43, 54, 0.16);
-  border-radius: 0.85rem;
-  padding: 0.95rem 1rem;
-  background: rgba(255, 255, 255, 0.92);
-  color: var(--text-main);
-  font-weight: 700;
+  min-height: 2.5rem;
+  border: 1px solid var(--idox-border-strong);
+  border-radius: var(--idox-radius-lg);
+  padding: 0.375rem 0.75rem;
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-primary);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-normal);
   outline: none;
-  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
 .auth-field input:focus {
-  border-color: rgba(23, 104, 93, 0.56);
-  background: #ffffff;
-  box-shadow: 0 0 0 4px rgba(94, 189, 147, 0.18);
+  border-color: var(--idox-border-focus);
+  background: var(--idox-bg-surface-default);
+  box-shadow: 0 0 0 1px var(--idox-border-focus);
 }
 
 .pin-input-wrap {
@@ -4170,19 +4453,22 @@ button.catalog-preview-format-badge:focus-visible {
 }
 
 .pin-visibility-button {
-  min-height: 3.3rem;
-  border: 1px solid rgba(29, 43, 54, 0.14);
-  border-radius: 0.85rem;
-  padding: 0 0.9rem;
-  background: rgba(255, 255, 255, 0.72);
-  color: var(--text-main);
-  font-weight: 900;
+  min-height: 2.5rem;
+  border: 1px solid var(--idox-border-strong);
+  border-radius: var(--idox-radius-lg);
+  padding: 0 0.75rem;
+  background: var(--idox-btn-secondary);
+  color: var(--idox-btn-secondary-text);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
-.pin-visibility-button:hover,
-.pin-visibility-button:focus-visible {
-  border-color: rgba(23, 104, 93, 0.36);
-  outline: none;
+.pin-visibility-button:hover {
+  background: var(--idox-btn-secondary-hover);
+}
+
+.pin-visibility-button:active {
+  background: var(--idox-btn-secondary-active);
 }
 
 .pin-progress {
@@ -4194,12 +4480,12 @@ button.catalog-preview-format-badge:focus-visible {
 .pin-progress span {
   height: 0.45rem;
   border-radius: 999px;
-  background: rgba(29, 43, 54, 0.12);
+  background: var(--idox-border-subtle);
   transition: background 160ms ease, transform 160ms ease;
 }
 
 .pin-progress span.filled {
-  background: #17685d;
+  background: var(--idox-interactive-default);
   transform: translateY(-1px);
 }
 
@@ -4213,57 +4499,60 @@ button.catalog-preview-format-badge:focus-visible {
 }
 
 .auth-helper-row strong {
-  color: #17685d;
+  color: var(--idox-text-brand-accent);
   font-size: 0.76rem;
   text-align: right;
 }
 
+/* Form-level message — Idox §callout. */
 .form-message {
   margin: 0;
-  border-radius: 0.8rem;
-  padding: 0.8rem 0.9rem;
-  font-size: 0.88rem;
-  font-weight: 800;
+  border-radius: var(--idox-radius-lg);
+  padding: 0.75rem 1.25rem;
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-medium);
 }
 
 .form-message.error {
-  border: 1px solid rgba(163, 61, 76, 0.22);
-  background: rgba(255, 231, 235, 0.72);
-  color: #a33d4c;
+  border: 1px solid var(--idox-error-border);
+  background: var(--idox-error-bg);
+  color: var(--idox-error-text-color);
 }
 
 .form-message.success {
-  border: 1px solid rgba(23, 104, 93, 0.22);
-  background: rgba(226, 247, 237, 0.78);
-  color: #17685d;
+  border: 1px solid var(--idox-success-border);
+  background: var(--idox-success-bg);
+  color: var(--idox-success-text-color);
 }
 
+/* Sign-in submit — Idox §buttons-primary. */
 .auth-submit-button {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.8rem;
-  min-height: 3.4rem;
-  border: 0;
-  border-radius: 0.95rem;
-  padding: 0 1.05rem 0 1.2rem;
-  background: linear-gradient(135deg, #17685d, #2f8c7b);
-  color: #ffffff;
-  font-weight: 900;
-  box-shadow: 0 14px 28px rgba(23, 104, 93, 0.24);
-  transition: transform 160ms ease, box-shadow 160ms ease, opacity 160ms ease;
+  min-height: 2.5rem;
+  border: 1px solid var(--idox-color-brand-accent);
+  border-radius: var(--idox-radius-lg);
+  padding: 0.375rem 0.75rem;
+  background: var(--idox-btn-primary);
+  color: var(--idox-btn-primary-text);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
+  transition: background-color 140ms ease;
 }
 
-.auth-submit-button:hover:not(:disabled),
-.auth-submit-button:focus-visible:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 18px 34px rgba(23, 104, 93, 0.3);
-  outline: none;
+.auth-submit-button:hover:not(:disabled) {
+  background: var(--idox-btn-primary-hover);
+}
+
+.auth-submit-button:active:not(:disabled) {
+  background: var(--idox-btn-primary-active);
 }
 
 .auth-submit-button:disabled {
   cursor: not-allowed;
-  opacity: 0.55;
+  opacity: 0.5;
 }
 
 @media (max-width: 1366px) {
@@ -4480,7 +4769,7 @@ button.catalog-preview-format-badge:focus-visible {
     padding-top: 0;
     padding-left: 0.5rem;
     border-top: 0;
-    border-left: 1px solid rgba(16, 38, 54, 0.12);
+    border-left: 1px solid var(--idox-border-subtle);
   }
 
   .rail-link {
@@ -4556,9 +4845,9 @@ button.catalog-preview-format-badge:focus-visible {
   width: 1.1rem;
   height: 1.1rem;
   background: var(--mint);
-  color: #ffffff;
+  color: var(--idox-text-inverse);
   border-radius: 50%;
-  border: 1.5px solid #ffffff;
+  border: 1.5px solid var(--idox-bg-surface-default);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
   z-index: 2;
 }
@@ -4570,20 +4859,24 @@ button.catalog-preview-format-badge:focus-visible {
 
 /* Ensure selected row in standards grid stands out */
 .approved-symbol-grid tr.active {
-  background: rgba(94, 189, 147, 0.08);
+  background: var(--idox-success-bg);
   outline: 2px solid var(--mint);
   outline-offset: -2px;
 }
 
 /* Organization Selection Screen */
+/*
+ * This screen previously targeted a dark theme through CSS variables that were
+ * never defined, so it rendered as a dark island in a light application. It is
+ * now an Idox panel like every other surface.
+ */
 .org-selection-frame {
   max-width: 500px;
   margin: 4rem auto;
   padding: 2rem;
-  background: var(--bg-surface-2, #1a1a1a);
-  border: 1px solid var(--border-subtle, #333);
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  background: var(--idox-bg-surface-default);
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-xl);
 }
 
 .org-selection-header {
@@ -4592,19 +4885,20 @@ button.catalog-preview-format-badge:focus-visible {
 }
 
 .org-selection-intro {
-  color: var(--text-secondary, #aaa);
-  font-size: 0.9rem;
-  line-height: 1.4;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+  line-height: var(--idox-line-height-normal);
 }
 
+/* Organisation selection error — Idox §callout-error. */
 .org-selection-error {
-  background: rgba(255, 69, 58, 0.1);
-  color: #ff453a;
-  padding: 0.75rem;
-  border-radius: 4px;
+  background: var(--idox-error-bg);
+  color: var(--idox-error-text-color);
+  padding: 0.75rem 1.25rem;
+  border: 1px solid var(--idox-error-border);
+  border-radius: var(--idox-radius-lg);
   margin-bottom: 1.5rem;
-  font-size: 0.85rem;
-  border-left: 3px solid #ff453a;
+  font-size: var(--idox-font-size-sm);
 }
 
 .org-selection-list {
@@ -4623,24 +4917,28 @@ button.catalog-preview-format-badge:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 1rem;
-  background: var(--bg-surface-3, #2a2a2a);
-  border: 1px solid var(--border-subtle, #333);
-  border-radius: 6px;
-  color: var(--text-primary, #eee);
+  padding: 0.75rem 1rem;
+  background: var(--idox-btn-secondary);
+  border: 1px solid var(--idox-border-strong);
+  border-radius: var(--idox-radius-lg);
+  color: var(--idox-btn-secondary-text);
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 140ms ease, border-color 140ms ease;
   text-align: left;
 }
 
 .org-selection-button:hover:not(:disabled) {
-  background: var(--bg-surface-hover, #333);
-  border-color: var(--accent-primary, #007aff);
+  background: var(--idox-btn-secondary-hover);
+  border-color: var(--idox-border-selected);
+}
+
+.org-selection-button:active:not(:disabled) {
+  background: var(--idox-btn-secondary-active);
 }
 
 .org-selection-button:focus-visible {
-  outline: 2px solid var(--accent-primary, #007aff);
-  outline-offset: 2px;
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .org-selection-button:disabled {
@@ -4657,9 +4955,9 @@ button.catalog-preview-format-badge:focus-visible {
 .org-selection-logo {
   width: 40px;
   height: 40px;
-  border-radius: 4px;
+  border-radius: var(--idox-radius-sm);
   object-fit: contain;
-  background: #fff;
+  background: var(--idox-bg-surface-default);
 }
 
 .org-selection-fallback {
@@ -4668,11 +4966,11 @@ button.catalog-preview-format-badge:focus-visible {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-accent-subtle, #003066);
-  color: var(--accent-light, #66b2ff);
-  border-radius: 4px;
-  font-weight: bold;
-  font-size: 1.2rem;
+  background: var(--idox-interactive-subtle);
+  color: var(--idox-text-brand-accent);
+  border-radius: var(--idox-radius-sm);
+  font-weight: var(--idox-font-weight-bold);
+  font-size: var(--idox-font-size-lg);
 }
 
 .org-selection-details {
@@ -4681,43 +4979,45 @@ button.catalog-preview-format-badge:focus-visible {
 }
 
 .org-selection-name {
-  font-weight: 500;
-  font-size: 1rem;
+  font-weight: var(--idox-font-weight-medium);
+  font-size: var(--idox-font-size-base);
+  color: var(--idox-text-primary);
 }
 
+/* Organisation code stays uppercase: it is an operator-facing identifier. */
 .org-selection-code {
-  font-size: 0.75rem;
-  color: var(--text-secondary, #aaa);
+  font-size: var(--idox-font-size-xs);
+  color: var(--idox-text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
 
 .org-selection-action {
-  font-size: 0.85rem;
-  color: var(--accent-primary, #007aff);
-  font-weight: 500;
+  font-size: var(--idox-font-size-sm);
+  color: var(--idox-text-brand-accent);
+  font-weight: var(--idox-font-weight-medium);
 }
 
 .org-selection-footer {
   text-align: center;
   padding-top: 1rem;
-  border-top: 1px solid var(--border-subtle, #333);
+  border-top: 1px solid var(--idox-border-subtle);
 }
 
 .org-selection-footer p {
-  font-size: 0.75rem;
-  color: var(--text-secondary, #aaa);
+  font-size: var(--idox-font-size-xs);
+  color: var(--idox-text-tertiary);
   margin-bottom: 1rem;
 }
 
 .org-selection-pagination {
   margin-bottom: 1.5rem;
   text-align: center;
-  font-size: 0.8rem;
-  color: var(--text-secondary, #aaa);
+  font-size: var(--idox-font-size-xs);
+  color: var(--idox-text-tertiary);
   padding: 0.5rem;
-  border: 1px dashed var(--border-subtle, #333);
-  border-radius: 4px;
+  border: 1px dashed var(--idox-border-default);
+  border-radius: var(--idox-radius-sm);
 }
 
 .header-org-context {
@@ -4726,8 +5026,8 @@ button.catalog-preview-format-badge:focus-visible {
   gap: 0.6rem;
   padding: 0.4rem 0.8rem;
   border-radius: var(--radius-md);
-  background: rgba(23, 104, 93, 0.06);
-  border: 1px solid rgba(23, 104, 93, 0.12);
+  background: var(--idox-interactive-subtle);
+  border: 1px solid var(--idox-interactive-subtle);
   margin-right: auto;
 }
 
@@ -4740,20 +5040,14 @@ button.catalog-preview-format-badge:focus-visible {
 }
 
 .header-org-context .org-name {
-  font-weight: 600;
+  font-weight: var(--idox-font-weight-semibold);
   font-size: 0.95rem;
-  color: #17685d;
+  color: var(--idox-text-brand-accent);
 }
 
 .switch-org-button {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: var(--text-soft);
-  transition: color 160ms ease;
-}
-
-.switch-org-button:hover {
-  color: var(--teal);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .llm-consumption-panel { display: grid; gap: 1rem; min-width: 0; }
@@ -4765,36 +5059,36 @@ button.catalog-preview-format-badge:focus-visible {
 .llm-consumption-results { display: grid; gap: 1rem; min-width: 0; }
 .llm-consumption-range { margin: 0; color: var(--text-soft); overflow-wrap: anywhere; }
 .llm-source-status { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 0.7rem; margin: 0; }
-.llm-source-item { display: grid; gap: 0.2rem; padding: 0.75rem; border: 1px solid var(--stroke); border-left-width: 0.35rem; border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.82); }
-.llm-source-item dt { font-weight: 850; }
+.llm-source-item { display: grid; gap: 0.2rem; padding: 0.75rem; border: 1px solid var(--stroke); border-left-width: 0.35rem; border-radius: var(--radius-md); background: var(--idox-bg-surface-default); }
+.llm-source-item dt { font-weight: var(--idox-font-weight-bold); }
 .llm-source-item dd { display: grid; gap: 0.15rem; margin: 0; color: var(--text-soft); }
-.source-status--available { border-left-color: #17685d; background: rgba(23, 104, 93, 0.08); }
-.source-status--disabled { border-left-color: #8a681f; background: rgba(176, 133, 41, 0.09); }
+.source-status--available { border-left-color: var(--idox-interactive-default); background: var(--idox-interactive-subtle); }
+.source-status--disabled { border-left-color: var(--idox-warning-border); background: var(--idox-warning-bg); }
 .source-status--unavailable,
-.llm-source-item:not(.source-status--available):not(.source-status--disabled) { border-left-color: #9b3333; background: rgba(171, 44, 44, 0.07); }
+.llm-source-item:not(.source-status--available):not(.source-status--disabled) { border-left-color: var(--idox-error-border); background: var(--idox-error-bg); }
 .llm-source-message { overflow-wrap: anywhere; }
-.llm-reconciliation-callout { display: grid; gap: 0.45rem; padding: 0.85rem 1rem; border: 1px solid rgba(47, 111, 167, 0.3); border-radius: var(--radius-md); background: rgba(238, 246, 251, 0.8); }
+.llm-reconciliation-callout { display: grid; gap: 0.45rem; padding: 0.85rem 1rem; border: 1px solid var(--idox-info-border); border-radius: var(--idox-radius-lg); background: var(--idox-info-bg); }
 .llm-reconciliation-callout p { margin: 0; }
 .llm-reconciliation-values { display: flex; gap: 1.25rem; flex-wrap: wrap; margin: 0; }
 .llm-reconciliation-values div { display: grid; gap: 0.1rem; }
 .llm-reconciliation-values dt { color: var(--text-soft); font-size: 0.82rem; }
-.llm-reconciliation-values dd { margin: 0; font-weight: 850; }
+.llm-reconciliation-values dd { margin: 0; font-weight: var(--idox-font-weight-bold); }
 .llm-summary-section,
 .llm-langfuse-report { display: grid; gap: 0.7rem; min-width: 0; }
 .llm-summary-section h4,
 .llm-langfuse-report h4,
 .llm-warning-group h4 { margin: 0; }
 .llm-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.7rem; margin: 0; }
-.llm-summary-card { display: grid; gap: 0.25rem; padding: 0.85rem; border: 1px solid var(--stroke); border-radius: var(--radius-md); background: rgba(255, 255, 255, 0.82); }
-.llm-summary-card dt { color: var(--text-soft); font-size: 0.82rem; font-weight: 750; }
-.llm-summary-card dd { margin: 0; font-size: 1.25rem; font-weight: 850; }
+.llm-summary-card { display: grid; gap: 0.25rem; padding: 0.85rem; border: 1px solid var(--stroke); border-radius: var(--radius-md); background: var(--idox-bg-surface-default); }
+.llm-summary-card dt { color: var(--text-soft); font-size: 0.82rem; font-weight: var(--idox-font-weight-semibold); }
+.llm-summary-card dd { margin: 0; font-size: 1.25rem; font-weight: var(--idox-font-weight-bold); }
 .llm-breakdown-grid { display: grid; gap: 1rem; min-width: 0; }
 .llm-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; border-radius: var(--radius-sm); }
 .llm-table-scroll:focus-visible { outline: 3px solid var(--blue); outline-offset: 3px; }
 .llm-breakdown-table { width: 100%; min-width: 38rem; }
-.llm-breakdown-table caption { padding: 0.6rem; text-align: left; font-weight: 850; color: var(--text-main); }
+.llm-breakdown-table caption { padding: 0.6rem; text-align: left; font-weight: var(--idox-font-weight-bold); color: var(--text-main); }
 .llm-empty-row td { color: var(--text-soft); font-style: italic; text-align: center; }
-.llm-consumption-warnings { margin: 0; color: #7b5011; }
+.llm-consumption-warnings { margin: 0; color: var(--idox-warning-border); }
 
 @media (max-width: 640px) {
   .llm-consumption-heading-row { align-items: stretch; }
@@ -4809,33 +5103,43 @@ button.catalog-preview-format-badge:focus-visible {
    review-status, fact-card, action-button, field) rather than a new one; only
    the layout and the two governance-specific markers are new. */
 
+/* Semantic review tabs — Idox §tabs-default. */
 .semantic-review-tabs {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 1rem;
   margin: 0.9rem 0 0.4rem;
+  border-bottom: 1px solid var(--idox-border-subtle);
 }
 
 .semantic-review-tab {
-  border: 1px solid var(--stroke);
-  border-radius: 999px;
-  padding: 0.5rem 0.95rem;
-  background: #ffffff;
-  color: var(--text-soft);
-  font-weight: 700;
-  font-size: 0.85rem;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-normal);
+}
+
+.semantic-review-tab:hover {
+  border-bottom-color: var(--idox-border-subtle);
+  color: var(--idox-text-primary);
 }
 
 .semantic-review-tab.active {
-  border-color: #17685d;
-  background: #17685d;
-  color: #ffffff;
+  border-bottom-color: var(--idox-color-brand-accent);
+  background: transparent;
+  color: var(--idox-text-primary);
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .semantic-review-tab:focus-visible,
 .semantic-review-card:focus-visible {
-  outline: 2px solid var(--cyan);
-  outline-offset: 2px;
+  outline: var(--focus-outline);
+  outline-offset: var(--focus-offset);
 }
 
 .semantic-review-filters {
@@ -4857,7 +5161,7 @@ button.catalog-preview-format-badge:focus-visible {
 }
 
 .semantic-review-card.active {
-  border-color: #17685d;
+  border-color: var(--idox-interactive-default);
 }
 
 .semantic-review-section {
@@ -4976,7 +5280,7 @@ button.catalog-preview-format-badge:focus-visible {
 
 .organization-symbol-governed-state dt {
   margin-top: 0.6rem;
-  font-weight: 600;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .organization-symbol-governed-state dd {

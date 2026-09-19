@@ -1,16 +1,17 @@
 .catalog-developer-hub {
-  --developer-surface: #ffffff;
-  --developer-surface-soft: #f4f8f7;
-  --developer-surface-tint: #e9f5f1;
-  --developer-ink: #173042;
-  --developer-muted: #5f7180;
-  --developer-border: #d7e2e5;
-  --developer-border-strong: #b9ccd1;
-  --developer-accent: #17685d;
-  --developer-accent-hover: #10564d;
-  --developer-accent-soft: #e1f1ed;
-  --developer-code-surface: #10242f;
-  --developer-code-ink: #e9f6f3;
+  /* Developer hub palette, mapped onto the Idox design-system tokens. */
+  --developer-surface: var(--idox-bg-surface-default);
+  --developer-surface-soft: var(--idox-bg-surface-base);
+  --developer-surface-tint: var(--idox-bg-surface-subtle);
+  --developer-ink: var(--idox-text-primary);
+  --developer-muted: var(--idox-text-tertiary);
+  --developer-border: var(--idox-border-default);
+  --developer-border-strong: var(--idox-border-strong);
+  --developer-accent: var(--idox-interactive-default);
+  --developer-accent-hover: var(--idox-interactive-hover);
+  --developer-accent-soft: var(--idox-interactive-subtle);
+  --developer-code-surface: var(--idox-slate-900);
+  --developer-code-ink: var(--idox-slate-100);
   display: grid;
   gap: 1.25rem;
   width: min(1280px, 100%);
@@ -23,9 +24,8 @@
 .catalog-developer-panel,
 .catalog-developer-access-card {
   border: 1px solid var(--developer-border);
-  border-radius: 16px;
+  border-radius: var(--idox-radius-xl);
   background: var(--developer-surface);
-  box-shadow: 0 8px 28px rgba(39, 68, 78, 0.08);
 }
 
 .catalog-developer-hero {
@@ -36,21 +36,12 @@
   gap: 1.5rem;
   padding: clamp(1.75rem, 3vw, 2.75rem);
   overflow: hidden;
-  background:
-    radial-gradient(circle at 88% 8%, rgba(94, 189, 147, 0.2), transparent 34%),
-    linear-gradient(125deg, #ffffff 10%, #f1f8f6 100%);
+  background: var(--idox-bg-surface-default);
 }
 
+/* Decorative hero flourish is retired under the Idox flat-surface system. */
 .catalog-developer-hero::after {
-  position: absolute;
-  content: '';
-  width: 12rem;
-  height: 12rem;
-  right: -4rem;
-  bottom: -7rem;
-  border-radius: 50%;
-  border: 1px solid rgba(23, 104, 93, 0.14);
-  pointer-events: none;
+  display: none;
 }
 
 .catalog-developer-hero > *,
@@ -84,7 +75,7 @@
 
 .catalog-developer-hub .eyebrow {
   color: var(--developer-accent);
-  font-weight: 800;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .catalog-developer-gate {
@@ -112,7 +103,7 @@
   display: grid;
   gap: 0.45rem;
   color: var(--developer-ink);
-  font-weight: 700;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .catalog-developer-access-card input,
@@ -124,13 +115,12 @@
   background: var(--developer-surface);
   color: var(--developer-ink);
   padding: 0.8rem 0.9rem;
-  box-shadow: inset 0 1px 2px rgba(39, 68, 78, 0.04);
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
 .catalog-developer-access-card input::placeholder,
 .catalog-ed-integration-form textarea::placeholder {
-  color: #7b8b97;
+  color: var(--idox-text-tertiary);
 }
 
 .catalog-developer-access-card input:focus,
@@ -138,13 +128,13 @@
 .catalog-ed-integration-form textarea:focus {
   border-color: var(--developer-accent);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(23, 104, 93, 0.14);
+  box-shadow: 0 0 0 1px var(--idox-border-focus);
 }
 
 .catalog-key-safety,
 .catalog-boundary-note,
 .catalog-developer-status {
-  color: #315e66;
+  color: var(--idox-text-secondary);
   font-size: 0.92rem;
 }
 
@@ -152,7 +142,7 @@
 .catalog-boundary-note {
   margin: 0;
   padding: 0.75rem 0.9rem;
-  border-left: 3px solid #5ebd93;
+  border-left: 3px solid var(--idox-info-border);
   border-radius: 0 8px 8px 0;
   background: var(--developer-surface-tint);
 }
@@ -167,18 +157,17 @@
   padding: 0.55rem;
   border: 1px solid var(--developer-border);
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.94);
-  box-shadow: 0 6px 20px rgba(39, 68, 78, 0.08);
+  background: var(--idox-bg-surface-default);
   backdrop-filter: blur(16px);
 }
 
 .catalog-developer-local-nav a {
-  color: #38515f;
+  color: var(--idox-text-secondary);
   text-decoration: none;
   padding: 0.55rem 0.8rem;
   border-radius: 8px;
   font-size: 0.94rem;
-  font-weight: 700;
+  font-weight: var(--idox-font-weight-semibold);
   transition: background 150ms ease, color 150ms ease;
 }
 
@@ -209,10 +198,10 @@
 
 .catalog-developer-panel p code,
 .catalog-developer-panel li code {
-  border: 1px solid #d9e7e3;
+  border: 1px solid var(--idox-border-default);
   border-radius: 5px;
-  background: #eff7f4;
-  color: #155d53;
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-brand-accent);
   padding: 0.08rem 0.32rem;
   font-size: 0.9em;
 }
@@ -256,7 +245,7 @@
   padding: 0.8rem;
   border: 1px solid var(--developer-border);
   border-radius: 10px;
-  background: #fbfcfc;
+  background: var(--idox-bg-surface-base);
   color: var(--developer-ink);
   text-align: left;
   cursor: pointer;
@@ -279,13 +268,13 @@
 .catalog-developer-hub .action-button:focus-visible,
 .catalog-developer-hub .ghost-button:focus-visible,
 .catalog-developer-local-nav a:focus-visible {
-  outline: 3px solid rgba(23, 104, 93, 0.28);
+  outline: var(--focus-outline);
   outline-offset: 2px;
 }
 
 .catalog-endpoint-list code {
   overflow-wrap: anywhere;
-  font-weight: 650;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .catalog-endpoint-list small {
@@ -298,28 +287,27 @@
   justify-content: center;
   border-radius: 999px;
   padding: 0.25rem 0.45rem;
-  background: #dff3e7;
-  color: #17613c;
+  background: var(--idox-success-bg);
+  color: var(--idox-success-text-color);
   font-size: 0.72rem;
-  font-weight: 850;
+  font-weight: var(--idox-font-weight-bold);
   letter-spacing: 0.04em;
 }
 
 .catalog-method.method-post {
-  background: #eee6fb;
-  color: #6841a5;
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
 }
 
 .catalog-code-card,
 .catalog-response,
 .catalog-ed-answer {
   min-width: 0;
-  border: 1px solid #29434e;
+  border: 1px solid var(--idox-slate-700);
   border-radius: 12px;
   background: var(--developer-code-surface);
   color: var(--developer-code-ink);
   padding: 1.15rem;
-  box-shadow: 0 10px 24px rgba(16, 36, 47, 0.14);
 }
 
 .catalog-code-card h4,
@@ -340,7 +328,7 @@
   white-space: pre;
   font-size: 0.84rem;
   line-height: 1.65;
-  scrollbar-color: #58717a transparent;
+  scrollbar-color: var(--idox-slate-500) transparent;
 }
 
 .catalog-ed-answer a {
@@ -360,7 +348,7 @@
 .catalog-developer-hub .action-button.primary {
   border-color: var(--developer-accent);
   background: var(--developer-accent);
-  color: #ffffff;
+  color: var(--idox-text-inverse);
 }
 
 .catalog-developer-hub .action-button.primary:hover:not(:disabled) {
@@ -371,10 +359,10 @@
 .catalog-developer-hub .ghost-button {
   border: 1px solid var(--developer-border-strong);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--idox-bg-surface-default);
   color: var(--developer-accent);
   padding: 0.7rem 0.9rem;
-  font-weight: 750;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .catalog-developer-hub .ghost-button:hover {
@@ -394,20 +382,20 @@
 }
 
 .catalog-key-badge {
-  border: 1px solid #99d0bd;
+  border: 1px solid var(--idox-success-border);
   border-radius: 999px;
-  background: #e7f7f0;
-  color: #17613c;
+  background: var(--idox-success-bg);
+  color: var(--idox-success-text-color);
   padding: 0.45rem 0.7rem;
   font-size: 0.82rem;
-  font-weight: 850;
+  font-weight: var(--idox-font-weight-bold);
 }
 
 .catalog-key-manager {
   display: grid;
   gap: 1.25rem;
-  border-color: #a9d5c8;
-  background: linear-gradient(145deg, #ffffff 25%, #f2faf7 100%);
+  border-color: var(--idox-border-default);
+  background: var(--idox-bg-surface-default);
 }
 
 .catalog-key-generator-form,
@@ -429,7 +417,7 @@
 .catalog-key-generator-form label,
 .catalog-key-generator-form legend {
   color: var(--developer-ink);
-  font-weight: 750;
+  font-weight: var(--idox-font-weight-semibold);
 }
 
 .catalog-key-generator-form input[type="text"],
@@ -438,7 +426,7 @@
   width: 100%;
   border: 1px solid var(--developer-border-strong);
   border-radius: 9px;
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
   color: var(--developer-ink);
   padding: 0.72rem 0.8rem;
 }
@@ -460,9 +448,9 @@
 .catalog-key-scope-grid label {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
-  border: 1px solid #d7e6e1;
+  border: 1px solid var(--idox-border-default);
   border-radius: 9px;
-  background: #ffffff;
+  background: var(--idox-bg-surface-default);
   padding: 0.75rem;
 }
 
@@ -478,7 +466,7 @@
 .catalog-key-scope-grid small {
   margin-top: 0.2rem;
   color: var(--developer-muted);
-  font-weight: 500;
+  font-weight: var(--idox-font-weight-medium);
 }
 
 .catalog-active-key {
@@ -486,16 +474,16 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  border: 1px solid #a8d8c7;
+  border: 1px solid var(--idox-success-border);
   border-radius: 12px;
-  background: #f3fbf7;
+  background: var(--idox-success-bg);
   padding: 1rem;
 }
 
 .catalog-key-status {
   margin-top: 0;
-  color: #17613c !important;
-  font-weight: 850;
+  color: var(--idox-success-text-color) !important;
+  font-weight: var(--idox-font-weight-bold);
 }
 
 .catalog-active-key dl {
@@ -511,10 +499,8 @@
 
 .catalog-active-key dt {
   color: var(--developer-muted);
-  font-size: 0.78rem;
-  font-weight: 750;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-medium);
 }
 
 .catalog-active-key dd {
@@ -524,22 +510,22 @@
 }
 
 .catalog-developer-hub .catalog-danger-button {
-  border-color: #b54343;
-  background: #ffffff;
-  color: #9d3030;
+  border-color: var(--idox-error-border);
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-error-text-color);
 }
 
 .catalog-one-time-key {
-  border: 2px solid #d68b24;
+  border: 2px solid var(--idox-warning-border);
   border-radius: 12px;
-  background: #fff8e8;
+  background: var(--idox-warning-bg);
   padding: 1rem;
 }
 
 .catalog-one-time-key h4,
 .catalog-one-time-key p {
   margin-top: 0;
-  color: #6a4515;
+  color: var(--idox-warning-text-color);
 }
 
 .catalog-one-time-key > div {
@@ -553,8 +539,8 @@
   min-width: 0;
   overflow-wrap: anywhere;
   border-radius: 8px;
-  background: #2b2419;
-  color: #fff7e7;
+  background: var(--idox-slate-900);
+  color: var(--idox-slate-100);
   padding: 0.75rem;
 }
 

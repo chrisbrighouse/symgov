@@ -10,9 +10,9 @@ function ErrorMessage({ message }) {
     {
       role: 'alert',
       style: {
-        color: '#dc2626',
-        background: '#fee2e2',
-        border: '1px solid #fca5a5',
+        color: 'var(--idox-error-text-color)',
+        background: 'var(--idox-error-bg)',
+        border: '1px solid var(--idox-error-border)',
         borderRadius: '6px',
         padding: '8px 12px',
         marginBottom: '12px',
@@ -79,8 +79,8 @@ function ContributionDashboardBody({ headingId, title, fetchSummary }) {
                       key: badge.badgeType,
                       style: {
                         fontSize: '0.75rem',
-                        background: '#dcfce7',
-                        color: '#166534',
+                        background: 'var(--idox-success-bg)',
+                        color: 'var(--idox-success-text-color)',
                         padding: '2px 10px',
                         borderRadius: '9999px',
                       },
@@ -89,7 +89,7 @@ function ContributionDashboardBody({ headingId, title, fetchSummary }) {
                   )
                 )
               )
-            : createElement('p', { style: { color: '#6b7280' } }, 'No badges earned yet.')
+            : createElement('p', { style: { color: 'var(--idox-text-tertiary)' } }, 'No badges earned yet.')
         )
       : null
   );

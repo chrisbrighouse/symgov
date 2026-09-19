@@ -10,7 +10,7 @@ export function EngineeringSymbolLogo() {
       viewBox: '0 0 24 24',
       'aria-hidden': 'true',
       fill: 'none',
-      stroke: '#17685d',
+      stroke: 'currentColor',
       strokeLinecap: 'round',
       strokeLinejoin: 'round',
       strokeWidth: '3.5'

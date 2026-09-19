@@ -10,9 +10,9 @@ function ErrorMessage({ message }) {
     {
       role: 'alert',
       style: {
-        color: '#dc2626',
-        background: '#fee2e2',
-        border: '1px solid #fca5a5',
+        color: 'var(--idox-error-text-color)',
+        background: 'var(--idox-error-bg)',
+        border: '1px solid var(--idox-error-border)',
         borderRadius: '6px',
         padding: '8px 12px',
         marginBottom: '12px',
@@ -27,7 +27,7 @@ function EventTypeTile({ item }) {
   const mostRecentDay = item.days.length > 0 ? item.days[item.days.length - 1] : null;
   return createElement(
     'div',
-    { style: { border: '1px solid #e5e7eb', borderRadius: '6px', padding: '12px 16px' } },
+    { style: { border: '1px solid var(--idox-border-subtle)', borderRadius: '6px', padding: '12px 16px' } },
     createElement('h3', { style: { margin: '0 0 8px', fontSize: '0.95rem' } }, describeProductUsageEventType(item.eventType)),
     createElement(
       'dl',
@@ -87,11 +87,11 @@ function UsageDashboardBody({ headingId, title, fetchSummary }) {
           null,
           createElement(
             'p',
-            { style: { color: '#6b7280', fontSize: '0.875rem', marginBottom: '16px' } },
+            { style: { color: 'var(--idox-text-tertiary)', fontSize: '0.875rem', marginBottom: '16px' } },
             `Window: ${summary.since} to ${summary.until}.`
           ),
           summary.eventTypes.length === 0
-            ? createElement('p', { style: { color: '#6b7280' } }, 'No usage recorded in this window.')
+            ? createElement('p', { style: { color: 'var(--idox-text-tertiary)' } }, 'No usage recorded in this window.')
             : createElement(
                 'div',
                 { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '12px' } },
