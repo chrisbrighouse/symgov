@@ -6,7 +6,14 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from .models import Attachment, IntakeRecord, PublishedPreviewAuthorization, SymbolRevision, ValidationReport
+from .models import (
+    Attachment,
+    IntakeRecord,
+    PublishedPreviewAuthorization,
+    ReviewSplitItem,
+    SymbolRevision,
+    ValidationReport,
+)
 from .published_catalog import choose_published_preview_asset
 
 
@@ -41,6 +48,33 @@ def _lineage_payload(revision: SymbolRevision) -> dict:
     return lineage if isinstance(lineage, dict) else {}
 
 
+def _matches_persisted_validation_report_split_lineage(
+    session: Session,
+    *,
+    lineage: dict,
+    attachment: Attachment,
+) -> bool:
+    split_item_id = _coerce_uuid(lineage.get("review_split_item_id"))
+    review_case_id = _coerce_uuid(lineage.get("parent_sheet_review_case_id"))
+    reviewed_object_key = str(lineage.get("reviewed_attachment_object_key") or "").strip()
+    attachment_object_key = str(attachment.object_key or "").strip()
+    if split_item_id is None or review_case_id is None or not reviewed_object_key:
+        return False
+    if not attachment_object_key or attachment_object_key != reviewed_object_key:
+        return False
+
+    split_item = session.get(ReviewSplitItem, split_item_id)
+    if split_item is None:
+        return False
+
+    split_item_object_key = str(split_item.attachment_object_key or "").strip()
+    return (
+        split_item.review_case_id == review_case_id
+        and bool(split_item_object_key)
+        and split_item_object_key == reviewed_object_key
+    )
+
+
 def _is_trusted_preview_lineage(session: Session, *, revision: SymbolRevision, attachment: Attachment) -> bool:
     if attachment.parent_type == "symbol_revision" and attachment.parent_id == revision.id:
         return True
@@ -48,10 +82,19 @@ def _is_trusted_preview_lineage(session: Session, *, revision: SymbolRevision, a
     lineage = _lineage_payload(revision)
 
     if attachment.parent_type == "validation_report":
-        validation_id = _coerce_uuid(lineage.get("validation_report_id"))
-        if validation_id is None or validation_id != attachment.parent_id:
+        attachment_report = session.get(ValidationReport, attachment.parent_id)
+        if attachment_report is None:
             return False
-        return session.get(ValidationReport, validation_id) is not None
+
+        validation_id = _coerce_uuid(lineage.get("validation_report_id"))
+        if validation_id is not None and validation_id == attachment.parent_id:
+            return True
+
+        return _matches_persisted_validation_report_split_lineage(
+            session,
+            lineage=lineage,
+            attachment=attachment,
+        )
 
     if attachment.parent_type == "external_submission_batch":
         intake_id = _coerce_uuid(lineage.get("intake_record_id"))

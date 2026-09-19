@@ -6,7 +6,14 @@ import uuid
 
 import pytest
 
-from symgov_backend.models import Attachment, IntakeRecord, PublishedPreviewAuthorization, SymbolRevision, ValidationReport
+from symgov_backend.models import (
+    Attachment,
+    IntakeRecord,
+    PublishedPreviewAuthorization,
+    ReviewSplitItem,
+    SymbolRevision,
+    ValidationReport,
+)
 from symgov_backend.published_preview_authorizations import (
     PreviewAuthorizationResult,
     backfill_published_preview_authorizations,
@@ -130,6 +137,89 @@ def test_ensure_preview_authorization_rejects_untrusted_lineage():
     )
     attachment = _attachment(object_key=key, parent_type="validation_report", parent_id=foreign_report_id)
     session = _FakeSession(query_map={Attachment: deque([attachment])})
+
+    result = ensure_preview_authorization(session, revision=revision, source="legacy_backfill")
+
+    assert result == PreviewAuthorizationResult(status="untrusted_lineage", object_key=key)
+    assert session.added == []
+    assert session.flushed == 0
+
+
+def test_ensure_preview_authorization_accepts_validation_report_split_lineage_when_report_id_differs():
+    revision_id = uuid.uuid4()
+    lineage_report_id = uuid.uuid4()
+    attachment_report_id = uuid.uuid4()
+    split_item_id = uuid.uuid4()
+    review_case_id = uuid.uuid4()
+    key = "previews/split-lineage.svg"
+    revision = _revision(
+        revision_id=revision_id,
+        object_key=key,
+        lineage={
+            "validation_report_id": str(lineage_report_id),
+            "review_split_item_id": str(split_item_id),
+            "parent_sheet_review_case_id": str(review_case_id),
+            "reviewed_attachment_object_key": key,
+        },
+    )
+    attachment = _attachment(object_key=key, parent_type="validation_report", parent_id=attachment_report_id)
+    split_item = SimpleNamespace(
+        id=split_item_id,
+        review_case_id=review_case_id,
+        attachment_object_key=key,
+    )
+    session = _FakeSession(
+        query_map={
+            Attachment: deque([attachment]),
+            PublishedPreviewAuthorization: deque([None, None]),
+        },
+        get_map={
+            (ValidationReport, attachment_report_id): SimpleNamespace(id=attachment_report_id),
+            (ReviewSplitItem, split_item_id): split_item,
+        },
+    )
+
+    result = ensure_preview_authorization(session, revision=revision, source="legacy_backfill")
+
+    assert result.status == "created"
+    assert session.flushed == 1
+    assert len(session.added) == 1
+
+
+@pytest.mark.parametrize("mismatch", ["split_item", "review_case", "object_key"])
+def test_ensure_preview_authorization_rejects_validation_report_split_lineage_mismatch(mismatch: str):
+    revision_id = uuid.uuid4()
+    lineage_report_id = uuid.uuid4()
+    attachment_report_id = uuid.uuid4()
+    split_item_id = uuid.uuid4()
+    review_case_id = uuid.uuid4()
+    key = "previews/split-lineage-mismatch.svg"
+    lineage_split_item_id = split_item_id if mismatch != "split_item" else uuid.uuid4()
+    lineage_review_case_id = review_case_id if mismatch != "review_case" else uuid.uuid4()
+    lineage_key = key if mismatch != "object_key" else "previews/other.svg"
+    revision = _revision(
+        revision_id=revision_id,
+        object_key=key,
+        lineage={
+            "validation_report_id": str(lineage_report_id),
+            "review_split_item_id": str(lineage_split_item_id),
+            "parent_sheet_review_case_id": str(lineage_review_case_id),
+            "reviewed_attachment_object_key": lineage_key,
+        },
+    )
+    attachment = _attachment(object_key=key, parent_type="validation_report", parent_id=attachment_report_id)
+    split_item = SimpleNamespace(
+        id=split_item_id,
+        review_case_id=review_case_id,
+        attachment_object_key=key,
+    )
+    session = _FakeSession(
+        query_map={Attachment: deque([attachment])},
+        get_map={
+            (ValidationReport, attachment_report_id): SimpleNamespace(id=attachment_report_id),
+            (ReviewSplitItem, split_item_id): split_item,
+        },
+    )
 
     result = ensure_preview_authorization(session, revision=revision, source="legacy_backfill")
 
