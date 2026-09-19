@@ -29,6 +29,7 @@ from .catalog_symbol_ids import ensure_catalog_symbol_id
 from .db import create_session_factory, read_env_file
 from .publication_authority import lock_review_case_decision_authority
 from .publication_gate import describe_refusal, enforce_publication_gate
+from .published_preview_authorizations import ensure_preview_authorization
 from .property_options import remember_property_option
 from .service_users import enforce_noninteractive_service_account, new_service_pin_hash
 from .models import (
@@ -2518,6 +2519,17 @@ class RuntimePersistenceBridge:
                     symbol,
                     allocated_at=completed_at,
                 )
+                preview_auth = ensure_preview_authorization(
+                    session,
+                    revision=revision,
+                    source="publication",
+                    created_at=completed_at,
+                )
+                if preview_auth.status not in {"created", "unchanged", "no_preview"}:
+                    raise RuntimeError(
+                        "Published preview authorization failed "
+                        f"for revision {revision_id}: {preview_auth.status}."
+                    )
 
                 page_code = self.generate_published_page_code(
                     symbol_slug=symbol.slug,

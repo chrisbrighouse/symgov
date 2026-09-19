@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from symgov_backend.app import create_app
 from symgov_backend.catalog_api_auth import hash_api_key
 from symgov_backend.dependencies import get_db_session, require_session_access
-from symgov_backend.models import Attachment, CatalogApiKey, CatalogApiUsageEvent
+from symgov_backend.models import Attachment, CatalogApiKey, CatalogApiUsageEvent, PublishedPreviewAuthorization
 from symgov_backend.routes.published import legacy_router as legacy_published_router
 from symgov_backend.routes.published import router as published_router
 
@@ -57,6 +57,19 @@ class AttachmentQuery:
         return None
 
 
+class PublishedPreviewAuthorizationQuery:
+    def __init__(self, rows):
+        self.rows = rows
+        self.criteria = []
+
+    def filter(self, *criteria):
+        self.criteria.extend(criteria)
+        return self
+
+    def one_or_none(self):
+        return self.rows[0] if self.rows else None
+
+
 class ExecuteRows:
     def __init__(self, rows):
         self._rows = rows
@@ -66,10 +79,19 @@ class ExecuteRows:
 
 
 class CapturingCatalogDetailSession:
-    def __init__(self, *, key_rows=None, symbol_rows=None, attachment_rows=None, fail_usage_logging: bool = False):
+    def __init__(
+        self,
+        *,
+        key_rows=None,
+        symbol_rows=None,
+        attachment_rows=None,
+        authorization_rows=None,
+        fail_usage_logging: bool = False,
+    ):
         self.key_rows = list(key_rows or [])
         self.symbol_rows = list(symbol_rows or [])
         self.attachment_rows = list(attachment_rows or [])
+        self.authorization_rows = list(authorization_rows or [])
         self.fail_usage_logging = fail_usage_logging
         self.added = []
         self.commits = 0
@@ -81,6 +103,8 @@ class CapturingCatalogDetailSession:
             return CatalogApiKeyQuery(self.key_rows)
         if model is Attachment:
             return AttachmentQuery(self.attachment_rows)
+        if model is PublishedPreviewAuthorization:
+            return PublishedPreviewAuthorizationQuery(self.authorization_rows)
         raise AssertionError(f"Unexpected query model: {model}")
 
     def execute(self, statement, params=None):
@@ -172,11 +196,34 @@ def attachment_row(**overrides):
     return SimpleNamespace(**base)
 
 
-def build_client(*, key_rows=None, symbol_rows=None, attachment_rows=None, fail_usage_logging: bool = False):
+def authorization_row(**overrides):
+    base = {
+        "symbol_revision_id": uuid.uuid4(),
+        "attachment_id": uuid.uuid4(),
+        "object_key": "previews/smoke-detector.svg",
+        "attachment_parent_type": "validation_report",
+        "attachment_parent_id": uuid.uuid4(),
+        "attachment_content_type": "image/svg+xml",
+        "attachment_size_bytes": 19,
+        "attachment_sha256": "f739e7cb8015b7f664f57169eb3f2f43db649bfc4507814d9eb7f2d959ec1c5d",
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
+def build_client(
+    *,
+    key_rows=None,
+    symbol_rows=None,
+    attachment_rows=None,
+    authorization_rows=None,
+    fail_usage_logging: bool = False,
+):
     session = CapturingCatalogDetailSession(
         key_rows=key_rows,
         symbol_rows=symbol_rows,
         attachment_rows=attachment_rows,
+        authorization_rows=authorization_rows,
         fail_usage_logging=fail_usage_logging,
     )
     app = create_app()
@@ -445,6 +492,50 @@ def test_catalog_preview_rejects_attachment_owned_by_other_revision(monkeypatch)
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Catalog symbol preview was not found."
+
+
+def test_catalog_preview_accepts_authorized_legacy_attachment_owner(monkeypatch):
+    row = symbol_row()
+    revision_id = uuid.UUID(str(row.symbol_revision_id))
+    attachment_id = uuid.uuid4()
+    object_key = "previews/smoke-detector.svg"
+    attachment_parent_id = uuid.uuid4()
+    client, _session = build_client(
+        key_rows=[api_key_row("valid-token")],
+        symbol_rows=[row],
+        attachment_rows=[
+            attachment_row(
+                id=attachment_id,
+                object_key=object_key,
+                parent_type="validation_report",
+                parent_id=attachment_parent_id,
+                content_type="image/svg+xml",
+                size_bytes=19,
+                sha256="f739e7cb8015b7f664f57169eb3f2f43db649bfc4507814d9eb7f2d959ec1c5d",
+            )
+        ],
+        authorization_rows=[
+            authorization_row(
+                symbol_revision_id=revision_id,
+                attachment_id=attachment_id,
+                object_key=object_key,
+                attachment_parent_type="validation_report",
+                attachment_parent_id=attachment_parent_id,
+            )
+        ],
+    )
+    import symgov_backend.routes.catalog as catalog_route
+
+    monkeypatch.setattr(
+        catalog_route,
+        "download_object_bytes",
+        lambda **_kwargs: {"payload": b"<svg>preview</svg>", "content_type": "image/svg+xml"},
+    )
+
+    response = client.get("/api/v1/catalog/symbols/0003-12/preview", headers=auth_headers())
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
 
 
 def test_catalog_symbol_detail_usage_logging_failure_does_not_fail_response():

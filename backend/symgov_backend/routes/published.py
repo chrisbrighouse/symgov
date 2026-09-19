@@ -53,6 +53,7 @@ from ..published_catalog import (
     published_fallback_source_asset,
     published_symbol_display_id,
 )
+from ..published_preview_authorizations import resolve_authorized_preview_attachment
 from ..runtime import download_object_bytes
 from ..services.published_feedback import (
     canonical_request_fingerprint,
@@ -978,14 +979,10 @@ def get_published_symbol_preview(
     if not object_key:
         raise HTTPException(status_code=404, detail="Published symbol preview was not found.")
 
-    attachment = (
-        session.query(Attachment)
-        .filter(
-            Attachment.object_key == object_key,
-            Attachment.parent_type == "symbol_revision",
-            Attachment.parent_id == revision_id,
-        )
-        .one_or_none()
+    attachment = resolve_authorized_preview_attachment(
+        session,
+        revision_id=revision_id,
+        object_key=object_key,
     )
     if attachment is None:
         raise HTTPException(status_code=404, detail="Published symbol preview was not found.")

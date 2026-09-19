@@ -444,7 +444,8 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
         }
 
         class QueryResult:
-            def __init__(self):
+            def __init__(self, rows):
+                self.rows = rows
                 self.criteria = []
 
             def filter(self, *criteria):
@@ -452,14 +453,21 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
                 return self
 
             def one_or_none(self):
-                if len(self.criteria) >= 3:
-                    return None
-                return SimpleNamespace(
-                    content_type="image/svg+xml",
-                    object_key="symbols/owner-bound.svg",
-                    parent_type="symbol_revision",
-                    parent_id=foreign_revision_id,
+                compiled = "\n".join(
+                    str(criterion.compile(compile_kwargs={"literal_binds": True}))
+                    for criterion in self.criteria
                 )
+                for row in self.rows:
+                    if hasattr(row, "symbol_revision_id") and str(row.symbol_revision_id) not in compiled:
+                        continue
+                    if hasattr(row, "object_key") and str(row.object_key) not in compiled:
+                        continue
+                    if hasattr(row, "parent_type") and "attachments.parent_type" in compiled and str(row.parent_type) not in compiled:
+                        continue
+                    if hasattr(row, "parent_id") and "attachments.parent_id" in compiled and str(row.parent_id) not in compiled:
+                        continue
+                    return row
+                return None
 
         class Session:
             def execute(self, *_args, **_kwargs):
@@ -473,8 +481,22 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
                     ]
                 )
 
-            def query(self, *_args):
-                return QueryResult()
+            def query(self, model):
+                if model.__name__ == "PublishedPreviewAuthorization":
+                    return QueryResult([])
+                return QueryResult(
+                    [
+                        SimpleNamespace(
+                            content_type="image/svg+xml",
+                            object_key="symbols/owner-bound.svg",
+                            parent_type="symbol_revision",
+                            parent_id=foreign_revision_id,
+                            id=UUID("cccccccc-cccc-cccc-cccc-cccccccccccc"),
+                            sha256="f739e7cb8015b7f664f57169eb3f2f43db649bfc4507814d9eb7f2d959ec1c5d",
+                            size_bytes=7,
+                        )
+                    ]
+                )
 
         with patch(
             "symgov_backend.routes.published.resolve_catalog_symbol",
@@ -488,6 +510,45 @@ class PublishedSymbolFeedbackTests(unittest.TestCase):
 
         self.assertEqual(exc.exception.status_code, 404)
         self.assertEqual(exc.exception.detail, "Published symbol preview was not found.")
+
+    def test_published_preview_accepts_authorized_legacy_attachment_owner(self) -> None:
+        revision_id = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+        payload_json = {
+            "visual_assets": {
+                "preview": {
+                    "object_key": "symbols/owner-bound.svg",
+                    "filename": "owner-bound.svg",
+                    "content_type": "image/svg+xml",
+                    "format": "svg",
+                }
+            }
+        }
+
+        class Session:
+            def execute(self, *_args, **_kwargs):
+                return SimpleNamespace(
+                    all=lambda: [
+                        SimpleNamespace(
+                            symbol_id="11111111-1111-1111-1111-111111111111",
+                            symbol_revision_id=str(revision_id),
+                            payload_json=payload_json,
+                        )
+                    ]
+                )
+
+        with patch(
+            "symgov_backend.routes.published.resolve_catalog_symbol",
+            return_value=SimpleNamespace(symbol_id=UUID("11111111-1111-1111-1111-111111111111")),
+        ), patch(
+            "symgov_backend.routes.published.resolve_authorized_preview_attachment",
+            return_value=SimpleNamespace(content_type="image/svg+xml"),
+        ), patch(
+            "symgov_backend.routes.published.download_object_bytes",
+            return_value={"payload": b"<svg />", "content_type": "image/svg+xml"},
+        ):
+            response = get_published_symbol_preview("owner-bound", format="SVG", session=Session())
+
+        self.assertEqual(response.status_code, 200)
 
     def test_published_symbol_comment_item_serializes_history_entry(self) -> None:
         comment = SimpleNamespace(

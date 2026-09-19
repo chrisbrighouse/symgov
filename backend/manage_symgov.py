@@ -32,6 +32,7 @@ from symgov_backend.catalog_api_keys import (
 )
 from symgov_backend.classification_backfill import run_legacy_classification_backfill
 from symgov_backend.db import create_session_factory
+from symgov_backend.published_preview_authorizations import backfill_published_preview_authorizations
 from symgov_backend.runtime import RuntimePersistenceBridge, check_database_health, check_storage_health
 from symgov_backend.tracy_operations import (
     archive_agent_runtime_queue,
@@ -198,6 +199,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     classification_backfill_parser.add_argument(
         "--summary-only", action="store_true", help="Print counts without the per-row detail."
+    )
+
+    preview_backfill_parser = subparsers.add_parser(
+        "backfill-published-preview-authorizations",
+        help=(
+            "Backfill immutable publication-time preview authorization bindings for already "
+            "published revisions. Dry run unless --apply."
+        ),
+    )
+    preview_backfill_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    preview_backfill_parser.add_argument(
+        "--apply", action="store_true", help="Apply the backfill. Omit for dry-run."
     )
 
     gate_parser = subparsers.add_parser(
@@ -531,6 +544,31 @@ def main(argv: Sequence[str] | None = None):
             apply=args.apply,
             summary_only=args.summary_only,
         )
+
+    if args.command == "backfill-published-preview-authorizations":
+        session_factory = create_session_factory(env_file=args.db_env_file, nopool=True)
+        session = session_factory()
+        try:
+            result = backfill_published_preview_authorizations(session, apply=args.apply)
+        except Exception as exc:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            try:
+                session.close()
+            except Exception:
+                pass
+            print(f"Published preview authorization backfill failed: {exc}", file=sys.stderr)
+            return 1
+        try:
+            session.close()
+        except Exception:
+            print(json.dumps(result, indent=2, default=str))
+            print("Published preview authorization backfill session cleanup failed.", file=sys.stderr)
+            return 1
+        print(json.dumps(result, indent=2, default=str))
+        return 0
 
     if args.command == "evaluate-automation-gates":
         if args.review_split_metadata:

@@ -793,6 +793,45 @@ class Attachment(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class PublishedPreviewAuthorization(Base):
+    """Immutable publication-time preview authorization binding.
+
+    Public/Catalog preview routes use this binding to prove that the requested
+    preview object key was explicitly authorized for this symbol revision at
+    publication time, even when the durable `Attachment` parent is a
+    provenance owner such as `validation_report`.
+    """
+
+    __tablename__ = "published_preview_authorizations"
+    __table_args__ = (
+        UniqueConstraint("symbol_revision_id", "object_key", name="uq_published_preview_authorizations_revision_object_key"),
+        UniqueConstraint("object_key", name="uq_published_preview_authorizations_object_key"),
+        CheckConstraint("object_key <> ''", name="ck_published_preview_authorizations_object_key_nonempty"),
+        CheckConstraint("attachment_sha256 ~ '^[0-9a-f]{64}$'", name="ck_published_preview_authorizations_sha256"),
+        CheckConstraint("attachment_size_bytes >= 0", name="ck_published_preview_authorizations_size_nonnegative"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    symbol_revision_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("symbol_revisions.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    attachment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("attachments.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    object_key: Mapped[str] = mapped_column(Text, nullable=False)
+    attachment_parent_type: Mapped[str] = mapped_column(Text, nullable=False)
+    attachment_parent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    attachment_content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    attachment_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    attachment_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 
