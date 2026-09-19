@@ -85,7 +85,7 @@ from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E40
 # which exist at 20260904_0043. An upgrade target, not a head assertion: it is
 # here so the fixture has the schema the code under test reads, and it must
 # track head for as long as that stays true.
-NEW_MIGRATION_HEAD = "20260911_0057"
+NEW_MIGRATION_HEAD = "20260919_0061"
 
 psycopg = pytest.importorskip("psycopg")
 
@@ -163,6 +163,7 @@ def wp93_database():
                 "GRANT SELECT, INSERT ON audit_events TO symgov_app",
                 "GRANT SELECT ON active_public_symbol_projections TO symgov_app",
                 "GRANT SELECT, INSERT, UPDATE ON attachments TO symgov_app",
+                "GRANT SELECT, INSERT, UPDATE ON published_preview_authorizations TO symgov_app",
                 "GRANT SELECT, INSERT, DELETE ON catalog_favourites TO symgov_app",
             ):
                 connection.execute(statement)
