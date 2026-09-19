@@ -6,8 +6,11 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from .models import Attachment, PublishedPreviewAuthorization, SymbolRevision
+from .models import Attachment, IntakeRecord, PublishedPreviewAuthorization, SymbolRevision, ValidationReport
 from .published_catalog import choose_published_preview_asset
+
+
+LEGACY_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "symgov/runtime-legacy-id")
 
 
 def _utc_now() -> datetime:
@@ -19,6 +22,86 @@ def _normalize_sha256(value: str | None) -> str | None:
     if len(candidate) != 64 or any(char not in "0123456789abcdef" for char in candidate):
         return None
     return candidate
+
+
+def _coerce_uuid(value: str | uuid.UUID | None) -> uuid.UUID | None:
+    if value is None:
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    try:
+        return uuid.UUID(str(value))
+    except (TypeError, ValueError, AttributeError):
+        return uuid.uuid5(LEGACY_ID_NAMESPACE, str(value))
+
+
+def _lineage_payload(revision: SymbolRevision) -> dict:
+    payload = revision.payload_json if isinstance(revision.payload_json, dict) else {}
+    lineage = payload.get("lineage") if isinstance(payload.get("lineage"), dict) else {}
+    return {"payload": payload, "lineage": lineage}
+
+
+def _attachment_keys_from_payload(payload: dict) -> set[str]:
+    keys: set[str] = set()
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key.endswith("object_key") and isinstance(child, str) and child.strip():
+                    keys.add(child.strip())
+                else:
+                    visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+
+    visit(payload)
+    return keys
+
+
+def _is_trusted_preview_lineage(session: Session, *, revision: SymbolRevision, attachment: Attachment) -> bool:
+    if attachment.parent_type == "symbol_revision" and attachment.parent_id == revision.id:
+        return True
+
+    payload_parts = _lineage_payload(revision)
+    payload = payload_parts["payload"]
+    lineage = payload_parts["lineage"]
+
+    if attachment.parent_type == "validation_report":
+        validation_id = _coerce_uuid(lineage.get("validation_report_id"))
+        if validation_id is None or validation_id != attachment.parent_id:
+            return False
+        return session.get(ValidationReport, validation_id) is not None
+
+    if attachment.parent_type == "external_submission_batch":
+        intake_id = _coerce_uuid(lineage.get("intake_record_id"))
+        if intake_id is None:
+            return False
+        intake = session.get(IntakeRecord, intake_id)
+        if intake is None:
+            return False
+
+        normalized = intake.normalized_submission_json if isinstance(intake.normalized_submission_json, dict) else {}
+        batch_id = _coerce_uuid(normalized.get("submission_batch_id"))
+        if batch_id is None or batch_id != attachment.parent_id:
+            return False
+
+        attachment_ids = {
+            str(value).strip()
+            for value in (normalized.get("attachment_ids") or [])
+            if str(value).strip()
+        }
+        attachment_keys = _attachment_keys_from_payload(payload)
+        if intake.raw_object_key:
+            attachment_keys.add(str(intake.raw_object_key).strip())
+        for key in ("raw_object_key", "origin_object_key", "source_object_key"):
+            value = normalized.get(key)
+            if isinstance(value, str) and value.strip():
+                attachment_keys.add(value.strip())
+
+        return str(attachment.id) in attachment_ids or str(attachment.object_key).strip() in attachment_keys
+
+    return False
 
 
 @dataclass(frozen=True)
@@ -55,6 +138,9 @@ def ensure_preview_authorization(
         return PreviewAuthorizationResult(status="invalid_size", object_key=object_key)
     if size_bytes < 0:
         return PreviewAuthorizationResult(status="invalid_size", object_key=object_key)
+
+    if not _is_trusted_preview_lineage(session, revision=revision, attachment=attachment):
+        return PreviewAuthorizationResult(status="untrusted_lineage", object_key=object_key)
 
     existing_for_object = (
         session.query(PublishedPreviewAuthorization)
@@ -180,6 +266,7 @@ def backfill_published_preview_authorizations(session: Session, *, apply: bool) 
         "invalid_size": 0,
         "conflicting_object_key": 0,
         "immutable_mismatch": 0,
+        "untrusted_lineage": 0,
     }
     failures: list[dict[str, str]] = []
     now = _utc_now()
@@ -193,7 +280,7 @@ def backfill_published_preview_authorizations(session: Session, *, apply: bool) 
         status = result.status
         if status in counters:
             counters[status] += 1
-        else:
+        if status not in {"created", "unchanged", "no_preview"}:
             failures.append(
                 {
                     "symbol_revision_id": str(revision.id),
@@ -202,8 +289,8 @@ def backfill_published_preview_authorizations(session: Session, *, apply: bool) 
                     "reason": result.reason or "",
                 }
             )
-    if apply:
+    if apply and not failures:
         session.commit()
     else:
         session.rollback()
-    return {**counters, "failures": failures, "applied": bool(apply)}
+    return {**counters, "failures": failures, "applied": bool(apply and not failures)}

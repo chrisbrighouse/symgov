@@ -568,6 +568,9 @@ def main(argv: Sequence[str] | None = None):
             print("Published preview authorization backfill session cleanup failed.", file=sys.stderr)
             return 1
         print(json.dumps(result, indent=2, default=str))
+        if args.apply and result.get("failures"):
+            print("Published preview authorization backfill aborted: one or more failures were detected.", file=sys.stderr)
+            return 1
         return 0
 
     if args.command == "evaluate-automation-gates":
