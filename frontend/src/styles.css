@@ -388,7 +388,7 @@ a:not([class]):active {
   stroke: var(--idox-color-brand-accent);
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 3.5;
+  stroke-width: 2;
 }
 
 .eyebrow {

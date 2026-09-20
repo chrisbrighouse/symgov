@@ -13,11 +13,11 @@ export function EngineeringSymbolLogo() {
       stroke: 'currentColor',
       strokeLinecap: 'round',
       strokeLinejoin: 'round',
-      strokeWidth: '3.5'
+      strokeWidth: '2'
     },
-    createElement('path', { d: 'M12 2L2 7l10 5 10-5-10-5z' }),
-    createElement('path', { d: 'M2 17l10 5 10-5' }),
-    createElement('path', { d: 'M2 12l10 5 10-5' })
+    createElement('path', { d: 'M4 8.5v11l16-11v11z' }),
+    createElement('path', { d: 'M12 14V6.5' }),
+    createElement('path', { d: 'M7.5 5.5h9' })
   );
 }
 
