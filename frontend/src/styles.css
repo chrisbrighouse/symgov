@@ -5751,3 +5751,494 @@ button.catalog-preview-format-badge:focus-visible {
     gap: 1.25rem;
   }
 }
+
+/*
+ * Platform administration surface.
+ *
+ * Before this block the page had one className and fifty-eight inline styles,
+ * so every button and input fell through to the browser default and nine
+ * unrelated sections stacked into one 800px column. Worse, four drill-downs
+ * rendered inside the Organizations section and accumulated, with nothing
+ * tying a panel to the row it came from. It is rebuilt here from the existing
+ * vocabulary -- glass-panel/pane, action-button, field, the admin table shell
+ * and the tab idiom -- plus a single-selection detail pane beside the list.
+ */
+
+/* Hint text inside a .field label. Referenced by the create-organization
+   fallback; it had no rule at all before. */
+.field-hint {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+}
+
+.platform-admin-shell {
+  width: min(84rem, 100%);
+}
+
+/* Page header: what is being administered, and the two totals behind it. */
+.platform-admin-hero {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Below 1120px the shared .hero-panel rule stacks the header; keep the
+   stacked children left-aligned rather than centred on the cross axis. */
+@media (max-width: 1120px) {
+  .platform-admin-hero {
+    align-items: flex-start;
+  }
+}
+
+.platform-admin-hero h1 {
+  margin: 0;
+  font-size: var(--idox-font-size-xl);
+  font-weight: var(--idox-font-weight-semibold);
+  line-height: var(--idox-line-height-tight);
+}
+
+.platform-admin-hero-meta {
+  margin: 0.3rem 0 0;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-sm);
+}
+
+/*
+ * Step-up PIN. It is spent by the first protected call that needs it, so it
+ * belongs to the page rather than to any one form, and it stays mounted on
+ * every tab. It says what it is for and whether one is currently held, and
+ * turns amber when a change was refused for want of it.
+ */
+.platform-admin-stepup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14rem;
+  align-items: start;
+  gap: 0.75rem 1.25rem;
+  padding: 1rem 1.25rem;
+}
+
+.platform-admin-stepup.needs-pin {
+  border-color: var(--idox-warning-border);
+  background: var(--idox-warning-bg);
+}
+
+.platform-admin-stepup h2 {
+  margin: 0;
+  font-size: var(--idox-font-size-base);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.platform-admin-stepup-field {
+  justify-self: stretch;
+  width: 100%;
+}
+
+.platform-admin-stepup-state {
+  grid-column: 2;
+  justify-self: end;
+  margin: 0;
+  font-size: var(--idox-font-size-xs);
+  color: var(--idox-text-tertiary);
+}
+
+.platform-admin-stepup-state.is-ready {
+  color: var(--idox-success-text-color);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+/* Section tabs -- the semantic review §tabs-default treatment. Shared by the
+   page tablist and the organization detail pane's own tablist. */
+.platform-admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.2rem 0 0;
+  border-bottom: 1px solid var(--idox-border-subtle);
+}
+
+.platform-admin-tab {
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  min-height: 2.4rem;
+  padding: 0.5rem 0.85rem;
+  background: transparent;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+}
+
+.platform-admin-tab:hover {
+  border-bottom-color: var(--idox-border-subtle);
+  color: var(--idox-text-primary);
+}
+
+.platform-admin-tab.active {
+  border-bottom-color: var(--idox-color-brand-accent);
+  color: var(--idox-text-primary);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.platform-admin-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.platform-admin-section {
+  display: grid;
+  gap: 0.9rem;
+  align-content: start;
+}
+
+.platform-admin-section-heading {
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.platform-admin-section-heading h2 {
+  margin: 0;
+  font-size: var(--idox-font-size-lg);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.platform-admin-message {
+  margin: 0;
+}
+
+.platform-admin-help {
+  margin: 0;
+  max-width: 46rem;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-sm);
+}
+
+.platform-admin-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+/*
+ * Organizations tab: the list, and beside it the detail pane for whichever
+ * row is selected. One selection at a time -- the pane cannot accumulate, and
+ * its heading always names its subject.
+ */
+.platform-admin-org-layout {
+  display: grid;
+  gap: 1rem;
+  align-items: start;
+}
+
+.platform-admin-org-layout.has-detail {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+}
+
+.platform-admin-detail {
+  display: grid;
+  gap: 0.9rem;
+  align-content: start;
+  position: sticky;
+  top: 1rem;
+}
+
+.platform-admin-detail h2 {
+  margin: 0;
+  font-size: var(--idox-font-size-lg);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.platform-admin-detail-tabs {
+  margin: 0;
+}
+
+.platform-admin-detail-body {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.platform-admin-detail-section {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.platform-admin-detail-section h3 {
+  margin: 0;
+  font-size: var(--idox-font-size-base);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+/* Tables. .admin-users-table-shell supplies the scroll shell and border; the
+   per-table min-width is retuned for four columns rather than the site user
+   table's twelve. */
+.platform-admin-grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--idox-font-size-sm);
+}
+
+.platform-admin-grid th,
+.platform-admin-grid td {
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid var(--idox-border-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+
+.platform-admin-grid th {
+  background: var(--idox-bg-surface-base);
+  color: var(--idox-text-secondary);
+  font-weight: var(--idox-font-weight-bold);
+  white-space: nowrap;
+}
+
+.platform-admin-grid th:first-child,
+.platform-admin-grid td:first-child {
+  min-width: 12rem;
+}
+
+.platform-admin-grid tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.platform-organizations-grid {
+  /* Narrow enough to sit beside the detail pane without clipping the actions
+     column; the drill-down buttons wrap rather than forcing a scroll. */
+  min-width: 32rem;
+}
+
+.platform-admins-grid,
+.platform-symgov-grid {
+  min-width: 46rem;
+}
+
+/* The selected row, so the detail pane beside it is never orphaned. */
+.platform-organization-row.is-selected {
+  background: var(--idox-interactive-subtle);
+}
+
+.platform-organization-row.is-selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--idox-color-brand-accent);
+}
+
+.platform-admin-principal-name {
+  display: block;
+}
+
+.platform-admin-principal-email,
+.platform-admin-principal-code,
+.platform-admin-timestamp {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+  word-break: break-word;
+}
+
+.platform-admin-principal-code,
+.platform-admin-timestamp {
+  font-family: var(--idox-font-family-mono);
+  white-space: nowrap;
+}
+
+/*
+ * Stack, never a row: the read-only drill-downs and the destructive
+ * suspend/revoke each sit in their own cell, a full cell-padding apart.
+ */
+.platform-admin-cell-stack {
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+}
+
+.platform-admin-row-views {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.platform-admin-row-actions {
+  white-space: nowrap;
+}
+
+.platform-admin-grid .action-button.compact {
+  min-height: 2rem;
+  padding: 0.3rem 0.65rem;
+}
+
+.platform-admin-error-row td {
+  padding-top: 0;
+}
+
+/* Member diagnostics inside the detail pane. */
+.platform-admin-diagnostic-list {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.platform-admin-diagnostic-member {
+  display: grid;
+  gap: 0.5rem;
+  border: 1px solid var(--idox-border-subtle);
+  border-radius: var(--idox-radius-lg);
+  padding: 0.75rem 0.9rem;
+  background: var(--idox-bg-surface-base);
+}
+
+.platform-admin-diagnostic-identity {
+  min-width: 0;
+}
+
+/*
+ * Record-creating forms. The labels stay direct children so each control
+ * keeps its own association; the grid supplies the row. The trailing filler
+ * track keeps the submit at its own width instead of letting it absorb the
+ * rest of the row.
+ */
+.platform-admin-record-form {
+  display: grid;
+  align-items: end;
+  gap: 0.75rem 1rem;
+  border: 1px solid var(--idox-border-subtle);
+  border-radius: var(--idox-radius-xl);
+  padding: 1rem 1.25rem;
+  background: var(--idox-bg-surface-base);
+}
+
+.platform-admin-record-form-title,
+.platform-admin-record-form-hint,
+.platform-admin-record-form .form-message {
+  grid-column: 1 / -1;
+}
+
+.platform-admin-record-form-hint {
+  margin: -0.25rem 0 0;
+}
+
+.platform-admin-record-form-title {
+  margin: 0;
+  font-weight: var(--idox-font-weight-semibold);
+  color: var(--idox-text-secondary);
+}
+
+.platform-admin-record-form-submit {
+  min-height: 2.25rem;
+}
+
+.platform-admin-create-org {
+  grid-template-columns: minmax(8rem, 12rem) minmax(10rem, 18rem) minmax(10rem, 20rem) auto minmax(0, 1fr);
+}
+
+.platform-admin-protected-add {
+  grid-template-columns: minmax(10rem, 16rem) minmax(8rem, 11rem) minmax(10rem, 20rem) auto minmax(0, 1fr);
+}
+
+.platform-admin-grant-form {
+  grid-template-columns: minmax(12rem, 22rem) auto minmax(0, 1fr);
+}
+
+/* Read-then-act forms that carry no chrome of their own. */
+.platform-admin-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.75rem 1rem;
+}
+
+.platform-admin-inline-form .field {
+  flex: 1 1 16rem;
+  margin: 0;
+  max-width: 26rem;
+}
+
+.platform-admin-inline-form .form-message {
+  flex: 1 1 100%;
+}
+
+/* Impact preview / opened request: the evidence you act on, given its own
+   surface so the destructive control below it is plainly a second step. */
+.platform-admin-preview {
+  display: grid;
+  gap: 0.6rem;
+  border: 1px solid var(--idox-border-subtle);
+  border-radius: var(--idox-radius-lg);
+  padding: 1rem 1.25rem;
+  background: var(--idox-bg-surface-base);
+}
+
+.platform-admin-preview h3 {
+  margin: 0;
+  font-size: var(--idox-font-size-base);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.platform-admin-preview-verdict {
+  margin: 0;
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.platform-admin-preview-reasons {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+}
+
+/* The demotion itself: separated from the preview by a rule, and never
+   adjacent to a non-destructive control. */
+.platform-admin-danger-zone {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+  margin-top: 0.35rem;
+  border-top: 1px solid var(--idox-border-subtle);
+  padding-top: 0.85rem;
+}
+
+.platform-admin-danger-zone .field {
+  width: min(32rem, 100%);
+}
+
+/* Dashboard sections carry no chrome of their own; give them the page panel. */
+.platform-admin-embedded > section {
+  margin-bottom: 0 !important;
+}
+
+@media (max-width: 1120px) {
+  .platform-admin-org-layout.has-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .platform-admin-detail {
+    position: static;
+  }
+}
+
+@media (max-width: 860px) {
+  .platform-admin-stepup {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .platform-admin-stepup-field,
+  .platform-admin-stepup-state {
+    grid-column: 1;
+    justify-self: start;
+  }
+
+  .platform-admin-create-org,
+  .platform-admin-protected-add,
+  .platform-admin-grant-form {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .platform-admin-record-form-submit {
+    justify-self: start;
+  }
+}

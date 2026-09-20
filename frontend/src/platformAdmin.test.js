@@ -108,6 +108,18 @@ function jsonResponse(body, status = 200) {
   };
 }
 
+/**
+ * The platform admin surface groups its sections behind a tablist, and these
+ * suites assert against the first render, so a section that is not on the
+ * landing tab has to be opened first.
+ */
+async function openPlatformAdminTab(renderer, key) {
+  const tab = renderer.root.find(
+    (node) => node.type === 'button' && node.props.id === `platform-admin-tab-${key}`,
+  );
+  await act(async () => tab.props.onClick());
+}
+
 async function mountPlatformAdmin(fetchImpl, createNodeMock) {
   globalThis.fetch = fetchImpl;
   let renderer;
@@ -254,6 +266,7 @@ describe('protected platform mutation', () => {
       return jsonResponse({ detail: `Unexpected request: ${path}` }, 404);
     });
     const root = renderer.root;
+    await openPlatformAdminTab(renderer, 'admins');
 
     await act(async () => {
       root.findByProps({ id: 'platform-step-up-pin' }).props.onChange({ target: { value: '1234' } });
@@ -288,6 +301,7 @@ describe('protected platform mutation', () => {
       return jsonResponse({ detail: `Unexpected request: ${path}` }, 404);
     }, (element) => ({ focus: () => focused.push(element.props.id) }));
     const root = renderer.root;
+    await openPlatformAdminTab(renderer, 'admins');
 
     await act(async () => {
       root.findByProps({ id: 'platform-admin-user-id' }).props.onChange({ target: { value: 'u-2' } });
@@ -313,6 +327,7 @@ describe('protected platform mutation', () => {
       return jsonResponse({ detail: `Unexpected request: ${path}` }, 404);
     });
     const root = renderer.root;
+    await openPlatformAdminTab(renderer, 'symgov');
     assert.equal(root.findByProps({ id: 'protected-symgov-members-heading' }).children.join(''), 'Protected Symgov members (1)');
     assert.equal(root.findByProps({ id: 'protected-member-reason' }).props.minLength, 10);
     assert.equal(root.findByProps({ id: 'protected-member-reason' }).props.maxLength, 1000);
@@ -342,6 +357,7 @@ describe('protected platform mutation', () => {
       return jsonResponse({ detail: `Unexpected request: ${path}` }, 404);
     });
     const root = renderer.root;
+    await openPlatformAdminTab(renderer, 'symgov');
     await act(async () => {
       root.findByProps({ id: 'platform-step-up-pin' }).props.onChange({ target: { value: '1234' } });
       root.findByProps({ id: 'protected-member-user-id' }).props.onChange({ target: { value: 'u-4' } });
@@ -373,6 +389,7 @@ describe('protected platform mutation', () => {
       return jsonResponse({ detail: `Unexpected request: ${path}` }, 404);
     });
     const root = renderer.root;
+    await openPlatformAdminTab(renderer, 'symgov');
     assert.equal(root.findAllByProps({ id: 'protected-member-user-id' }).length, 0);
     assert.match(root.findByProps({ role: 'alert' }).children.join(''), /platform admin access is required/i);
     await act(async () => renderer.unmount());
@@ -533,6 +550,7 @@ describe('demotion console (WP7.8)', () => {
         return jsonResponse(demoteResult);
       },
     }), platformAdminUser);
+    await openPlatformAdminTab(renderer, 'symbols');
 
     await act(async () => {
       renderer.root.findByProps({ id: 'demotion-symbol-id' }).props.onChange({ target: { value: 'sym-1' } });
@@ -569,6 +587,7 @@ describe('demotion console (WP7.8)', () => {
     const renderer = await mountPlatformAdminWithUser(baselineFetch({
       '/api/v1/platform/governed-symbols/sym-2/demotion-impact-preview': () => jsonResponse(preview),
     }), platformAdminUser);
+    await openPlatformAdminTab(renderer, 'symbols');
 
     await act(async () => {
       renderer.root.findByProps({ id: 'demotion-symbol-id' }).props.onChange({ target: { value: 'sym-2' } });
@@ -599,6 +618,7 @@ describe('promotion-request review panel (WP7.8)', () => {
         return jsonResponse({ id: 'case-1', status: 'closed' });
       },
     }), platformAdminUser);
+    await openPlatformAdminTab(renderer, 'symbols');
 
     await act(async () => {
       renderer.root.findByProps({ id: 'promotion-review-symbol-id' }).props.onChange({ target: { value: 'sym-1' } });
@@ -807,6 +827,228 @@ describe('PlatformAdminPage organization row contributions trigger', () => {
     assert.deepEqual(contributionRequests, ['/api/v1/platform/organizations/org-2/contributions']);
     const markup = JSON.stringify(renderer.toJSON());
     assert.match(markup, /First Contribution/);
+    await act(async () => renderer.unmount());
+  });
+});
+
+// --- Rebuilt surface: tablist, single-selection detail pane, step-up panel ---
+
+function platformFetch(overrides = {}) {
+  return async (url, options = {}) => {
+    const path = new URL(url, 'http://test').pathname;
+    if (path === '/api/v1/platform/admins' && !options.method) return jsonResponse(mockAdminsResponse);
+    if (path === '/api/v1/platform/organizations' && !options.method) return jsonResponse(mockOrganizationsResponse);
+    if (path === '/api/v1/platform/organizations/symgov/members' && !options.method) return jsonResponse(mockSymgovMembersResponse);
+    const override = overrides[path];
+    if (override) return override(options);
+    return jsonResponse({ detail: `Unexpected request: ${path} ${options.method || 'GET'}` }, 404);
+  };
+}
+
+function tabIds(renderer) {
+  return renderer.root
+    .findAllByProps({ role: 'tab' })
+    .filter((node) => node.type === 'button')
+    .map((node) => node.props.id);
+}
+
+describe('platform admin tablist', () => {
+  it('omits the capability-gated tabs and keeps the step-up PIN mounted on every tab', async () => {
+    const renderer = await mountPlatformAdmin(platformFetch());
+
+    assert.deepEqual(tabIds(renderer), [
+      'platform-admin-tab-organizations',
+      'platform-admin-tab-admins',
+      'platform-admin-tab-symgov',
+    ]);
+
+    // The PIN is spent by whichever protected call needs it first, so it is a
+    // page-level control and must survive a tab change.
+    assert.ok(renderer.root.findByProps({ id: 'platform-step-up-pin' }));
+    await openPlatformAdminTab(renderer, 'symgov');
+    assert.ok(renderer.root.findByProps({ id: 'platform-step-up-pin' }));
+
+    await act(async () => renderer.unmount());
+  });
+
+  it('mounts the symbol-governance and agent tabs only for the capabilities that gate them', async () => {
+    const renderer = await mountPlatformAdminWithUser(platformFetch({
+      '/api/v1/platform/agent-configurations': () => jsonResponse({ items: [] }),
+      '/api/v1/platform/agent-findings': () => jsonResponse({ items: [] }),
+    }), {
+      ...platformAdminUser,
+      capabilities: { ...platformAdminUser.capabilities, organizationAgentsEnabled: true },
+    });
+
+    assert.deepEqual(tabIds(renderer), [
+      'platform-admin-tab-organizations',
+      'platform-admin-tab-admins',
+      'platform-admin-tab-symgov',
+      'platform-admin-tab-symbols',
+      'platform-admin-tab-agents',
+    ]);
+
+    await act(async () => renderer.unmount());
+  });
+
+  it('moves between tabs with the arrow keys and keeps a roving tabindex', async () => {
+    const renderer = await mountPlatformAdmin(platformFetch());
+    const tablist = renderer.root.findByProps({ 'aria-label': 'Platform administration sections' });
+
+    function selected() {
+      return renderer.root
+        .findAllByProps({ role: 'tab' })
+        .filter((node) => node.type === 'button' && node.props['aria-selected'])
+        .map((node) => node.props.id);
+    }
+
+    assert.deepEqual(selected(), ['platform-admin-tab-organizations']);
+    // Only the selected tab is in the page tab order; the arrows do the rest.
+    assert.deepEqual(
+      renderer.root.findAllByProps({ role: 'tab' })
+        .filter((node) => node.type === 'button')
+        .map((node) => node.props.tabIndex),
+      [0, -1, -1],
+    );
+
+    await act(async () => tablist.props.onKeyDown({ key: 'ArrowRight', preventDefault() {} }));
+    assert.deepEqual(selected(), ['platform-admin-tab-admins']);
+
+    await act(async () => tablist.props.onKeyDown({ key: 'End', preventDefault() {} }));
+    assert.deepEqual(selected(), ['platform-admin-tab-symgov']);
+
+    // Wraps rather than dead-ending at the last tab.
+    await act(async () => tablist.props.onKeyDown({ key: 'ArrowRight', preventDefault() {} }));
+    assert.deepEqual(selected(), ['platform-admin-tab-organizations']);
+
+    await act(async () => tablist.props.onKeyDown({ key: 'ArrowLeft', preventDefault() {} }));
+    assert.deepEqual(selected(), ['platform-admin-tab-symgov']);
+
+    await act(async () => tablist.props.onKeyDown({ key: 'Home', preventDefault() {} }));
+    assert.deepEqual(selected(), ['platform-admin-tab-organizations']);
+
+    await act(async () => renderer.unmount());
+  });
+});
+
+describe('organization detail pane', () => {
+  function detailHeadings(renderer) {
+    return renderer.root
+      .findAllByProps({ id: 'platform-organization-detail-heading' })
+      .filter((node) => node.type === 'h2')
+      .map((node) => node.children.join(''));
+  }
+
+  it('replaces the previous drill-down instead of accumulating, and names its subject', async () => {
+    const renderer = await mountPlatformAdmin(platformFetch({
+      '/api/v1/platform/organizations/org-2/usage-summary': () => jsonResponse({
+        organizationId: 'org-2', since: '2026-08-05', until: '2026-09-04', eventTypes: [],
+      }),
+      '/api/v1/platform/organizations/org-1/members': () => jsonResponse({
+        items: [], page: 1, pageSize: 50, total: 0,
+      }),
+    }));
+
+    assert.deepEqual(detailHeadings(renderer), [], 'nothing is open before a row is picked');
+
+    await act(async () => {
+      await renderer.root.findByProps({ 'aria-label': 'View usage dashboard for Acme Inc' }).props.onClick();
+    });
+    assert.deepEqual(detailHeadings(renderer), ['Acme Inc']);
+    assert.match(JSON.stringify(renderer.toJSON()), /No usage recorded/);
+
+    // A second drill-down on a different organization must take the pane over,
+    // not stack a second one underneath with nothing naming its row.
+    await act(async () => {
+      await renderer.root.findByProps({ 'aria-label': 'View members for Symgov' }).props.onClick();
+    });
+    assert.deepEqual(detailHeadings(renderer), ['Symgov']);
+    assert.doesNotMatch(JSON.stringify(renderer.toJSON()), /No usage recorded/);
+    assert.equal(
+      renderer.root.findByProps({ id: 'member-diagnostics-heading' }).children.join(''),
+      'Member diagnostics: Symgov',
+    );
+
+    await act(async () => renderer.unmount());
+  });
+
+  it('marks the selected row and its active view, and closes back to the bare list', async () => {
+    const renderer = await mountPlatformAdmin(platformFetch({
+      '/api/v1/platform/organizations/org-2/contributions': () => jsonResponse({
+        organizationId: 'org-2', acceptedContributionCount: 0, reversedContributionCount: 0, badges: [],
+      }),
+    }));
+
+    await act(async () => {
+      await renderer.root.findByProps({ 'aria-label': 'View contributions for Acme Inc' }).props.onClick();
+    });
+
+    const selectedRows = renderer.root
+      .findAllByType('tr')
+      .filter((node) => node.props['aria-current'] === 'true');
+    assert.equal(selectedRows.length, 1);
+    assert.equal(
+      renderer.root.findByProps({ 'aria-label': 'View contributions for Acme Inc' }).props['aria-pressed'],
+      true,
+    );
+    assert.equal(
+      renderer.root.findByProps({ 'aria-label': 'View members for Acme Inc' }).props['aria-pressed'],
+      false,
+    );
+
+    await act(async () => {
+      renderer.root.findByProps({ 'aria-label': 'Close detail for Acme Inc' }).props.onClick();
+    });
+    assert.deepEqual(detailHeadings(renderer), []);
+    assert.equal(
+      renderer.root.findAllByType('tr').filter((node) => node.props['aria-current'] === 'true').length,
+      0,
+    );
+
+    await act(async () => renderer.unmount());
+  });
+});
+
+describe('platform step-up panel', () => {
+  it('explains the refusal, flags itself and takes focus when a change needs a PIN nobody entered', async () => {
+    const focused = [];
+    const renderer = await mountPlatformAdmin(platformFetch({
+      '/api/v1/platform/admins': (options) => (options.method === 'POST'
+        ? jsonResponse({ detail: 'Step-up reauthentication is required.' }, 403)
+        : jsonResponse(mockAdminsResponse)),
+    }), (element) => ({ focus: () => focused.push(element.props.id) }));
+    const root = renderer.root;
+    await openPlatformAdminTab(renderer, 'admins');
+
+    assert.equal(root.findByProps({ id: 'platform-step-up-state' }).children.join(''), 'No PIN entered.');
+
+    await act(async () => {
+      root.findByProps({ id: 'platform-admin-user-id' }).props.onChange({ target: { value: 'u-2' } });
+    });
+    await act(async () => {
+      await root.findByProps({ id: 'platform-admin-user-id' }).parent.parent.props.onSubmit({ preventDefault() {} });
+    });
+
+    assert.match(root.findByProps({ role: 'alert' }).children.join(''), /needs your PIN/);
+    assert.match(
+      root.findByProps({ 'aria-labelledby': 'platform-step-up-heading' }).props.className,
+      /needs-pin/,
+    );
+    assert.deepEqual(focused, ['platform-step-up-pin']);
+
+    // Entering a PIN clears the flag without needing another failed attempt.
+    await act(async () => {
+      root.findByProps({ id: 'platform-step-up-pin' }).props.onChange({ target: { value: '1234' } });
+    });
+    assert.doesNotMatch(
+      root.findByProps({ 'aria-labelledby': 'platform-step-up-heading' }).props.className,
+      /needs-pin/,
+    );
+    assert.equal(
+      root.findByProps({ id: 'platform-step-up-state' }).children.join(''),
+      'PIN entered — protected changes are ready.',
+    );
+
     await act(async () => renderer.unmount());
   });
 });

@@ -85,6 +85,14 @@ async function openOrganizationAdminTab(renderer, key) {
   await act(async () => tab.props.onClick());
 }
 
+/** So does the platform admin surface; Organizations is the landing tab. */
+async function openPlatformAdminTab(renderer, key) {
+  const tab = renderer.root.find(
+    (node) => node.type === 'button' && node.props.id === `platform-admin-tab-${key}`,
+  );
+  await act(async () => tab.props.onClick());
+}
+
 describe('mounted admin App journeys', () => {
   let originalFetch;
 
@@ -244,6 +252,7 @@ describe('mounted admin App journeys', () => {
 
     const renderer = await mount('/platform/admin');
     assert.ok(renderer.root.findByProps({ 'aria-label': 'Platform' }));
+    await openPlatformAdminTab(renderer, 'admins');
     assert.equal(input(renderer, 'platform-admin-user-id').props.required, true);
     await act(async () => {
       input(renderer, 'platform-admin-user-id').props.onChange({ target: { value: 'u-2' } });
@@ -295,6 +304,7 @@ describe('mounted admin App journeys', () => {
 
     const renderer = await mount('/platform/admin');
     assert.ok(renderer.root.findByProps({ 'aria-label': 'Platform' }));
+    await openPlatformAdminTab(renderer, 'symgov');
     assert.equal(input(renderer, 'protected-member-reason').props.required, true);
     assert.equal(renderer.root.findByProps({ 'aria-label': 'Promote Protected Member' }).props.disabled, true);
 
