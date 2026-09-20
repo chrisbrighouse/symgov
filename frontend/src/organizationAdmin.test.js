@@ -275,6 +275,139 @@ describe('existing-user member mutation', () => {
   });
 });
 
+describe('organization admin section tabs', () => {
+  function pageFetch(overrides = {}) {
+    return async (url, options = {}) => {
+      const path = new URL(url, 'http://test').pathname;
+      if (overrides[path]) return overrides[path](options);
+      if (path === '/api/v1/org/me') return jsonResponse(mockOrg);
+      if (path === '/api/v1/org/me/members' && !options.method) return jsonResponse(mockMembersResponse);
+      return jsonResponse({ detail: `Unexpected request: ${path}` }, 404);
+    };
+  }
+
+  function tab(renderer, key) {
+    return renderer.root.find(
+      (node) => node.type === 'button' && node.props.id === `organization-admin-tab-${key}`,
+    );
+  }
+
+  it('opens on Members and exposes the sections as an accessible tablist', async () => {
+    const renderer = await mountOrganizationAdmin(pageFetch());
+
+    const tablist = renderer.root.findByProps({ role: 'tablist' });
+    assert.equal(tablist.props['aria-label'], 'Organization administration sections');
+    const labels = renderer.root
+      .findAllByProps({ role: 'tab' })
+      .filter((node) => node.type === 'button')
+      .map((node) => node.children.join(''));
+    assert.deepEqual(labels, ['Members', 'Organization', 'Activity']);
+
+    assert.equal(tab(renderer, 'members').props['aria-selected'], true);
+    assert.equal(tab(renderer, 'members').props.tabIndex, 0);
+    assert.equal(tab(renderer, 'organization').props.tabIndex, -1);
+    assert.equal(
+      renderer.root.findByProps({ role: 'tabpanel' }).props['aria-labelledby'],
+      'organization-admin-tab-members',
+    );
+    await act(async () => renderer.unmount());
+  });
+
+  it('shows one section at a time: the member table gives way to the organization detail', async () => {
+    const renderer = await mountOrganizationAdmin(pageFetch());
+    assert.equal(renderer.root.findAllByProps({ id: 'organization-member-user-id' }).length, 1);
+
+    await act(async () => tab(renderer, 'organization').props.onClick());
+
+    assert.equal(renderer.root.findAllByProps({ id: 'organization-member-user-id' }).length, 0);
+    assert.equal(tab(renderer, 'organization').props['aria-selected'], true);
+    assert.ok(renderer.root.findByProps({ id: 'org-detail-heading' }));
+    assert.ok(renderer.root.findByProps({ id: 'org-icon-heading' }));
+    await act(async () => renderer.unmount());
+  });
+
+  it('omits the Projects & symbol sets tab when the organization has no symbol-set session', async () => {
+    const renderer = await mountOrganizationAdmin(pageFetch());
+    assert.equal(renderer.root.findAllByProps({ id: 'organization-admin-tab-library' }).length, 0);
+    await act(async () => renderer.unmount());
+  });
+});
+
+describe('member controls', () => {
+  async function mountMembers() {
+    return mountOrganizationAdmin(async (url, options = {}) => {
+      const path = new URL(url, 'http://test').pathname;
+      if (path === '/api/v1/org/me') return jsonResponse(mockOrg);
+      if (path === '/api/v1/org/me/members' && !options.method) return jsonResponse(mockMembersResponse);
+      return jsonResponse({ detail: `Unexpected request: ${path}` }, 404);
+    });
+  }
+
+  it('renders each capability as a labelled checkbox reflecting the granted state', async () => {
+    const renderer = await mountMembers();
+
+    const contributor = renderer.root.findByProps({ id: 'member-m-2-contributor' });
+    assert.equal(contributor.props.type, 'checkbox');
+    assert.equal(contributor.props.checked, true);
+    assert.equal(contributor.props['aria-label'], 'Contributor capability for Org Member');
+
+    const reviewer = renderer.root.findByProps({ id: 'member-m-2-symbol_reviewer' });
+    assert.equal(reviewer.props.checked, false);
+    assert.equal(reviewer.props['aria-label'], 'Reviewer capability for Org Member');
+
+    assert.equal(renderer.root.findByProps({ id: 'member-m-1-contributor' }).props.checked, false);
+    await act(async () => renderer.unmount());
+  });
+
+  it('names the role change and the destructive action after the member they act on', async () => {
+    const renderer = await mountMembers();
+    const markup = JSON.stringify(renderer.toJSON());
+
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Make Org Member an organization admin' }));
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Change Admin User to member' }));
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Remove Org Member from this organization' }));
+    // The destructive control is the only one carrying the danger treatment.
+    assert.match(markup, /action-button compact danger/);
+    await act(async () => renderer.unmount());
+  });
+});
+
+describe('step-up guidance', () => {
+  it('explains the missing PIN in the operator’s terms and flags the protected-changes panel', async () => {
+    const renderer = await mountOrganizationAdmin(async (url, options = {}) => {
+      const path = new URL(url, 'http://test').pathname;
+      if (path === '/api/v1/org/me') return jsonResponse(mockOrg);
+      if (path === '/api/v1/org/me/members' && !options.method) return jsonResponse(mockMembersResponse);
+      if (path === '/api/v1/org/me/members' && options.method === 'POST') {
+        return jsonResponse({ detail: 'Step-up reauthentication is required.' }, 403);
+      }
+      return jsonResponse({ detail: `Unexpected request: ${path}` }, 404);
+    });
+    const root = renderer.root;
+
+    assert.equal(root.findByProps({ id: 'organization-step-up-state' }).children.join(''), 'No PIN entered.');
+
+    await act(async () => {
+      root.findByProps({ id: 'organization-member-user-id' }).props.onChange({ target: { value: 'u-2' } });
+    });
+    await act(async () => {
+      const userInput = root.findByProps({ id: 'organization-member-user-id' });
+      await userInput.parent.parent.props.onSubmit({ preventDefault() {} });
+    });
+
+    // The raw backend wording tells the operator nothing they can act on.
+    assert.match(root.findByProps({ role: 'alert' }).children.join(''), /needs your PIN/i);
+    assert.match(JSON.stringify(renderer.toJSON()), /needs-pin/);
+
+    await act(async () => {
+      root.findByProps({ id: 'organization-step-up-pin' }).props.onChange({ target: { value: '1234' } });
+    });
+    assert.match(root.findByProps({ id: 'organization-step-up-state' }).children.join(''), /PIN entered/);
+    assert.doesNotMatch(JSON.stringify(renderer.toJSON()), /needs-pin/);
+    await act(async () => renderer.unmount());
+  });
+});
+
 describe('fetch mock', () => {
   it('setup works correctly', async () => {
     setupFetchMock();

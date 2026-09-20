@@ -1,4 +1,4 @@
-import { createElement, useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { createElement, Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { runWithStepUp } from './adminJourneys.js';
 import { requestJson } from './api.js';
 import { canMountAgentOversight, canMountOrganizationSymbolDrafts, canMountProjectContext } from './projectContext.js';
@@ -57,65 +57,64 @@ export function addExistingOrganizationMember({ userId, baseRole, protect }) {
   return protect(() => apiPost('/org/me/members', { userId, baseRole }));
 }
 
+const STATUS_BADGE_MODIFIERS = {
+  active: 'is-active',
+  inactive: 'is-inactive',
+  invited: 'is-invited',
+};
+
 function StatusBadge({ status }) {
-  const styles = {
-    active: { background: 'var(--idox-success-bg)', color: 'var(--idox-success-text-color)' },
-    inactive: { background: 'var(--idox-error-bg)', color: 'var(--idox-error-text-color)' },
-    invited: { background: 'var(--idox-info-bg)', color: 'var(--idox-info-text-color)' },
-  };
-  const s = styles[status] || { background: 'var(--idox-bg-surface-subtle)', color: 'var(--idox-text-secondary)' };
-  return createElement(
-    'span',
-    {
-      style: {
-        ...s,
-        fontSize: '0.75rem',
-        padding: '2px 8px',
-        borderRadius: '9999px',
-        fontWeight: 600,
-        textTransform: 'capitalize',
-      },
-    },
-    status
-  );
+  const modifier = STATUS_BADGE_MODIFIERS[status] || 'is-neutral';
+  return createElement('span', { className: `organization-admin-badge ${modifier}` }, status);
 }
 
 function RoleBadge({ role }) {
-  const isAdmin = role === 'admin';
-  return createElement(
-    'span',
-    {
-      style: {
-        background: isAdmin ? 'var(--idox-info-bg)' : 'var(--idox-bg-surface-subtle)',
-        color: isAdmin ? 'var(--idox-info-text-color)' : 'var(--idox-text-secondary)',
-        fontSize: '0.75rem',
-        padding: '2px 8px',
-        borderRadius: '9999px',
-        fontWeight: 600,
-        textTransform: 'capitalize',
-      },
-    },
-    role
-  );
+  const modifier = role === 'admin' ? 'is-admin' : 'is-neutral';
+  return createElement('span', { className: `organization-admin-badge ${modifier}` }, role);
 }
 
 function ErrorMessage({ message }) {
   if (!message) return null;
   return createElement(
     'p',
-    {
-      role: 'alert',
-      style: {
-        color: 'var(--idox-error-text-color)',
-        background: 'var(--idox-error-bg)',
-        border: '1px solid var(--idox-error-border)',
-        borderRadius: '6px',
-        padding: '8px 12px',
-        marginBottom: '12px',
-        fontSize: '0.875rem',
-      },
-    },
+    { role: 'alert', className: 'form-message error organization-admin-message' },
     message
+  );
+}
+
+function HelpText({ children }) {
+  return createElement('p', { className: 'organization-admin-help' }, children);
+}
+
+/**
+ * The usage, contribution and agent-findings sections are shared with the
+ * platform page and carry no chrome of their own; give them the page panel so
+ * the Activity tab reads like the rest of the surface.
+ */
+function EmbeddedPanel({ children }) {
+  return createElement('div', { className: 'glass-panel pane organization-admin-embedded' }, children);
+}
+
+/**
+ * Section shell: one heading, an optional one-line explanation, and an
+ * optional action slot on the heading row rather than buried in the body.
+ */
+function AdminSection({ id, title, description, actions, children }) {
+  return createElement(
+    'section',
+    { className: 'glass-panel pane organization-admin-section', 'aria-labelledby': id },
+    createElement(
+      'div',
+      { className: 'detail-heading organization-admin-section-heading' },
+      createElement(
+        'div',
+        null,
+        createElement('h2', { id }, title),
+        description ? createElement('p', { className: 'title-support' }, description) : null
+      ),
+      actions || null
+    ),
+    children
   );
 }
 
@@ -144,58 +143,79 @@ function OrgDetailSection({ org, isAdmin, onUpdate, protect }) {
     }
   }
 
+  function startEditing() {
+    setDisplayName(org.displayName);
+    setLegalName(org.legalName || '');
+    setError('');
+    setEditing(true);
+  }
+
+  const canEdit = isAdmin && !org.isProtected;
+  const editAction = canEdit && !editing
+    ? createElement(
+        'button',
+        { type: 'button', className: 'action-button', onClick: startEditing },
+        'Edit details'
+      )
+    : null;
+
   return createElement(
-    'section',
-    { 'aria-labelledby': 'org-detail-heading', style: { marginBottom: '32px' } },
-    createElement('h2', { id: 'org-detail-heading', style: { marginBottom: '16px' } }, 'Organization details'),
+    AdminSection,
+    {
+      id: 'org-detail-heading',
+      title: 'Organization details',
+      description: 'The name and identifiers this organization is published under.',
+      actions: editAction,
+    },
     ErrorMessage({ message: error }),
+    isAdmin && org.isProtected
+      ? createElement(HelpText, null, 'This organization is protected — its details are managed by the platform team.')
+      : null,
     editing
       ? createElement(
           'form',
-          { onSubmit: handleSave, style: { display: 'flex', flexDirection: 'column', gap: '12px', maxWidth: '480px' } },
+          { onSubmit: handleSave, className: 'organization-admin-form' },
           createElement(
             'label',
-            { htmlFor: 'org-display-name' },
-            'Display name',
+            { htmlFor: 'org-display-name', className: 'field' },
+            createElement('span', null, 'Display name'),
             createElement('input', {
               id: 'org-display-name',
               type: 'text',
               value: displayName,
               onChange: (e) => setDisplayName(e.target.value),
               required: true,
-              style: { display: 'block', width: '100%', marginTop: '4px' },
             })
           ),
           createElement(
             'label',
-            { htmlFor: 'org-legal-name' },
-            'Legal name',
+            { htmlFor: 'org-legal-name', className: 'field' },
+            createElement('span', null, 'Legal name'),
             createElement('input', {
               id: 'org-legal-name',
               type: 'text',
               value: legalName,
               onChange: (e) => setLegalName(e.target.value),
-              style: { display: 'block', width: '100%', marginTop: '4px' },
             })
           ),
           createElement(
             'div',
-            { style: { display: 'flex', gap: '8px' } },
+            { className: 'organization-admin-form-actions' },
             createElement(
               'button',
-              { type: 'submit', disabled: saving },
+              { type: 'submit', className: 'action-button primary', disabled: saving },
               saving ? 'Saving…' : 'Save changes'
             ),
             createElement(
               'button',
-              { type: 'button', onClick: () => setEditing(false) },
+              { type: 'button', className: 'action-button', onClick: () => setEditing(false), disabled: saving },
               'Cancel'
             )
           )
         )
       : createElement(
           'dl',
-          { style: { display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 16px' } },
+          { className: 'organization-admin-detail-grid' },
           createElement('dt', null, 'Code'),
           createElement('dd', null, createElement('code', null, org.code)),
           createElement('dt', null, 'Display name'),
@@ -203,26 +223,26 @@ function OrgDetailSection({ org, isAdmin, onUpdate, protect }) {
           createElement('dt', null, 'Legal name'),
           createElement('dd', null, org.legalName || '—'),
           createElement('dt', null, 'Locale'),
-          createElement('dd', null, org.locale),
+          createElement('dd', null, org.locale || '—'),
           createElement('dt', null, 'Status'),
           createElement(
             'dd',
             null,
             StatusBadge({ status: org.isActive ? org.entitlementStatus : 'inactive' })
-          ),
-          isAdmin && !org.isProtected
-            ? createElement(
-                'dd',
-                { style: { gridColumn: '1/-1', marginTop: '12px' } },
-                createElement('button', { onClick: () => setEditing(true) }, 'Edit details')
-              )
-            : null
+          )
         )
   );
 }
 
 const ALLOWED_ICON_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 const MAX_ICON_BYTES = 512 * 1024;
+
+function describeIconLock({ isAdmin, org, iconUploadEnabled }) {
+  if (!isAdmin) return 'Only organization admins can change the icon.';
+  if (org.isProtected) return 'This organization is protected — its icon is managed by the platform team.';
+  if (!iconUploadEnabled) return 'Icon upload is not enabled for this organization.';
+  return '';
+}
 
 function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) {
   const [file, setFile] = useState(null);
@@ -295,44 +315,44 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
   }
 
   const canManage = isAdmin && !org.isProtected && iconUploadEnabled;
+  const lockReason = canManage ? '' : describeIconLock({ isAdmin, org, iconUploadEnabled });
 
   return createElement(
-    'section',
-    { 'aria-labelledby': 'org-icon-heading', style: { marginBottom: '32px' } },
-    createElement('h2', { id: 'org-icon-heading', style: { marginBottom: '16px' } }, 'Organization icon'),
+    AdminSection,
+    {
+      id: 'org-icon-heading',
+      title: 'Organization icon',
+      description: 'Shown beside this organization across the product.',
+    },
     ErrorMessage({ message: error }),
     createElement(
       'div',
-      { style: { display: 'flex', alignItems: 'flex-start', gap: '24px', flexWrap: 'wrap' } },
+      { className: 'organization-admin-icon-layout' },
       createElement(
         'div',
-        null,
-        createElement('p', { style: { margin: '0 0 8px', fontSize: '0.875rem', color: 'var(--idox-text-tertiary)' } },
-          org.hasCustomIcon ? 'Custom icon' : 'Generated fallback icon'
-        ),
+        { className: 'organization-admin-icon-current' },
+        createElement('p', { className: 'eyebrow' }, org.hasCustomIcon ? 'Custom icon' : 'Generated fallback'),
         org.iconUrl
           ? createElement('img', {
               src: org.iconUrl,
               alt: `${org.displayName} icon`,
               width: 64,
               height: 64,
-              style: { borderRadius: '8px', border: '1px solid var(--idox-border-subtle)', display: 'block' },
+              className: 'organization-admin-icon',
             })
-          : createElement('div', {
-              style: {
-                width: '64px', height: '64px', borderRadius: '8px',
-                background: 'var(--idox-bg-surface-subtle)', border: '1px solid var(--idox-border-subtle)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                fontSize: '0.7rem', color: 'var(--idox-text-disabled)', textAlign: 'center',
-              },
-            }, 'Generated'),
+          : createElement(
+              'div',
+              { className: 'organization-admin-icon is-placeholder', role: 'img', 'aria-label': 'Generated fallback icon' },
+              'Generated'
+            ),
         canManage && org.hasCustomIcon
           ? createElement(
               'button',
               {
+                type: 'button',
                 onClick: handleRemove,
                 disabled: removing,
-                style: { marginTop: '8px', fontSize: '0.8rem', color: 'var(--idox-error-text-color)', display: 'block' },
+                className: 'action-button compact danger organization-admin-icon-remove',
                 'aria-label': 'Remove custom icon',
               },
               removing ? 'Removing…' : 'Remove icon'
@@ -342,41 +362,67 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
       canManage
         ? createElement(
             'form',
-            { onSubmit: handleUpload, style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+            { onSubmit: handleUpload, className: 'organization-admin-form organization-admin-icon-form' },
             createElement(
               'label',
-              { htmlFor: 'org-icon-file', style: { fontSize: '0.875rem' } },
-              'Upload new icon',
+              { htmlFor: 'org-icon-file', className: 'field' },
+              createElement('span', null, 'Upload a new icon'),
               createElement('input', {
                 id: 'org-icon-file',
                 type: 'file',
                 accept: 'image/png,image/jpeg,image/webp',
                 onChange: handleFileChange,
-                style: { display: 'block', marginTop: '4px' },
+                'aria-describedby': 'org-icon-constraints',
               })
-            ),
-            previewUrl
-              ? createElement('img', {
-                  src: previewUrl,
-                  alt: 'Icon preview',
-                  width: 64,
-                  height: 64,
-                  style: { borderRadius: '8px', border: '1px solid var(--idox-border-subtle)' },
-                })
-              : null,
-            createElement(
-              'button',
-              { type: 'submit', disabled: !file || uploading },
-              uploading ? 'Uploading…' : 'Upload icon'
             ),
             createElement(
               'p',
-              { style: { fontSize: '0.75rem', color: 'var(--idox-text-disabled)', margin: 0 } },
+              { id: 'org-icon-constraints', className: 'organization-admin-help' },
               'PNG, JPEG or WEBP · max 512 KB · 32–1024 px per side'
+            ),
+            previewUrl
+              ? createElement(
+                  'div',
+                  { className: 'organization-admin-icon-preview' },
+                  createElement('p', { className: 'eyebrow' }, 'Preview'),
+                  createElement('img', {
+                    src: previewUrl,
+                    alt: 'Icon preview',
+                    width: 64,
+                    height: 64,
+                    className: 'organization-admin-icon',
+                  })
+                )
+              : null,
+            createElement(
+              'div',
+              { className: 'organization-admin-form-actions' },
+              createElement(
+                'button',
+                { type: 'submit', className: 'action-button primary', disabled: !file || uploading },
+                uploading ? 'Uploading…' : 'Upload icon'
+              )
             )
           )
-        : null
+        : createElement(HelpText, null, lockReason)
     )
+  );
+}
+
+function CapabilityToggle({ member, capability, label, granted, busy, onChange }) {
+  const inputId = `member-${member.membershipId}-${capability}`;
+  return createElement(
+    'label',
+    { className: 'checkbox-row compact organization-admin-capability', htmlFor: inputId },
+    createElement('input', {
+      id: inputId,
+      type: 'checkbox',
+      checked: granted,
+      disabled: busy,
+      onChange: () => onChange(granted ? 'revoke' : 'grant', capability),
+      'aria-label': `${label} capability for ${member.displayName}`,
+    }),
+    createElement('span', null, label)
   );
 }
 
@@ -421,79 +467,106 @@ function MemberRow({ member, isAdmin, onRoleChange, onCapabilityChange, onDeacti
     }
   }
 
-  const hasContributor = member.capabilities.some((c) => c.capability === 'contributor');
-  const hasReviewer = member.capabilities.some((c) => c.capability === 'symbol_reviewer');
+  const capabilities = member.capabilities || [];
+  const hasContributor = capabilities.some((c) => c.capability === 'contributor');
+  const hasReviewer = capabilities.some((c) => c.capability === 'symbol_reviewer');
+  const manageable = isAdmin && member.status === 'active';
+  const isOrgAdmin = member.baseRole === 'admin';
 
-  return createElement(
-    'li',
-    {
-      style: {
-        display: 'flex',
-        flexWrap: 'wrap',
-        alignItems: 'center',
-        gap: '8px',
-        padding: '10px 0',
-        borderBottom: '1px solid var(--idox-border-subtle)',
-      },
-    },
+  const row = createElement(
+    'tr',
+    { className: 'organization-admin-member-row', 'aria-busy': busy || undefined },
     createElement(
-      'div',
-      { style: { flex: '1 1 200px' } },
-      createElement('strong', null, member.displayName),
-      createElement('br', null),
-      createElement('small', { style: { color: 'var(--idox-text-tertiary)' } }, member.email)
+      'td',
+      null,
+      createElement('strong', { className: 'organization-admin-member-name' }, member.displayName),
+      createElement('span', { className: 'organization-admin-member-email' }, member.email)
     ),
-    createElement('div', { style: { display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' } },
-      StatusBadge({ status: member.status }),
-      RoleBadge({ role: member.baseRole }),
-      hasContributor && createElement('span', { style: { fontSize: '0.7rem', background: 'var(--idox-warning-bg)', color: 'var(--idox-warning-text-color)', padding: '2px 6px', borderRadius: '9999px' } }, 'contributor'),
-      hasReviewer && createElement('span', { style: { fontSize: '0.7rem', background: 'var(--idox-warning-bg)', color: 'var(--idox-warning-text-color)', padding: '2px 6px', borderRadius: '9999px' } }, 'reviewer')
+    createElement('td', null, StatusBadge({ status: member.status })),
+    createElement(
+      'td',
+      null,
+      createElement(
+        'div',
+        { className: 'organization-admin-cell-stack' },
+        RoleBadge({ role: member.baseRole }),
+        manageable
+          ? createElement(
+              'button',
+              {
+                type: 'button',
+                className: 'action-button compact',
+                onClick: () => handleRoleChange(isOrgAdmin ? 'user' : 'admin'),
+                disabled: busy,
+                'aria-label': isOrgAdmin
+                  ? `Change ${member.displayName} to member`
+                  : `Make ${member.displayName} an organization admin`,
+              },
+              isOrgAdmin ? 'Make member' : 'Make admin'
+            )
+          : null
+      )
     ),
-    error ? createElement('span', { style: { color: 'var(--idox-error-text-color)', fontSize: '0.8rem', width: '100%' } }, error) : null,
-    isAdmin && member.status === 'active'
-      ? createElement(
-          'div',
-          { style: { display: 'flex', gap: '6px', flexWrap: 'wrap' } },
-          createElement(
-            'button',
-            {
-              onClick: () => handleRoleChange(member.baseRole === 'admin' ? 'user' : 'admin'),
-              disabled: busy,
-              style: { fontSize: '0.8rem' },
-              'aria-label': `${member.baseRole === 'admin' ? 'Demote' : 'Promote'} ${member.displayName}`,
-            },
-            member.baseRole === 'admin' ? 'Demote' : 'Promote'
-          ),
-          createElement(
-            'button',
-            {
-              onClick: () => handleCapability(hasContributor ? 'revoke' : 'grant', 'contributor'),
-              disabled: busy,
-              style: { fontSize: '0.8rem' },
-            },
-            hasContributor ? '−Contributor' : '+Contributor'
-          ),
-          createElement(
-            'button',
-            {
-              onClick: () => handleCapability(hasReviewer ? 'revoke' : 'grant', 'symbol_reviewer'),
-              disabled: busy,
-              style: { fontSize: '0.8rem' },
-            },
-            hasReviewer ? '−Reviewer' : '+Reviewer'
-          ),
-          createElement(
-            'button',
-            {
-              onClick: handleDeactivate,
-              disabled: busy,
-              style: { fontSize: '0.8rem', color: 'var(--idox-error-text-color)' },
-              'aria-label': `Remove ${member.displayName}`,
-            },
-            'Remove'
+    createElement(
+      'td',
+      null,
+      manageable
+        ? createElement(
+            'div',
+            { className: 'organization-admin-cell-stack', role: 'group', 'aria-label': `Capabilities for ${member.displayName}` },
+            createElement(CapabilityToggle, {
+              member, capability: 'contributor', label: 'Contributor',
+              granted: hasContributor, busy, onChange: handleCapability,
+            }),
+            createElement(CapabilityToggle, {
+              member, capability: 'symbol_reviewer', label: 'Reviewer',
+              granted: hasReviewer, busy, onChange: handleCapability,
+            })
           )
+        : createElement(
+            'div',
+            { className: 'organization-admin-cell-stack' },
+            hasContributor ? createElement('span', { className: 'organization-admin-badge is-capability' }, 'contributor') : null,
+            hasReviewer ? createElement('span', { className: 'organization-admin-badge is-capability' }, 'reviewer') : null,
+            !hasContributor && !hasReviewer ? createElement('span', { className: 'muted-text' }, '—') : null
+          )
+    ),
+    isAdmin
+      ? createElement(
+          'td',
+          { className: 'organization-admin-member-actions' },
+          manageable
+            ? createElement(
+                'button',
+                {
+                  type: 'button',
+                  className: 'action-button compact danger',
+                  onClick: handleDeactivate,
+                  disabled: busy,
+                  'aria-label': `Remove ${member.displayName} from this organization`,
+                },
+                'Remove'
+              )
+            : createElement('span', { className: 'muted-text' }, '—')
         )
       : null
+  );
+
+  if (!error) return row;
+
+  return createElement(
+    Fragment,
+    null,
+    row,
+    createElement(
+      'tr',
+      { className: 'organization-admin-member-error-row' },
+      createElement(
+        'td',
+        { colSpan: isAdmin ? 5 : 4 },
+        createElement('p', { role: 'alert', className: 'form-message error' }, error)
+      )
+    )
   );
 }
 
@@ -520,29 +593,35 @@ export function OrganizationMemberAddForm({ onAdd }) {
     }
   }
 
+  // The labels stay direct children of the form: the grid does the layout so
+  // that each control keeps its own label association without a wrapper.
   return createElement(
     'form',
-    { onSubmit: handleSubmit, style: { display: 'flex', gap: '8px', alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: '16px' } },
-    createElement('label', { htmlFor: 'organization-member-user-id' },
-      'Existing user ID',
+    { onSubmit: handleSubmit, className: 'organization-admin-member-add' },
+    createElement('p', { className: 'organization-admin-member-add-title' }, 'Add an existing user'),
+    createElement('label', { htmlFor: 'organization-member-user-id', className: 'field' },
+      createElement('span', null, 'Existing user ID'),
       createElement('input', {
         id: 'organization-member-user-id', type: 'text', value: userId, required: true,
         ref: userIdInputRef,
+        placeholder: 'User ID of an existing account',
         onChange: (event) => setUserId(event.target.value),
-        style: { display: 'block', marginTop: '4px' },
       })
     ),
-    createElement('label', { htmlFor: 'organization-member-base-role' },
-      'Base role',
+    createElement('label', { htmlFor: 'organization-member-base-role', className: 'field' },
+      createElement('span', null, 'Base role'),
       createElement('select', {
         id: 'organization-member-base-role', value: baseRole,
         onChange: (event) => setBaseRole(event.target.value),
-        style: { display: 'block', marginTop: '4px' },
       },
       createElement('option', { value: 'user' }, 'User'),
       createElement('option', { value: 'admin' }, 'Admin'))
     ),
-    createElement('button', { type: 'submit', disabled: saving || !userId }, saving ? 'Adding…' : 'Add member'),
+    createElement('button', {
+      type: 'submit',
+      className: 'action-button primary organization-admin-member-add-submit',
+      disabled: saving || !userId,
+    }, saving ? 'Adding…' : 'Add member'),
     error ? createElement(ErrorMessage, { message: error }) : null
   );
 }
@@ -594,48 +673,80 @@ function MemberListSection({ isAdmin, protect }) {
   }
 
   if (error) return createElement(ErrorMessage, { message: error });
-  if (!members) return createElement('p', null, 'Loading members…');
+  if (!members) {
+    return createElement(
+      AdminSection,
+      { id: 'members-heading', title: 'Members' },
+      createElement('p', { role: 'status' }, 'Loading members…')
+    );
+  }
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
+  const columnCount = isAdmin ? 5 : 4;
 
   return createElement(
-    'section',
-    { 'aria-labelledby': 'members-heading' },
-    createElement(
-      'h2',
-      { id: 'members-heading', style: { marginBottom: '16px' } },
-      `Members (${total})`
-    ),
+    AdminSection,
+    {
+      id: 'members-heading',
+      title: 'Members',
+      description: total === 1 ? '1 member' : `${total} members`,
+    },
     isAdmin ? createElement(OrganizationMemberAddForm, { onAdd: handleAdd }) : null,
-    loading && createElement('p', null, 'Loading…'),
+    loading ? createElement('p', { role: 'status', className: 'organization-admin-help' }, 'Loading…') : null,
     createElement(
-      'ul',
-      { style: { listStyle: 'none', padding: 0, margin: 0 } },
-      members.map((m) =>
-        createElement(MemberRow, {
-          key: m.membershipId,
-          member: m,
-          isAdmin,
-          onRoleChange: handleRoleChange,
-          onCapabilityChange: handleCapabilityChange,
-          onDeactivate: handleDeactivate,
-        })
+      'div',
+      { className: 'admin-users-table-shell' },
+      createElement(
+        'table',
+        { className: 'organization-members-grid' },
+        createElement(
+          'thead',
+          null,
+          createElement(
+            'tr',
+            null,
+            createElement('th', { scope: 'col' }, 'Member'),
+            createElement('th', { scope: 'col' }, 'Status'),
+            createElement('th', { scope: 'col' }, 'Role'),
+            createElement('th', { scope: 'col' }, 'Capabilities'),
+            isAdmin ? createElement('th', { scope: 'col' }, 'Actions') : null
+          )
+        ),
+        createElement(
+          'tbody',
+          null,
+          total === 0
+            ? createElement(
+                'tr',
+                null,
+                createElement('td', { colSpan: columnCount, className: 'admin-users-empty' }, 'No members found.')
+              )
+            : members.map((m) =>
+                createElement(MemberRow, {
+                  key: m.membershipId,
+                  member: m,
+                  isAdmin,
+                  onRoleChange: handleRoleChange,
+                  onCapabilityChange: handleCapabilityChange,
+                  onDeactivate: handleDeactivate,
+                })
+              )
+        )
       )
     ),
-    total === 0 && createElement('p', { style: { color: 'var(--idox-text-tertiary)' } }, 'No members found.'),
     totalPages > 1
       ? createElement(
           'nav',
-          { 'aria-label': 'Member list pagination', style: { display: 'flex', gap: '8px', marginTop: '16px', alignItems: 'center' } },
+          { 'aria-label': 'Member list pagination', className: 'admin-user-pagination' },
           createElement(
             'button',
-            { onClick: () => load(page - 1), disabled: page <= 1 || loading },
+            { type: 'button', className: 'action-button compact', onClick: () => load(page - 1), disabled: page <= 1 || loading },
             'Previous'
           ),
-          createElement('span', null, `Page ${page} of ${totalPages}`),
+          createElement('span', { className: 'muted-text' }, `Page ${page} of ${totalPages}`),
           createElement(
             'button',
-            { onClick: () => load(page + 1), disabled: page >= totalPages || loading },
+            { type: 'button', className: 'action-button compact', onClick: () => load(page + 1), disabled: page >= totalPages || loading },
             'Next'
           )
         )
@@ -643,11 +754,66 @@ function MemberListSection({ isAdmin, protect }) {
   );
 }
 
+/**
+ * Step-up PIN. The PIN is spent on the first protected call that needs it, so
+ * it is a page-level control rather than a field on any one form; the panel
+ * says what it is for, and says whether one is currently held.
+ */
+function StepUpPanel({ pin, onPinChange, inputRef, needed }) {
+  return createElement(
+    'section',
+    {
+      className: `glass-panel organization-admin-stepup${needed ? ' needs-pin' : ''}`,
+      'aria-labelledby': 'organization-step-up-heading',
+    },
+    createElement(
+      'div',
+      { className: 'organization-admin-stepup-copy' },
+      createElement('h2', { id: 'organization-step-up-heading' }, 'Protected changes'),
+      createElement(
+        'p',
+        { className: 'organization-admin-help' },
+        'Renaming the organization, changing a member’s role or capabilities, and removing a member all need your sign-in PIN. Enter it here first — it is used once and then cleared.'
+      )
+    ),
+    createElement(
+      'label',
+      { htmlFor: 'organization-step-up-pin', className: 'field organization-admin-stepup-field' },
+      createElement('span', null, 'PIN for protected changes'),
+      createElement('input', {
+        id: 'organization-step-up-pin', type: 'password', inputMode: 'numeric',
+        autoComplete: 'off', value: pin, maxLength: 4,
+        ref: inputRef,
+        'aria-describedby': 'organization-step-up-state',
+        onChange: (event) => onPinChange(event.target.value),
+      })
+    ),
+    createElement(
+      'p',
+      {
+        id: 'organization-step-up-state',
+        role: 'status',
+        className: `organization-admin-stepup-state${pin ? ' is-ready' : ''}`,
+      },
+      pin ? 'PIN entered — protected changes are ready.' : 'No PIN entered.'
+    )
+  );
+}
+
+const ADMIN_TAB_PANEL_ID = 'organization-admin-panel';
+
+function tabId(key) {
+  return `organization-admin-tab-${key}`;
+}
+
 export function OrganizationAdminPage({ auth }) {
   const [org, setOrg] = useState(null);
   const [error, setError] = useState('');
   const [stepUpPin, setStepUpPin] = useState('');
+  const [stepUpNeeded, setStepUpNeeded] = useState(false);
   const [contextRefreshToken, setContextRefreshToken] = useState(0);
+  const [activeTab, setActiveTab] = useState('members');
+  const stepUpPinRef = useRef(null);
 
   useEffect(() => {
     apiGet('/org/me')
@@ -656,12 +822,31 @@ export function OrganizationAdminPage({ auth }) {
   }, []);
 
   const isAdmin = auth?.user?.organization?.baseRole === 'admin';
-  const protect = useCallback((operation) => runWithStepUp({
-    pin: stepUpPin,
-    operation,
-    reauthenticate: (pin) => auth.reauthenticate({ pin }),
-    clearPin: () => setStepUpPin(''),
-  }), [auth, stepUpPin]);
+  const protect = useCallback(async (operation) => {
+    try {
+      const value = await runWithStepUp({
+        pin: stepUpPin,
+        operation,
+        reauthenticate: (pin) => auth.reauthenticate({ pin }),
+        clearPin: () => setStepUpPin(''),
+      });
+      setStepUpNeeded(false);
+      return value;
+    } catch (err) {
+      // runWithStepUp flags the one case the operator can fix here: the change
+      // needed a step-up and no PIN was held. Say so in those terms, and put
+      // the cursor where the fix is.
+      if (err?.requiresStepUp) {
+        setStepUpNeeded(true);
+        stepUpPinRef.current?.focus?.();
+        const guided = new Error('This change needs your PIN. Enter it under “Protected changes”, then try again.');
+        guided.status = err.status;
+        guided.requiresStepUp = true;
+        throw guided;
+      }
+      throw err;
+    }
+  }, [auth, stepUpPin]);
   const symbolSetsUiEnabled = canMountProjectContext(auth);
   const symbolPromotionUiEnabled = canMountOrganizationSymbolDrafts(auth);
   const agentOversightUiEnabled = canMountAgentOversight(auth);
@@ -669,31 +854,110 @@ export function OrganizationAdminPage({ auth }) {
     setContextRefreshToken((current) => current + 1);
   }, []);
 
+  const handlePinChange = useCallback((value) => {
+    setStepUpPin(value);
+    if (value) setStepUpNeeded(false);
+  }, []);
+
   if (error) {
     return createElement(
       'section',
-      { style: { padding: '24px' } },
-      createElement('h1', null, 'Organization'),
+      { className: 'experience-shell organization-admin-shell' },
+      createElement(
+        'div',
+        { className: 'hero-panel glass-panel' },
+        createElement('h1', null, 'Organization administration')
+      ),
       ErrorMessage({ message: error })
     );
   }
 
   if (!org) {
-    return createElement('section', { style: { padding: '24px' } }, createElement('p', { role: 'status' }, 'Loading…'));
+    return createElement(
+      'section',
+      { className: 'experience-shell organization-admin-shell' },
+      createElement(
+        'div',
+        { className: 'glass-panel pane' },
+        createElement('p', { role: 'status' }, 'Loading…')
+      )
+    );
   }
+
+  const libraryTabEnabled = symbolSetsUiEnabled || symbolPromotionUiEnabled;
+  const tabs = [
+    { key: 'members', label: 'Members' },
+    { key: 'organization', label: 'Organization' },
+    libraryTabEnabled ? { key: 'library', label: 'Projects & symbol sets' } : null,
+    { key: 'activity', label: 'Activity' },
+  ].filter(Boolean);
+  const currentTab = tabs.some((tab) => tab.key === activeTab) ? activeTab : tabs[0].key;
+
+  function onTabKeyDown(event) {
+    const moves = { ArrowLeft: -1, ArrowRight: 1, Home: 'first', End: 'last' };
+    const move = moves[event.key];
+    if (move === undefined) return;
+    event.preventDefault?.();
+    const index = tabs.findIndex((tab) => tab.key === currentTab);
+    const last = tabs.length - 1;
+    const nextIndex = move === 'first'
+      ? 0
+      : move === 'last'
+        ? last
+        : (index + move + tabs.length) % tabs.length;
+    const next = tabs[nextIndex];
+    setActiveTab(next.key);
+    // Only present on a real DOM event; the tab still changes without it.
+    event.currentTarget?.querySelector?.(`#${tabId(next.key)}`)?.focus?.();
+  }
+
+  const orgStatus = org.isActive ? org.entitlementStatus : 'inactive';
 
   return createElement(
     'section',
-    { style: { padding: '24px', maxWidth: '800px' } },
-    createElement('h1', { style: { marginBottom: '24px' } }, 'Organization administration'),
-    isAdmin ? createElement('label', { htmlFor: 'organization-step-up-pin' },
-      'PIN for protected changes',
-      createElement('input', {
-        id: 'organization-step-up-pin', type: 'password', inputMode: 'numeric',
-        autoComplete: 'off', value: stepUpPin, maxLength: 4,
-        onChange: (event) => setStepUpPin(event.target.value),
-      })
-    ) : null,
+    { className: 'experience-shell organization-admin-shell' },
+    createElement(
+      'div',
+      { className: 'hero-panel glass-panel organization-admin-hero' },
+      createElement(
+        'div',
+        { className: 'organization-admin-hero-identity' },
+        org.iconUrl
+          ? createElement('img', {
+              src: org.iconUrl,
+              alt: '',
+              width: 44,
+              height: 44,
+              className: 'organization-admin-hero-icon',
+            })
+          : null,
+        createElement(
+          'div',
+          null,
+          createElement('p', { className: 'eyebrow' }, 'Organization administration'),
+          createElement('h1', null, org.displayName),
+          createElement(
+            'p',
+            { className: 'organization-admin-hero-meta' },
+            createElement('code', null, org.code),
+            StatusBadge({ status: orgStatus })
+          )
+        )
+      ),
+      createElement(
+        'p',
+        { className: 'page-status-text' },
+        isAdmin ? 'Signed in as an organization admin' : 'Read-only — organization admin required to make changes'
+      )
+    ),
+    isAdmin
+      ? createElement(StepUpPanel, {
+          pin: stepUpPin,
+          onPinChange: handlePinChange,
+          inputRef: stepUpPinRef,
+          needed: stepUpNeeded,
+        })
+      : null,
     symbolSetsUiEnabled
       ? createElement(ProjectContextBar, {
           auth,
@@ -701,35 +965,92 @@ export function OrganizationAdminPage({ auth }) {
           onContextChanged: notifyContextChange,
         })
       : null,
-    createElement(OrgDetailSection, { org, isAdmin, onUpdate: setOrg, protect }),
-    createElement(OrgIconSection, {
-      org,
-      isAdmin,
-      iconUploadEnabled: auth?.user?.capabilities?.organizationIconUploadEnabled === true,
-      onUpdate: setOrg,
-      protect,
-    }),
-    createElement(OrgUsageDashboardSection, {}),
-    createElement(OrgContributionSection, {}),
-    agentOversightUiEnabled ? createElement(OrgAgentFindingsDashboardSection, {}) : null,
-    symbolSetsUiEnabled
-      ? createElement(OrganizationProjectsPanel, {
-          isAdmin,
-          onContextChanged: notifyContextChange,
-        })
-      : null,
-    symbolSetsUiEnabled
-      ? createElement(OrganizationSymbolSetsPanel, {
-          isAdmin,
-          onContextChanged: notifyContextChange,
-        })
-      : null,
-    symbolSetsUiEnabled
-      ? createElement(SymbolSetBuilderPanel, { isAdmin })
-      : null,
-    symbolPromotionUiEnabled
-      ? createElement(PromotionSubmissionPanel, { isAdmin })
-      : null,
-    createElement(MemberListSection, { isAdmin, protect })
+    createElement(
+      'nav',
+      {
+        className: 'organization-admin-tabs',
+        role: 'tablist',
+        'aria-label': 'Organization administration sections',
+        onKeyDown: onTabKeyDown,
+      },
+      tabs.map((tab) => createElement(
+        'button',
+        {
+          key: tab.key,
+          type: 'button',
+          role: 'tab',
+          id: tabId(tab.key),
+          'aria-selected': tab.key === currentTab,
+          'aria-controls': ADMIN_TAB_PANEL_ID,
+          // Roving tabindex: `role="tablist"` promises the arrow keys move
+          // between tabs and that Tab leaves the group.
+          tabIndex: tab.key === currentTab ? 0 : -1,
+          className: `organization-admin-tab${tab.key === currentTab ? ' active' : ''}`,
+          onClick: () => setActiveTab(tab.key),
+        },
+        tab.label
+      ))
+    ),
+    createElement(
+      'div',
+      {
+        className: 'organization-admin-panel',
+        id: ADMIN_TAB_PANEL_ID,
+        role: 'tabpanel',
+        'aria-labelledby': tabId(currentTab),
+      },
+      currentTab === 'members'
+        ? createElement(MemberListSection, { isAdmin, protect })
+        : null,
+      currentTab === 'organization'
+        ? createElement(
+            Fragment,
+            null,
+            createElement(OrgDetailSection, { org, isAdmin, onUpdate: setOrg, protect }),
+            createElement(OrgIconSection, {
+              org,
+              isAdmin,
+              iconUploadEnabled: auth?.user?.capabilities?.organizationIconUploadEnabled === true,
+              onUpdate: setOrg,
+              protect,
+            })
+          )
+        : null,
+      currentTab === 'library'
+        ? createElement(
+            Fragment,
+            null,
+            symbolSetsUiEnabled
+              ? createElement(OrganizationProjectsPanel, {
+                  isAdmin,
+                  onContextChanged: notifyContextChange,
+                })
+              : null,
+            symbolSetsUiEnabled
+              ? createElement(OrganizationSymbolSetsPanel, {
+                  isAdmin,
+                  onContextChanged: notifyContextChange,
+                })
+              : null,
+            symbolSetsUiEnabled
+              ? createElement(SymbolSetBuilderPanel, { isAdmin })
+              : null,
+            symbolPromotionUiEnabled
+              ? createElement(PromotionSubmissionPanel, { isAdmin })
+              : null
+          )
+        : null,
+      currentTab === 'activity'
+        ? createElement(
+            Fragment,
+            null,
+            createElement(EmbeddedPanel, null, createElement(OrgUsageDashboardSection, {})),
+            createElement(EmbeddedPanel, null, createElement(OrgContributionSection, {})),
+            agentOversightUiEnabled
+              ? createElement(EmbeddedPanel, null, createElement(OrgAgentFindingsDashboardSection, {}))
+              : null
+          )
+        : null
+    )
   );
 }

@@ -77,6 +77,14 @@ function formContaining(renderer, id) {
   return node;
 }
 
+/** The organization admin surface groups its sections behind a tablist. */
+async function openOrganizationAdminTab(renderer, key) {
+  const tab = renderer.root.find(
+    (node) => node.type === 'button' && node.props.id === `organization-admin-tab-${key}`,
+  );
+  await act(async () => tab.props.onClick());
+}
+
 describe('mounted admin App journeys', () => {
   let originalFetch;
 
@@ -365,6 +373,7 @@ describe('mounted admin App journeys', () => {
     };
     const renderer = await mount('/organization/admin');
     assert.equal(renderer.root.findAllByType('main').length, 1);
+    await openOrganizationAdminTab(renderer, 'organization');
     assert.equal(renderer.root.findByProps({ alt: 'Acme icon' }).props.src, '/api/v1/org/me/icon');
     assert.equal(renderer.root.findAllByProps({ id: 'org-icon-file' }).length, 0);
     await act(async () => renderer.unmount());
@@ -430,6 +439,7 @@ describe('mounted admin App journeys', () => {
     };
     try {
       const renderer = await mount('/organization/admin');
+      await openOrganizationAdminTab(renderer, 'organization');
       await act(async () => renderer.root.findByProps({ id: 'org-icon-file' }).props.onChange({
         target: { files: [{ type: 'image/png', size: 100 }] },
       }));

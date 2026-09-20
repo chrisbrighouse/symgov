@@ -5292,3 +5292,462 @@ button.catalog-preview-format-badge:focus-visible {
     padding: 0.5rem 0;
   }
 }
+
+/*
+ * Organization administration surface.
+ *
+ * Before this block the page had no component classes at all: every button and
+ * input fell through to the browser default, and eleven unrelated sections
+ * stacked into one 800px column. It is rebuilt here from the existing
+ * vocabulary — glass-panel/pane, action-button, field, checkbox-row, the admin
+ * table shell and the tab idiom from the semantic review surface — so only the
+ * layout rhythm this page needs is new.
+ */
+
+.organization-admin-shell {
+  width: min(76rem, 100%);
+}
+
+/* Page header: who you are administering, and in what capacity. */
+.organization-admin-hero {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Below 1120px the shared .hero-panel rule stacks the header; keep the
+   stacked children left-aligned rather than centred on the cross axis. */
+@media (max-width: 1120px) {
+  .organization-admin-hero {
+    align-items: flex-start;
+  }
+}
+
+.organization-admin-hero-identity {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.organization-admin-hero h1 {
+  margin: 0;
+  font-size: var(--idox-font-size-xl);
+  font-weight: var(--idox-font-weight-semibold);
+  line-height: var(--idox-line-height-tight);
+}
+
+.organization-admin-hero-icon {
+  flex: 0 0 auto;
+  border-radius: var(--idox-radius-lg);
+  border: 1px solid var(--idox-border-subtle);
+  object-fit: contain;
+  background: var(--idox-bg-surface-default);
+}
+
+.organization-admin-hero-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.3rem 0 0;
+}
+
+.organization-admin-hero-meta code {
+  font-family: var(--idox-font-family-mono);
+  font-size: var(--idox-font-size-xs);
+  color: var(--idox-text-secondary);
+}
+
+/*
+ * Step-up PIN. It is spent by the first protected call that needs it, so it
+ * belongs to the page rather than to any one form. It says what it is for and
+ * whether one is currently held, and turns amber when a change was refused for
+ * want of it.
+ */
+.organization-admin-stepup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14rem;
+  align-items: start;
+  gap: 0.75rem 1.25rem;
+  padding: 1rem 1.25rem;
+}
+
+.organization-admin-stepup.needs-pin {
+  border-color: var(--idox-warning-border);
+  background: var(--idox-warning-bg);
+}
+
+.organization-admin-stepup h2 {
+  margin: 0;
+  font-size: var(--idox-font-size-base);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.organization-admin-stepup-field {
+  justify-self: stretch;
+  width: 100%;
+}
+
+.organization-admin-stepup-state {
+  grid-column: 2;
+  justify-self: end;
+  margin: 0;
+  font-size: var(--idox-font-size-xs);
+  color: var(--idox-text-tertiary);
+}
+
+.organization-admin-stepup-state.is-ready {
+  color: var(--idox-success-text-color);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+/* Section tabs — the semantic review §tabs-default treatment. */
+.organization-admin-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.2rem 0 0;
+  border-bottom: 1px solid var(--idox-border-subtle);
+}
+
+.organization-admin-tab {
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  min-height: 2.4rem;
+  padding: 0.5rem 0.85rem;
+  background: transparent;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+}
+
+.organization-admin-tab:hover {
+  border-bottom-color: var(--idox-border-subtle);
+  color: var(--idox-text-primary);
+}
+
+.organization-admin-tab.active {
+  border-bottom-color: var(--idox-color-brand-accent);
+  color: var(--idox-text-primary);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.organization-admin-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.organization-admin-section {
+  display: grid;
+  gap: 0.9rem;
+  align-content: start;
+}
+
+.organization-admin-section-heading {
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.organization-admin-section-heading h2 {
+  margin: 0;
+  font-size: var(--idox-font-size-lg);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.organization-admin-message {
+  margin: 0;
+}
+
+.organization-admin-help {
+  margin: 0;
+  max-width: 46rem;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-sm);
+}
+
+.organization-admin-form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 30rem;
+}
+
+.organization-admin-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+}
+
+/* Read-only organization facts. */
+.organization-admin-detail-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.5rem 1.5rem;
+  margin: 0;
+}
+
+.organization-admin-detail-grid dt {
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-sm);
+}
+
+.organization-admin-detail-grid dd {
+  margin: 0;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.organization-admin-icon-layout {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 2rem;
+}
+
+.organization-admin-icon-current {
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+}
+
+.organization-admin-icon {
+  display: block;
+  width: 64px;
+  height: 64px;
+  border-radius: var(--idox-radius-lg);
+  border: 1px solid var(--idox-border-subtle);
+  object-fit: contain;
+  background: var(--idox-bg-surface-default);
+}
+
+.organization-admin-icon.is-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+  text-align: center;
+}
+
+/* Destructive control kept clear of the icon and of the upload action. */
+.organization-admin-icon-remove {
+  margin-top: 0.5rem;
+}
+
+.organization-admin-icon-form {
+  flex: 1 1 18rem;
+  max-width: 26rem;
+}
+
+.organization-admin-icon-preview {
+  display: grid;
+  justify-items: start;
+  gap: 0.35rem;
+}
+
+/*
+ * Add-member form. The labels stay direct children so each control keeps its
+ * own association; the grid supplies the row.
+ */
+.organization-admin-member-add {
+  display: grid;
+  /* The trailing filler track keeps the submit at its own width instead of
+     letting it absorb the rest of the row. */
+  grid-template-columns: minmax(12rem, 22rem) minmax(8rem, 12rem) auto minmax(0, 1fr);
+  align-items: end;
+  gap: 0.75rem 1rem;
+  border: 1px solid var(--idox-border-subtle);
+  border-radius: var(--idox-radius-xl);
+  padding: 1rem 1.25rem;
+  background: var(--idox-bg-surface-base);
+}
+
+.organization-admin-member-add-title,
+.organization-admin-member-add .form-message {
+  grid-column: 1 / -1;
+}
+
+.organization-admin-member-add-title {
+  margin: 0;
+  font-weight: var(--idox-font-weight-semibold);
+  color: var(--idox-text-secondary);
+}
+
+.organization-admin-member-add-submit {
+  min-height: 2.25rem;
+}
+
+/* Member table. */
+.organization-members-grid {
+  width: 100%;
+  min-width: 46rem;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--idox-font-size-sm);
+}
+
+.organization-members-grid th,
+.organization-members-grid td {
+  padding: 0.75rem 0.9rem;
+  border-bottom: 1px solid var(--idox-border-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+
+.organization-members-grid th {
+  background: var(--idox-bg-surface-base);
+  color: var(--idox-text-secondary);
+  font-weight: var(--idox-font-weight-bold);
+  white-space: nowrap;
+}
+
+.organization-members-grid th:first-child,
+.organization-members-grid td:first-child {
+  min-width: 14rem;
+}
+
+.organization-members-grid tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.organization-admin-member-name {
+  display: block;
+}
+
+.organization-admin-member-email {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+  word-break: break-word;
+}
+
+/*
+ * Stack, never a row: the role change, the two capability toggles and the
+ * destructive Remove each sit in their own cell, a full cell-padding apart.
+ */
+.organization-admin-cell-stack {
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+}
+
+.organization-admin-capability {
+  min-height: 1.75rem;
+  cursor: pointer;
+}
+
+.organization-admin-capability input {
+  cursor: pointer;
+}
+
+.organization-members-grid .action-button.compact {
+  min-height: 2rem;
+  padding: 0.3rem 0.65rem;
+}
+
+.organization-admin-member-actions {
+  white-space: nowrap;
+}
+
+.organization-admin-member-error-row td {
+  padding-top: 0;
+}
+
+/* Pills — Idox §badge-semantic. */
+.organization-admin-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--idox-radius-full);
+  padding: 0.125rem 0.5rem;
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.organization-admin-badge.is-active {
+  background: var(--idox-success-bg);
+  color: var(--idox-success-text-color);
+}
+
+.organization-admin-badge.is-inactive {
+  background: var(--idox-error-bg);
+  color: var(--idox-error-text-color);
+}
+
+.organization-admin-badge.is-invited,
+.organization-admin-badge.is-admin {
+  background: var(--idox-info-bg);
+  color: var(--idox-info-text-color);
+}
+
+.organization-admin-badge.is-capability {
+  background: var(--idox-warning-bg);
+  color: var(--idox-warning-text-color);
+}
+
+/* Dashboard sections carry no chrome of their own; give them the page panel. */
+.organization-admin-embedded > section {
+  margin-bottom: 0 !important;
+}
+
+/*
+ * The panels hosted by this page each shipped with different chrome — one had
+ * a border and a 10px radius, the rest had none at all. Normalise them onto
+ * the Idox panel treatment, and let the stacked ones stack.
+ */
+.organization-admin-panel > .organization-symbol-sets-panel,
+.organization-admin-panel > .organization-projects-panel,
+.organization-admin-panel > .symbol-set-builder-panel,
+.organization-admin-panel > .promotion-submission-panel {
+  margin: 0;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-xl);
+  padding: 1.2rem;
+  background: var(--idox-bg-surface-default);
+}
+
+.organization-admin-shell > .project-context-bar,
+.organization-admin-panel > .organization-projects-panel {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.75rem;
+}
+
+.organization-admin-shell > .project-context-bar {
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-xl);
+  padding: 1rem 1.25rem;
+  background: var(--idox-bg-surface-default);
+}
+
+@media (max-width: 860px) {
+  .organization-admin-stepup {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .organization-admin-stepup-field,
+  .organization-admin-stepup-state {
+    grid-column: 1;
+    justify-self: start;
+  }
+
+  .organization-admin-member-add {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .organization-admin-member-add-submit {
+    justify-self: start;
+  }
+
+  .organization-admin-icon-layout {
+    gap: 1.25rem;
+  }
+}
