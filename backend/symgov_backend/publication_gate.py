@@ -6,20 +6,21 @@ phase M6 repeats as a migration phase.
 
 **Measure section 9.2 against what a symbol can actually satisfy before
 reading any further.** As of 20260910_0056 the six dimensions stood like
-this, and the measurement is the reason this module is shaped the way it is:
+this, and the measurement is the reason this module is shaped the way it is.
+Two of the six have changed since; the current position follows the list.
 
 * *Semantic identity* -- unsatisfiable by any path. Nothing in
-  `symgov_backend` imports `semantic_concepts`, so no `SemanticConcept` row is
-  ever created in production and no assignment can point at one. Section 9.2
-  supplies the only way through: "an explicit approved 'semantic identity
-  pending' exception".
+  `symgov_backend` imported `semantic_concepts`, so no `SemanticConcept` row
+  was ever created in production and no assignment could point at one.
+  Section 9.2 supplies the only way through: "an explicit approved 'semantic
+  identity pending' exception".
 * *Source* -- satisfiable since SM-P0-07, which makes promotion write a
   `source_package_entries` row. Not satisfiable for anything promoted before
   it.
 * *Graphical authority* -- satisfiable sometimes. SM-P0-07 proposes a link
   only on an exact standard-code match with exactly one active edition.
-* *Rights* -- unsatisfiable. Nothing imports `rights_provenance` either, so
-  no `RightsRecord` exists. SM-P0-08 changes half of that: see
+* *Rights* -- unsatisfiable. Nothing imported `rights_provenance` either, so
+  no `RightsRecord` existed. SM-P0-08 changes half of that: see
   `propose_intake_rights_record` below, which makes a *proposal* durable. It
   still cannot approve one.
 * *Integrity* -- satisfiable on the organisation path, where
@@ -34,6 +35,18 @@ this, and the measurement is the reason this module is shaped the way it is:
 So a gate switched on for the current publication path would publish nothing.
 That is not an argument against the gate; it is exactly why section 17 scopes
 it to new authoritative ingestion and grandfathers what is already public.
+
+**Since SM-P1-01 activated on 2026-09-18, semantic identity and rights are
+both satisfiable.** `routes/semantic_review.py` gives every dimension a
+production write path: concepts and their revisions, semantic and
+classification assignments with their decisions, and rights records with
+theirs. A rights approval still needs a named human decider --
+`rights_provenance.transition_rights_record` has no controlled-system
+decision -- so the number of approvals an ingestion needs is the number of
+source packages it registers. The DEXPI pilot's disposable-database rehearsal
+(2026-09-23) measured the consequence: 174 symbols satisfied five dimensions
+with no waiver, were refused on `rights_undecided` alone, and all reached T5
+once the one package's record was approved.
 
 **What "new authoritative ingestion" means here, concretely.** A revision is
 in scope when it reaches a `source_packages` row whose `package_type` is
@@ -88,8 +101,9 @@ For everything else it reports -- the evaluation is recorded with all six
 dimensions and the section 13.2 level, outcome `not_in_scope`, and
 publication proceeds. SM-P0-07's rule that "a mapping failure never blocks
 promotion" does not carry over; a gate that never blocks is not a gate. What
-makes blocking safe today is that the in-scope set is empty, not that the
-refusal is soft.
+made blocking safe was that the in-scope set was empty, not that the refusal
+is soft; the first `authoritative_library` package ends that, and its symbols
+are refused until each dimension is actually satisfied.
 
 **Section 13.2's T0-T5 ships here, and only as a derivation.**
 `derive_traceability_level` is a pure function of the same facts the six
