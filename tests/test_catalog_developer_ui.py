@@ -83,13 +83,15 @@ def test_catalog_developer_hub_styles_are_isolated_and_loaded():
 def test_catalog_developer_hub_uses_a_readable_light_documentation_surface():
     styles = STYLE.read_text(encoding="utf-8")
 
-    assert "--developer-surface: #ffffff" in styles
-    assert "--developer-ink: #173042" in styles
-    assert "--developer-muted: #5f7180" in styles
+    # The Idox reskin maps the hub's palette onto design-system tokens rather
+    # than hard-coded colours; a light surface with dark ink is what it pins.
+    assert "--developer-surface: var(--idox-bg-surface-default);" in styles
+    assert "--developer-ink: var(--idox-text-primary);" in styles
+    assert "--developer-muted: var(--idox-text-tertiary);" in styles
     assert "background: var(--developer-surface);" in styles
     assert "color: var(--developer-ink);" in styles
     assert ".catalog-code-card" in styles
-    assert "--developer-code-surface: #10242f" in styles
+    assert "--developer-code-surface: var(--idox-slate-900);" in styles
     assert ":focus-visible" in styles
 
 

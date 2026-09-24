@@ -154,10 +154,18 @@ def test_semantic_model_migrations_from_0049_pass_bare_constraint_names():
     repairs the result, and this guard keeps the next semantic-model migration
     from repeating it.
     """
+    # 20260919_0061 passed pre-prefixed names and is already applied in
+    # production, where its check constraints exist as the hash-truncated
+    # `ck_published_preview_authorizations_ck_published_previe_<hash>`. Its ORM
+    # model carries the same pre-prefixed names, so the two sides agree -- the
+    # house-pattern case above, unreadable rather than broken. Renaming them is
+    # a repair migration of its own; until one lands, 0061 is the only
+    # exemption and every later migration is still held to bare names.
+    exempt = {"20260919_0061_published_preview_authorizations.py"}
     semantic_migrations = sorted(
         path
         for path in VERSIONS.glob("*.py")
-        if path.name >= "20260909_0049"
+        if path.name >= "20260909_0049" and path.name not in exempt
     )
     assert semantic_migrations, "expected at least the SM-P0-03 migration"
 
