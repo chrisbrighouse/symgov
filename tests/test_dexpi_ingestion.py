@@ -30,6 +30,7 @@ from symgov_backend.services.dexpi_ingestion import (  # noqa: E402
     LICENCE_REFERENCE,
     PACKAGE_CODE,
     PACKAGE_SOURCE_URI,
+    asset_object_key,
     REPRESENTATION_TYPE_NODE_CODE,
     REPRESENTATION_TYPE_SCHEME_CODE,
     REVISION_LIFECYCLE_STATE,
@@ -310,3 +311,81 @@ class TestTheAttributionPanel:
         assert panel["creator"] == selection["attribution"]["creator"]
         assert panel["source_url"] == selection["attribution"]["source"]
         assert panel["creator"] in panel["attribution"]
+
+
+class TestDecisionD10:
+    """Each asset names its storage key in the plan, and `upload` sends only SVGs."""
+
+    def test_every_asset_names_a_distinct_content_addressed_key(self, selection, concept_map):
+        plan = plan_ingestion(selection, concept_map)
+        keys = []
+        for symbol in plan["symbols"]:
+            asset = symbol["payload"]["assets"][0]
+            assert asset["object_key"] == f"dexpi/{PACKAGE_CODE}/{symbol['slug']}/{asset['sha256']}.svg"
+            keys.append(asset["object_key"])
+        # `ensure_preview_authorization` refuses a key bound to another revision.
+        assert len(set(keys)) == len(keys) == 174
+
+    def test_the_catalogue_finds_the_svg_as_both_preview_and_download(self, selection, concept_map):
+        from symgov_backend.published_catalog import (
+            choose_published_preview_asset,
+            published_fallback_source_asset,
+        )
+        from symgov_backend.asset_manifest import list_download_assets
+
+        plan = plan_ingestion(selection, concept_map)
+        for symbol in plan["symbols"]:
+            payload = symbol["payload"]
+            key = payload["assets"][0]["object_key"]
+            preview = choose_published_preview_asset(payload)
+            assert preview is not None and preview["object_key"] == key
+            assert preview["content_type"] == "image/svg+xml"
+            downloads = list_download_assets(
+                payload, fallback_source_asset=published_fallback_source_asset(payload)
+            )
+            assert [asset["object_key"] for asset in downloads] == [key]
+
+    def test_a_key_is_refused_for_anything_but_a_sha256_digest(self):
+        with pytest.raises(DexpiIngestionPlanError, match="not a SHA-256"):
+            asset_object_key("dexpi-ttc-x", "../../etc/passwd")
+
+    def test_upload_sends_each_svg_to_its_key_and_refuses_a_non_svg(self, selection, concept_map, tmp_path):
+        from symgov_backend import dexpi_ingest
+
+        plan = plan_ingestion(selection, concept_map)
+        plan = {**plan, "symbols": plan["symbols"][:2]}
+        assets = {}
+        for index, symbol in enumerate(plan["symbols"]):
+            path = tmp_path / f"{index}.svg"
+            path.write_bytes(b'<svg xmlns="http://www.w3.org/2000/svg"/>')
+            assets[(symbol["entry"]["source_path"], symbol["transformation"]["svg"])] = path
+        sent = []
+        report = dexpi_ingest.upload_assets(
+            plan, assets, storage_env_file="unused", uploader=lambda **call: sent.append(call)
+        )
+        assert report["uploaded_count"] == 2
+        assert [call["object_key"] for call in sent] == [
+            symbol["payload"]["assets"][0]["object_key"] for symbol in plan["symbols"]
+        ]
+        assert {call["content_type"] for call in sent} == {"image/svg+xml"}
+
+        next(iter(assets.values())).write_bytes(b"MZ not an image")
+        with pytest.raises(dexpi_ingest.ConfigurationError, match="not an allowed image"):
+            dexpi_ingest.upload_assets(
+                plan, assets, storage_env_file="unused", uploader=lambda **call: None
+            )
+
+    def test_apply_refuses_a_plan_with_unmeasured_svgs_before_writing(self, selection, concept_map):
+        from symgov_backend import dexpi_ingest
+
+        plan = plan_ingestion(selection, concept_map)
+
+        class _NoWrites:
+            def get(self, *_args):
+                return object()
+
+            def __getattr__(self, name):
+                raise AssertionError(f"apply touched the session ({name}) before refusing")
+
+        with pytest.raises(dexpi_ingest.ConfigurationError, match="run apply with --harvest"):
+            dexpi_ingest.ingest(_NoWrites(), plan=plan, actor_id=uuid.uuid4(), occurred_at=None)

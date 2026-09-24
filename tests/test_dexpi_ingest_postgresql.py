@@ -8,6 +8,13 @@ entry, `asset_transformations` is ordered by a per-revision `step_index`,
 statuses, and both assignment tables have a partial unique index over the
 verified primary. A portable test could assert none of it.
 
+**The SVGs are synthetic.** The converted corpus is not vendored, so the
+trimmed selection's SVG digests are replaced with those of small generated
+files written to a temporary harvest directory. That keeps every digest the
+driver checks -- on disk, in the payload, in the transformation chain and in
+the fake bucket `publish` reads -- consistent with real bytes, and it runs
+the same `--harvest` path the production command does.
+
 **It ingests a trimmed selection, not all 174.** The full corpus takes about
 ten minutes to write on a disposable Debian PostgreSQL, and every behaviour
 here is per symbol. The subset is chosen to carry all four of decision D2's
@@ -20,6 +27,7 @@ string, and its seeded identity uses a synthetic `@example.test` email.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import uuid
@@ -41,7 +49,10 @@ from test_organization_symbol_postgresql import _alembic, _database  # noqa: E40
 from symgov_backend import dexpi_ingest, dexpi_seed  # noqa: E402
 from symgov_backend.models import (  # noqa: E402
     AssetTransformation,
+    Attachment,
     GovernedSymbol,
+    PublicationJob,
+    PublishedPreviewAuthorization,
     RightsRecord,
     SourcePackageEntry,
     SymbolRevision,
@@ -54,7 +65,12 @@ from symgov_backend.publication_gate import (  # noqa: E402
     evaluate_publication_gate,
 )
 from symgov_backend.services.dexpi_concepts import plan_concepts  # noqa: E402
-from symgov_backend.services.dexpi_ingestion import PACKAGE_CODE, plan_ingestion  # noqa: E402
+from symgov_backend.published_catalog import PUBLISHED_SYMBOLS_SQL  # noqa: E402
+from symgov_backend.services.dexpi_ingestion import (  # noqa: E402
+    PACKAGE_CODE,
+    PUBLICATION_PACK_CODE,
+    plan_ingestion,
+)
 
 SELECTION_PATH = REPO_ROOT / "integrations" / "dexpi" / "selection.json"
 
@@ -84,7 +100,50 @@ def _trimmed_selection() -> dict:
         if len(seen) == len(_BASES_WANTED):
             break
     assert seen == set(_BASES_WANTED), "the selection no longer carries every assertion basis"
-    return {**full, "selected": chosen}
+    synthetic = [{**item, "svg_sha256": hashlib.sha256(_svg_bytes(item)).hexdigest()} for item in chosen]
+    return {**full, "selected": synthetic}
+
+
+def _svg_bytes(item: dict) -> bytes:
+    """A small, valid SVG standing in for the converter's output for one item."""
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+        f"<title>{item['canonical_name']}</title><path d=\"M0 0 L10 10\"/></svg>"
+    ).encode("utf-8")
+
+
+def _write_harvest(root: Path, selection: dict) -> Path:
+    """The WP1 harvest layout `index_harvest_assets` reads: one directory per source file."""
+    by_source: dict[str, list[dict]] = {}
+    for item in selection["selected"]:
+        by_source.setdefault(item["source_path"], []).append(item)
+    for index, (source_path, items) in enumerate(sorted(by_source.items())):
+        directory = root / "assets" / f"{index:03d}"
+        directory.mkdir(parents=True)
+        for item in items:
+            (directory / item["svg"]).write_bytes(_svg_bytes(item))
+        (directory / "manifest.json").write_text(
+            json.dumps({"source_path": source_path, "symbols": [{"svg": item["svg"]} for item in items]}),
+            encoding="utf-8",
+        )
+    return root
+
+
+class _FakeBucket:
+    """Object storage for `upload` and `publish`, holding bytes by key."""
+
+    def __init__(self):
+        self.objects: dict[str, bytes] = {}
+
+    def put(self, *, object_key, payload, content_type, env_file=None):
+        assert content_type == "image/svg+xml"
+        self.objects[object_key] = payload
+        return {"object_key": object_key}
+
+    def get(self, *, object_key, env_file=None):
+        if object_key not in self.objects:
+            raise RuntimeError("Storage download failed with HTTP 404")
+        return {"object_key": object_key, "payload": self.objects[object_key]}
 
 
 @pytest.fixture(scope="module")
@@ -118,7 +177,12 @@ def selection() -> dict:
 
 
 @pytest.fixture(scope="module")
-def ingested(ingest_database, actor_id, selection):
+def harvest(selection, tmp_path_factory) -> Path:
+    return _write_harvest(tmp_path_factory.mktemp("dexpi-harvest"), selection)
+
+
+@pytest.fixture(scope="module")
+def ingested(ingest_database, actor_id, selection, harvest):
     """One ingestion the whole module reads: it is the thing under test."""
     engine, _url = ingest_database
     concept_plan = plan_concepts(selection)
@@ -126,7 +190,12 @@ def ingested(ingest_database, actor_id, selection):
         dexpi_seed.seed(session, plan=concept_plan, actor_id=actor_id, occurred_at=NOW)
     with Session(engine) as session:
         concept_map = dexpi_seed.concept_map(session, concept_plan)
-    plan = plan_ingestion(selection, concept_map)
+    # The production path: sizes come from the files, re-checked against the digests.
+    sizes, problems = dexpi_ingest.verify_assets(
+        plan_ingestion(selection, concept_map), dexpi_ingest.index_harvest_assets(harvest)
+    )
+    assert problems == []
+    plan = plan_ingestion(selection, concept_map, svg_sizes=sizes)
     with Session(engine) as session, session.begin():
         report = dexpi_ingest.ingest(session, plan=plan, actor_id=actor_id, occurred_at=NOW)
     return plan, report
@@ -185,6 +254,14 @@ class TestApply:
                 )
                 revision = session.get(SymbolRevision, symbol.current_revision_id)
                 assert revision is not None
+
+                asset = revision.payload_json["assets"][0]
+                attachment = session.query(Attachment).filter_by(object_key=asset["object_key"]).one()
+                # Parented to the revision: the lineage preview authorization trusts.
+                assert (attachment.parent_type, attachment.parent_id) == ("symbol_revision", revision.id)
+                assert attachment.sha256 == asset["sha256"]
+                assert attachment.size_bytes == asset["size_bytes"] > 0
+                assert asset["object_key"].startswith(f"dexpi/{PACKAGE_CODE}/{symbol.slug}/")
 
                 entry = (
                     session.query(SourcePackageEntry)
@@ -365,3 +442,128 @@ class TestTheGate:
                     target_status="retired",
                     occurred_at=NOW,
                 )
+
+
+def _published_slugs(engine, plan) -> set[str]:
+    with Session(engine) as session:
+        rows = session.execute(text(PUBLISHED_SYMBOLS_SQL)).all()
+    wanted = {symbol["slug"] for symbol in plan["symbols"]}
+    return {row.slug for row in rows} & wanted
+
+
+class TestPublish:
+    """Decision D10: upload, then publish all or nothing, through the Catalogue's own rows.
+
+    Runs after `TestTheGate`, which leaves the first rights record retired, so
+    this class proposes and approves its own.
+    """
+
+    def test_upload_puts_every_svg_at_its_planned_key(self, ingested, harvest):
+        plan, _ = ingested
+        bucket = _FakeBucket()
+        report = dexpi_ingest.upload_assets(
+            plan,
+            dexpi_ingest.index_harvest_assets(harvest),
+            storage_env_file=None,
+            uploader=bucket.put,
+        )
+        assert report["uploaded_count"] == len(plan["symbols"])
+        for symbol in plan["symbols"]:
+            asset = symbol["payload"]["assets"][0]
+            assert hashlib.sha256(bucket.objects[asset["object_key"]]).hexdigest() == asset["sha256"]
+
+    def test_without_an_approved_rights_record_nothing_is_published(
+        self, ingest_database, ingested, actor_id, harvest
+    ):
+        plan, _ = ingested
+        engine, _ = ingest_database
+        bucket = _FakeBucket()
+        dexpi_ingest.upload_assets(
+            plan, dexpi_ingest.index_harvest_assets(harvest), storage_env_file=None, uploader=bucket.put
+        )
+        with pytest.raises(dexpi_ingest.PublicationRefused) as refused:
+            with Session(engine) as session, session.begin():
+                dexpi_ingest.publish(
+                    session, plan=plan, actor_id=actor_id, occurred_at=NOW,
+                    storage_env_file=None, fetcher=bucket.get,
+                )
+        assert set(refused.value.report["refusal_reasons"]) == {"rights_undecided"}
+        assert _published_slugs(engine, plan) == set()
+
+    def test_a_missing_stored_object_publishes_nothing(self, ingest_database, ingested, actor_id):
+        plan, _ = ingested
+        engine, _ = ingest_database
+        with pytest.raises(dexpi_ingest.PublicationRefused, match="run upload first") as refused:
+            with Session(engine) as session, session.begin():
+                dexpi_ingest.publish(
+                    session, plan=plan, actor_id=actor_id, occurred_at=NOW,
+                    storage_env_file=None, fetcher=_FakeBucket().get,
+                )
+        assert len(refused.value.report["storage_problems"]) == len(plan["symbols"])
+        assert _published_slugs(engine, plan) == set()
+
+    def test_after_the_rights_approval_every_symbol_reaches_the_catalogue(
+        self, ingest_database, ingested, actor_id, harvest
+    ):
+        from symgov_backend.rights_provenance import transition_rights_record
+        from symgov_backend.source_package_acquisition import get_source_package
+
+        plan, _ = ingested
+        engine, _ = ingest_database
+        with Session(engine) as session, session.begin():
+            package = get_source_package(session, PACKAGE_CODE)
+            record_id, created = dexpi_ingest.ensure_rights_proposal(
+                session, plan, package=package, actor_id=actor_id, occurred_at=NOW
+            )
+            assert created is True
+            transition_rights_record(
+                session,
+                record_id,
+                target_status="approved",
+                occurred_at=NOW,
+                decided_by_user_id=actor_id,
+                decision_reason="Rehearsal: CC BY 4.0 permits redistribution with attribution.",
+            )
+
+        bucket = _FakeBucket()
+        dexpi_ingest.upload_assets(
+            plan, dexpi_ingest.index_harvest_assets(harvest), storage_env_file=None, uploader=bucket.put
+        )
+        with Session(engine) as session, session.begin():
+            report = dexpi_ingest.publish(
+                session, plan=plan, actor_id=actor_id, occurred_at=NOW,
+                storage_env_file=None, fetcher=bucket.get,
+            )
+        assert report["published_count"] == len(plan["symbols"])
+        assert report["traceability_levels"] == {"T5": len(plan["symbols"])}
+        assert report["publication_pack_code"] == PUBLICATION_PACK_CODE
+        # The Catalogue's own query sees them: this is the point of WP6.
+        assert _published_slugs(engine, plan) == {symbol["slug"] for symbol in plan["symbols"]}
+
+        with Session(engine) as session:
+            job = session.get(PublicationJob, uuid.UUID(report["publication_job_id"]))
+            assert (job.requested_by, job.approved_by, job.status) == (actor_id, actor_id, "completed")
+            for symbol_plan in plan["symbols"]:
+                symbol = session.query(GovernedSymbol).filter_by(slug=symbol_plan["slug"]).one()
+                revision = session.get(SymbolRevision, symbol.current_revision_id)
+                assert revision.lifecycle_state == "published"
+                # Human-readable identity is allocated by publication, not by apply.
+                assert symbol.catalog_symbol_id
+                # The preview route can serve the SVG: its key is authorized.
+                authorization = (
+                    session.query(PublishedPreviewAuthorization)
+                    .filter_by(symbol_revision_id=revision.id)
+                    .one()
+                )
+                assert authorization.object_key == revision.payload_json["assets"][0]["object_key"]
+
+    def test_a_second_publish_changes_nothing(self, ingest_database, ingested, actor_id):
+        plan, _ = ingested
+        engine, _ = ingest_database
+        with Session(engine) as session, session.begin():
+            report = dexpi_ingest.publish(
+                session, plan=plan, actor_id=actor_id, occurred_at=NOW,
+                # Nothing is pending, so storage is not read at all.
+                storage_env_file=None, fetcher=_FakeBucket().get,
+            )
+        assert report == {"published_count": 0, "published": [], "unchanged_count": len(plan["symbols"])}

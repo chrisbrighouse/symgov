@@ -1360,6 +1360,208 @@ def check_database_health(
     return result
 
 
+def upload_object_bytes(
+    *,
+    object_key: str,
+    payload: bytes,
+    content_type: str,
+    env_file: str | os.PathLike[str] | None = None,
+) -> dict[str, Any]:
+    """PUT one object to the configured bucket, signed with AWS SigV4.
+
+    Module-level so an operator command can upload without constructing a
+    `RuntimePersistenceBridge`, whose constructor opens a database engine.
+    """
+    resolved_env_path, env = read_storage_env_file(env_file)
+    settings = _storage_connection_settings(env)
+    endpoint = settings["endpoint"]
+    bucket = settings["bucket"]
+    region = settings["region"]
+    access_key_id = settings["access_key_id"]
+    secret_access_key = settings["secret_access_key"]
+
+    parsed = urllib.parse.urlparse(endpoint)
+    host = parsed.netloc
+    canonical_uri = _canonical_object_path(endpoint, bucket, object_key)
+    payload_hash = hashlib.sha256(payload).hexdigest()
+    request_time = datetime.now(timezone.utc)
+    amz_date = request_time.strftime("%Y%m%dT%H%M%SZ")
+    date_stamp = request_time.strftime("%Y%m%d")
+
+    canonical_headers = (
+        f"host:{host}\n"
+        f"x-amz-content-sha256:{payload_hash}\n"
+        f"x-amz-date:{amz_date}\n"
+    )
+    signed_headers = "host;x-amz-content-sha256;x-amz-date"
+    canonical_request = "\n".join(
+        [
+            "PUT",
+            canonical_uri,
+            "",
+            canonical_headers,
+            signed_headers,
+            payload_hash,
+        ]
+    )
+    credential_scope = f"{date_stamp}/{region}/s3/aws4_request"
+    string_to_sign = "\n".join(
+        [
+            "AWS4-HMAC-SHA256",
+            amz_date,
+            credential_scope,
+            hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
+        ]
+    )
+    signing_key = _aws_v4_signing_key(secret_access_key, date_stamp, region)
+    signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+    authorization = (
+        "AWS4-HMAC-SHA256 "
+        f"Credential={access_key_id}/{credential_scope}, "
+        f"SignedHeaders={signed_headers}, "
+        f"Signature={signature}"
+    )
+
+    request_url = urllib.parse.urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            canonical_uri,
+            "",
+            "",
+            "",
+        )
+    )
+    request = urllib.request.Request(
+        request_url,
+        data=payload,
+        method="PUT",
+        headers={
+            "Authorization": authorization,
+            "Content-Length": str(len(payload)),
+            "Content-Type": content_type,
+            "Host": host,
+            "x-amz-content-sha256": payload_hash,
+            "x-amz-date": amz_date,
+        },
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        if not (200 <= response.status < 300):
+            raise RuntimeError(f"Storage upload failed with HTTP {response.status} for {object_key}")
+        etag = response.headers.get("ETag")
+
+    return {
+        "bucket": bucket,
+        "endpoint": endpoint,
+        "env_path": str(resolved_env_path),
+        "object_key": object_key,
+        "content_type": content_type,
+        "size_bytes": len(payload),
+        "etag": etag,
+        "status_code": response.status,
+    }
+
+
+def published_page_code(*, symbol_slug: str, revision_label: str, pack_code: str) -> str:
+    return "-".join(
+        [
+            slugify_public_code(symbol_slug),
+            slugify_public_code(revision_label),
+            slugify_public_code(pack_code),
+        ]
+    )
+
+
+def publish_revision_to_pack(
+    session,
+    *,
+    symbol: GovernedSymbol,
+    revision: SymbolRevision,
+    publication_pack: PublicationPack,
+    sort_order: int,
+    effective_date,
+    published_at: datetime,
+) -> tuple[PublishedPage, PackEntry]:
+    """Make one approved revision public in a pack: the rows the Catalogue reads.
+
+    Shared by Rupert's publication handoff and the DEXPI pilot's `publish`
+    command so the two cannot drift. **The caller must already have passed
+    section 9.2's gate for this revision** (`enforce_publication_gate`): the
+    catalogue identity allocated here is the first irreversible step, and the
+    gate belongs before it.
+    """
+    allocate_catalog_identity_for_publication(
+        session,
+        symbol,
+        allocated_at=published_at,
+    )
+    preview_auth = ensure_preview_authorization(
+        session,
+        revision=revision,
+        source="publication",
+        created_at=published_at,
+    )
+    if preview_auth.status not in {"created", "unchanged", "no_preview"}:
+        raise RuntimeError(
+            "Published preview authorization failed "
+            f"for revision {revision.id}: {preview_auth.status}."
+        )
+
+    page_code = published_page_code(
+        symbol_slug=symbol.slug,
+        revision_label=revision.revision_label,
+        pack_code=publication_pack.pack_code,
+    )
+    page_title = f"{symbol.canonical_name} ({revision.revision_label})"
+    published_page = session.query(PublishedPage).filter_by(page_code=page_code).one_or_none()
+    if published_page is None:
+        published_page = PublishedPage(
+            id=uuid.uuid4(),
+            page_code=page_code,
+            title=page_title,
+            pack_id=publication_pack.id,
+            current_symbol_revision_id=revision.id,
+            effective_date=effective_date,
+            created_at=published_at,
+            updated_at=published_at,
+        )
+        session.add(published_page)
+    else:
+        published_page.title = page_title
+        published_page.pack_id = publication_pack.id
+        published_page.current_symbol_revision_id = revision.id
+        published_page.effective_date = effective_date
+        published_page.updated_at = published_at
+    session.flush()
+
+    pack_entry = (
+        session.query(PackEntry)
+        .filter_by(
+            pack_id=publication_pack.id,
+            symbol_revision_id=revision.id,
+            published_page_id=published_page.id,
+        )
+        .one_or_none()
+    )
+    if pack_entry is None:
+        pack_entry = PackEntry(
+            id=uuid.uuid4(),
+            pack_id=publication_pack.id,
+            symbol_revision_id=revision.id,
+            published_page_id=published_page.id,
+            sort_order=sort_order,
+            created_at=published_at,
+        )
+        session.add(pack_entry)
+    else:
+        pack_entry.sort_order = sort_order
+
+    revision.lifecycle_state = "published"
+    symbol.current_revision_id = revision.id
+    symbol.updated_at = published_at
+    return published_page, pack_entry
+
+
 class RuntimePersistenceBridge:
     def __init__(self, env_file: str | os.PathLike[str] | None = None, nopool: bool = True):
         # RuntimePersistenceBridge is frequently constructed per-task by agent
@@ -1739,94 +1941,12 @@ class RuntimePersistenceBridge:
         content_type: str,
         env_file: str | os.PathLike[str] | None = None,
     ) -> dict[str, Any]:
-        resolved_env_path, env = read_storage_env_file(env_file)
-        settings = _storage_connection_settings(env)
-        endpoint = settings["endpoint"]
-        bucket = settings["bucket"]
-        region = settings["region"]
-        access_key_id = settings["access_key_id"]
-        secret_access_key = settings["secret_access_key"]
-
-        parsed = urllib.parse.urlparse(endpoint)
-        host = parsed.netloc
-        canonical_uri = _canonical_object_path(endpoint, bucket, object_key)
-        payload_hash = hashlib.sha256(payload).hexdigest()
-        request_time = datetime.now(timezone.utc)
-        amz_date = request_time.strftime("%Y%m%dT%H%M%SZ")
-        date_stamp = request_time.strftime("%Y%m%d")
-
-        canonical_headers = (
-            f"host:{host}\n"
-            f"x-amz-content-sha256:{payload_hash}\n"
-            f"x-amz-date:{amz_date}\n"
+        return upload_object_bytes(
+            object_key=object_key,
+            payload=payload,
+            content_type=content_type,
+            env_file=env_file,
         )
-        signed_headers = "host;x-amz-content-sha256;x-amz-date"
-        canonical_request = "\n".join(
-            [
-                "PUT",
-                canonical_uri,
-                "",
-                canonical_headers,
-                signed_headers,
-                payload_hash,
-            ]
-        )
-        credential_scope = f"{date_stamp}/{region}/s3/aws4_request"
-        string_to_sign = "\n".join(
-            [
-                "AWS4-HMAC-SHA256",
-                amz_date,
-                credential_scope,
-                hashlib.sha256(canonical_request.encode("utf-8")).hexdigest(),
-            ]
-        )
-        signing_key = _aws_v4_signing_key(secret_access_key, date_stamp, region)
-        signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
-        authorization = (
-            "AWS4-HMAC-SHA256 "
-            f"Credential={access_key_id}/{credential_scope}, "
-            f"SignedHeaders={signed_headers}, "
-            f"Signature={signature}"
-        )
-
-        request_url = urllib.parse.urlunparse(
-            (
-                parsed.scheme,
-                parsed.netloc,
-                canonical_uri,
-                "",
-                "",
-                "",
-            )
-        )
-        request = urllib.request.Request(
-            request_url,
-            data=payload,
-            method="PUT",
-            headers={
-                "Authorization": authorization,
-                "Content-Length": str(len(payload)),
-                "Content-Type": content_type,
-                "Host": host,
-                "x-amz-content-sha256": payload_hash,
-                "x-amz-date": amz_date,
-            },
-        )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            if not (200 <= response.status < 300):
-                raise RuntimeError(f"Storage upload failed with HTTP {response.status} for {object_key}")
-            etag = response.headers.get("ETag")
-
-        return {
-            "bucket": bucket,
-            "endpoint": endpoint,
-            "env_path": str(resolved_env_path),
-            "object_key": object_key,
-            "content_type": content_type,
-            "size_bytes": len(payload),
-            "etag": etag,
-            "status_code": response.status,
-        }
 
     def upload_file(
         self,
@@ -2326,12 +2446,10 @@ class RuntimePersistenceBridge:
         revision_label: str,
         pack_code: str,
     ) -> str:
-        return "-".join(
-            [
-                slugify_public_code(symbol_slug),
-                slugify_public_code(revision_label),
-                slugify_public_code(pack_code),
-            ]
+        return published_page_code(
+            symbol_slug=symbol_slug,
+            revision_label=revision_label,
+            pack_code=pack_code,
         )
 
     def _publication_pack_from_artifact(self, artifact: dict[str, Any]) -> dict[str, Any]:
@@ -2514,79 +2632,19 @@ class RuntimePersistenceBridge:
                 )
                 if not gate_decision.permitted:
                     raise RuntimeError(describe_refusal(gate_decision))
-                allocate_catalog_identity_for_publication(
+                published_page, pack_entry = publish_revision_to_pack(
                     session,
-                    symbol,
-                    allocated_at=completed_at,
-                )
-                preview_auth = ensure_preview_authorization(
-                    session,
+                    symbol=symbol,
                     revision=revision,
-                    source="publication",
-                    created_at=completed_at,
+                    publication_pack=publication_pack,
+                    sort_order=sort_order,
+                    effective_date=effective_date,
+                    published_at=completed_at,
                 )
-                if preview_auth.status not in {"created", "unchanged", "no_preview"}:
-                    raise RuntimeError(
-                        "Published preview authorization failed "
-                        f"for revision {revision_id}: {preview_auth.status}."
-                    )
-
-                page_code = self.generate_published_page_code(
-                    symbol_slug=symbol.slug,
-                    revision_label=revision.revision_label,
-                    pack_code=publication_pack.pack_code,
-                )
-                page_title = f"{symbol.canonical_name} ({revision.revision_label})"
-                published_page = session.query(PublishedPage).filter_by(page_code=page_code).one_or_none()
-                if published_page is None:
-                    published_page = PublishedPage(
-                        id=uuid.uuid4(),
-                        page_code=page_code,
-                        title=page_title,
-                        pack_id=publication_pack.id,
-                        current_symbol_revision_id=revision.id,
-                        effective_date=effective_date,
-                        created_at=completed_at,
-                        updated_at=completed_at,
-                    )
-                    session.add(published_page)
-                else:
-                    published_page.title = page_title
-                    published_page.pack_id = publication_pack.id
-                    published_page.current_symbol_revision_id = revision.id
-                    published_page.effective_date = effective_date
-                    published_page.updated_at = completed_at
-                session.flush()
-
-                pack_entry = (
-                    session.query(PackEntry)
-                    .filter_by(
-                        pack_id=publication_pack.id,
-                        symbol_revision_id=revision.id,
-                        published_page_id=published_page.id,
-                    )
-                    .one_or_none()
-                )
-                if pack_entry is None:
-                    pack_entry = PackEntry(
-                        id=uuid.uuid4(),
-                        pack_id=publication_pack.id,
-                        symbol_revision_id=revision.id,
-                        published_page_id=published_page.id,
-                        sort_order=sort_order,
-                        created_at=completed_at,
-                    )
-                    session.add(pack_entry)
-                else:
-                    pack_entry.sort_order = sort_order
-
-                revision.lifecycle_state = "published"
-                symbol.current_revision_id = revision.id
-                symbol.updated_at = completed_at
                 published_pages.append(
                     {
                         "id": str(published_page.id),
-                        "page_code": page_code,
+                        "page_code": published_page.page_code,
                         "symbol_revision_id": str(revision.id),
                     }
                 )

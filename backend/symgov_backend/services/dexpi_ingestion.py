@@ -122,6 +122,12 @@ SEMANTIC_METHOD = "source_mapping"
 
 SVG_CONTENT_TYPE = "image/svg+xml"
 
+# Decision D10: the pack the public Catalogue reads these symbols through.
+# One pack for the one package, `public` so `active_public_symbol_projections`
+# admits it.
+PUBLICATION_PACK_CODE = "dexpi-ttc-1-2-1-3"
+PUBLICATION_PACK_TITLE = "DEXPI symbol library pilot (TrainingTestCases, DEXPI 1.2/1.3)"
+
 REVISION_LABEL = "r1"
 
 # Revisions are created `approved`, not `published`. See the module docstring.
@@ -209,6 +215,20 @@ def symbol_slug(geometry_signature: str) -> str:
     unique, so this is what makes `apply` idempotent by check.
     """
     return f"dexpi-ttc-{geometry_signature[:32]}"
+
+
+def asset_object_key(slug: str, svg_sha256: str) -> str:
+    """Where a symbol's SVG lives in object storage (decision D10).
+
+    Content-addressed under the symbol's slug, so the key is known before the
+    upload happens, a re-upload of the same bytes is the same PUT, and no two
+    revisions can share a key -- `ensure_preview_authorization` refuses a key
+    already bound to another revision.
+    """
+    digest = str(svg_sha256).strip().lower()
+    if len(digest) != 64 or any(c not in "0123456789abcdef" for c in digest):
+        raise DexpiIngestionPlanError(f"{slug}: the SVG digest is not a SHA-256 hex digest")
+    return f"dexpi/{PACKAGE_CODE}/{slug}/{digest}.svg"
 
 
 def source_edition(source_path: str) -> str:
@@ -334,13 +354,15 @@ def revision_payload(
 ) -> dict[str, Any]:
     """The revision payload the Catalogue renders and search indexes.
 
-    The asset entry carries no `object_key`. Uploading the SVG to object
-    storage is a live mutation on a deployment's bucket, which this driver
-    deliberately does not perform; the digest is what section 9.2's integrity
-    dimension reads, and it is recorded here and in the transformation chain.
+    The asset's `object_key` is decided here and uploaded by `dexpi_ingest
+    upload` (decision D10), so the payload the Catalogue renders names the
+    object its preview and download routes will read. The digest is what
+    section 9.2's integrity dimension reads, and it is recorded here and in
+    the transformation chain.
     """
     key = concept["concept_key"]
     asset: dict[str, Any] = {
+        "object_key": asset_object_key(symbol_slug(item["geometry_signature"]), item["svg_sha256"]),
         "filename": item["svg"],
         "content_type": SVG_CONTENT_TYPE,
         "role": "primary",
@@ -363,6 +385,11 @@ def revision_payload(
         "aliases": _aliases(item),
         "keywords": _keywords(item, concept_key_value=key),
         "assets": [asset],
+        # Where the Catalogue looks: `asset_manifest.choose_preview_asset` and
+        # `list_download_assets` read `visual_assets`, not `assets`, which only
+        # the integrity dimension reads. The same SVG is both the preview and
+        # the download (decision D10).
+        "visual_assets": {"source_assets": [dict(asset)]},
         "dexpi": {
             "geometry_signature": item["geometry_signature"],
             "base_name": item["base_name"],

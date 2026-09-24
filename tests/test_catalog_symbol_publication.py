@@ -1321,12 +1321,17 @@ def test_runtime_publication_transaction_rolls_back_identity_and_all_later_write
 
 def test_runtime_allocates_before_published_page_or_pack_entry_creation() -> None:
     source = RUNTIME.read_text(encoding="utf-8")
-    method = source[source.index("    def persist_publication_execution(") :]
-    allocation = method.index("allocate_catalog_identity_for_publication(")
-    page = method.index("PublishedPage(")
-    entry = method.index("PackEntry(")
-    lifecycle = method.index('revision.lifecycle_state = "published"')
+    # The per-revision rows are written by the routine Rupert's handoff and the
+    # DEXPI `publish` command share, so the ordering is pinned there.
+    routine = source[source.index("def publish_revision_to_pack(") : source.index("class RuntimePersistenceBridge:")]
+    allocation = routine.index("allocate_catalog_identity_for_publication(")
+    page = routine.index("PublishedPage(")
+    entry = routine.index("PackEntry(")
+    lifecycle = routine.index('revision.lifecycle_state = "published"')
     assert allocation < page < entry < lifecycle
+    # And the handoff still gates before that first irreversible step.
+    method = source[source.index("    def persist_publication_execution(") :]
+    assert method.index("enforce_publication_gate(") < method.index("publish_revision_to_pack(")
 
 
 def test_published_display_identity_is_canonical_and_missing_identity_fails_closed() -> None:

@@ -22,11 +22,18 @@ through the SM-P1-01 review UI. Until it does, section 9.2's rights dimension
 refuses every one of these symbols with `rights_undecided` -- which is the
 gate working, not a defect.
 
-**Nothing here publishes anything.** Revisions are created `approved`. The
-public Catalogue is reached through `published_pages`, `publication_packs`,
-`pack_entries` and `active_public_symbol_projections`, and this command writes
-to none of them. `gate` evaluates section 9.2 and records the evaluation so
-the refusals can be read before any of that is proposed.
+**Publishing is its own command, and it is all-or-nothing (decision D10).**
+`apply` creates revisions `approved` and publishes nothing. `upload` puts each
+converted SVG in object storage at the content-addressed key the plan
+decided, and touches no database. `publish` then, in one transaction: checks
+every stored object against the digest the revision records, evaluates
+section 9.2's gate for every symbol, and only if all of them pass writes the
+`publication_packs`, `published_pages` and `pack_entries` rows the Catalogue
+reads -- through `runtime.publish_revision_to_pack`, the routine Rupert's
+publication handoff uses, so the two paths cannot drift. One refusal
+publishes nothing. `--actor-id` is recorded as the publication's requester
+and approver, because publishing to the public Catalogue is a named person's
+decision just as the rights approval is.
 
 **Idempotent by check, like the seed.** A symbol is identified by its slug,
 which WP2's geometry signature decides, so a second `apply` recognises its own
@@ -44,35 +51,46 @@ from pathlib import Path
 import sys
 import uuid
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session
 
 from .classification_assignments import (
     propose_symbol_revision_classification,
     transition_symbol_revision_classification,
 )
+from .image_content import UnsafeImageContentError, validate_stored_image
 from .models import (
+    Attachment,
+    AuditEvent,
     ClassificationNode,
     ClassificationScheme,
     GovernedSymbol,
+    PublicationJob,
+    PublicationPack,
     SourcePackage,
     StandardVersion,
     SymbolRevision,
     User,
 )
 from .publication_gate import describe_refusal, enforce_publication_gate
+from .published_catalog import choose_published_preview_asset
 from .rights_provenance import list_rights_records, propose_rights_record, record_asset_transformation
+from .runtime import download_object_bytes, publish_revision_to_pack, upload_object_bytes
 from .services.dexpi_converter import CONVERTER_NAME, CONVERTER_VERSION
 from .services.dexpi_ingestion import (
     CLASSIFICATION_METHOD,
     PACKAGE_SOURCE_URI,
     DexpiIngestionPlanError,
     LINK_VERIFICATION_METHOD,
+    PACKAGE_CODE,
+    PUBLICATION_PACK_CODE,
+    PUBLICATION_PACK_TITLE,
     REPRESENTATION_TYPE_NODE_CODE,
     REPRESENTATION_TYPE_SCHEME_CODE,
     REVISION_LABEL,
     REVISION_LIFECYCLE_STATE,
     SEMANTIC_METHOD,
+    SVG_CONTENT_TYPE,
     plan_ingestion,
 )
 from .source_package_acquisition import (
@@ -359,6 +377,24 @@ def ingest_symbol(
     session.flush()
     symbol.current_revision_id = revision.id
 
+    # Parented to the revision itself, which is the lineage
+    # `ensure_preview_authorization` trusts without further proof; the bytes
+    # are `upload`'s job, at the key the plan decided (decision D10).
+    asset = symbol_plan["payload"]["assets"][0]
+    session.add(
+        Attachment(
+            id=uuid.uuid4(),
+            parent_type="symbol_revision",
+            parent_id=revision.id,
+            filename=asset["filename"],
+            object_key=asset["object_key"],
+            content_type=asset["content_type"],
+            size_bytes=asset["size_bytes"],
+            sha256=asset["sha256"],
+            created_at=occurred_at,
+        )
+    )
+
     entry = add_source_package_entry(
         session,
         source_package_id=package.id,
@@ -469,6 +505,17 @@ def ingest(
 ) -> dict:
     """Record every planned symbol that is not already recorded."""
     _require_actor(session, actor_id)
+    unmeasured = [
+        symbol["canonical_name"]
+        for symbol in plan["symbols"]
+        if "size_bytes" not in symbol["payload"]["assets"][0]
+    ]
+    if unmeasured:
+        # `attachments.size_bytes` is NOT NULL and a size nobody measured is
+        # not recorded, so the SVGs have to be read before anything is written.
+        raise ConfigurationError(
+            f"{len(unmeasured)} planned SVGs carry no measured size; run apply with --harvest"
+        )
     existing = index_existing_symbols(session, plan)
     package, package_created = ensure_package(session, plan, occurred_at=occurred_at)
     rights_id, rights_created = ensure_rights_proposal(
@@ -571,6 +618,243 @@ def evaluate_gate(
 
 
 # --------------------------------------------------------------------------
+# Storage and publication (decision D10).
+# --------------------------------------------------------------------------
+
+
+class PublicationRefused(ValueError):
+    """`publish` found a reason to publish nothing. Carries a report, never a credential."""
+
+    def __init__(self, message: str, report: dict):
+        super().__init__(message)
+        self.report = report
+
+
+def upload_assets(
+    plan: dict,
+    assets: dict[tuple[str, str], Path],
+    *,
+    storage_env_file,
+    uploader=upload_object_bytes,
+) -> dict:
+    """PUT every planned SVG to its content-addressed key. Touches no database.
+
+    `verify_assets` has already matched each file to its digest; the stored
+    image check here is the one `organization_symbol_drafts` applies to an
+    upload, so a file that is not an SVG never reaches the bucket under an SVG
+    content type. Re-running is the same PUT of the same bytes.
+    """
+    uploaded = []
+    for symbol in plan["symbols"]:
+        asset = symbol["payload"]["assets"][0]
+        path = assets[(symbol["entry"]["source_path"], symbol["transformation"]["svg"])]
+        data = path.read_bytes()
+        try:
+            validate_stored_image(data, asset["content_type"])
+        except UnsafeImageContentError as exc:
+            raise ConfigurationError(f"{symbol['canonical_name']}: {exc}") from exc
+        uploader(
+            object_key=asset["object_key"],
+            payload=data,
+            content_type=SVG_CONTENT_TYPE,
+            env_file=storage_env_file,
+        )
+        uploaded.append(asset["object_key"])
+    return {"uploaded_count": len(uploaded), "uploaded": uploaded}
+
+
+def _stored_object_problems(symbols: list[tuple], *, storage_env_file, fetcher) -> list[str]:
+    """Every planned object must be in the bucket with the bytes the revision records."""
+    problems = []
+    for symbol, revision in symbols:
+        asset = (revision.payload_json or {}).get("assets", [{}])[0]
+        # `publish_revision_to_pack` accepts `no_preview` silently, as Rupert's
+        # path must; a DEXPI symbol without one would be a blank catalogue card.
+        preview = choose_published_preview_asset(revision.payload_json)
+        if preview is None or preview.get("object_key") != asset.get("object_key"):
+            problems.append(f"{symbol.slug}: the Catalogue would not preview the stored SVG")
+            continue
+        try:
+            stored = fetcher(object_key=asset["object_key"], env_file=storage_env_file)
+        except Exception as exc:  # noqa: BLE001 -- reported by class name only
+            problems.append(f"{symbol.slug}: stored object unreadable ({type(exc).__name__})")
+            continue
+        if hashlib.sha256(stored["payload"]).hexdigest() != asset.get("sha256"):
+            problems.append(f"{symbol.slug}: stored object does not match the recorded digest")
+    return problems
+
+
+def publish(
+    session: Session,
+    *,
+    plan: dict,
+    actor_id: uuid.UUID,
+    occurred_at: datetime,
+    storage_env_file,
+    fetcher=download_object_bytes,
+) -> dict:
+    """Publish every planned symbol to the public Catalogue, or none of them."""
+    _require_actor(session, actor_id)
+    slugs = [symbol["slug"] for symbol in plan["symbols"]]
+    sort_orders = {symbol["slug"]: symbol["sort_order"] for symbol in plan["symbols"]}
+    rows = session.execute(
+        select(GovernedSymbol, SymbolRevision)
+        .join(SymbolRevision, SymbolRevision.id == GovernedSymbol.current_revision_id)
+        .where(GovernedSymbol.slug.in_(slugs))
+        .order_by(GovernedSymbol.slug)
+    ).all()
+    if len(rows) != len(slugs):
+        raise ConfigurationError(
+            f"{len(slugs) - len(rows)} planned symbols are not recorded; run apply first"
+        )
+
+    unchanged = [symbol.slug for symbol, revision in rows if revision.lifecycle_state == "published"]
+    pending = [(symbol, revision) for symbol, revision in rows if revision.lifecycle_state != "published"]
+    wrong_state = [
+        f"{symbol.slug}: {revision.lifecycle_state}"
+        for symbol, revision in pending
+        if revision.lifecycle_state != "approved"
+    ]
+    if wrong_state:
+        raise PublicationRefused(
+            f"{len(wrong_state)} revisions are not approved",
+            {"not_approved": wrong_state},
+        )
+    if not pending:
+        return {"published_count": 0, "published": [], "unchanged_count": len(unchanged)}
+
+    storage_problems = _stored_object_problems(
+        pending, storage_env_file=storage_env_file, fetcher=fetcher
+    )
+    if storage_problems:
+        raise PublicationRefused(
+            f"{len(storage_problems)} stored objects are missing, wrong or not previewable; run upload first",
+            {"storage_problems": storage_problems},
+        )
+
+    # Every gate before any publication: `publish_revision_to_pack` allocates
+    # catalogue identity, which is irreversible, and one refusal publishes
+    # nothing.
+    refusals: dict[str, int] = {}
+    samples: list[dict] = []
+    levels: dict[str, int] = {}
+    for symbol, revision in pending:
+        decision = enforce_publication_gate(
+            session,
+            symbol_revision_id=revision.id,
+            evaluated_at=occurred_at,
+            evaluated_by_user_id=actor_id,
+        )
+        levels[decision.traceability_level] = levels.get(decision.traceability_level, 0) + 1
+        if not decision.permitted:
+            for reason in decision.refusal_reasons:
+                refusals[reason] = refusals.get(reason, 0) + 1
+            if len(samples) < 5:
+                samples.append({"slug": symbol.slug, "describe": describe_refusal(decision)})
+    if refusals:
+        raise PublicationRefused(
+            "the publication gate refused at least one symbol; nothing was published",
+            {"refusal_reasons": refusals, "sample_refusals": samples},
+        )
+
+    pack = session.execute(
+        select(PublicationPack).where(PublicationPack.pack_code == PUBLICATION_PACK_CODE)
+    ).scalar_one_or_none()
+    if pack is None:
+        pack = PublicationPack(
+            id=uuid.uuid4(),
+            pack_code=PUBLICATION_PACK_CODE,
+            title=PUBLICATION_PACK_TITLE,
+            audience="public",
+            effective_date=occurred_at.date(),
+            status="published",
+            created_at=occurred_at,
+            updated_at=occurred_at,
+        )
+        session.add(pack)
+    else:
+        pack.status = "published"
+        pack.updated_at = occurred_at
+    session.flush()
+
+    job = PublicationJob(
+        id=uuid.uuid4(),
+        pack_id=pack.id,
+        status="completed",
+        requested_by=actor_id,
+        approved_by=actor_id,
+        artifact_manifest_json={
+            "source": "dexpi_ingest publish",
+            "source_package_code": PACKAGE_CODE,
+            "symbol_count": len(pending),
+            "simulation": False,
+        },
+        created_at=occurred_at,
+        completed_at=occurred_at,
+    )
+    session.add(job)
+    session.flush()
+
+    published = []
+    for symbol, revision in pending:
+        page, entry = publish_revision_to_pack(
+            session,
+            symbol=symbol,
+            revision=revision,
+            publication_pack=pack,
+            sort_order=sort_orders[symbol.slug],
+            effective_date=pack.effective_date,
+            published_at=occurred_at,
+        )
+        published.append(
+            {
+                "slug": symbol.slug,
+                "catalog_symbol_id": symbol.catalog_symbol_id,
+                "page_code": page.page_code,
+                "published_page_id": str(page.id),
+                "pack_entry_id": str(entry.id),
+            }
+        )
+
+    audit_payload = {
+        "publication_job_id": str(job.id),
+        "pack_code": pack.pack_code,
+        "source_package_code": PACKAGE_CODE,
+        "published_count": len(published),
+        "approval_actor": {"id": str(actor_id), "type": "user"},
+    }
+    events = [
+        ("publication_pack", pack.id, "publication_pack_published"),
+        ("publication_job", job.id, "publication_job_completed"),
+    ] + [
+        ("published_page", uuid.UUID(item["published_page_id"]), "published_page_upserted")
+        for item in published
+    ]
+    for entity_type, entity_id, action in events:
+        session.add(
+            AuditEvent(
+                id=uuid.uuid4(),
+                entity_type=entity_type,
+                entity_id=entity_id,
+                action=action,
+                actor_id=actor_id,
+                payload_json=audit_payload,
+                created_at=occurred_at,
+            )
+        )
+    session.flush()
+    session.execute(text("SELECT refresh_published_symbol_views()"))
+    return {
+        "publication_pack_code": pack.pack_code,
+        "publication_job_id": str(job.id),
+        "published_count": len(published),
+        "published": published,
+        "unchanged_count": len(unchanged),
+        "traceability_levels": levels,
+    }
+
+
+# --------------------------------------------------------------------------
 # The command.
 # --------------------------------------------------------------------------
 
@@ -583,6 +867,8 @@ def _parser() -> argparse.ArgumentParser:
         ("plan", "Read-only: what the ingestion would record, and what is already there"),
         ("apply", "Record every planned symbol that is not already recorded"),
         ("gate", "Evaluate section 9.2's publication gate over the ingested revisions"),
+        ("upload", "Put every converted SVG in object storage; touches no database"),
+        ("publish", "Publish every ingested symbol to the public Catalogue, or none"),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument(
@@ -597,10 +883,18 @@ def _parser() -> argparse.ArgumentParser:
         )
         command.add_argument(
             "--harvest",
+            # `apply` records each SVG's size and `upload` sends its bytes, so
+            # neither can run from the manifests alone.
+            required=name in {"apply", "upload"},
             help="WP1 harvest directory; when given, every SVG digest is re-checked on disk",
         )
         command.add_argument("--output", help="Write the full report here as JSON")
-        if name == "apply":
+        if name in {"upload", "publish"}:
+            command.add_argument(
+                "--storage-env-file",
+                help="Object storage settings (default: the API's configured storage env file)",
+            )
+        if name in {"apply", "publish"}:
             command.add_argument(
                 "--actor-id",
                 type=uuid.UUID,
@@ -616,27 +910,50 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def build_plan(args) -> tuple[dict, list[str]]:
+def _storage_env_file(args):
+    if args.storage_env_file:
+        return args.storage_env_file
+    from .settings import get_settings
+
+    return get_settings().storage_env_file
+
+
+def build_plan(args) -> tuple[dict, list[str], dict]:
     selection = _read_json(args.selection, "selection manifest")
     concept_map = _read_json(args.concept_map, "concept map")
     sizes: dict[str, int] = {}
     problems: list[str] = []
+    assets: dict[tuple[str, str], Path] = {}
     if args.harvest:
         assets = index_harvest_assets(args.harvest)
         draft = plan_ingestion(selection, concept_map)
         sizes, problems = verify_assets(draft, assets)
-    return plan_ingestion(selection, concept_map, svg_sizes=sizes), problems
+    return plan_ingestion(selection, concept_map, svg_sizes=sizes), problems, assets
 
 
 def main(argv=None) -> int:
     args = _parser().parse_args(argv)
     try:
-        plan, asset_problems = build_plan(args)
-        if asset_problems and args.command == "apply":
+        plan, asset_problems, assets = build_plan(args)
+        if asset_problems and args.command in {"apply", "upload"}:
             raise ConfigurationError(
                 f"{len(asset_problems)} converted assets do not match the manifest; "
                 f"first: {asset_problems[0]}"
             )
+        if args.command == "upload":
+            report = {
+                "command": "upload",
+                "mode": "upload",
+                "planned_symbols": plan["summary"]["symbol_count"],
+                **upload_assets(plan, assets, storage_env_file=_storage_env_file(args)),
+            }
+            if args.output:
+                Path(args.output).write_text(
+                    json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+                )
+            printable = {key: value for key, value in report.items() if key != "uploaded"}
+            print(json.dumps(printable, indent=2, default=str))
+            return 0
         engine = _engine()
         try:
             report = {
@@ -671,6 +988,25 @@ def main(argv=None) -> int:
                 report.update({"mode": "apply", **result})
                 report["created_count"] = len(result["created"])
                 report["unchanged_count"] = len(result["unchanged"])
+            elif args.command == "publish":
+                try:
+                    with Session(engine) as session, session.begin():
+                        result = publish(
+                            session,
+                            plan=plan,
+                            actor_id=args.actor_id,
+                            occurred_at=datetime.now(timezone.utc),
+                            storage_env_file=_storage_env_file(args),
+                        )
+                except PublicationRefused as refused:
+                    # The transaction has rolled back; say why, with counts.
+                    print(
+                        json.dumps({"mode": "publish", "refused": str(refused), **refused.report}, indent=2),
+                        file=sys.stderr,
+                    )
+                    print("DEXPI publication refused; nothing was published.", file=sys.stderr)
+                    return 1
+                report.update({"mode": "publish", **result})
             else:
                 with Session(engine) as session, session.begin():
                     result = evaluate_gate(
@@ -689,7 +1025,7 @@ def main(argv=None) -> int:
             printable = dict(report)
             # The per-symbol lists are what `--output` is for; the console gets
             # the counts, so a 174-symbol run stays readable.
-            for key in ("created", "unchanged", "summary"):
+            for key in ("created", "unchanged", "summary", "published"):
                 if isinstance(printable.get(key), list):
                     printable[key] = len(printable[key])
             print(json.dumps(printable, indent=2, default=str))

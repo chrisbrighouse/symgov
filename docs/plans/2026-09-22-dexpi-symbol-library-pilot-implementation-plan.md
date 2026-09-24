@@ -478,6 +478,39 @@ an exact label through unchanged.
 These symbols appear *on* a P&ID; they are not P&IDs, and a document-type
 classification of a symbol asserts something the corpus does not.
 
+### D10 — Storage and publication are part of the pilot
+
+**Taken 2026-09-24, when preparing the production run showed WP1–WP5 never
+reach the Catalogue.** "Permitted at T5" is a gate verdict, not a
+publication. `gate` only records evaluations and the revisions stay
+`approved`; the Catalogue reads `published_pages`, `pack_entries` and
+`publication_packs` through `active_public_symbol_projections`, which only
+Rupert's publication handoff wrote. And the payload's asset had no
+`object_key`, so even a published symbol would have had no preview or
+download (`routes/catalog.py` serves an asset by its key).
+
+So WP6 adds both halves, and keeps the operator in charge of each:
+
+- **Content-addressed keys, decided in the plan.** `dexpi/<package>/<slug>/<sha256>.svg`.
+  Known before the upload, the same PUT on a re-run, and never shared between
+  revisions, which `ensure_preview_authorization` would refuse.
+- **`apply` writes an `Attachment` parented to the revision** — the lineage
+  preview authorization trusts without further proof — and so requires
+  `--harvest`, because `attachments.size_bytes` is NOT NULL.
+- **`upload` is its own command** and touches no database. It re-checks every
+  digest and runs the stored-image check organisation drafts use.
+- **`publish` is all-or-nothing.** In one transaction it reads every stored
+  object back against its recorded digest, evaluates the gate for every
+  symbol, and only if all pass writes the pack, job, pages and entries
+  through `runtime.publish_revision_to_pack` — extracted from Rupert's
+  handoff so the two paths share one routine. `--actor-id` is recorded as the
+  job's requester and approver: publishing to the public Catalogue is a named
+  person's decision, like the rights approval.
+
+*Rejected:* driving the symbols through Rupert's handoff. It is bound to a
+review case, a queue item and an agent run that an ingested package does not
+have, and inventing them would record a review that never happened.
+
 ---
 
 ## 4. Work packages
@@ -635,6 +668,16 @@ correct the `publication_gate` module docstring, which still states that rights
 and semantic identity are unsatisfiable — true when written, false since
 2026-09-18, and actively misleading to the next reader of the gate.
 
+### WP6 — Storage upload and publication
+
+**Delivered 2026-09-24,** per decision D10: `asset_object_key` in
+`services/dexpi_ingestion.py`; the `Attachment` row, `upload` and `publish` in
+`dexpi_ingest.py`; `runtime.upload_object_bytes` and
+`runtime.publish_revision_to_pack` lifted to module level, with Rupert's
+handoff now calling the latter. The production sequence becomes: `dexpi_seed
+apply`, `dexpi_ingest apply --harvest`, `upload`, the named rights approval,
+`gate`, then `publish`.
+
 ---
 
 ## 5. What this plan does not do
@@ -685,3 +728,5 @@ and semantic identity are unsatisfiable — true when written, false since
 4. fix whatever the gate refuses, and re-rehearse
 5. **only then** seek explicit approval for the production migration and
    ingestion
+6. **WP6** (decision D10) before that approval is sought, because without it
+   the production run would record 174 symbols the Catalogue cannot show
