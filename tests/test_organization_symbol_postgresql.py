@@ -17,6 +17,8 @@ from sqlalchemy.exc import DBAPIError
 
 psycopg = pytest.importorskip("psycopg")
 
+from postgres_image import ALEMBIC_TIMEOUT, POSTGRES_IMAGE, POSTGRES_READY_TIMEOUT  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 
@@ -45,7 +47,7 @@ def _alembic(url: str, *args: str, check: bool = True) -> subprocess.CompletedPr
         check=check,
         capture_output=True,
         text=True,
-        timeout=240,
+        timeout=max(240, ALEMBIC_TIMEOUT),
     )
 
 
@@ -67,14 +69,14 @@ def _database(name_prefix: str):
         "POSTGRES_DB=symgov_stage5",
         "--publish",
         "127.0.0.1::5432",
-        "postgres:16-alpine",
+        POSTGRES_IMAGE,
     )
     engine = None
     try:
         port = int(_docker("port", name, "5432/tcp").stdout.strip().rsplit(":", 1)[1])
         raw_url = f"postgresql://postgres:{password}@127.0.0.1:{port}/symgov_stage5"
         url = raw_url.replace("postgresql://", "postgresql+psycopg://", 1)
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + POSTGRES_READY_TIMEOUT
         while True:
             try:
                 with psycopg.connect(raw_url, connect_timeout=2) as connection:

@@ -59,6 +59,8 @@ if str(BACKEND) not in sys.path:
 
 from symgov_backend.subscriptions import PROTECTED_OWNER_EMAIL  # noqa: E402
 
+from postgres_image import ALEMBIC_TIMEOUT, POSTGRES_IMAGE, POSTGRES_READY_TIMEOUT  # noqa: E402
+
 CURRENT_HEAD = "20260908_0046"
 
 # The four tables 20260810_0028 makes append-only for symgov_app.
@@ -109,7 +111,7 @@ def _management(app_url: str, migration_url: str, *args: str, use_migration_role
         env["SYMGOV_ALEMBIC_USE_MIGRATION_DB"] = "1"
     return subprocess.run(
         [sys.executable, "-m", "symgov_backend.management", *args],
-        cwd=BACKEND, env=env, check=False, capture_output=True, text=True, timeout=300,
+        cwd=BACKEND, env=env, check=False, capture_output=True, text=True, timeout=max(300, ALEMBIC_TIMEOUT),
     )
 
 
@@ -127,14 +129,14 @@ def _role_split_database():
         "--env", f"POSTGRES_PASSWORD={superuser_password}",
         "--env", "POSTGRES_DB=symgov_roles",
         "--publish", "127.0.0.1::5432",
-        "postgres:16-alpine",
+        POSTGRES_IMAGE,
     )
     try:
         port = int(_docker("port", name, "5432/tcp").stdout.strip().rsplit(":", 1)[1])
         privileged_raw = f"postgresql://postgres:{superuser_password}@127.0.0.1:{port}/symgov_roles"
         app_raw = f"postgresql://symgov_app:{app_password}@127.0.0.1:{port}/symgov_roles"
 
-        deadline = time.monotonic() + 90
+        deadline = time.monotonic() + POSTGRES_READY_TIMEOUT
         while True:
             try:
                 with psycopg.connect(privileged_raw, connect_timeout=2) as connection:

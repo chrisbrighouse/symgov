@@ -25,6 +25,8 @@ from symgov_backend.models import User, UserSession
 
 psycopg = pytest.importorskip("psycopg")
 
+from postgres_image import ALEMBIC_TIMEOUT, POSTGRES_IMAGE, POSTGRES_READY_TIMEOUT  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 
@@ -43,7 +45,7 @@ def _alembic(url: str, *args: str) -> None:
         check=True,
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=max(180, ALEMBIC_TIMEOUT),
     )
 
 
@@ -69,7 +71,7 @@ def postgres_url() -> Generator[str, None, None]:
             "POSTGRES_DB=symgov_2c",
             "--publish",
             "127.0.0.1::5432",
-            "postgres:16-alpine",
+            POSTGRES_IMAGE,
         ],
         check=True,
     )
@@ -82,7 +84,7 @@ def postgres_url() -> Generator[str, None, None]:
         url = f"postgresql+psycopg://postgres:{password}@127.0.0.1:{port}/symgov_2c"
         # Wait for PG
         start = time.time()
-        while time.time() - start < 30:
+        while time.time() - start < POSTGRES_READY_TIMEOUT:
             try:
                 engine = create_engine(url)
                 with engine.connect() as conn:

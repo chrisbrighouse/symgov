@@ -33,6 +33,8 @@ from symgov_backend.symbol_context_service import select_active_set, select_proj
 
 psycopg = pytest.importorskip("psycopg")
 
+from postgres_image import ALEMBIC_TIMEOUT, POSTGRES_IMAGE, POSTGRES_READY_TIMEOUT  # noqa: E402
+
 
 @pytest.fixture(autouse=True)
 def _stub_record_governance_usage_event():
@@ -62,7 +64,7 @@ def _docker(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
 
 def _alembic(url: str, *args: str) -> None:
     env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(BACKEND), "SYMGOV_DATABASE_URL": url, "SYMGOV_MIGRATION_DATABASE_URL": url}
-    subprocess.run(["alembic", *args], cwd=BACKEND, env=env, check=True, capture_output=True, text=True, timeout=180)
+    subprocess.run(["alembic", *args], cwd=BACKEND, env=env, check=True, capture_output=True, text=True, timeout=max(180, ALEMBIC_TIMEOUT))
 
 
 @contextmanager
@@ -78,7 +80,7 @@ def _disposable_database(name_prefix: str, database: str, *revisions: str):
         pytest.skip("Docker is required for the disposable PostgreSQL migration rehearsal")
     name = f"{name_prefix}-{uuid.uuid4().hex[:12]}"
     password = f"disposable-{name_prefix}-password"
-    _docker("run", "--rm", "--detach", "--name", name, "--env", f"POSTGRES_PASSWORD={password}", "--env", f"POSTGRES_DB={database}", "--publish", "127.0.0.1::5432", "postgres:16-alpine")
+    _docker("run", "--rm", "--detach", "--name", name, "--env", f"POSTGRES_PASSWORD={password}", "--env", f"POSTGRES_DB={database}", "--publish", "127.0.0.1::5432", POSTGRES_IMAGE)
     engine = None
     try:
         port = int(_docker("port", name, "5432/tcp").stdout.strip().rsplit(":", 1)[1])
@@ -88,7 +90,7 @@ def _disposable_database(name_prefix: str, database: str, *revisions: str):
         credentials = f"postgres:{password}"
         raw_url = f"postgresql://{credentials}@127.0.0.1:{port}/{database}"
         url = raw_url.replace("postgresql://", "postgresql+psycopg://", 1)
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + POSTGRES_READY_TIMEOUT
         while True:
             try:
                 with psycopg.connect(raw_url, connect_timeout=2) as connection:
@@ -1808,13 +1810,13 @@ def test_wp4_concurrent_preference_updates_are_last_project_lock_winner(wp1_data
 def empty_wp1_database():
     name = f"symgov-wp1-empty-{uuid.uuid4().hex[:12]}"
     password = "disposable-wp1-password"
-    _docker("run", "--rm", "--detach", "--name", name, "--env", f"POSTGRES_PASSWORD={password}", "--env", "POSTGRES_DB=symgov_wp1", "--publish", "127.0.0.1::5432", "postgres:16-alpine")
+    _docker("run", "--rm", "--detach", "--name", name, "--env", f"POSTGRES_PASSWORD={password}", "--env", "POSTGRES_DB=symgov_wp1", "--publish", "127.0.0.1::5432", POSTGRES_IMAGE)
     engine = None
     try:
         port = int(_docker("port", name, "5432/tcp").stdout.strip().rsplit(":", 1)[1])
         raw_url = f"postgresql://postgres:{password}@127.0.0.1:{port}/symgov_wp1"
         url = raw_url.replace("postgresql://", "postgresql+psycopg://", 1)
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + POSTGRES_READY_TIMEOUT
         while True:
             try:
                 with psycopg.connect(raw_url, connect_timeout=2) as connection:

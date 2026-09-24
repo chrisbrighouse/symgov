@@ -42,6 +42,8 @@ from pathlib import Path
 import psycopg
 import pytest
 
+from postgres_image import ALEMBIC_TIMEOUT, POSTGRES_IMAGE, POSTGRES_READY_TIMEOUT  # noqa: E402
+
 BACKEND = Path(__file__).resolve().parents[1] / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
@@ -70,7 +72,7 @@ def _alembic(url: str, password: str, *args: str):
     }
     return subprocess.run(
         ["alembic", *args], cwd=BACKEND, env=env, check=True,
-        capture_output=True, text=True, timeout=600,
+        capture_output=True, text=True, timeout=max(600, ALEMBIC_TIMEOUT),
     )
 
 
@@ -118,13 +120,13 @@ def _dump_restore_container(target_revision: str):
         "--env", f"POSTGRES_PASSWORD={password}",
         "--env", "POSTGRES_DB=symgov_src",
         "--publish", "127.0.0.1::5432",
-        "postgres:16-alpine",
+        POSTGRES_IMAGE,
     )
     try:
         port = int(_docker("port", name, "5432/tcp").stdout.strip().rsplit(":", 1)[1])
         raw = f"postgresql://postgres@127.0.0.1:{port}/symgov_src"
 
-        deadline = time.monotonic() + 90
+        deadline = time.monotonic() + POSTGRES_READY_TIMEOUT
         while True:
             try:
                 with psycopg.connect(raw, password=password, connect_timeout=2) as connection:

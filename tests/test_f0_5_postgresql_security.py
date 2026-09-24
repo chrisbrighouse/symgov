@@ -27,6 +27,8 @@ from symgov_backend.models import User, UserRole, UserSession, UserSubscription
 
 psycopg = pytest.importorskip("psycopg")
 
+from postgres_image import ALEMBIC_TIMEOUT, POSTGRES_IMAGE, POSTGRES_READY_TIMEOUT  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"
 
@@ -66,7 +68,7 @@ def _alembic(url: str, *args: str) -> None:
         check=True,
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=max(180, ALEMBIC_TIMEOUT),
     )
 
 
@@ -91,14 +93,14 @@ def disposable_postgres() -> Generator[DisposablePostgres, None, None]:
         "POSTGRES_DB=symgov_f05",
         "--publish",
         "127.0.0.1::5432",
-        "postgres:16-alpine",
+        POSTGRES_IMAGE,
     )
     try:
         port_output = _docker("port", name, "5432/tcp").stdout.strip()
         port = int(port_output.rsplit(":", 1)[1])
         url = f"postgresql+psycopg://postgres:{password}@127.0.0.1:{port}/symgov_f05"
         raw_url = url.replace("postgresql+psycopg://", "postgresql://", 1)
-        deadline = time.monotonic() + 60
+        deadline = time.monotonic() + POSTGRES_READY_TIMEOUT
         while True:
             try:
                 with psycopg.connect(raw_url, connect_timeout=2) as connection:
