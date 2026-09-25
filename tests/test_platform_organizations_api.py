@@ -302,6 +302,37 @@ def test_create_organization_adds_to_directory():
     assert listing.json()["total"] == 2
 
 
+def test_create_organization_names_initial_admin_by_email():
+    client, Session, admin_id, candidate_id, _ = _build_client()
+    org_id = _seed_symgov_org_with_platform_admin(Session, admin_id)
+    _login_and_step_up(client, "platform-admin@example.test", org_id)
+
+    response = client.post(
+        "/api/v1/platform/organizations",
+        json={"code": "BSCO", "displayName": "Birsco", "initialAdminEmail": "candidate@example.test"},
+    )
+
+    assert response.status_code == 201, response.text
+    new_org_id = response.json()["id"]
+    members = client.get(f"/api/v1/platform/organizations/{new_org_id}/members").json()["items"]
+    assert [(m["userId"], m["baseRole"]) for m in members] == [(str(candidate_id), "admin")]
+
+
+def test_create_organization_with_unknown_admin_email_rejected():
+    client, Session, admin_id, _, _ = _build_client()
+    org_id = _seed_symgov_org_with_platform_admin(Session, admin_id)
+    _login_and_step_up(client, "platform-admin@example.test", org_id)
+
+    response = client.post(
+        "/api/v1/platform/organizations",
+        json={"code": "BSCO", "displayName": "Birsco", "initialAdminEmail": "nobody@example.test"},
+    )
+
+    assert response.status_code == 400
+    assert "needs an account" in response.json()["detail"]
+    assert client.get("/api/v1/platform/organizations").json()["total"] == 1
+
+
 def test_create_rejects_duplicate_code():
     client, Session, admin_id, candidate_id, _ = _build_client()
     org_id = _seed_symgov_org_with_platform_admin(Session, admin_id)

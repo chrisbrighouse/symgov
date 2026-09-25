@@ -1265,9 +1265,13 @@ class OrgMemberListResponse(BaseModel):
     total: int
 
 
-class OrgAddMemberRequest(BaseModel):
-    """Identify the new member by email (the UI path) or by user ID, not both."""
+def _require_one_user_reference(email: str | None, user_id: str | None, *, names: str) -> None:
+    """People are named by email in the UI; the ID form stays for API callers."""
+    if bool(email and email.strip()) == bool(user_id):
+        raise PydanticCustomError("user_reference", "Provide exactly one of {names}.", {"names": names})
 
+
+class OrgAddMemberRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     email: str | None = Field(default=None, max_length=320)
@@ -1276,13 +1280,7 @@ class OrgAddMemberRequest(BaseModel):
 
     @model_validator(mode="after")
     def require_one_identifier(self):
-        has_email = bool(self.email and self.email.strip())
-        if has_email == bool(self.userId):
-            # PydanticCustomError, not ValueError: the 422 handler serializes
-            # exc.errors(), and a raw exception in its ctx is not JSON.
-            raise PydanticCustomError(
-                "member_identifier", "Provide exactly one of email or userId."
-            )
+        _require_one_user_reference(self.email, self.userId, names="email or userId")
         return self
 
 
@@ -1314,7 +1312,13 @@ class PlatformAdminListResponse(BaseModel):
 class GrantPlatformAdminRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    userId: str
+    email: str | None = Field(default=None, max_length=320)
+    userId: str | None = None
+
+    @model_validator(mode="after")
+    def require_one_identifier(self):
+        _require_one_user_reference(self.email, self.userId, names="email or userId")
+        return self
 
 
 # --- Platform Admin organization directory (Slice 3C) ---
@@ -1343,7 +1347,16 @@ class CreateOrganizationRequest(BaseModel):
     displayName: str = Field(min_length=1, max_length=200)
     legalName: str | None = Field(default=None, min_length=1, max_length=200)
     locale: str = "en-US"
-    initialAdminUserId: str
+    initialAdminEmail: str | None = Field(default=None, max_length=320)
+    initialAdminUserId: str | None = None
+
+    @model_validator(mode="after")
+    def require_one_initial_admin(self):
+        _require_one_user_reference(
+            self.initialAdminEmail, self.initialAdminUserId,
+            names="initialAdminEmail or initialAdminUserId",
+        )
+        return self
 
 
 # --- Platform Admin protected Symgov member management (Slice 3F) ---
@@ -1351,9 +1364,15 @@ class CreateOrganizationRequest(BaseModel):
 class PlatformAddSymgovMemberRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    userId: str
+    email: str | None = Field(default=None, max_length=320)
+    userId: str | None = None
     baseRole: str = Field(pattern="^(admin|user)$")
     reason: str = Field(min_length=10, max_length=1000)
+
+    @model_validator(mode="after")
+    def require_one_identifier(self):
+        _require_one_user_reference(self.email, self.userId, names="email or userId")
+        return self
 
 
 class PlatformPatchSymgovMemberRequest(BaseModel):

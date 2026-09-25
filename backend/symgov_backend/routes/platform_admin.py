@@ -26,6 +26,7 @@ from ..organization_service import (
     reactivate_membership,
     reactivate_organization,
     replace_protected_membership_base_role,
+    resolve_user_reference,
     revoke_platform_admin,
     suspend_organization,
 )
@@ -192,11 +193,11 @@ def grant_admin(
     current_user: AuthenticatedUser = Depends(require_platform_admin),
     _step_up: AuthenticatedUser = Depends(require_recent_step_up),
 ) -> PlatformAdminItem:
+    actor_id = uuid.UUID(current_user.id)
     try:
-        actor_id = uuid.UUID(current_user.id)
-        user_id = uuid.UUID(body.userId)
+        user_id = resolve_user_reference(session, user_id=body.userId, email=body.email)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid user ID.") from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         assign_platform_admin(
             session,
@@ -314,11 +315,13 @@ def create_organization_route(
     current_user: AuthenticatedUser = Depends(require_platform_admin),
     _step_up: AuthenticatedUser = Depends(require_recent_step_up),
 ) -> PlatformOrganizationItem:
+    actor_id = uuid.UUID(current_user.id)
     try:
-        actor_id = uuid.UUID(current_user.id)
-        initial_admin_id = uuid.UUID(body.initialAdminUserId)
+        initial_admin_id = resolve_user_reference(
+            session, user_id=body.initialAdminUserId, email=body.initialAdminEmail
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid user ID.") from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         result = create_organization_with_initial_admin(
             session,
@@ -438,11 +441,11 @@ def add_symgov_member(
     current_user: AuthenticatedUser = Depends(require_platform_admin),
     _step_up: AuthenticatedUser = Depends(require_recent_step_up),
 ) -> OrgMemberResponse:
+    actor_id = uuid.UUID(current_user.id)
     try:
-        user_id = uuid.UUID(body.userId)
-        actor_id = uuid.UUID(current_user.id)
+        user_id = resolve_user_reference(session, user_id=body.userId, email=body.email)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid ID format.") from exc
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     symgov_org_id = session.execute(
         select(Organization.id).where(Organization.normalized_code == "symgov")

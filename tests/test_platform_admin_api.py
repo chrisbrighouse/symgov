@@ -312,6 +312,63 @@ def test_grant_platform_admin_adds_user_to_list():
     assert listing.json()["total"] == 2
 
 
+def test_grant_platform_admin_by_email():
+    client, Session, admin_id, candidate_id, _ = _build_client()
+    org_id = _seed_symgov_org_with_platform_admin(
+        Session, admin_id, candidate_admin_org_id=candidate_id
+    )
+    _login_and_step_up(client, "platform-admin@example.test", org_id)
+
+    response = client.post("/api/v1/platform/admins", json={"email": " Candidate@Example.test "})
+
+    assert response.status_code == 201
+    assert response.json()["userId"] == str(candidate_id)
+
+
+def test_grant_platform_admin_by_unknown_email_rejected():
+    client, Session, admin_id, candidate_id, _ = _build_client()
+    org_id = _seed_symgov_org_with_platform_admin(
+        Session, admin_id, candidate_admin_org_id=candidate_id
+    )
+    _login_and_step_up(client, "platform-admin@example.test", org_id)
+
+    response = client.post("/api/v1/platform/admins", json={"email": "nobody@example.test"})
+
+    assert response.status_code == 400
+    assert "needs an account" in response.json()["detail"]
+
+
+def test_grant_platform_admin_requires_exactly_one_identifier():
+    client, Session, admin_id, candidate_id, _ = _build_client()
+    org_id = _seed_symgov_org_with_platform_admin(
+        Session, admin_id, candidate_admin_org_id=candidate_id
+    )
+    _login_and_step_up(client, "platform-admin@example.test", org_id)
+
+    neither = client.post("/api/v1/platform/admins", json={})
+    both = client.post(
+        "/api/v1/platform/admins",
+        json={"email": "candidate@example.test", "userId": str(candidate_id)},
+    )
+
+    assert neither.status_code == 422
+    assert both.status_code == 422
+
+
+def test_add_protected_symgov_member_by_email():
+    client, Session, admin_id, _, plain_id = _build_client()
+    org_id = _seed_symgov_org_with_platform_admin(Session, admin_id)
+    _login_and_step_up(client, "platform-admin@example.test", org_id)
+
+    response = client.post(
+        "/api/v1/platform/organizations/symgov/members",
+        json={"email": "plain@example.test", "baseRole": "user", "reason": "Approved onboarding request"},
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["userId"] == str(plain_id)
+
+
 def test_grant_duplicate_is_idempotent():
     client, Session, admin_id, candidate_id, _ = _build_client()
     org_id = _seed_symgov_org_with_platform_admin(

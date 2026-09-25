@@ -50,8 +50,8 @@ async function apiDelete(path) {
 }
 
 
-export function grantExistingPlatformAdmin({ userId, protect }) {
-  return protect(() => apiPost('/platform/admins', { userId }));
+export function grantExistingPlatformAdmin({ email, protect }) {
+  return protect(() => apiPost('/platform/admins', { email: email.trim() }));
 }
 
 function ErrorMessage({ message }) {
@@ -522,7 +522,7 @@ function OrganizationDetailPane({
 // The labels stay direct children of the form: the grid does the layout so
 // that each control keeps its own label association without a wrapper.
 function ProtectedMemberAddForm({ onAdd }) {
-  const [userId, setUserId] = useState('');
+  const [email, setEmail] = useState('');
   const [baseRole, setBaseRole] = useState('user');
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -534,8 +534,8 @@ function ProtectedMemberAddForm({ onAdd }) {
     setBusy(true);
     setError('');
     try {
-      await onAdd({ userId, baseRole, reason });
-      setUserId(''); setBaseRole('user'); setReason('');
+      await onAdd({ email, baseRole, reason });
+      setEmail(''); setBaseRole('user'); setReason('');
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
 
@@ -545,11 +545,12 @@ function ProtectedMemberAddForm({ onAdd }) {
     createElement('p', { className: 'platform-admin-record-form-title' }, 'Add a protected member'),
     createElement(
       'label',
-      { htmlFor: 'protected-member-user-id', className: 'field' },
-      createElement('span', null, 'Existing user ID'),
+      { htmlFor: 'protected-member-email', className: 'field' },
+      createElement('span', null, 'Email address'),
       createElement('input', {
-        id: 'protected-member-user-id', value: userId, required: true,
-        onChange: (event) => setUserId(event.target.value),
+        id: 'protected-member-email', type: 'email', value: email, required: true,
+        autoComplete: 'off', placeholder: 'name@example.com',
+        onChange: (event) => setEmail(event.target.value),
       })
     ),
     createElement(
@@ -577,7 +578,7 @@ function ProtectedMemberAddForm({ onAdd }) {
       {
         type: 'submit',
         className: 'action-button primary platform-admin-record-form-submit',
-        disabled: busy || !userId || !validReason,
+        disabled: busy || !email.trim() || !validReason,
       },
       busy ? 'Adding…' : 'Add protected member'
     ),
@@ -770,7 +771,8 @@ export function userPickerOptions(users) {
 export function CreateOrganizationForm({ onCreate, loadUsers = loadAllUsers }) {
   const [code, setCode] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [initialAdminUserId, setInitialAdminUserId] = useState('');
+  // The picker yields a user ID; without it the admin is named by email.
+  const [initialAdmin, setInitialAdmin] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [users, setUsers] = useState(null);
@@ -782,7 +784,7 @@ export function CreateOrganizationForm({ onCreate, loadUsers = loadAllUsers }) {
       .then((loaded) => { if (!cancelled) setUsers(userPickerOptions(loaded)); })
       // Listing users needs the site admin role (routes/admin.py list_users,
       // require_any_role({"admin"})), which a platform admin need not hold.
-      // Fall back to entering the id by hand rather than blocking creation.
+      // Fall back to entering the admin's email rather than blocking creation.
       .catch((err) => { if (!cancelled) setUsersError(err.message || 'User list unavailable.'); });
     return () => { cancelled = true; };
   }, [loadUsers]);
@@ -792,10 +794,12 @@ export function CreateOrganizationForm({ onCreate, loadUsers = loadAllUsers }) {
     setSaving(true);
     setError('');
     try {
-      await onCreate({ code, displayName, initialAdminUserId });
+      await onCreate(users
+        ? { code, displayName, initialAdminUserId: initialAdmin }
+        : { code, displayName, initialAdminEmail: initialAdmin.trim() });
       setCode('');
       setDisplayName('');
-      setInitialAdminUserId('');
+      setInitialAdmin('');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -839,14 +843,14 @@ export function CreateOrganizationForm({ onCreate, loadUsers = loadAllUsers }) {
     createElement(
       'label',
       { htmlFor: 'new-org-initial-admin', className: 'field' },
-      createElement('span', null, users ? 'Initial admin' : 'Initial admin user ID'),
+      createElement('span', null, users ? 'Initial admin' : 'Initial admin email'),
       users
         ? createElement(
           'select',
           {
             id: 'new-org-initial-admin',
-            value: initialAdminUserId,
-            onChange: (e) => setInitialAdminUserId(e.target.value),
+            value: initialAdmin,
+            onChange: (e) => setInitialAdmin(e.target.value),
             required: true,
           },
           createElement('option', { value: '' }, 'Select a user…'),
@@ -854,9 +858,11 @@ export function CreateOrganizationForm({ onCreate, loadUsers = loadAllUsers }) {
         )
         : createElement('input', {
           id: 'new-org-initial-admin',
-          type: 'text',
-          value: initialAdminUserId,
-          onChange: (e) => setInitialAdminUserId(e.target.value),
+          type: 'email',
+          autoComplete: 'off',
+          placeholder: 'name@example.com',
+          value: initialAdmin,
+          onChange: (e) => setInitialAdmin(e.target.value),
           required: true,
           'aria-describedby': usersError ? 'new-org-initial-admin-hint' : undefined,
         }),
@@ -866,7 +872,7 @@ export function CreateOrganizationForm({ onCreate, loadUsers = loadAllUsers }) {
       {
         type: 'submit',
         className: 'action-button primary platform-admin-record-form-submit',
-        disabled: saving || !code || !displayName || !initialAdminUserId,
+        disabled: saving || !code || !displayName || !initialAdmin.trim(),
       },
       saving ? 'Creating…' : 'Create organization'
     ),
@@ -874,31 +880,31 @@ export function CreateOrganizationForm({ onCreate, loadUsers = loadAllUsers }) {
     // field's input off the baseline the rest of the row sits on.
     usersError
       ? createElement('p', { id: 'new-org-initial-admin-hint', className: 'field-hint platform-admin-record-form-hint' },
-        `User list unavailable (${usersError}) — enter the user's ID.`)
+        `User list unavailable (${usersError}) — enter the admin's email address.`)
       : null,
     error ? ErrorMessage({ message: error }) : null
   );
 }
 
 export function GrantAdminForm({ onGrant }) {
-  const [userId, setUserId] = useState('');
+  const [email, setEmail] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const userIdInputRef = useRef(null);
+  const emailInputRef = useRef(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setSaving(true);
     setError('');
     try {
-      await onGrant(userId);
-      setUserId('');
+      await onGrant(email);
+      setEmail('');
     } catch (err) {
       setError(err.message);
       // A step-up refusal is fixed in the page-level PIN panel, which has
       // already taken focus; pulling it back here would send the operator to
       // the one field that is not the problem.
-      if (!err?.requiresStepUp) queueMicrotask(() => userIdInputRef.current?.focus());
+      if (!err?.requiresStepUp) queueMicrotask(() => emailInputRef.current?.focus());
     } finally {
       setSaving(false);
     }
@@ -910,14 +916,16 @@ export function GrantAdminForm({ onGrant }) {
     createElement('p', { className: 'platform-admin-record-form-title' }, 'Grant platform administration'),
     createElement(
       'label',
-      { htmlFor: 'platform-admin-user-id', className: 'field' },
-      createElement('span', null, 'User ID'),
+      { htmlFor: 'platform-admin-email', className: 'field' },
+      createElement('span', null, 'Email address'),
       createElement('input', {
-        id: 'platform-admin-user-id',
-        type: 'text',
-        value: userId,
-        ref: userIdInputRef,
-        onChange: (e) => setUserId(e.target.value),
+        id: 'platform-admin-email',
+        type: 'email',
+        autoComplete: 'off',
+        placeholder: 'name@example.com',
+        value: email,
+        ref: emailInputRef,
+        onChange: (e) => setEmail(e.target.value),
         required: true,
       })
     ),
@@ -926,7 +934,7 @@ export function GrantAdminForm({ onGrant }) {
       {
         type: 'submit',
         className: 'action-button primary platform-admin-record-form-submit',
-        disabled: saving || !userId,
+        disabled: saving || !email.trim(),
       },
       saving ? 'Granting…' : 'Grant platform admin'
     ),
@@ -1337,8 +1345,8 @@ export function PlatformAdminPage({ auth }) {
   useEffect(() => { loadOrganizations(1); }, [loadOrganizations]);
   useEffect(() => { loadProtectedMembers(); }, [loadProtectedMembers]);
 
-  async function handleGrant(userId) {
-    await grantExistingPlatformAdmin({ userId, protect });
+  async function handleGrant(email) {
+    await grantExistingPlatformAdmin({ email, protect });
     await load(page);
   }
 
@@ -1347,8 +1355,8 @@ export function PlatformAdminPage({ auth }) {
     await load(page);
   }
 
-  async function handleCreateOrganization({ code, displayName, initialAdminUserId }) {
-    await protect(() => apiPost('/platform/organizations', { code, displayName, initialAdminUserId }));
+  async function handleCreateOrganization(body) {
+    await protect(() => apiPost('/platform/organizations', body));
     await loadOrganizations(orgPage);
   }
 
@@ -1395,8 +1403,8 @@ export function PlatformAdminPage({ auth }) {
     await loadMemberDiagnostics(detailOrganization);
   }
 
-  async function handleAddProtectedMember({ userId, baseRole, reason }) {
-    await protect(() => apiPost('/platform/organizations/symgov/members', { userId, baseRole, reason }));
+  async function handleAddProtectedMember({ email, baseRole, reason }) {
+    await protect(() => apiPost('/platform/organizations/symgov/members', { email: email.trim(), baseRole, reason }));
     await loadProtectedMembers();
   }
 

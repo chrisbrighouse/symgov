@@ -253,12 +253,12 @@ describe('mounted admin App journeys', () => {
     const renderer = await mount('/platform/admin');
     assert.ok(renderer.root.findByProps({ 'aria-label': 'Platform' }));
     await openPlatformAdminTab(renderer, 'admins');
-    assert.equal(input(renderer, 'platform-admin-user-id').props.required, true);
+    assert.equal(input(renderer, 'platform-admin-email').props.required, true);
     await act(async () => {
-      input(renderer, 'platform-admin-user-id').props.onChange({ target: { value: 'u-2' } });
+      input(renderer, 'platform-admin-email').props.onChange({ target: { value: 'new.admin@example.test' } });
     });
     await act(async () => {
-      await formContaining(renderer, 'platform-admin-user-id').props.onSubmit({ preventDefault() {} });
+      await formContaining(renderer, 'platform-admin-email').props.onSubmit({ preventDefault() {} });
     });
 
     const alert = renderer.root.findByProps({ role: 'alert' });
@@ -310,10 +310,10 @@ describe('mounted admin App journeys', () => {
 
     await act(async () => {
       input(renderer, 'platform-step-up-pin').props.onChange({ target: { value: '1234' } });
-      input(renderer, 'protected-member-user-id').props.onChange({ target: { value: 'u-4' } });
+      input(renderer, 'protected-member-email').props.onChange({ target: { value: 'new.member@example.test' } });
       input(renderer, 'protected-member-reason').props.onChange({ target: { value: 'Approved onboarding request' } });
     });
-    await act(async () => formContaining(renderer, 'protected-member-user-id').props.onSubmit({ preventDefault() {} }));
+    await act(async () => formContaining(renderer, 'protected-member-email').props.onSubmit({ preventDefault() {} }));
     assert.equal(addAttempts, 2);
     assert.equal(input(renderer, 'platform-step-up-pin').props.value, '');
 
@@ -331,8 +331,8 @@ describe('mounted admin App journeys', () => {
     const protectedMutations = requests.filter(({ url, method }) =>
       url.includes('/platform/organizations/symgov/members') && (method === 'POST' || method === 'PATCH'));
     assert.deepEqual(protectedMutations.map(({ body }) => JSON.parse(body)), [
-      { userId: 'u-4', baseRole: 'user', reason: 'Approved onboarding request' },
-      { userId: 'u-4', baseRole: 'user', reason: 'Approved onboarding request' },
+      { email: 'new.member@example.test', baseRole: 'user', reason: 'Approved onboarding request' },
+      { email: 'new.member@example.test', baseRole: 'user', reason: 'Approved onboarding request' },
       { baseRole: 'admin', reason: 'Approved role promotion' },
       { baseRole: 'user', reason: 'Approved role demotion' },
       { reason: 'Membership no longer required' },
@@ -369,7 +369,7 @@ describe('mounted admin App journeys', () => {
       const path = currentUser.isPlatformAdmin ? '/platform/admin' : '/organization/admin';
       const renderer = await mount(path);
       assert.match(JSON.stringify(renderer.toJSON()), /You do not have access to this area/);
-      assert.equal(renderer.root.findAllByProps({ id: 'protected-member-user-id' }).length, 0);
+      assert.equal(renderer.root.findAllByProps({ id: 'protected-member-email' }).length, 0);
       await act(async () => renderer.unmount());
     }
   });

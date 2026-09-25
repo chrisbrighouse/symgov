@@ -203,14 +203,37 @@ describe('PlatformAdminPage', () => {
     });
     const field = renderer.root.findByProps({ id: 'new-org-initial-admin' });
     assert.equal(field.type, 'input');
+    assert.equal(field.props.type, 'email');
     assert.match(JSON.stringify(renderer.toJSON()), /User list unavailable/);
+    assert.match(JSON.stringify(renderer.toJSON()), /enter the admin's email address/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('names the initial admin by email when the user list is unavailable', async () => {
+    const created = [];
+    let renderer;
+    await act(async () => {
+      renderer = create(createElement(CreateOrganizationForm, {
+        onCreate: async (body) => { created.push(body); },
+        loadUsers: async () => { throw new Error('Forbidden'); },
+      }));
+    });
+    await act(async () => {
+      renderer.root.findByProps({ id: 'new-org-code' }).props.onChange({ target: { value: 'bsco' } });
+      renderer.root.findByProps({ id: 'new-org-display-name' }).props.onChange({ target: { value: 'Birsco' } });
+      renderer.root.findByProps({ id: 'new-org-initial-admin' }).props.onChange({ target: { value: ' ada@example.test ' } });
+    });
+    await act(async () => renderer.root.findByType('form').props.onSubmit({ preventDefault() {} }));
+    assert.deepEqual(created, [{ code: 'BSCO', displayName: 'Birsco', initialAdminEmail: 'ada@example.test' }]);
     await act(async () => renderer.unmount());
   });
 
   it('renders labelled platform-admin and organization mutation controls', () => {
     const adminMarkup = renderToStaticMarkup(createElement(GrantAdminForm, { onGrant: async () => {} }));
     const organizationMarkup = renderToStaticMarkup(createElement(CreateOrganizationForm, { onCreate: async () => {} }));
-    assert.match(adminMarkup, /for="platform-admin-user-id"/);
+    assert.match(adminMarkup, /for="platform-admin-email"/);
+    assert.match(adminMarkup, /type="email"/);
+    assert.doesNotMatch(adminMarkup + organizationMarkup, /user ID/i);
     assert.match(adminMarkup, /type="submit"[^>]*>Grant platform admin<\/button>/);
     assert.match(organizationMarkup, /for="new-org-code"/);
     assert.match(organizationMarkup, /for="new-org-display-name"/);
@@ -227,12 +250,12 @@ describe('protected platform mutation', () => {
       return { ok: true, json: async () => mockAdminsResponse.items[1] };
     };
     const result = await grantExistingPlatformAdmin({
-      userId: 'u-2',
+      email: ' new.admin@example.test ',
       protect: (operation) => operation(),
     });
     assert.equal(result.userId, 'u-2');
     assert.match(request.url, /\/api\/v1\/platform\/admins$/);
-    assert.deepEqual(JSON.parse(request.options.body), { userId: 'u-2' });
+    assert.deepEqual(JSON.parse(request.options.body), { email: 'new.admin@example.test' });
     assert.doesNotMatch(request.options.body, /pin/i);
   });
 
@@ -242,7 +265,7 @@ describe('protected platform mutation', () => {
       json: async () => ({ detail: 'Platform admin access is required.' }),
     });
     await assert.rejects(
-      grantExistingPlatformAdmin({ userId: 'u-2', protect: (operation) => operation() }),
+      grantExistingPlatformAdmin({ email: 'new.admin@example.test', protect: (operation) => operation() }),
       (error) => error.status === 403 && /platform admin access/i.test(error.message),
     );
   });
@@ -270,20 +293,20 @@ describe('protected platform mutation', () => {
 
     await act(async () => {
       root.findByProps({ id: 'platform-step-up-pin' }).props.onChange({ target: { value: '1234' } });
-      root.findByProps({ id: 'platform-admin-user-id' }).props.onChange({ target: { value: 'u-2' } });
+      root.findByProps({ id: 'platform-admin-email' }).props.onChange({ target: { value: 'new.admin@example.test' } });
     });
     await act(async () => {
-      const userInput = root.findByProps({ id: 'platform-admin-user-id' });
+      const userInput = root.findByProps({ id: 'platform-admin-email' });
       await userInput.parent.parent.props.onSubmit({ preventDefault() {} });
     });
 
     const grantBodies = requests
       .filter(({ path, options }) => path === '/api/v1/platform/admins' && options.method === 'POST')
       .map(({ options }) => JSON.parse(options.body));
-    assert.deepEqual(grantBodies, [{ userId: 'u-2' }, { userId: 'u-2' }]);
+    assert.deepEqual(grantBodies, [{ email: 'new.admin@example.test' }, { email: 'new.admin@example.test' }]);
     assert.equal(requests.filter(({ path }) => path === '/api/v1/auth/reauthenticate').length, 1);
     assert.equal(root.findByProps({ id: 'platform-step-up-pin' }).props.value, '');
-    assert.equal(root.findByProps({ id: 'platform-admin-user-id' }).props.value, '');
+    assert.equal(root.findByProps({ id: 'platform-admin-email' }).props.value, '');
     assert.equal(JSON.stringify(grantBodies).includes('1234'), false);
     await act(async () => renderer.unmount());
   });
@@ -304,17 +327,17 @@ describe('protected platform mutation', () => {
     await openPlatformAdminTab(renderer, 'admins');
 
     await act(async () => {
-      root.findByProps({ id: 'platform-admin-user-id' }).props.onChange({ target: { value: 'u-2' } });
+      root.findByProps({ id: 'platform-admin-email' }).props.onChange({ target: { value: 'new.admin@example.test' } });
     });
     await act(async () => {
-      const userInput = root.findByProps({ id: 'platform-admin-user-id' });
+      const userInput = root.findByProps({ id: 'platform-admin-email' });
       await userInput.parent.parent.props.onSubmit({ preventDefault() {} });
     });
 
     assert.match(root.findByProps({ role: 'alert' }).children.join(''), /platform admin access is required/i);
-    assert.equal(root.findByProps({ id: 'platform-admin-user-id' }).props.disabled, undefined);
-    assert.equal(root.findByProps({ id: 'platform-admin-user-id' }).parent.props.htmlFor, 'platform-admin-user-id');
-    assert.deepEqual(focused, ['platform-admin-user-id']);
+    assert.equal(root.findByProps({ id: 'platform-admin-email' }).props.disabled, undefined);
+    assert.equal(root.findByProps({ id: 'platform-admin-email' }).parent.props.htmlFor, 'platform-admin-email');
+    assert.deepEqual(focused, ['platform-admin-email']);
     await act(async () => renderer.unmount());
   });
 
@@ -360,10 +383,10 @@ describe('protected platform mutation', () => {
     await openPlatformAdminTab(renderer, 'symgov');
     await act(async () => {
       root.findByProps({ id: 'platform-step-up-pin' }).props.onChange({ target: { value: '1234' } });
-      root.findByProps({ id: 'protected-member-user-id' }).props.onChange({ target: { value: 'u-4' } });
+      root.findByProps({ id: 'protected-member-email' }).props.onChange({ target: { value: 'new.member@example.test' } });
       root.findByProps({ id: 'protected-member-reason' }).props.onChange({ target: { value: 'Approved onboarding request' } });
     });
-    await act(async () => root.findByProps({ id: 'protected-member-user-id' }).parent.parent.props.onSubmit({ preventDefault() {} }));
+    await act(async () => root.findByProps({ id: 'protected-member-email' }).parent.parent.props.onSubmit({ preventDefault() {} }));
     assert.equal(addAttempts, 2);
     assert.equal(requests.filter(({ path }) => path === '/api/v1/auth/reauthenticate').length, 1);
     assert.equal(root.findByProps({ id: 'platform-step-up-pin' }).props.value, '');
@@ -390,7 +413,7 @@ describe('protected platform mutation', () => {
     });
     const root = renderer.root;
     await openPlatformAdminTab(renderer, 'symgov');
-    assert.equal(root.findAllByProps({ id: 'protected-member-user-id' }).length, 0);
+    assert.equal(root.findAllByProps({ id: 'protected-member-email' }).length, 0);
     assert.match(root.findByProps({ role: 'alert' }).children.join(''), /platform admin access is required/i);
     await act(async () => renderer.unmount());
   });
@@ -1023,10 +1046,10 @@ describe('platform step-up panel', () => {
     assert.equal(root.findByProps({ id: 'platform-step-up-state' }).children.join(''), 'No PIN entered.');
 
     await act(async () => {
-      root.findByProps({ id: 'platform-admin-user-id' }).props.onChange({ target: { value: 'u-2' } });
+      root.findByProps({ id: 'platform-admin-email' }).props.onChange({ target: { value: 'new.admin@example.test' } });
     });
     await act(async () => {
-      await root.findByProps({ id: 'platform-admin-user-id' }).parent.parent.props.onSubmit({ preventDefault() {} });
+      await root.findByProps({ id: 'platform-admin-email' }).parent.parent.props.onSubmit({ preventDefault() {} });
     });
 
     assert.match(root.findByProps({ role: 'alert' }).children.join(''), /needs your PIN/);

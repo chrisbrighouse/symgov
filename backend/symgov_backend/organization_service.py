@@ -202,6 +202,31 @@ def find_active_user_id_by_email(session: Session, email: str) -> uuid.UUID | No
     ).scalar_one_or_none()
 
 
+NO_ACCOUNT_FOR_EMAIL = (
+    "No active Symgov account uses that email address. "
+    "The person needs an account before they can be added."
+)
+
+
+def resolve_user_reference(
+    session: Session, *, user_id: str | None, email: str | None
+) -> uuid.UUID:
+    """Turn a request's user ID or email into a user ID, or raise ValueError.
+
+    Request schemas guarantee exactly one is set. Email is how people identify
+    each other in the UI; the ID form remains for API callers.
+    """
+    if user_id:
+        try:
+            return uuid.UUID(user_id)
+        except ValueError as exc:
+            raise ValueError("Invalid user ID.") from exc
+    resolved = find_active_user_id_by_email(session, email or "")
+    if resolved is None:
+        raise ValueError(NO_ACCOUNT_FOR_EMAIL)
+    return resolved
+
+
 def _symgov_admin_membership(session: Session, user_id: uuid.UUID, *, lock: bool) -> OrganizationMembership | None:
     statement = (
         select(OrganizationMembership)
