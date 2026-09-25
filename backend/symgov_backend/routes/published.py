@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from typing import Literal
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import bindparam, func, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -25,6 +27,17 @@ from ..catalog_workbench import (
     load_catalog_workbench,
     save_catalog_workbench_clipboard,
     save_catalog_workbench_section,
+)
+from ..catalog_browse_search import (
+    COLUMN_FIELDS as CATALOG_SEARCH_COLUMN_FIELDS,
+    DEFAULT_PAGE_SIZE as DEFAULT_CATALOG_SEARCH_PAGE_SIZE,
+    MAX_PAGE_SIZE as MAX_CATALOG_SEARCH_PAGE_SIZE,
+    SORT_KEYS as CATALOG_SEARCH_SORT_KEYS,
+    CatalogSearchInputError,
+    CatalogSearchRequest,
+    CatalogSearchScope,
+    load_public_page_rows,
+    search_catalog,
 )
 from ..catalog_organization_context import (
     list_organization_wide_catalog_symbols,
@@ -736,6 +749,148 @@ def list_published_symbols(
             organization_private_symbol_row(governed_symbol, revision, favourite_ids)
             for governed_symbol, revision in organization_private_rows
         ]
+    }
+
+
+CATALOG_SEARCH_COLUMN_PREFIX = "column."
+
+
+def _catalog_search_validation_error(name: str, message: str, value: object = None) -> RequestValidationError:
+    return RequestValidationError(
+        [{"type": "value_error", "loc": ["query", name], "msg": message, "input": value}]
+    )
+
+
+# Registered before `/symbols/{symbol_id}`, which would otherwise capture it.
+@router.get("/symbols/search")
+def search_published_symbols(
+    request: Request,
+    scope: Literal["catalog"] = Query(default="catalog"),
+    q: str = Query(default="", max_length=200),
+    catalog_disciplines: list[str] = Query(default=[], alias="catalogDisciplines"),
+    catalog_categories: list[str] = Query(default=[], alias="catalogCategories"),
+    use_cases: list[str] = Query(default=[], alias="useCases"),
+    available_formats: list[str] = Query(default=[], alias="availableFormats"),
+    pack: list[str] = Query(default=[]),
+    symbol_family: list[str] = Query(default=[], alias="symbolFamily"),
+    favourites: bool = Query(default=False),
+    sort: str = Query(default="id"),
+    direction: Literal["asc", "desc"] = Query(default="asc"),
+    preferred_formats: list[str] = Query(default=[], alias="preferredFormats"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=DEFAULT_CATALOG_SEARCH_PAGE_SIZE, alias="pageSize", ge=1, le=MAX_CATALOG_SEARCH_PAGE_SIZE),
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
+) -> dict:
+    """One page of the Catalog, searched, filtered, counted and sorted in the database.
+
+    `scope=catalog` is the Catalog tab: public symbols, plus an
+    organization-bound session's own organization-wide private symbols,
+    decided exactly as `GET /published/symbols` decides them. Column filters
+    are passed as `column.<key>=<text>`, for example `column.name=valve`.
+    See `catalog_browse_search.py` for the matching rules.
+    """
+    columns: dict[str, str] = {}
+    for name, value in request.query_params.multi_items():
+        if not name.startswith(CATALOG_SEARCH_COLUMN_PREFIX):
+            continue
+        key = name[len(CATALOG_SEARCH_COLUMN_PREFIX):]
+        if key not in CATALOG_SEARCH_COLUMN_FIELDS:
+            raise _catalog_search_validation_error(name, f"Unknown column filter: {key}.", value)
+        if key in columns:
+            raise _catalog_search_validation_error(name, "Give each column filter once.", value)
+        columns[key] = value
+    if sort not in CATALOG_SEARCH_SORT_KEYS:
+        raise _catalog_search_validation_error("sort", f"Unknown sort column: {sort}.", sort)
+
+    organization_id = None
+    if (
+        settings.organizations_enabled
+        and settings.organization_symbols_enabled
+        and current_user.session_mode == "organization"
+        and current_user.active_organization_id
+    ):
+        organization_id = uuid.UUID(current_user.active_organization_id)
+
+    search_request = CatalogSearchRequest(
+        query=q,
+        facets={
+            "catalogDisciplines": catalog_disciplines,
+            "catalogCategories": catalog_categories,
+            "useCases": use_cases,
+            "availableFormats": available_formats,
+            "pack": pack,
+            "symbolFamily": symbol_family,
+        },
+        columns=columns,
+        favourites_only=favourites,
+        sort=sort,
+        direction=direction,
+        preferred_formats=preferred_formats,
+        page=page,
+        page_size=page_size,
+    )
+    try:
+        result = search_catalog(
+            session,
+            CatalogSearchScope(user_id=uuid.UUID(str(current_user.id)), organization_id=organization_id),
+            search_request,
+        )
+    except CatalogSearchInputError as exc:
+        raise _catalog_search_validation_error("query", str(exc)) from exc
+
+    public_rows = load_public_page_rows(session, result.entries)
+    private_ids = [
+        entry["symbol_revision_id"] for entry in result.entries if entry["source"] == "organization_private"
+    ]
+    private_by_revision: dict[uuid.UUID, tuple[GovernedSymbol, SymbolRevision]] = {}
+    if private_ids:
+        for governed_symbol, revision in (
+            session.query(GovernedSymbol, SymbolRevision)
+            .join(SymbolRevision, SymbolRevision.id == GovernedSymbol.current_revision_id)
+            .filter(
+                SymbolRevision.id.in_(private_ids),
+                GovernedSymbol.owner_organization_id == organization_id,
+                GovernedSymbol.visibility == "organization_private",
+                GovernedSymbol.organization_wide.is_(True),
+            )
+            .all()
+        ):
+            private_by_revision[revision.id] = (governed_symbol, revision)
+
+    rows_in_order = [
+        public_rows.get((str(entry["symbol_revision_id"]), entry["page_id"], entry["pack_id"]))
+        for entry in result.entries
+        if entry["source"] == "public"
+    ]
+    present_public = [row for row in rows_in_order if row is not None]
+    supplemental = load_supplemental_photos(session, present_public)
+    comment_counts = load_comment_counts(session, present_public)
+    favourite_ids = load_favourite_symbol_ids(
+        session,
+        current_user.id,
+        [entry["governed_symbol_id"] for entry in result.entries],
+    )
+
+    items: list[dict] = []
+    for entry in result.entries:
+        if entry["source"] == "public":
+            row = public_rows.get((str(entry["symbol_revision_id"]), entry["page_id"], entry["pack_id"]))
+            if row is not None:
+                items.append(published_symbol_row(row, supplemental, comment_counts, favourite_ids))
+        else:
+            pair = private_by_revision.get(entry["symbol_revision_id"])
+            if pair is not None:
+                items.append(organization_private_symbol_row(pair[0], pair[1], favourite_ids))
+
+    return {
+        "scope": scope,
+        "items": items,
+        "page": page,
+        "pageSize": page_size,
+        "total": result.total,
+        "facets": result.facets,
     }
 
 

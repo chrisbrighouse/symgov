@@ -30,6 +30,7 @@ from symgov_backend.catalog_api_keys import (
     list_catalog_api_keys,
     revoke_catalog_api_key,
 )
+from symgov_backend.catalog_facets import backfill_catalog_facets
 from symgov_backend.classification_backfill import run_legacy_classification_backfill
 from symgov_backend.db import create_session_factory
 from symgov_backend.published_preview_authorizations import backfill_published_preview_authorizations
@@ -210,6 +211,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     preview_backfill_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
     preview_backfill_parser.add_argument(
+        "--apply", action="store_true", help="Apply the backfill. Omit for dry-run."
+    )
+
+    facet_backfill_parser = subparsers.add_parser(
+        "backfill-catalog-facets",
+        help=(
+            "Fill the Catalog facet store for every symbol the Catalog can list, so the first "
+            "search after a deploy does not compute them all. Dry run unless --apply."
+        ),
+    )
+    facet_backfill_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    facet_backfill_parser.add_argument(
         "--apply", action="store_true", help="Apply the backfill. Omit for dry-run."
     )
 
@@ -571,6 +584,18 @@ def main(argv: Sequence[str] | None = None):
         if args.apply and result.get("failures"):
             print("Published preview authorization backfill aborted: one or more failures were detected.", file=sys.stderr)
             return 1
+        return 0
+
+    if args.command == "backfill-catalog-facets":
+        session_factory = create_session_factory(env_file=args.db_env_file, nopool=True)
+        with session_factory() as session:
+            try:
+                result = backfill_catalog_facets(session, apply=args.apply)
+            except Exception as exc:
+                session.rollback()
+                print(f"Catalog facet backfill failed: {exc}", file=sys.stderr)
+                return 1
+        print(json.dumps(result, indent=2))
         return 0
 
     if args.command == "evaluate-automation-gates":
