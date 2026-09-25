@@ -17,6 +17,15 @@ from ..catalog_favourites import (
     load_favourite_symbol_ids,
     remove_catalog_favourite,
 )
+from ..catalog_workbench import (
+    CatalogClipboardRequest,
+    CatalogSavedViewsRequest,
+    CatalogWorkbenchPreferences,
+    clipboard_organization_id,
+    load_catalog_workbench,
+    save_catalog_workbench_clipboard,
+    save_catalog_workbench_section,
+)
 from ..catalog_organization_context import (
     list_organization_wide_catalog_symbols,
     resolve_organization_wide_catalog_symbol,
@@ -603,6 +612,49 @@ def remove_current_user_catalog_favourite(
         favourite_action="removed",
     )
     return {"symbolId": str(symbol_id), "isFavourite": False}
+
+
+@router.get("/workbench")
+def get_catalog_workbench(
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    return load_catalog_workbench(session, current_user.id, clipboard_organization_id(current_user))
+
+
+@router.put("/workbench/preferences")
+def save_catalog_workbench_preferences(
+    payload: CatalogWorkbenchPreferences,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    save_catalog_workbench_section(session, current_user.id, "preferences", payload.model_dump())
+    return load_catalog_workbench(session, current_user.id, clipboard_organization_id(current_user))
+
+
+@router.put("/workbench/saved-views")
+def save_catalog_workbench_saved_views(
+    payload: CatalogSavedViewsRequest,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    save_catalog_workbench_section(
+        session, current_user.id, "savedViews", [view.model_dump() for view in payload.items]
+    )
+    return load_catalog_workbench(session, current_user.id, clipboard_organization_id(current_user))
+
+
+@router.put("/workbench/clipboard")
+def save_catalog_workbench_clipboard_items(
+    payload: CatalogClipboardRequest,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+) -> dict:
+    organization_id = clipboard_organization_id(current_user)
+    save_catalog_workbench_clipboard(
+        session, current_user.id, organization_id, [item.model_dump() for item in payload.items]
+    )
+    return load_catalog_workbench(session, current_user.id, organization_id)
 
 
 @router.get("/symbols")

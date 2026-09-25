@@ -21,6 +21,7 @@ import {
   logoutUser,
   reauthenticateCurrentSession,
   fetchPublishedSymbolComments,
+  fetchCatalogWorkbench,
   fetchPublishedSymbols,
   fetchWorkspaceDaisyReports,
   fetchWorkspaceQueueItems,
@@ -41,6 +42,7 @@ import {
   upgradeAdminUserSubscription,
   updateAdminLlmSettings,
   resetAdminUserPin,
+  saveCatalogWorkbenchSection,
   testAdminLlmPrompt,
   submitPublishedSymbolCommand,
   updateCatalogFavourite,
@@ -78,6 +80,10 @@ import { ReviewClassificationForecast } from './ReviewClassificationForecast.js'
 import { Header } from './Header.js';
 import FavouriteButton from './FavouriteButton.js';
 import FavouriteFilter from './FavouriteFilter.js';
+import {
+  clearLegacyCatalogStorage,
+  createCatalogWorkbenchSaver
+} from './catalogWorkbenchSync.js';
 import {
   createPublishedFeedbackAttempt,
   publishedFeedbackLifecycleNotice
@@ -549,7 +555,7 @@ function AppContent() {
           <Route path="/reviews" element={<RequireAnyRole roles={['admin', 'reviewer']}><ReviewsPage /></RequireAnyRole>} />
           {/* Route path="/rights" element={<RightsReviewPage />} protected by reviewer/admin auth. */}
           <Route path="/rights" element={<RequireAnyRole roles={['admin', 'reviewer']}><RightsReviewPage /></RequireAnyRole>} />
-          <Route path="/standards" element={<RequireAuth><StandardsPage /></RequireAuth>} />
+          <Route path="/standards" element={<RequireAuth><SessionScopedStandardsPage /></RequireAuth>} />
           <Route path="/integrator/catalog" element={<RequireAnyRole roles={['admin', 'integrator']}><CatalogDeveloperHub /></RequireAnyRole>} />
           <Route path="/developers/catalog" element={<RequireAnyRole roles={['admin', 'integrator']}><Navigate to="/integrator/catalog" replace /></RequireAnyRole>} />
           <Route path="/standards/submit" element={<RequireAnyRole roles={['admin', 'submitter']}><SubmissionPage /></RequireAnyRole>} />
@@ -984,32 +990,21 @@ function DurationStepper({ ariaLabel, durationSeconds, disabled = false, onChang
   );
 }
 
-const CATALOG_PREFERENCES_STORAGE_KEY = 'symgov.catalog.preferences.v1';
-const CATALOG_SAVED_VIEWS_STORAGE_KEY = 'symgov.catalog.savedViews.v1';
-const CATALOG_CLIPBOARD_STORAGE_KEY = 'symgov.catalog.clipboard.v1';
-
-function readLocalStorageJson(key, fallback) {
-  if (typeof window === 'undefined' || !window.localStorage) {
-    return fallback;
-  }
+function browserLocalStorage() {
   try {
-    const value = window.localStorage.getItem(key);
-    return value ? JSON.parse(value) : fallback;
-  } catch (error) {
-    console.warn(`Unable to read ${key} from local storage`, error);
-    return fallback;
+    return typeof window === 'undefined' ? null : window.localStorage || null;
+  } catch {
+    return null;
   }
 }
 
-function writeLocalStorageJson(key, value) {
-  if (typeof window === 'undefined' || !window.localStorage) {
-    return;
-  }
-  try {
-    window.localStorage.setItem(key, JSON.stringify(value));
-  } catch (error) {
-    console.warn(`Unable to write ${key} to local storage`, error);
-  }
+// The Catalog clipboard belongs to the account within one session scope
+// (personal, or one organization), so a change of account or organization
+// remounts the page and loads that scope's own state.
+function SessionScopedStandardsPage() {
+  const { user } = useAuth();
+  const scope = `${user?.id || ''}:${user?.session?.activeOrganizationId || 'personal'}`;
+  return <StandardsPage key={scope} />;
 }
 
 function StandardsPage() {
@@ -1031,16 +1026,13 @@ function StandardsPage() {
   const [activeDetailTab, setActiveDetailTab] = useState('details');
   const [commentHistoryState, setCommentHistoryState] = useState({ symbolId: '', loading: false, mode: '', message: '', items: [] });
   const [displayCount, setDisplayCount] = useState(60);
-  const [catalogPreferences, setCatalogPreferences] = useState(() =>
-    serializeCatalogPreferences(readLocalStorageJson(CATALOG_PREFERENCES_STORAGE_KEY, {}))
-  );
-  const [savedCatalogViews, setSavedCatalogViews] = useState(() =>
-    readLocalStorageJson(CATALOG_SAVED_VIEWS_STORAGE_KEY, [])
-  );
+  // Preferences and saved views are the signed-in account's, and the clipboard
+  // is the account's within this session's organization (X-01). All three are
+  // loaded from and saved to the server, never kept in the browser.
+  const [catalogPreferences, setCatalogPreferences] = useState(() => serializeCatalogPreferences({}));
+  const [savedCatalogViews, setSavedCatalogViews] = useState([]);
   const [catalogViewName, setCatalogViewName] = useState('');
-  const [catalogClipboard, setCatalogClipboard] = useState(() =>
-    readLocalStorageJson(CATALOG_CLIPBOARD_STORAGE_KEY, [])
-  );
+  const [catalogClipboard, setCatalogClipboard] = useState([]);
   const [clipboardOpen, setClipboardOpen] = useState(false);
   const [workbenchExpanded, setWorkbenchExpanded] = useState(false);
   const [catalogResultView, setCatalogResultView] = useState('cards');
@@ -1060,6 +1052,22 @@ function StandardsPage() {
   const catalogLoadSequenceRef = useRef(0);
   const catalogMutationSequenceRef = useRef(0);
   const favouriteOperationSequencesRef = useRef(new Map());
+  // 'loading' until the account's saved workbench arrives; nothing is saved
+  // before then, and nothing at all if it fails, so a partial local copy can
+  // never overwrite the account's saved state.
+  const workbenchLoadRef = useRef(appConfig.apiRoot ? 'loading' : 'unavailable');
+  const workbenchTouchedRef = useRef({ preferences: false, savedViews: false, clipboard: false });
+  const workbenchDirtyRef = useRef({ preferences: false, savedViews: false, clipboard: false });
+  const workbenchSaverRef = useRef(null);
+  if (!workbenchSaverRef.current) {
+    workbenchSaverRef.current = createCatalogWorkbenchSaver({
+      save: saveCatalogWorkbenchSection,
+      onError: () => setWorkbenchStatus({
+        mode: 'error',
+        message: 'Your Catalog preferences could not be saved. Recent changes may not be kept.'
+      })
+    });
+  }
   const standardsSymbols = catalogItemsForDisplay(standardsState, symbols);
   const favouriteMutationsEnabled = !standardsState.loading && standardsState.mode === 'live';
   const requestedSymbolId = searchParams.get('symbol') || '';
@@ -1179,15 +1187,64 @@ function StandardsPage() {
   }, []);
 
   useEffect(() => {
-    writeLocalStorageJson(CATALOG_PREFERENCES_STORAGE_KEY, catalogPreferences);
+    clearLegacyCatalogStorage(browserLocalStorage());
+    const saver = workbenchSaverRef.current;
+    if (workbenchLoadRef.current !== 'loading') {
+      return undefined;
+    }
+    let cancelled = false;
+    fetchCatalogWorkbench().then((result) => {
+      if (cancelled) {
+        return;
+      }
+      if (!result.ok) {
+        workbenchLoadRef.current = 'failed';
+        setWorkbenchStatus({
+          mode: 'error',
+          message: 'Your saved Catalog preferences could not be loaded. Changes made now will not be saved.'
+        });
+        return;
+      }
+      workbenchLoadRef.current = 'loaded';
+      const saved = result.state;
+      const touched = workbenchTouchedRef.current;
+      const savedViews = Array.isArray(saved.savedViews) ? saved.savedViews : [];
+      const savedClipboard = Array.isArray(saved.clipboard) ? saved.clipboard : [];
+      // A section changed while the load was in flight is merged and saved:
+      // the local preferences win, and local views and clipboard items are
+      // added to what the account already had. Each merge returns a new
+      // value, so the save effects below see the change.
+      Object.keys(touched).forEach((section) => {
+        if (touched[section]) {
+          workbenchDirtyRef.current[section] = true;
+        }
+      });
+      setCatalogPreferences((current) => (touched.preferences
+        ? { ...current }
+        : serializeCatalogPreferences(saved.preferences || {})));
+      setSavedCatalogViews((current) => (touched.savedViews
+        ? [...current, ...savedViews.filter((view) => !current.some((local) => local.id === view.id || local.name === view.name))].slice(0, 12)
+        : savedViews));
+      setCatalogClipboard((current) => (touched.clipboard
+        ? [...savedClipboard.filter((item) => !current.some((local) => local.id === item.id)), ...current]
+        : savedClipboard));
+    });
+    return () => {
+      cancelled = true;
+      saver.flush();
+    };
+  }, []);
+
+  useEffect(() => {
+    persistWorkbenchSection('preferences', catalogPreferences);
   }, [catalogPreferences]);
 
   useEffect(() => {
-    writeLocalStorageJson(CATALOG_SAVED_VIEWS_STORAGE_KEY, savedCatalogViews);
+    persistWorkbenchSection('savedViews', savedCatalogViews);
   }, [savedCatalogViews]);
 
   useEffect(() => {
-    writeLocalStorageJson(CATALOG_CLIPBOARD_STORAGE_KEY, catalogClipboard);
+    persistWorkbenchSection('clipboard', catalogClipboard);
   }, [catalogClipboard]);
 
   useEffect(() => {
@@ -1556,8 +1613,34 @@ function StandardsPage() {
     });
   }
 
+  function persistWorkbenchSection(section, value) {
+    if (!workbenchDirtyRef.current[section] || workbenchLoadRef.current !== 'loaded') {
+      return;
+    }
+    workbenchDirtyRef.current[section] = false;
+    workbenchSaverRef.current.schedule(section, value);
+  }
+
+  function updateCatalogPreferences(updater) {
+    workbenchTouchedRef.current.preferences = true;
+    workbenchDirtyRef.current.preferences = true;
+    setCatalogPreferences(updater);
+  }
+
+  function updateSavedCatalogViews(updater) {
+    workbenchTouchedRef.current.savedViews = true;
+    workbenchDirtyRef.current.savedViews = true;
+    setSavedCatalogViews(updater);
+  }
+
+  function updateCatalogClipboard(updater) {
+    workbenchTouchedRef.current.clipboard = true;
+    workbenchDirtyRef.current.clipboard = true;
+    setCatalogClipboard(updater);
+  }
+
   function toggleCatalogPreference(kind, value) {
-    setCatalogPreferences((current) => {
+    updateCatalogPreferences((current) => {
       const selected = new Set(current[kind] || []);
       if (selected.has(value)) {
         selected.delete(value);
@@ -1586,7 +1669,7 @@ function StandardsPage() {
       facetFilters,
       preferredFormats: catalogPreferences.formats
     });
-    setSavedCatalogViews((current) => [snapshot, ...current.filter((view) => view.name !== snapshot.name)].slice(0, 12));
+    updateSavedCatalogViews((current) => [snapshot, ...current.filter((view) => view.name !== snapshot.name)].slice(0, 12));
     setCatalogViewName('');
     setWorkbenchStatus({ mode: 'success', message: `Saved Catalog view “${snapshot.name}”.` });
   }
@@ -1595,12 +1678,12 @@ function StandardsPage() {
     const next = applySavedCatalogView(view);
     setQuery(next.query);
     setFacetFilters(next.facetFilters);
-    setCatalogPreferences((current) => serializeCatalogPreferences({ ...current, formats: next.preferredFormats }));
+    updateCatalogPreferences((current) => serializeCatalogPreferences({ ...current, formats: next.preferredFormats }));
     setWorkbenchStatus({ mode: 'success', message: `Applied Catalog view “${view.name}”.` });
   }
 
   function deleteCatalogView(viewId) {
-    setSavedCatalogViews((current) => current.filter((view) => view.id !== viewId));
+    updateSavedCatalogViews((current) => current.filter((view) => view.id !== viewId));
   }
 
   function askEdToFindCatalogSymbols() {
@@ -1611,7 +1694,7 @@ function StandardsPage() {
     }
     setQuery(interpretation.searchQuery || interpretation.query);
     setFacetFilters((current) => ({ ...current, ...interpretation.facetFilters }));
-    setCatalogPreferences((current) => serializeCatalogPreferences({
+    updateCatalogPreferences((current) => serializeCatalogPreferences({
       ...current,
       formats: interpretation.preferredFormats.length ? interpretation.preferredFormats : current.formats
     }));
@@ -1625,13 +1708,13 @@ function StandardsPage() {
       setWorkbenchStatus({ mode: 'error', message: 'Select or open a symbol before adding it to the Catalog clipboard.' });
       return;
     }
-    setCatalogClipboard((current) => addSymbolsToClipboard(current, candidates));
+    updateCatalogClipboard((current) => addSymbolsToClipboard(current, candidates));
     setClipboardOpen(true);
     setWorkbenchStatus({ mode: 'success', message: `${candidates.length} symbol(s) added to the application clipboard.` });
   }
 
   function removeCatalogClipboardItem(symbolId) {
-    setCatalogClipboard((current) => removeSymbolFromClipboard(current, symbolId));
+    updateCatalogClipboard((current) => removeSymbolFromClipboard(current, symbolId));
   }
 
   function toggleSort(key) {
@@ -1805,7 +1888,7 @@ function StandardsPage() {
                     </div>
                   )) : <p className="muted-text">Clipboard is empty. Select symbols and add them here before later download/bundle support.</p>}
                   {catalogClipboard.length ? (
-                    <button type="button" className="action-button secondary compact" onClick={() => setCatalogClipboard([])}>
+                    <button type="button" className="action-button secondary compact" onClick={() => updateCatalogClipboard([])}>
                       Clear clipboard
                     </button>
                   ) : null}

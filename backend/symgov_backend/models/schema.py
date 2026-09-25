@@ -538,6 +538,69 @@ class CatalogFavourite(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class CatalogWorkbenchState(Base):
+    """One account's Catalog preferences and saved views.
+
+    Keyed by account, like `catalog_favourites`, so it follows the user across
+    browsers and never leaks between accounts that share one browser.
+    """
+
+    __tablename__ = "catalog_workbench_states"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    preferences_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    saved_views_json: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class CatalogWorkbenchClipboard(Base):
+    """One account's Catalog clipboard within one session scope.
+
+    `organization_id` is null for the personal session and set for an
+    organization session, so each organization gets its own clipboard and an
+    organization's private symbols never show outside it.
+    """
+
+    __tablename__ = "catalog_workbench_clipboards"
+    __table_args__ = (
+        Index(
+            "uq_catalog_workbench_clipboards_personal",
+            "user_id",
+            unique=True,
+            postgresql_where=text("organization_id is null"),
+            sqlite_where=text("organization_id is null"),
+        ),
+        Index(
+            "uq_catalog_workbench_clipboards_organization",
+            "user_id",
+            "organization_id",
+            unique=True,
+            postgresql_where=text("organization_id is not null"),
+            sqlite_where=text("organization_id is not null"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    items_json: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class CatalogApiKey(Base):
     __tablename__ = "catalog_api_keys"
     __table_args__ = (

@@ -1702,6 +1702,33 @@ export async function updateCatalogFavourite(symbolId, isFavourite) {
   return result.payload;
 }
 
+export async function fetchCatalogWorkbench() {
+  const result = await requestJson('/published/workbench');
+  if (!result.ok) {
+    return { ok: false, mode: result.mode, message: result.message || 'Catalog preferences load failed.' };
+  }
+  return { ok: true, mode: 'live', state: result.payload || {} };
+}
+
+const CATALOG_WORKBENCH_SECTION_PATHS = {
+  preferences: '/published/workbench/preferences',
+  savedViews: '/published/workbench/saved-views',
+  clipboard: '/published/workbench/clipboard'
+};
+
+export async function saveCatalogWorkbenchSection(section, value) {
+  const path = CATALOG_WORKBENCH_SECTION_PATHS[section];
+  if (!path) {
+    throw new Error(`Unknown Catalog workbench section: ${section}`);
+  }
+  const body = section === 'preferences' ? value : { items: value };
+  const result = await requestJson(path, { method: 'PUT', body: JSON.stringify(body) });
+  if (!result.ok) {
+    throw new Error(result.message || 'Catalog preferences save failed.');
+  }
+  return result.payload;
+}
+
 export async function fetchPublishedSymbolComments(symbolId) {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [] };
