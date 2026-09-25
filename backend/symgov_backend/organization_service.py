@@ -182,6 +182,26 @@ def _locked_active_user(session: Session, user_id: uuid.UUID, *, label: str) -> 
     return _locked_active_users(session, {user_id: label})[user_id]
 
 
+def find_active_user_id_by_email(session: Session, email: str) -> uuid.UUID | None:
+    """Resolve an exact (case-insensitive) email to an active user's ID.
+
+    Exact match only, never a search: an Organization Admin may add a person
+    whose address they already know without being able to browse the users of
+    other organizations. Inactive and deleted accounts resolve to None, so the
+    caller cannot tell them apart from an address that has no account.
+    """
+    normalized = str(email or "").strip().lower()
+    if not normalized:
+        return None
+    return session.execute(
+        select(User.id).where(
+            func.lower(User.email) == normalized,
+            User.is_active.is_(True),
+            User.deleted_at.is_(None),
+        )
+    ).scalar_one_or_none()
+
+
 def _symgov_admin_membership(session: Session, user_id: uuid.UUID, *, lock: bool) -> OrganizationMembership | None:
     statement = (
         select(OrganizationMembership)

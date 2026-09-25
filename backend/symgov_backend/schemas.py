@@ -1266,10 +1266,24 @@ class OrgMemberListResponse(BaseModel):
 
 
 class OrgAddMemberRequest(BaseModel):
+    """Identify the new member by email (the UI path) or by user ID, not both."""
+
     model_config = ConfigDict(extra="forbid")
 
-    userId: str
+    email: str | None = Field(default=None, max_length=320)
+    userId: str | None = None
     baseRole: str = Field(pattern="^(admin|user)$")
+
+    @model_validator(mode="after")
+    def require_one_identifier(self):
+        has_email = bool(self.email and self.email.strip())
+        if has_email == bool(self.userId):
+            # PydanticCustomError, not ValueError: the 422 handler serializes
+            # exc.errors(), and a raw exception in its ctx is not JSON.
+            raise PydanticCustomError(
+                "member_identifier", "Provide exactly one of email or userId."
+            )
+        return self
 
 
 class OrgPatchMemberRequest(BaseModel):

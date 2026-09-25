@@ -53,8 +53,8 @@ async function apiDeleteJson(path) {
 }
 
 
-export function addExistingOrganizationMember({ userId, baseRole, protect }) {
-  return protect(() => apiPost('/org/me/members', { userId, baseRole }));
+export function addExistingOrganizationMember({ email, baseRole, protect }) {
+  return protect(() => apiPost('/org/me/members', { email: email.trim(), baseRole }));
 }
 
 const STATUS_BADGE_MODIFIERS = {
@@ -571,23 +571,23 @@ function MemberRow({ member, isAdmin, onRoleChange, onCapabilityChange, onDeacti
 }
 
 export function OrganizationMemberAddForm({ onAdd }) {
-  const [userId, setUserId] = useState('');
+  const [email, setEmail] = useState('');
   const [baseRole, setBaseRole] = useState('user');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const userIdInputRef = useRef(null);
+  const emailInputRef = useRef(null);
 
   async function handleSubmit(event) {
     event.preventDefault();
     setSaving(true);
     setError('');
     try {
-      await onAdd({ userId, baseRole });
-      setUserId('');
+      await onAdd({ email, baseRole });
+      setEmail('');
       setBaseRole('user');
     } catch (err) {
       setError(err.message);
-      queueMicrotask(() => userIdInputRef.current?.focus());
+      queueMicrotask(() => emailInputRef.current?.focus());
     } finally {
       setSaving(false);
     }
@@ -599,13 +599,15 @@ export function OrganizationMemberAddForm({ onAdd }) {
     'form',
     { onSubmit: handleSubmit, className: 'organization-admin-member-add' },
     createElement('p', { className: 'organization-admin-member-add-title' }, 'Add an existing user'),
-    createElement('label', { htmlFor: 'organization-member-user-id', className: 'field' },
-      createElement('span', null, 'Existing user ID'),
+    createElement('label', { htmlFor: 'organization-member-email', className: 'field' },
+      createElement('span', null, 'Email address'),
       createElement('input', {
-        id: 'organization-member-user-id', type: 'text', value: userId, required: true,
-        ref: userIdInputRef,
-        placeholder: 'User ID of an existing account',
-        onChange: (event) => setUserId(event.target.value),
+        id: 'organization-member-email', type: 'email', value: email, required: true,
+        autoComplete: 'off',
+        ref: emailInputRef,
+        placeholder: 'name@example.com',
+        'aria-describedby': 'organization-member-email-help',
+        onChange: (event) => setEmail(event.target.value),
       })
     ),
     createElement('label', { htmlFor: 'organization-member-base-role', className: 'field' },
@@ -620,8 +622,10 @@ export function OrganizationMemberAddForm({ onAdd }) {
     createElement('button', {
       type: 'submit',
       className: 'action-button primary organization-admin-member-add-submit',
-      disabled: saving || !userId,
+      disabled: saving || !email.trim(),
     }, saving ? 'Adding…' : 'Add member'),
+    createElement('p', { id: 'organization-member-email-help', className: 'organization-admin-help' },
+      'The person must already have a Symgov account under this email address.'),
     error ? createElement(ErrorMessage, { message: error }) : null
   );
 }
@@ -667,8 +671,8 @@ function MemberListSection({ isAdmin, protect }) {
     await load(page);
   }
 
-  async function handleAdd({ userId, baseRole }) {
-    await addExistingOrganizationMember({ userId, baseRole, protect });
+  async function handleAdd({ email, baseRole }) {
+    await addExistingOrganizationMember({ email, baseRole, protect });
     await load(1);
   }
 

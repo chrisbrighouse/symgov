@@ -143,8 +143,12 @@ describe('OrganizationAdminPage', () => {
     const markup = renderToStaticMarkup(createElement(OrganizationMemberAddForm, {
       onAdd: async () => {},
     }));
-    assert.match(markup, /for="organization-member-user-id"/);
-    assert.match(markup, /id="organization-member-user-id"/);
+    assert.match(markup, /for="organization-member-email"/);
+    assert.match(markup, /id="organization-member-email"/);
+    assert.match(markup, /type="email"/);
+    assert.match(markup, /aria-describedby="organization-member-email-help"/);
+    assert.match(markup, /must already have a Symgov account/);
+    assert.doesNotMatch(markup, /user ID/i);
     assert.match(markup, /for="organization-member-base-role"/);
     assert.match(markup, /id="organization-member-base-role"/);
     assert.match(markup, /<option value="user" selected="">User<\/option>/);
@@ -155,7 +159,7 @@ describe('OrganizationAdminPage', () => {
 });
 
 describe('existing-user member mutation', () => {
-  it('posts the selected base role through the protected operation without a PIN payload', async () => {
+  it('posts the trimmed email and selected base role through the protected operation without a PIN payload', async () => {
     let request;
     globalThis.fetch = async (url, options) => {
       request = { url, options };
@@ -163,7 +167,7 @@ describe('existing-user member mutation', () => {
     };
     let protectedAttempts = 0;
     const result = await addExistingOrganizationMember({
-      userId: 'u-2',
+      email: '  member2@example.test ',
       baseRole: 'admin',
       protect: async (operation) => {
         protectedAttempts += 1;
@@ -175,7 +179,7 @@ describe('existing-user member mutation', () => {
     assert.equal(protectedAttempts, 1);
     assert.match(request.url, /\/api\/v1\/org\/me\/members$/);
     assert.equal(request.options.method, 'POST');
-    assert.deepEqual(JSON.parse(request.options.body), { userId: 'u-2', baseRole: 'admin' });
+    assert.deepEqual(JSON.parse(request.options.body), { email: 'member2@example.test', baseRole: 'admin' });
     assert.doesNotMatch(request.options.body, /pin/i);
   });
 
@@ -189,7 +193,7 @@ describe('existing-user member mutation', () => {
 
     await assert.rejects(
       addExistingOrganizationMember({
-        userId: 'u-2',
+        email: 'member2@example.test',
         baseRole: 'user',
         protect: (operation) => operation(),
       }),
@@ -221,11 +225,11 @@ describe('existing-user member mutation', () => {
 
     await act(async () => {
       root.findByProps({ id: 'organization-step-up-pin' }).props.onChange({ target: { value: '1234' } });
-      root.findByProps({ id: 'organization-member-user-id' }).props.onChange({ target: { value: 'u-2' } });
+      root.findByProps({ id: 'organization-member-email' }).props.onChange({ target: { value: 'member2@example.test' } });
       root.findByProps({ id: 'organization-member-base-role' }).props.onChange({ target: { value: 'admin' } });
     });
     await act(async () => {
-      const userInput = root.findByProps({ id: 'organization-member-user-id' });
+      const userInput = root.findByProps({ id: 'organization-member-email' });
       await userInput.parent.parent.props.onSubmit({ preventDefault() {} });
     });
 
@@ -233,12 +237,12 @@ describe('existing-user member mutation', () => {
       .filter(({ path, options }) => path === '/api/v1/org/me/members' && options.method === 'POST')
       .map(({ options }) => JSON.parse(options.body));
     assert.deepEqual(membershipBodies, [
-      { userId: 'u-2', baseRole: 'admin' },
-      { userId: 'u-2', baseRole: 'admin' },
+      { email: 'member2@example.test', baseRole: 'admin' },
+      { email: 'member2@example.test', baseRole: 'admin' },
     ]);
     assert.equal(requests.filter(({ path }) => path === '/api/v1/auth/reauthenticate').length, 1);
     assert.equal(root.findByProps({ id: 'organization-step-up-pin' }).props.value, '');
-    assert.equal(root.findByProps({ id: 'organization-member-user-id' }).props.value, '');
+    assert.equal(root.findByProps({ id: 'organization-member-email' }).props.value, '');
     assert.equal(root.findByProps({ id: 'organization-member-base-role' }).props.value, 'user');
     assert.equal(JSON.stringify(membershipBodies).includes('1234'), false);
     await act(async () => renderer.unmount());
@@ -260,17 +264,17 @@ describe('existing-user member mutation', () => {
     const root = renderer.root;
 
     await act(async () => {
-      root.findByProps({ id: 'organization-member-user-id' }).props.onChange({ target: { value: 'u-2' } });
+      root.findByProps({ id: 'organization-member-email' }).props.onChange({ target: { value: 'member2@example.test' } });
     });
     await act(async () => {
-      const userInput = root.findByProps({ id: 'organization-member-user-id' });
+      const userInput = root.findByProps({ id: 'organization-member-email' });
       await userInput.parent.parent.props.onSubmit({ preventDefault() {} });
     });
 
     assert.match(root.findByProps({ role: 'alert' }).children.join(''), /admin access is required/i);
-    assert.equal(root.findByProps({ id: 'organization-member-user-id' }).props.disabled, undefined);
-    assert.equal(root.findByProps({ id: 'organization-member-user-id' }).parent.props.htmlFor, 'organization-member-user-id');
-    assert.deepEqual(focused, ['organization-member-user-id']);
+    assert.equal(root.findByProps({ id: 'organization-member-email' }).props.disabled, undefined);
+    assert.equal(root.findByProps({ id: 'organization-member-email' }).parent.props.htmlFor, 'organization-member-email');
+    assert.deepEqual(focused, ['organization-member-email']);
     await act(async () => renderer.unmount());
   });
 });
@@ -315,11 +319,11 @@ describe('organization admin section tabs', () => {
 
   it('shows one section at a time: the member table gives way to the organization detail', async () => {
     const renderer = await mountOrganizationAdmin(pageFetch());
-    assert.equal(renderer.root.findAllByProps({ id: 'organization-member-user-id' }).length, 1);
+    assert.equal(renderer.root.findAllByProps({ id: 'organization-member-email' }).length, 1);
 
     await act(async () => tab(renderer, 'organization').props.onClick());
 
-    assert.equal(renderer.root.findAllByProps({ id: 'organization-member-user-id' }).length, 0);
+    assert.equal(renderer.root.findAllByProps({ id: 'organization-member-email' }).length, 0);
     assert.equal(tab(renderer, 'organization').props['aria-selected'], true);
     assert.ok(renderer.root.findByProps({ id: 'org-detail-heading' }));
     assert.ok(renderer.root.findByProps({ id: 'org-icon-heading' }));
@@ -388,10 +392,10 @@ describe('step-up guidance', () => {
     assert.equal(root.findByProps({ id: 'organization-step-up-state' }).children.join(''), 'No PIN entered.');
 
     await act(async () => {
-      root.findByProps({ id: 'organization-member-user-id' }).props.onChange({ target: { value: 'u-2' } });
+      root.findByProps({ id: 'organization-member-email' }).props.onChange({ target: { value: 'member2@example.test' } });
     });
     await act(async () => {
-      const userInput = root.findByProps({ id: 'organization-member-user-id' });
+      const userInput = root.findByProps({ id: 'organization-member-email' });
       await userInput.parent.parent.props.onSubmit({ preventDefault() {} });
     });
 

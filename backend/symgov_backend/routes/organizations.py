@@ -27,6 +27,7 @@ from ..organization_service import (
     add_organization_member,
     deactivate_membership,
     finalize_organization_icon_upload,
+    find_active_user_id_by_email,
     get_organization_detail,
     grant_member_capability,
     list_organization_members,
@@ -222,9 +223,16 @@ def add_member(
     org_id = _active_org_id(current_user)
     try:
         actor_id = uuid.UUID(current_user.id)
-        user_id = uuid.UUID(body.userId)
+        user_id = uuid.UUID(body.userId) if body.userId else None
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid user ID.") from exc
+    if user_id is None:
+        user_id = find_active_user_id_by_email(session, body.email or "")
+        if user_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="No active Symgov account uses that email address. The person needs an account before they can be added.",
+            )
     try:
         membership = add_organization_member(
             session,

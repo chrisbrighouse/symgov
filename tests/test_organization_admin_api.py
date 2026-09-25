@@ -477,6 +477,104 @@ def test_add_member_success():
     assert data["status"] == "active"
 
 
+def test_add_member_by_email_success():
+    client, Session, admin_id, _, other_id = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+
+    # Case and surrounding whitespace do not matter; the match is still exact.
+    response = client.post(
+        "/api/v1/org/me/members",
+        json={"email": "  Other@Example.TEST ", "baseRole": "user"},
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["userId"] == str(other_id)
+    assert data["email"] == "other@example.test"
+    assert data["status"] == "active"
+
+
+def test_add_member_by_unknown_email_rejected():
+    client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+
+    response = client.post(
+        "/api/v1/org/me/members",
+        json={"email": "nobody@example.test", "baseRole": "user"},
+    )
+
+    assert response.status_code == 400
+    assert "needs an account" in response.json()["detail"]
+
+
+def test_add_member_by_email_is_exact_not_a_search():
+    client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+
+    for probe in ("other@", "%@example.test", "other"):
+        response = client.post(
+            "/api/v1/org/me/members",
+            json={"email": probe, "baseRole": "user"},
+        )
+        assert response.status_code == 400, probe
+
+
+def test_add_member_by_email_of_inactive_user_reads_as_unknown():
+    client, Session, admin_id, _, other_id = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    with Session() as session:
+        session.get(User, other_id).is_active = False
+        session.commit()
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+
+    response = client.post(
+        "/api/v1/org/me/members",
+        json={"email": "other@example.test", "baseRole": "user"},
+    )
+
+    assert response.status_code == 400
+    assert "needs an account" in response.json()["detail"]
+
+
+def test_add_member_by_email_requires_step_up():
+    client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+
+    response = client.post(
+        "/api/v1/org/me/members",
+        json={"email": "other@example.test", "baseRole": "user"},
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"baseRole": "user"},
+        {"email": "   ", "baseRole": "user"},
+        {"email": "other@example.test", "userId": str(uuid.uuid4()), "baseRole": "user"},
+    ],
+)
+def test_add_member_requires_exactly_one_identifier(body):
+    client, Session, admin_id, _, _ = _build_client(pilots=("acme",))
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+
+    response = client.post("/api/v1/org/me/members", json=body)
+
+    assert response.status_code == 422
+
+
 def test_add_member_duplicate_rejected():
     client, Session, admin_id, member_id, _ = _build_client(pilots=("acme",))
     org_id, _, _ = _add_org_with_members(Session, admin_id, member_id)

@@ -5566,6 +5566,7 @@ button.catalog-preview-format-badge:focus-visible {
 }
 
 .organization-admin-member-add-title,
+.organization-admin-member-add .organization-admin-help,
 .organization-admin-member-add .form-message {
   grid-column: 1 / -1;
 }

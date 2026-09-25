@@ -129,11 +129,11 @@ describe('mounted admin App journeys', () => {
 
     await act(async () => {
       input(renderer, 'organization-step-up-pin').props.onChange({ target: { value: '1234' } });
-      input(renderer, 'organization-member-user-id').props.onChange({ target: { value: 'u-2' } });
+      input(renderer, 'organization-member-email').props.onChange({ target: { value: 'member2@example.test' } });
       renderer.root.findByProps({ id: 'organization-member-base-role' }).props.onChange({ target: { value: 'admin' } });
     });
     await act(async () => {
-      await formContaining(renderer, 'organization-member-user-id').props.onSubmit({ preventDefault() {} });
+      await formContaining(renderer, 'organization-member-email').props.onSubmit({ preventDefault() {} });
     });
 
     assert.equal(addAttempts, 2);
@@ -141,7 +141,7 @@ describe('mounted admin App journeys', () => {
     const reauth = requests.find((request) => request.url.endsWith('/auth/reauthenticate'));
     assert.deepEqual(JSON.parse(reauth.body), { pin: '1234' });
     const memberPosts = requests.filter((request) => request.url.endsWith('/org/me/members') && request.method === 'POST');
-    assert.deepEqual(JSON.parse(memberPosts[0].body), { userId: 'u-2', baseRole: 'admin' });
+    assert.deepEqual(JSON.parse(memberPosts[0].body), { email: 'member2@example.test', baseRole: 'admin' });
     assert.doesNotMatch(memberPosts[0].body, /pin/i);
     await act(async () => renderer.unmount());
   });
