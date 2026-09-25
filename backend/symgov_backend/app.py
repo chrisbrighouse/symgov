@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -94,7 +95,13 @@ def create_app() -> FastAPI:
     async def validation_exception_handler(_, exc: RequestValidationError) -> JSONResponse:
         return JSONResponse(
             status_code=422,
-            content={"error": "validation_error", "detail": "Request validation failed.", "issues": exc.errors()},
+            # A validator that raises ValueError leaves the exception object in
+            # the issue's ctx; encode it as its message rather than 500 on it.
+            content={
+                "error": "validation_error",
+                "detail": "Request validation failed.",
+                "issues": jsonable_encoder(exc.errors(), custom_encoder={Exception: str}),
+            },
         )
 
     csrf = Depends(require_cookie_mutation_security)
