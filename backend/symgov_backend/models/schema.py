@@ -806,9 +806,9 @@ class PublishedPreviewAuthorization(Base):
     __table_args__ = (
         UniqueConstraint("symbol_revision_id", "object_key", name="uq_published_preview_authorizations_revision_object_key"),
         UniqueConstraint("object_key", name="uq_published_preview_authorizations_object_key"),
-        CheckConstraint("object_key <> ''", name="ck_published_preview_authorizations_object_key_nonempty"),
-        CheckConstraint("attachment_sha256 ~ '^[0-9a-f]{64}$'", name="ck_published_preview_authorizations_sha256"),
-        CheckConstraint("attachment_size_bytes >= 0", name="ck_published_preview_authorizations_size_nonnegative"),
+        CheckConstraint("object_key <> ''", name="object_key_nonempty"),
+        CheckConstraint("attachment_sha256 ~ '^[0-9a-f]{64}$'", name="sha256"),
+        CheckConstraint("attachment_size_bytes >= 0", name="size_nonnegative"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

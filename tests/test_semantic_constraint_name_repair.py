@@ -23,6 +23,7 @@ import pytest
 from sqlalchemy import CheckConstraint
 
 from symgov_backend.models import (
+    PublishedPreviewAuthorization,
     SemanticConcept,
     SemanticConceptRevision,
     SymbolSemanticAssignment,
@@ -154,13 +155,10 @@ def test_semantic_model_migrations_from_0049_pass_bare_constraint_names():
     repairs the result, and this guard keeps the next semantic-model migration
     from repeating it.
     """
-    # 20260919_0061 passed pre-prefixed names and is already applied in
-    # production, where its check constraints exist as the hash-truncated
-    # `ck_published_preview_authorizations_ck_published_previe_<hash>`. Its ORM
-    # model carries the same pre-prefixed names, so the two sides agree -- the
-    # house-pattern case above, unreadable rather than broken. Renaming them is
-    # a repair migration of its own; until one lands, 0061 is the only
-    # exemption and every later migration is still held to bare names.
+    # 20260919_0061 passed pre-prefixed names and was applied in production
+    # before this guard caught it. A shipped migration is not rewritten, so it
+    # stays exempt here; 20260925_0062 renames the constraints it created, and
+    # its contract is pinned below. Every later migration is held to bare names.
     exempt = {"20260919_0061_published_preview_authorizations.py"}
     semantic_migrations = sorted(
         path
@@ -189,3 +187,61 @@ def test_repaired_orm_names_are_singly_prefixed_and_fit_the_limit(model):
         assert name.startswith(f"ck_{table}_")
         assert not name.startswith(f"ck_{table}_ck_")
         assert len(name) <= 63
+
+
+# --------------------------------------------------------------------------
+# 20260925_0062: the same repair for 20260919_0061's preview authorizations
+# --------------------------------------------------------------------------
+
+MIGRATION_0062 = VERSIONS / "20260925_0062_repair_preview_authorization_constraint_names.py"
+
+
+def _load_0062():
+    spec = importlib.util.spec_from_file_location("migration_0062", MIGRATION_0062)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_0062_chains_from_0061():
+    migration = MIGRATION_0062.read_text(encoding="utf-8")
+    assert re.search(r'revision(?:\s*:\s*str)?\s*=\s*"20260925_0062"', migration)
+    assert re.search(r'down_revision(?:\s*:\s*[^=]+)?\s*=\s*"20260919_0061"', migration)
+
+
+def test_0062_targets_exactly_the_orm_names():
+    targeted = {target for _table, _marker, target in _load_0062()._REPAIRS}
+    assert {table for table, _m, _t in _load_0062()._REPAIRS} == {
+        PublishedPreviewAuthorization.__tablename__
+    }
+    assert targeted == _orm_check_names(PublishedPreviewAuthorization)
+
+
+def test_0062_changes_nothing_but_names_and_locates_by_definition():
+    migration = MIGRATION_0062.read_text(encoding="utf-8")
+    body = migration[migration.index("def upgrade()"):]
+    for forbidden in ("op.create_table(", "op.drop_table(", "op.add_column(", "op.drop_column(",
+                      "op.alter_column(", "INSERT INTO", "UPDATE ", "DELETE FROM"):
+        assert forbidden not in body, forbidden
+    assert "RENAME CONSTRAINT" in migration
+    assert "pg_get_constraintdef" in migration and "INTO STRICT" in migration
+    markers = [marker for _table, marker, _target in _load_0062()._REPAIRS]
+    assert len(set(markers)) == len(markers)
+    assert not re.search(r'"ck_\w+_ck_\w+"', migration)
+
+
+def test_0062_downgrade_is_an_intentional_no_op():
+    tree = ast.parse(MIGRATION_0062.read_text(encoding="utf-8"))
+    downgrade = next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "downgrade"
+    )
+    assert len(downgrade.body) == 1
+    only = downgrade.body[0]
+    assert isinstance(only, ast.Expr) and isinstance(only.value, ast.Constant)
+    assert "no-op" in only.value.value.lower()
+
+
+def test_preview_authorization_orm_names_are_singly_prefixed():
+    for name in _orm_check_names(PublishedPreviewAuthorization):
+        assert name.startswith("ck_published_preview_authorizations_")
+        assert "_ck_" not in name and len(name) <= 63
