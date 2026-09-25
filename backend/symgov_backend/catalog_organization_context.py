@@ -136,3 +136,53 @@ def resolve_organization_wide_catalog_symbol(
         else None
     )
     return symbol, revision
+
+
+def resolve_set_member_catalog_symbol(
+    session: Session,
+    symbol_ref: str,
+    organization_id: uuid.UUID,
+) -> tuple[GovernedSymbol, SymbolRevision | None] | None:
+    """Resolve a detail/preview/download lookup for one of the caller's own
+    organization-private symbols that is not organization-wide but is an
+    item of one of that organization's active Symbol Sets.
+
+    The Catalog's Set tab lists such symbols (Stage 11 WP11.1 lets a set hold
+    them), so without this the Set tab could show a card that cannot be
+    opened. Approved by Chris on 2026-09-25 (Set/Catalog tab design, D3),
+    limited to the caller's own organization and to symbols in an active set.
+    Eligibility is the Symbol Set readers' own predicate
+    (`eligible_organization_private_symbols`), so a symbol whose current
+    revision is not the approved one never resolves. By raw governed-symbol
+    UUID only, like `resolve_organization_wide_catalog_symbol`, and it
+    returns `None` for every miss.
+    """
+    from .models import SymbolSet, SymbolSetItem
+    from .symbol_eligibility import eligible_organization_private_symbols
+
+    try:
+        symbol_id = uuid.UUID(symbol_ref)
+    except (TypeError, ValueError):
+        return None
+    in_active_set = (
+        session.query(SymbolSetItem.id)
+        .join(SymbolSet, SymbolSet.id == SymbolSetItem.symbol_set_id)
+        .filter(
+            SymbolSetItem.governed_symbol_id == symbol_id,
+            SymbolSet.owner_organization_id == organization_id,
+            SymbolSet.status == "active",
+        )
+        .first()
+    )
+    if in_active_set is None:
+        return None
+    eligible = eligible_organization_private_symbols(session, organization_id, symbol_ids=[symbol_id])
+    symbol = next((row for row in eligible if row.id == symbol_id), None)
+    if symbol is None or symbol.owner_organization_id != organization_id:
+        return None
+    revision = (
+        session.get(SymbolRevision, symbol.current_revision_id)
+        if symbol.current_revision_id is not None
+        else None
+    )
+    return symbol, revision

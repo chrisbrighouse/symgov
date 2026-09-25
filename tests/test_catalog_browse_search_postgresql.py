@@ -385,3 +385,196 @@ def test_backfill_fills_what_the_search_would_otherwise_compute(search_database,
         assert applied["catalogRevisions"] >= len(PUBLIC_SYMBOLS)
     with Session() as session:
         assert backfill_catalog_facets(session, apply=False)["missingOrOutdated"] == 0
+
+
+# -- Set tab (scope=set) -----------------------------------------------------
+
+
+def _sets_client(engine):
+    """`_client` with Symbol Sets switched on, as the Set tab needs."""
+    from dataclasses import replace
+
+    from fastapi.testclient import TestClient
+    from symgov_backend.app import create_app
+    from symgov_backend.dependencies import get_db_session
+    from symgov_backend.settings import get_settings
+
+    client, TestingSessionLocal = _client(engine)
+    base_settings = client.app.dependency_overrides[get_settings]()
+    settings = replace(base_settings, symbol_sets_enabled=True)
+    app = create_app()
+
+    def override_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db_session] = override_db
+    app.dependency_overrides[get_settings] = lambda: settings
+    return TestClient(app, headers={"origin": "http://testserver"})
+
+
+def _sets_session(engine, *, email, code=None, base_role="user", capabilities=()):
+    Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+    client = _sets_client(engine)
+    user_id = _create_user_with_global_roles(Session, email=email, display_name=email.split("@")[0], roles=[])
+    if code is not None:
+        _add_membership(Session, user_id, code=code, base_role=base_role, capabilities=capabilities)
+    _login(client, email)
+    return client
+
+
+def _approved_private_symbol(client, *, name):
+    """Approved within the organization, but not organization-wide."""
+    created = client.post(
+        "/api/v1/organization-symbols",
+        json={"name": name, "category": "valve", "discipline": "piping", "summary": "A private relief valve."},
+    )
+    assert created.status_code == 200, created.text
+    symbol_id, revision_id = created.json()["id"], created.json()["currentRevisionId"]
+    submitted = client.post(f"/api/v1/organization-symbols/{symbol_id}/revisions/{revision_id}/submit", json={})
+    assert submitted.status_code == 200, submitted.text
+    decided = client.post(
+        f"/api/v1/organization-symbols/{symbol_id}/review-submissions/{submitted.json()['id']}/decision",
+        json={"decision": "approved"},
+    )
+    assert decided.status_code == 200, decided.text
+    return symbol_id
+
+
+def _replace_set_items(client, set_id, items):
+    etag = client.get(f"/api/v1/org/me/symbol-sets/{set_id}/items").json()["etag"]
+    response = client.put(f"/api/v1/org/me/symbol-sets/{set_id}/items", json={"items": items, "etag": etag})
+    assert response.status_code == 200, response.text
+
+
+@pytest.fixture(scope="module")
+def set_tab(search_database):
+    engine, seeded = search_database
+    admin = _sets_session(
+        engine, email="set-admin@example.test", code="setorg", base_role="admin",
+        capabilities=("contributor", "symbol_reviewer"),
+    )
+    private_id = _approved_private_symbol(admin, name="Setorg relief valve")
+    wide_id = _make_organization_wide_symbol(admin, name="Setorg hydrant")
+
+    project = admin.post("/api/v1/org/me/projects", json={"code": "NORTH", "name": "North Terminal"})
+    assert project.status_code == 201, project.text
+    project_id = project.json()["id"]
+    created = admin.post("/api/v1/org/me/symbol-sets", json={"code": "SET-PID", "name": "P&ID core"})
+    assert created.status_code == 201, created.text
+    set_id = created.json()["id"]
+    assert admin.patch(f"/api/v1/org/me/symbol-sets/{set_id}", json={"status": "active"}).status_code == 200
+    items = [
+        {"governedSymbolId": seeded["Gate valve"]["symbol_id"], "sortOrder": 1, "groupName": "Valves",
+         "displayLabel": "Isolation valve", "preferredFormat": "DXF", "notes": "Manual isolation only."},
+        {"governedSymbolId": seeded["Centrifugal pump"]["symbol_id"], "sortOrder": 2, "groupName": "Rotating"},
+        {"governedSymbolId": private_id, "sortOrder": 3, "groupName": "Valves"},
+    ]
+    _replace_set_items(admin, set_id, items)
+    attached = admin.put(
+        f"/api/v1/org/me/symbol-sets/{set_id}/projects",
+        json={"projects": [{"projectId": project_id, "isDefault": True}]},
+    )
+    assert attached.status_code == 200, attached.text
+    # A plain member, as a set's everyday reader is.
+    member = _sets_session(engine, email="set-member@example.test", code="setorg")
+    return {
+        "admin": admin, "member": member, "project_id": project_id, "set_id": set_id, "items": items,
+        "private_id": private_id, "wide_id": wide_id, "seeded": seeded,
+    }
+
+
+def _set_search(client, project_id, **params):
+    return _search(client, scope="set", projectId=project_id, **params)
+
+
+def test_set_scope_lists_the_palette_in_set_order(set_tab):
+    body = _set_search(set_tab["member"], set_tab["project_id"])
+    assert body["scope"] == "set"
+    assert body["reason"] == "project_default"
+    assert body["activeSet"]["code"] == "SET-PID"
+    assert body["project"]["id"] == set_tab["project_id"]
+    assert body["total"] == 4
+    assert [item["symbolId"] for item in body["items"]] == [
+        set_tab["seeded"]["Gate valve"]["symbol_id"],
+        set_tab["seeded"]["Centrifugal pump"]["symbol_id"],
+        set_tab["private_id"],
+        set_tab["wide_id"],
+    ]
+    gate, _, private, wide = body["items"]
+    assert gate["source"] == "public"
+    assert gate["paletteEntry"] == {
+        "source": "set", "sortOrder": 1, "groupName": "Valves", "displayLabel": "Isolation valve",
+        "preferredFormat": "DXF", "notes": "Manual isolation only.",
+    }
+    assert private["source"] == "organization_private"
+    assert private["paletteEntry"]["source"] == "set"
+    assert wide["paletteEntry"]["source"] == "organization_wide"
+    assert wide["paletteEntry"]["groupName"] == "Organization-wide"
+
+    assert _counts(body, "setGroup") == {"Valves": 2, "Rotating": 1, "Organization-wide": 1}
+    assert _counts(body, "paletteSource") == {"set": 3, "organization_wide": 1}
+
+
+def test_set_scope_filters_search_and_sorts(set_tab):
+    member, project_id = set_tab["member"], set_tab["project_id"]
+    valves = _set_search(member, project_id, setGroup="Valves")
+    assert [item["name"] for item in valves["items"]] == ["Gate valve", "Setorg relief valve"]
+    # Counts for the set group ignore the set-group filter itself.
+    assert _counts(valves, "setGroup")["Rotating"] == 1
+    # The set's own label is searchable.
+    assert _names(_set_search(member, project_id, q="isolation valve")) == ["Gate valve"]
+    # Catalog filters work on the set, including on its private items.
+    assert sorted(_names(_set_search(member, project_id, catalogCategories="Valves"))) == ["Gate valve", "Setorg relief valve"]
+    by_name = _set_search(member, project_id, sort="name")
+    assert _names(by_name) == ["Centrifugal pump", "Gate valve", "Setorg hydrant", "Setorg relief valve"]
+    assert _set_search(member, project_id, paletteSource="organization_wide")["total"] == 1
+
+
+def test_set_scope_parameters_are_checked(set_tab):
+    member, project_id = set_tab["member"], set_tab["project_id"]
+    for params in (
+        {"scope": "set"},
+        {"scope": "catalog", "projectId": project_id},
+        {"scope": "catalog", "setGroup": "Valves"},
+        {"scope": "catalog", "sort": "setOrder"},
+    ):
+        response = member.get(SEARCH, params=params)
+        assert response.status_code == 422, (params, response.text)
+        assert response.json()["error"] == "validation_error"
+
+
+def test_the_set_tab_is_the_projects_organization_only(search_database, set_tab, personal_client):
+    engine, _ = search_database
+    project_id = set_tab["project_id"]
+    outsider = _sets_session(engine, email="set-outsider@example.test", code="otherset", base_role="admin")
+    assert outsider.get(SEARCH, params={"scope": "set", "projectId": project_id}).status_code == 404
+    assert personal_client.get(SEARCH, params={"scope": "set", "projectId": project_id}).status_code == 404
+    # With Symbol Sets off, the Set tab does not exist, as the palette route.
+    flags_off = _session_client(engine, email="set-flags-off@example.test", code="setorg")
+    assert flags_off.get(SEARCH, params={"scope": "set", "projectId": project_id}).status_code == 404
+    # The Catalog tab of the set's own organization still lists only its
+    # organization-wide private symbols, not the set-only one.
+    catalog = _search(set_tab["member"], q="setorg", pageSize=200)
+    assert [item["symbolId"] for item in catalog["items"]] == [set_tab["wide_id"]]
+
+
+def test_a_set_only_private_symbol_opens_while_an_active_set_holds_it(search_database, set_tab):
+    engine, _ = search_database
+    private_id, member = set_tab["private_id"], set_tab["member"]
+    detail = member.get(f"/api/v1/published/symbols/{private_id}")
+    assert detail.status_code == 200, detail.text
+    outsider = _sets_session(engine, email="set-outsider-detail@example.test", code="otherdetail", base_role="admin")
+    assert outsider.get(f"/api/v1/published/symbols/{private_id}").status_code == 404
+
+    remaining = [item for item in set_tab["items"] if item["governedSymbolId"] != private_id]
+    _replace_set_items(set_tab["admin"], set_tab["set_id"], remaining)
+    try:
+        assert member.get(f"/api/v1/published/symbols/{private_id}").status_code == 404
+        assert private_id not in [item["symbolId"] for item in _set_search(member, set_tab["project_id"])["items"]]
+    finally:
+        _replace_set_items(set_tab["admin"], set_tab["set_id"], set_tab["items"])
+    assert member.get(f"/api/v1/published/symbols/{private_id}").status_code == 200

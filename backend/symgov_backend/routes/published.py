@@ -32,6 +32,8 @@ from ..catalog_browse_search import (
     COLUMN_FIELDS as CATALOG_SEARCH_COLUMN_FIELDS,
     DEFAULT_PAGE_SIZE as DEFAULT_CATALOG_SEARCH_PAGE_SIZE,
     MAX_PAGE_SIZE as MAX_CATALOG_SEARCH_PAGE_SIZE,
+    SET_ORDER_SORT as CATALOG_SEARCH_SET_ORDER_SORT,
+    SET_SORT_KEYS as CATALOG_SEARCH_SET_SORT_KEYS,
     SORT_KEYS as CATALOG_SEARCH_SORT_KEYS,
     CatalogSearchInputError,
     CatalogSearchRequest,
@@ -39,9 +41,12 @@ from ..catalog_browse_search import (
     load_public_page_rows,
     search_catalog,
 )
+from ..effective_palette import resolve_effective_palette
+from ..symbol_context_service import project_summary, symbol_set_summary
 from ..catalog_organization_context import (
     list_organization_wide_catalog_symbols,
     resolve_organization_wide_catalog_symbol,
+    resolve_set_member_catalog_symbol,
 )
 from ..catalog_symbol_resolution import (
     CatalogSymbolLookupUnavailable,
@@ -504,7 +509,9 @@ def _load_symbol_for_detail(
     organization-bound session's own organization-wide private symbol, by
     raw governed-symbol UUID (plan §1.6/§4 Q3). A non-404 error from the
     public path (e.g. the 503 lookup-unavailable case) is never swallowed
-    or retried against the organization-private path.
+    or retried against the organization-private path. With Symbol Sets on,
+    the organization's other approved private symbols also resolve while one
+    of its active sets holds them (`resolve_set_member_catalog_symbol`).
 
     Returns `("public", row, resolved_by)` or
     `("organization_private", (governed_symbol, revision), "organization_private")`.
@@ -530,6 +537,14 @@ def _load_symbol_for_detail(
         )
         if resolved is not None:
             return "organization_private", resolved, "organization_private"
+        # Set/Catalog tab design D3: the organization's other private
+        # symbols open only while one of its active Symbol Sets holds them.
+        if settings.symbol_sets_enabled:
+            resolved = resolve_set_member_catalog_symbol(
+                session, symbol_ref, uuid.UUID(current_user.active_organization_id)
+            )
+            if resolved is not None:
+                return "organization_private", resolved, "organization_private"
 
     raise public_not_found
 
@@ -765,7 +780,9 @@ def _catalog_search_validation_error(name: str, message: str, value: object = No
 @router.get("/symbols/search")
 def search_published_symbols(
     request: Request,
-    scope: Literal["catalog"] = Query(default="catalog"),
+    scope: Literal["catalog", "set"] = Query(default="catalog"),
+    project_id: uuid.UUID | None = Query(default=None, alias="projectId"),
+    set_code: str | None = Query(default=None, alias="setCode", max_length=200),
     q: str = Query(default="", max_length=200),
     catalog_disciplines: list[str] = Query(default=[], alias="catalogDisciplines"),
     catalog_categories: list[str] = Query(default=[], alias="catalogCategories"),
@@ -773,8 +790,10 @@ def search_published_symbols(
     available_formats: list[str] = Query(default=[], alias="availableFormats"),
     pack: list[str] = Query(default=[]),
     symbol_family: list[str] = Query(default=[], alias="symbolFamily"),
+    set_group: list[str] = Query(default=[], alias="setGroup"),
+    palette_source: list[str] = Query(default=[], alias="paletteSource"),
     favourites: bool = Query(default=False),
-    sort: str = Query(default="id"),
+    sort: str | None = Query(default=None),
     direction: Literal["asc", "desc"] = Query(default="asc"),
     preferred_formats: list[str] = Query(default=[], alias="preferredFormats"),
     page: int = Query(default=1, ge=1),
@@ -787,9 +806,17 @@ def search_published_symbols(
 
     `scope=catalog` is the Catalog tab: public symbols, plus an
     organization-bound session's own organization-wide private symbols,
-    decided exactly as `GET /published/symbols` decides them. Column filters
-    are passed as `column.<key>=<text>`, for example `column.name=valve`.
-    See `catalog_browse_search.py` for the matching rules.
+    decided exactly as `GET /published/symbols` decides them.
+
+    `scope=set&projectId=...` is the Set tab: that Project's effective
+    palette, resolved and authorized exactly as
+    `GET /org/me/projects/{projectId}/effective-palette` does it (including
+    its 404 when Symbol Sets are off or the Project is not the caller's), with
+    an optional `setCode` for an explicit set. It sorts in set order unless
+    told otherwise.
+
+    Column filters are passed as `column.<key>=<text>`, for example
+    `column.name=valve`. See `catalog_browse_search.py` for the matching rules.
     """
     columns: dict[str, str] = {}
     for name, value in request.query_params.multi_items():
@@ -801,8 +828,33 @@ def search_published_symbols(
         if key in columns:
             raise _catalog_search_validation_error(name, "Give each column filter once.", value)
         columns[key] = value
-    if sort not in CATALOG_SEARCH_SORT_KEYS:
+    if scope == "set" and project_id is None:
+        raise _catalog_search_validation_error("projectId", "The Set tab needs a projectId.")
+    if scope == "catalog" and (project_id is not None or set_code is not None):
+        raise _catalog_search_validation_error("projectId", "projectId and setCode apply only to scope=set.")
+    if scope == "catalog" and (set_group or palette_source):
+        raise _catalog_search_validation_error("setGroup", "Set filters apply only to scope=set.")
+    if sort is None:
+        sort = CATALOG_SEARCH_SET_ORDER_SORT if scope == "set" else "id"
+    allowed_sorts = CATALOG_SEARCH_SET_SORT_KEYS if scope == "set" else CATALOG_SEARCH_SORT_KEYS
+    if sort not in allowed_sorts:
         raise _catalog_search_validation_error("sort", f"Unknown sort column: {sort}.", sort)
+
+    palette_context = None
+    set_members = None
+    if scope == "set":
+        principal, project, symbol_set, reason, members = resolve_effective_palette(
+            session, request, settings, project_id, set_code=set_code,
+        )
+        # Resolving can clear a stale set preference; keep that, as the
+        # palette route does.
+        session.commit()
+        set_members = tuple(members)
+        palette_context = {
+            "project": project_summary(project),
+            "activeSet": symbol_set_summary(symbol_set) if symbol_set is not None else None,
+            "reason": reason,
+        }
 
     organization_id = None
     if (
@@ -812,6 +864,9 @@ def search_published_symbols(
         and current_user.active_organization_id
     ):
         organization_id = uuid.UUID(current_user.active_organization_id)
+    if scope == "set":
+        # The palette's own principal, which the Project lookup authorized.
+        organization_id = principal.organization.id
 
     search_request = CatalogSearchRequest(
         query=q,
@@ -822,6 +877,7 @@ def search_published_symbols(
             "availableFormats": available_formats,
             "pack": pack,
             "symbolFamily": symbol_family,
+            **({"setGroup": set_group, "paletteSource": palette_source} if scope == "set" else {}),
         },
         columns=columns,
         favourites_only=favourites,
@@ -834,7 +890,11 @@ def search_published_symbols(
     try:
         result = search_catalog(
             session,
-            CatalogSearchScope(user_id=uuid.UUID(str(current_user.id)), organization_id=organization_id),
+            CatalogSearchScope(
+                user_id=uuid.UUID(str(current_user.id)),
+                organization_id=organization_id,
+                set_members=set_members,
+            ),
             search_request,
         )
     except CatalogSearchInputError as exc:
@@ -853,7 +913,9 @@ def search_published_symbols(
                 SymbolRevision.id.in_(private_ids),
                 GovernedSymbol.owner_organization_id == organization_id,
                 GovernedSymbol.visibility == "organization_private",
-                GovernedSymbol.organization_wide.is_(True),
+                # The Catalog tab lists only organization-wide private
+                # symbols; a set may also hold the organization's others.
+                *(() if scope == "set" else (GovernedSymbol.organization_wide.is_(True),)),
             )
             .all()
         ):
@@ -877,15 +939,19 @@ def search_published_symbols(
     for entry in result.entries:
         if entry["source"] == "public":
             row = public_rows.get((str(entry["symbol_revision_id"]), entry["page_id"], entry["pack_id"]))
-            if row is not None:
-                items.append(published_symbol_row(row, supplemental, comment_counts, favourite_ids))
+            item = published_symbol_row(row, supplemental, comment_counts, favourite_ids) if row is not None else None
         else:
             pair = private_by_revision.get(entry["symbol_revision_id"])
-            if pair is not None:
-                items.append(organization_private_symbol_row(pair[0], pair[1], favourite_ids))
+            item = organization_private_symbol_row(pair[0], pair[1], favourite_ids) if pair is not None else None
+        if item is None:
+            continue
+        if entry["palette_entry"] is not None:
+            item["paletteEntry"] = entry["palette_entry"]
+        items.append(item)
 
     return {
         "scope": scope,
+        **(palette_context or {}),
         "items": items,
         "page": page,
         "pageSize": page_size,

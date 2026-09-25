@@ -111,7 +111,6 @@ def _set_entries(
         entries.append({
             "governedSymbolId": item.governed_symbol_id,
             "catalogSymbolId": governed.catalog_symbol_id,
-            "displayId": governed_symbol_human_readable_id(session, governed),
             "source": "set",
             "canonicalName": governed.canonical_name,
             "category": governed.category,
@@ -123,6 +122,7 @@ def _set_entries(
             "notes": item.notes,
             "provenance": item.provenance_json or {},
             "currentRevisionId": eligible[item.governed_symbol_id],
+            "_governed": governed,
         })
     return entries
 
@@ -148,7 +148,6 @@ def _organization_wide_entries(session: Session, organization_id: uuid.UUID, *, 
         entries.append({
             "governedSymbolId": governed.id,
             "catalogSymbolId": governed.catalog_symbol_id,
-            "displayId": governed_symbol_human_readable_id(session, governed),
             "source": "organization_wide",
             "canonicalName": governed.canonical_name,
             "category": governed.category,
@@ -160,20 +159,27 @@ def _organization_wide_entries(session: Session, organization_id: uuid.UUID, *, 
             "notes": None,
             "provenance": {},
             "currentRevisionId": governed.current_revision_id,
+            "_governed": governed,
         })
     return entries
 
 
-def effective_palette(
+def resolve_effective_palette(
     session: Session,
     request: Request,
     settings,
     project_id: uuid.UUID,
     *,
     set_code: str | None = None,
-    page: int,
-    page_size: int,
 ):
+    """Every entry of one Project's effective palette, in palette order.
+
+    The single membership definition behind both the palette route and the
+    Catalog's Set tab (`catalog_browse_search`). Entries carry the governed
+    symbol row under `_governed` for callers that need more of it; nothing
+    here computes per-entry display values, so a large set costs no more than
+    its eligibility queries.
+    """
     principal, project = get_project(session, request, settings, project_id)
 
     if set_code is not None:
@@ -202,10 +208,32 @@ def effective_palette(
             entries.append(entry)
 
     entries.sort(key=lambda entry: (entry["sortOrder"], str(entry["governedSymbolId"])))
+    return principal, project, symbol_set, reason, entries
+
+
+def effective_palette(
+    session: Session,
+    request: Request,
+    settings,
+    project_id: uuid.UUID,
+    *,
+    set_code: str | None = None,
+    page: int,
+    page_size: int,
+):
+    principal, _project, symbol_set, reason, entries = resolve_effective_palette(
+        session, request, settings, project_id, set_code=set_code,
+    )
 
     total = len(entries)
     start = (page - 1) * page_size
-    page_entries = entries[start:start + page_size]
+    page_entries = []
+    for entry in entries[start:start + page_size]:
+        governed = entry["_governed"]
+        page_entry = {key: value for key, value in entry.items() if key != "_governed"}
+        # Only the page being returned pays for the human-readable ID lookup.
+        page_entry["displayId"] = governed_symbol_human_readable_id(session, governed)
+        page_entries.append(page_entry)
 
     return principal, {
         "activeSet": symbol_set_summary(symbol_set) if symbol_set is not None else None,

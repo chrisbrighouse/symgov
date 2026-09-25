@@ -22,6 +22,14 @@ page switches over:
 - the preferred-format order is the primary sort key, as
   `sortSymbolsByPreferredFormats` makes it after the column sort.
 
+The Set tab (`scope=set`) runs the same search over one Project's effective
+palette, as resolved by `effective_palette.resolve_effective_palette` -- the
+same membership the palette route serves, including a set's approved
+organization-private items that the Catalog tab never lists. It adds two
+filters, the set group and the palette source (set item or
+organization-wide), a `setOrder` sort, and also searches the set's own
+display label for each symbol.
+
 Two deliberate differences: date columns sort chronologically (the browser
 compared the formatted strings, so "01 Oct" sorted before "30 Sept"), and the
 photo and comment columns sort by count.
@@ -55,6 +63,12 @@ FACET_FIELDS: dict[str, tuple[str, bool]] = {
     "availableFormats": ("f.formats", True),
     "pack": ("c.pack_title", False),
     "symbolFamily": ("f.symbol_family", False),
+}
+
+# Only the Set tab has these: a Catalog row belongs to no set.
+SET_FACET_FIELDS: dict[str, tuple[str, bool]] = {
+    "setGroup": ("c.group_name", False),
+    "paletteSource": ("c.palette_source", False),
 }
 
 
@@ -116,6 +130,9 @@ COLUMN_FIELDS: dict[str, tuple[str, str]] = {
 }
 
 SORT_KEYS = frozenset(COLUMN_FIELDS)
+# The set's own order, grouped as the set groups it. Set tab only.
+SET_ORDER_SORT = "setOrder"
+SET_SORT_KEYS = SORT_KEYS | {SET_ORDER_SORT}
 
 
 class CatalogSearchInputError(ValueError):
@@ -134,14 +151,14 @@ class CatalogSearchRequest:
     page: int = 1
     page_size: int = DEFAULT_PAGE_SIZE
 
-    def validate(self) -> None:
-        unknown_facets = sorted(set(self.facets) - set(FACET_FIELDS))
+    def validate(self, scope: "CatalogSearchScope") -> None:
+        unknown_facets = sorted(set(self.facets) - set(scope.facet_fields))
         if unknown_facets:
             raise CatalogSearchInputError(f"Unknown filter: {', '.join(unknown_facets)}.")
         unknown_columns = sorted(set(self.columns) - set(COLUMN_FIELDS))
         if unknown_columns:
             raise CatalogSearchInputError(f"Unknown column filter: {', '.join(unknown_columns)}.")
-        if self.sort not in SORT_KEYS:
+        if self.sort not in (SET_SORT_KEYS if scope.is_set else SORT_KEYS):
             raise CatalogSearchInputError(f"Unknown sort column: {self.sort}.")
         if self.direction not in {"asc", "desc"}:
             raise CatalogSearchInputError("Sort direction must be asc or desc.")
@@ -153,10 +170,41 @@ class CatalogSearchRequest:
 
 @dataclass(frozen=True)
 class CatalogSearchScope:
-    """Who is searching, which decides the candidate rows."""
+    """Who is searching and over what, which decides the candidate rows.
+
+    `set_members` is None for the Catalog tab. For the Set tab it is the
+    effective palette, already resolved and authorized by
+    `effective_palette.resolve_effective_palette`: this module only reads
+    those symbols' Catalog rows, it never decides membership itself.
+    """
 
     user_id: uuid.UUID
     organization_id: uuid.UUID | None = None
+    set_members: tuple[dict, ...] | None = None
+
+    @property
+    def is_set(self) -> bool:
+        return self.set_members is not None
+
+    @property
+    def facet_fields(self) -> dict[str, tuple[str, bool]]:
+        return {**FACET_FIELDS, **SET_FACET_FIELDS} if self.is_set else FACET_FIELDS
+
+    def parameters(self) -> dict:
+        params: dict = {"organization_id": self.organization_id}
+        if self.is_set:
+            members = self.set_members or ()
+            params.update(
+                member_symbol_ids=[member["governedSymbolId"] for member in members],
+                member_revision_ids=[member["currentRevisionId"] for member in members],
+                member_sources=[member["source"] for member in members],
+                member_orders=[member["sortOrder"] for member in members],
+                member_groups=[member.get("groupName") for member in members],
+                member_labels=[member.get("displayLabel") for member in members],
+                member_formats=[member.get("preferredFormat") for member in members],
+                member_notes=[member.get("notes") for member in members],
+            )
+        return params
 
 
 @dataclass
@@ -171,7 +219,42 @@ def _like_pattern(value: str) -> str:
     return f"%{escaped}%"
 
 
+_NO_PALETTE_COLUMNS = """
+            NULL::text AS palette_source,
+            NULL::integer AS set_order,
+            NULL::text AS group_name,
+            NULL::text AS display_label,
+            NULL::text AS preferred_format,
+            NULL::text AS notes
+"""
+
+_MEMBERS = """
+    (SELECT * FROM unnest(
+        CAST(:member_symbol_ids AS uuid[]),
+        CAST(:member_revision_ids AS uuid[]),
+        CAST(:member_sources AS text[]),
+        CAST(:member_orders AS integer[]),
+        CAST(:member_groups AS text[]),
+        CAST(:member_labels AS text[]),
+        CAST(:member_formats AS text[]),
+        CAST(:member_notes AS text[])
+    ) AS members(governed_symbol_id, symbol_revision_id, palette_source, set_order,
+                 group_name, display_label, preferred_format, notes)) m
+"""
+
+_MEMBER_COLUMNS = """
+            m.palette_source,
+            m.set_order,
+            m.group_name,
+            m.display_label,
+            m.preferred_format,
+            m.notes
+"""
+
+
 def _candidates_sql(scope: CatalogSearchScope) -> str:
+    if scope.is_set:
+        return _set_candidates_sql()
     public = f"""
         SELECT
             'public'::text AS source,
@@ -184,12 +267,13 @@ def _candidates_sql(scope: CatalogSearchScope) -> str:
             p.page_code,
             p.revision_label,
             p.effective_date,
-            p.last_updated_at
+            p.last_updated_at,
+            {_NO_PALETTE_COLUMNS}
         FROM ({PUBLISHED_SYMBOLS_SQL}) p
     """
     if scope.organization_id is None:
         return public
-    private = """
+    private = f"""
         SELECT
             'organization_private'::text AS source,
             gs.id AS governed_symbol_id,
@@ -201,7 +285,8 @@ def _candidates_sql(scope: CatalogSearchScope) -> str:
             NULL::text AS page_code,
             sr.revision_label,
             NULL::date AS effective_date,
-            gs.updated_at AS last_updated_at
+            gs.updated_at AS last_updated_at,
+            {_NO_PALETTE_COLUMNS}
         FROM governed_symbols gs
         JOIN symbol_revisions sr ON sr.id = gs.current_revision_id
         WHERE gs.owner_organization_id = :organization_id
@@ -210,6 +295,55 @@ def _candidates_sql(scope: CatalogSearchScope) -> str:
           AND sr.lifecycle_state = 'approved'
     """
     return f"{public} UNION ALL {private}"
+
+
+def _set_candidates_sql() -> str:
+    """One row per palette member.
+
+    A public symbol listed in several packs appears once, from its most
+    recently effective publication. A private member must still belong to the
+    caller's organization; its eligibility was checked when the palette was
+    resolved.
+    """
+    return f"""
+        (SELECT DISTINCT ON (m.governed_symbol_id)
+            'public'::text AS source,
+            m.governed_symbol_id,
+            m.symbol_revision_id,
+            p.page_id,
+            p.pack_id,
+            p.pack_title,
+            p.pack_code,
+            p.page_code,
+            p.revision_label,
+            p.effective_date,
+            p.last_updated_at,
+            {_MEMBER_COLUMNS}
+        FROM {_MEMBERS}
+        JOIN ({PUBLISHED_SYMBOLS_SQL}) p
+            ON p.symbol_id::uuid = m.governed_symbol_id
+           AND p.symbol_revision_id::uuid = m.symbol_revision_id
+        ORDER BY m.governed_symbol_id, p.effective_date DESC, p.pack_code, p.page_id)
+        UNION ALL
+        SELECT
+            'organization_private'::text AS source,
+            m.governed_symbol_id,
+            m.symbol_revision_id,
+            NULL::text AS page_id,
+            NULL::text AS pack_id,
+            NULL::text AS pack_title,
+            NULL::text AS pack_code,
+            NULL::text AS page_code,
+            sr.revision_label,
+            NULL::date AS effective_date,
+            gs.updated_at AS last_updated_at,
+            {_MEMBER_COLUMNS}
+        FROM {_MEMBERS}
+        JOIN governed_symbols gs ON gs.id = m.governed_symbol_id
+        JOIN symbol_revisions sr ON sr.id = m.symbol_revision_id AND sr.symbol_id = gs.id
+        WHERE gs.visibility = 'organization_private'
+          AND gs.owner_organization_id = :organization_id
+    """
 
 
 _FACET_JOIN = """
@@ -231,7 +365,7 @@ def _stale_revision_ids(session: Session, scope: CatalogSearchScope) -> list[uui
            AND f.symbol_generation = gs_live.catalog_facet_generation
         WHERE f.symbol_revision_id IS NULL
     """
-    params = {"rules_version": CATALOG_FACET_RULES_VERSION, "organization_id": scope.organization_id}
+    params = {"rules_version": CATALOG_FACET_RULES_VERSION, **scope.parameters()}
     return [row.symbol_revision_id for row in session.execute(text(sql), params).all()]
 
 
@@ -245,7 +379,9 @@ def _filter_clauses(request: CatalogSearchRequest, scope: CatalogSearchScope, pa
             "(f.search_text LIKE :search_pattern ESCAPE '\\'"
             " OR lower(COALESCE(c.pack_title, '')) LIKE :search_pattern ESCAPE '\\'"
             " OR lower(COALESCE(c.pack_code, '')) LIKE :search_pattern ESCAPE '\\'"
-            " OR lower(COALESCE(c.page_code, '')) LIKE :search_pattern ESCAPE '\\')"
+            " OR lower(COALESCE(c.page_code, '')) LIKE :search_pattern ESCAPE '\\'"
+            # A set's own label for the symbol (Set tab only; null otherwise).
+            " OR lower(COALESCE(c.display_label, '')) LIKE :search_pattern ESCAPE '\\')"
         )
     for position, (key, value) in enumerate(sorted(request.columns.items())):
         wanted = str(value or "").strip().lower()
@@ -266,7 +402,7 @@ def _filter_clauses(request: CatalogSearchRequest, scope: CatalogSearchScope, pa
         selected = [str(value).strip() for value in values if str(value or "").strip()]
         if not selected:
             continue
-        column, is_array = FACET_FIELDS[key]
+        column, is_array = scope.facet_fields[key]
         parameter = f"facet_{key}"
         params[parameter] = selected
         if is_array:
@@ -281,6 +417,10 @@ def _conjunction(clauses: list[str]) -> str:
 
 
 def _order_by(request: CatalogSearchRequest, params: dict) -> str:
+    if request.sort == SET_ORDER_SORT:
+        column_sort = "c.set_order"
+    else:
+        column_sort = COLUMN_FIELDS[request.sort][1]
     parts: list[str] = []
     preferred = [str(value).strip().upper() for value in request.preferred_formats if str(value or "").strip()]
     if preferred:
@@ -292,27 +432,29 @@ def _order_by(request: CatalogSearchRequest, params: dict) -> str:
         parts.append(f"CASE {ranks} ELSE {len(preferred)} END")
     direction = "DESC" if request.direction == "desc" else "ASC"
     nulls = "NULLS LAST" if direction == "DESC" else "NULLS FIRST"
-    parts.append(f"{COLUMN_FIELDS[request.sort][1]} {direction} {nulls}")
+    parts.append(f"{column_sort} {direction} {nulls}")
     parts.extend(['f.id_sort_key COLLATE "C"', "c.symbol_revision_id", "c.pack_id NULLS FIRST", "c.page_id NULLS FIRST"])
     return ", ".join(parts)
 
 
 def search_catalog(session: Session, scope: CatalogSearchScope, request: CatalogSearchRequest) -> CatalogSearchPage:
-    request.validate()
+    request.validate(scope)
+    facet_fields = scope.facet_fields
 
     stale = _stale_revision_ids(session, scope)
     if stale:
         compute_catalog_facets(session, stale)
         session.commit()
 
-    params: dict = {"rules_version": CATALOG_FACET_RULES_VERSION, "organization_id": scope.organization_id}
+    params: dict = {"rules_version": CATALOG_FACET_RULES_VERSION, **scope.parameters()}
     clauses, facet_clauses = _filter_clauses(request, scope, params)
     base = f"""
         WITH c AS ({_candidates_sql(scope)}),
         base AS (
-            SELECT c.pack_title, f.symbol_family, f.disciplines, f.categories, f.formats, f.use_cases,
+            SELECT c.pack_title, c.group_name, c.palette_source,
+                f.symbol_family, f.disciplines, f.categories, f.formats, f.use_cases,
                 {_conjunction(clauses)} AS m_always,
-                {", ".join(f"{facet_clauses.get(key, 'TRUE')} AS m_{key}" for key in FACET_FIELDS)}
+                {", ".join(f"{facet_clauses.get(key, 'TRUE')} AS m_{key}" for key in facet_fields)}
             FROM c
             {_FACET_JOIN}
             JOIN catalog_symbol_facets f
@@ -322,11 +464,11 @@ def search_catalog(session: Session, scope: CatalogSearchScope, request: Catalog
                AND f.symbol_generation = gs_live.catalog_facet_generation
         )
     """
-    all_match = " AND ".join(["m_always", *(f"m_{key}" for key in FACET_FIELDS)])
+    all_match = " AND ".join(["m_always", *(f"m_{key}" for key in facet_fields)])
 
     count_parts = [f"SELECT '' AS facet, '' AS value, count(*) FILTER (WHERE {all_match}) AS n FROM base"]
-    for key, (column, is_array) in FACET_FIELDS.items():
-        others = " AND ".join(["m_always", *(f"m_{other}" for other in FACET_FIELDS if other != key)])
+    for key, (column, is_array) in facet_fields.items():
+        others = " AND ".join(["m_always", *(f"m_{other}" for other in facet_fields if other != key)])
         # The base CTE exposes each facet's column unqualified.
         bare = column.split(".", 1)[1]
         if is_array:
@@ -340,7 +482,7 @@ def search_catalog(session: Session, scope: CatalogSearchScope, request: Catalog
                 f" FROM base WHERE COALESCE(base.{bare}, '') <> '' GROUP BY base.{bare}"
             )
     total = 0
-    facets: dict[str, list[dict]] = {key: [] for key in FACET_FIELDS}
+    facets: dict[str, list[dict]] = {key: [] for key in facet_fields}
     for row in session.execute(text(base + " UNION ALL ".join(count_parts)), params).all():
         facet, value, count = row
         if facet == "":
@@ -354,7 +496,8 @@ def search_catalog(session: Session, scope: CatalogSearchScope, request: Catalog
     # joined rows directly rather than the flattened base CTE.
     page_sql = f"""
         WITH c AS ({_candidates_sql(scope)})
-        SELECT c.source, c.governed_symbol_id, c.symbol_revision_id, c.page_id, c.pack_id
+        SELECT c.source, c.governed_symbol_id, c.symbol_revision_id, c.page_id, c.pack_id,
+            c.palette_source, c.set_order, c.group_name, c.display_label, c.preferred_format, c.notes
         FROM c
         {_FACET_JOIN}
         JOIN catalog_symbol_facets f
@@ -375,6 +518,18 @@ def search_catalog(session: Session, scope: CatalogSearchScope, request: Catalog
             "symbol_revision_id": row.symbol_revision_id,
             "page_id": row.page_id,
             "pack_id": row.pack_id,
+            "palette_entry": (
+                {
+                    "source": row.palette_source,
+                    "sortOrder": row.set_order,
+                    "groupName": row.group_name,
+                    "displayLabel": row.display_label,
+                    "preferredFormat": row.preferred_format,
+                    "notes": row.notes,
+                }
+                if scope.is_set
+                else None
+            ),
         }
         for row in session.execute(text(page_sql), params).all()
     ]
