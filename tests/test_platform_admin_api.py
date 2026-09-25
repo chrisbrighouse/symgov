@@ -135,7 +135,6 @@ def _build_client(*, platform_admin_enabled=True, organizations_enabled=True):
         symbol_sets_enabled=False,
         organization_symbols_enabled=False,
         organization_agents_enabled=False,
-        organization_pilot_codes=("symgov",),
     )
     app.dependency_overrides[get_db_session] = override_db
     app.dependency_overrides[get_settings] = lambda: settings

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 from datetime import datetime, timedelta, timezone
-from dataclasses import replace
 from types import SimpleNamespace
 from sqlalchemy import CheckConstraint
 
@@ -10,12 +9,11 @@ from sqlalchemy import CheckConstraint
 import symgov_backend.project_service as project_service
 from symgov_backend.auth import hash_session_token
 from symgov_backend.models import Organization, OrganizationMembership, OrganizationRoleAssignment, UserSession
-from symgov_backend.settings import get_settings
 
 from symgov_backend.project_service import normalize_code, normalize_text, validate_json
 
 
-def _stage4_client(*, enabled=True, role="admin", pilots=("acme",), bind=True):
+def _stage4_client(*, enabled=True, role="admin", bind=True):
     from sqlalchemy import JSON
     from symgov_backend.models import AuditEvent, Project, ProductUsageEvent, ProjectSymbolSet, SymbolSet, UserProjectSetSelection, UserSessionProjectContext
     import sys
@@ -23,7 +21,7 @@ def _stage4_client(*, enabled=True, role="admin", pilots=("acme",), bind=True):
     sys.path.insert(0, str(Path(__file__).parent))
     from test_organization_auth_context import _add_membership, _build_client, _login
 
-    client, Session, user_id, settings = _build_client(enabled=enabled, pilots=pilots)
+    client, Session, user_id, settings = _build_client(enabled=enabled)
     for model in (SymbolSet, Project, ProjectSymbolSet, UserProjectSetSelection, UserSessionProjectContext, AuditEvent, ProductUsageEvent):
         table = model.__table__
         original = table.constraints
@@ -303,7 +301,6 @@ def test_project_validation_uses_real_fastapi_error_envelope():
     (
         ("expired", 401),
         ("revoked", 401),
-        ("non_pilot", 404),
         ("ineligible_entitlement", 404),
         ("inactive_organization", 404),
         ("inactive_membership", 404),
@@ -334,17 +331,13 @@ def test_project_real_fastapi_revalidates_each_bound_authority_state(case, expec
             role.is_active = False
             role.revoked_at = datetime.now(timezone.utc)
         session.commit()
-    if case == "non_pilot":
-        client.app.dependency_overrides[get_settings] = lambda: replace(
-            client._stage4_settings, organization_pilot_codes=("other",)
-        )
     response = client.get("/api/v1/org/me/projects")
     assert response.status_code == expected
     assert set(response.json()) == {"error", "detail"}
 
 
 def test_project_real_fastapi_hides_other_organization_detail_and_mutation():
-    client, Session = _stage4_client(pilots=("acme", "other"))
+    client, Session = _stage4_client()
     _login(client)
     created = client.post("/api/v1/org/me/projects", json={"code": "P-01", "name": "First"})
     project_id = created.json()["id"]

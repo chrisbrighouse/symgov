@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
+import os
 from pathlib import Path
 
 from fastapi import Depends, FastAPI
@@ -50,6 +52,14 @@ from .auth_security import login_throttle_policy
 from .settings import get_settings
 
 
+LOGGER = logging.getLogger(__name__)
+
+# I-20 as amended 2026-09-25: an organization's own entitlement status is the
+# only per-organization gate. The env allowlist is no longer read; a stale
+# value is tolerated so the compose line can be removed after the release.
+RETIRED_PILOT_CODES_VARIABLE = "SYMGOV_ORGANIZATION_PILOT_CODES"
+
+
 def load_app_version() -> str:
     package_json_path = Path(__file__).resolve().parents[2] / "package.json"
     return json.loads(package_json_path.read_text(encoding="utf-8"))["version"]
@@ -59,6 +69,11 @@ def create_app() -> FastAPI:
     settings = get_settings()
     login_throttle_policy(settings)
     validate_request_security_settings(settings)
+    if os.environ.get(RETIRED_PILOT_CODES_VARIABLE, "").strip():
+        LOGGER.warning(
+            "%s is set but no longer read; organization access follows entitlement status.",
+            RETIRED_PILOT_CODES_VARIABLE,
+        )
     app = FastAPI(
         title="Symgov API",
         version=load_app_version(),

@@ -118,10 +118,9 @@ def test_s3_b6_logic_revalidates_live_settings():
         )
         session.commit()
 
-        # 1. Test with organizations enabled and in pilot
+        # 1. Test with organizations enabled and the organization entitled
         settings = SymgovAPISettings(
             organizations_enabled=True,
-            organization_pilot_codes=("acme",),
         )
         context = resolve_bound_organization_context(session, user, org.id, settings)
         assert context is not None
@@ -130,15 +129,12 @@ def test_s3_b6_logic_revalidates_live_settings():
         # 2. Test with organizations disabled
         settings_disabled = SymgovAPISettings(
             organizations_enabled=False,
-            organization_pilot_codes=("acme",),
         )
         context = resolve_bound_organization_context(session, user, org.id, settings_disabled)
         assert context is None, "Should be None when organizations are disabled"
 
-        # 3. Test with organization removed from pilot
-        settings_no_pilot = SymgovAPISettings(
-            organizations_enabled=True,
-            organization_pilot_codes=("other",),
-        )
-        context = resolve_bound_organization_context(session, user, org.id, settings_no_pilot)
-        assert context is None, "Should be None when org is not in pilot"
+        # 3. Test with organizations enabled but the organization suspended
+        org.entitlement_status = "suspended"
+        session.commit()
+        context = resolve_bound_organization_context(session, user, org.id, settings)
+        assert context is None, "Should be None when the organization is suspended"

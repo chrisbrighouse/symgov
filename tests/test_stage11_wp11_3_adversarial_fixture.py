@@ -92,7 +92,7 @@ def _unique_set_code(prefix: str) -> str:
     return f"{prefix}{uuid.uuid4().hex[:6]}".upper()
 
 
-def _client(engine, *, pilot_codes):
+def _client(engine):
     app = create_app()
     SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     settings = SymgovAPISettings(
@@ -101,7 +101,6 @@ def _client(engine, *, pilot_codes):
         platform_admin_enabled=True,
         symbol_sets_enabled=True,
         organization_symbols_enabled=True,
-        organization_pilot_codes=tuple(pilot_codes),
     )
 
     def override_db():
@@ -203,7 +202,6 @@ def adversarial(stage11_database):
 
     api_key_token = _api_key(Session)
 
-    pilot_codes = (code_a, code_b, "symgov")
     clients = {}
     for name, email in (
         ("org_a_user", org_a_user_email),
@@ -214,19 +212,19 @@ def adversarial(stage11_database):
         ("org_b_reviewer", org_b_reviewer_email),
         ("platform_admin", platform_admin_email),
     ):
-        client, _ = _client(engine, pilot_codes=pilot_codes)
+        client, _ = _client(engine)
         _login(client, email)
         clients[name] = client
 
-    personal_client, _ = _client(engine, pilot_codes=pilot_codes)
+    personal_client, _ = _client(engine)
     _login(personal_client, personal_email)
     clients["personal"] = personal_client
 
-    api_client, _ = _client(engine, pilot_codes=pilot_codes)
+    api_client, _ = _client(engine)
     api_client.headers["Authorization"] = f"Bearer {api_key_token}"
     clients["api_key"] = api_client
 
-    inactive_client, _ = _client(engine, pilot_codes=pilot_codes)
+    inactive_client, _ = _client(engine)
     clients["org_a_inactive"] = inactive_client
 
     from types import SimpleNamespace

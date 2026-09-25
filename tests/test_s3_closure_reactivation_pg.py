@@ -41,7 +41,6 @@ def pg_client(organization_database):
             organizations_enabled=True,
             organization_admin_enabled=True,
             platform_admin_enabled=True,
-            organization_pilot_codes=("symgov",),
         )
 
     app.dependency_overrides[get_db_session] = override_get_db_session

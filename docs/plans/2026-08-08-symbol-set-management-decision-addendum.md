@@ -96,3 +96,16 @@ Before any private row is created/imported/backfilled or demotion is enabled, de
 ## Acceptance block
 
 Accepted in this continuation by Chris Brighouse, CEO of Symgov, at `2026-08-08T19:08:02Z`: all proposed I-01–I-25 contracts and O1–O6 dispositions are accepted without amendment. This acceptance freezes the implementation contract; it does not authorize commits, push, production migration, deployment, service restart, publication, withdrawal, gateway changes, or external messaging. The accepted addendum requires independent review against its exact post-acceptance hash before implementation proceeds.
+
+## Amendments
+
+### I-20 amendment — organization pilot allowlist retired (2026-09-25)
+
+Approved by Chris Brighouse on 2026-09-25. The rows above remain as accepted; this note supersedes the part of I-20 that names `SYMGOV_ORGANIZATION_PILOT_CODES`.
+
+- The backend no longer reads `SYMGOV_ORGANIZATION_PILOT_CODES`. An organization's own `entitlement_status` (`active` / `suspended`) together with `is_active` is the only per-organization gate, at sign-in eligibility, bound-session revalidation, and `/auth/me` capabilities.
+- Platform Admin Suspend / Reactivate is how a single organization is switched off or on. Suspension also revokes that organization's bound sessions, which the allowlist never did.
+- `SYMGOV_ORGANIZATIONS_ENABLED` remains the whole-feature kill switch that an empty allowlist used to provide.
+- A stale value of the retired variable is tolerated and logged as a warning at startup, so the deployment line can be removed after the release rather than with it.
+
+Why: every new organization needed a hand edit of production compose before its members could reach it (Birsco and Crosswell, both 2026-09-25), even though the Platform Admin had already created the organization as active.

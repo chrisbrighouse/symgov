@@ -81,7 +81,6 @@ def _client(engine):
         organization_symbols_enabled=True,
         symbol_sets_enabled=True,
         platform_admin_enabled=True,
-        organization_pilot_codes=("acme", "other", "symgov"),
     )
 
     def override_db():

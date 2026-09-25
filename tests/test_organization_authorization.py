@@ -70,7 +70,7 @@ def _create_tables(engine) -> None:
             table.constraints = original
 
 
-def _build_client(*, pilots=()):
+def _build_client():
     engine = create_engine(
         "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
@@ -116,7 +116,6 @@ def _build_client(*, pilots=()):
         symbol_sets_enabled=True,
         organization_symbols_enabled=True,
         organization_agents_enabled=True,
-        organization_pilot_codes=pilots,
     )
     app.dependency_overrides[get_db_session] = override_db
     app.dependency_overrides[get_settings] = lambda: settings
@@ -199,7 +198,7 @@ def _login(client):
 
 
 def test_require_organization_session_rejects_unauthenticated():
-    client, _, _ = _build_client(pilots=("acme",))
+    client, _, _ = _build_client()
 
     response = client.get("/test-require-org-session")
 
@@ -218,7 +217,7 @@ def test_require_organization_session_rejects_personal_session():
 
 
 def test_require_organization_session_permits_org_session():
-    client, Session, user_id = _build_client(pilots=("acme",))
+    client, Session, user_id = _build_client()
     org_id, _ = _add_membership(Session, user_id, "acme")
     login = _login(client)
     assert login.json()["user"]["session"]["mode"] == "organization"
@@ -244,7 +243,7 @@ def test_require_organization_admin_rejects_personal_session():
 
 
 def test_require_organization_admin_rejects_non_admin_org_session():
-    client, Session, user_id = _build_client(pilots=("acme",))
+    client, Session, user_id = _build_client()
     _add_membership(Session, user_id, "acme", base_role="user")
     _login(client)
 
@@ -255,7 +254,7 @@ def test_require_organization_admin_rejects_non_admin_org_session():
 
 
 def test_require_organization_admin_permits_org_admin_session():
-    client, Session, user_id = _build_client(pilots=("acme",))
+    client, Session, user_id = _build_client()
     _add_membership(Session, user_id, "acme", base_role="admin")
     _login(client)
 
@@ -269,7 +268,7 @@ def test_require_organization_admin_permits_org_admin_session():
 
 
 def test_require_platform_admin_rejects_non_platform_admin():
-    client, Session, user_id = _build_client(pilots=("acme",))
+    client, Session, user_id = _build_client()
     _add_membership(Session, user_id, "acme", base_role="admin")
     _login(client)
 
@@ -281,7 +280,7 @@ def test_require_platform_admin_rejects_non_platform_admin():
 
 def test_require_platform_admin_requires_symgov_org_membership_not_just_role_row():
     """A PlatformRoleAssignment without Symgov org admin membership does not confer platform admin."""
-    client, Session, user_id = _build_client(pilots=("acme",))
+    client, Session, user_id = _build_client()
     _add_membership(Session, user_id, "acme", base_role="admin", platform_admin=True)
     login = _login(client)
     assert login.json()["user"]["isPlatformAdmin"] is False
@@ -292,7 +291,7 @@ def test_require_platform_admin_requires_symgov_org_membership_not_just_role_row
 
 
 def test_require_platform_admin_permits_symgov_org_admin_with_platform_role():
-    client, Session, user_id = _build_client(pilots=("symgov",))
+    client, Session, user_id = _build_client()
     _add_membership(Session, user_id, "symgov", base_role="admin", platform_admin=True)
     login = _login(client)
     assert login.json()["user"]["isPlatformAdmin"] is True
@@ -317,7 +316,7 @@ def test_require_capability_rejects_personal_session():
 
 
 def test_require_capability_rejects_org_session_without_required_capability():
-    client, Session, user_id = _build_client(pilots=("acme",))
+    client, Session, user_id = _build_client()
     _add_membership(Session, user_id, "acme")
     _login(client)
 
@@ -328,7 +327,7 @@ def test_require_capability_rejects_org_session_without_required_capability():
 
 
 def test_require_capability_permits_org_session_with_required_capability():
-    client, Session, user_id = _build_client(pilots=("acme",))
+    client, Session, user_id = _build_client()
     _add_membership(Session, user_id, "acme", capabilities=("contributor",))
     _login(client)
 
@@ -339,7 +338,7 @@ def test_require_capability_permits_org_session_with_required_capability():
 
 
 def test_require_capability_rejects_org_session_with_different_capability():
-    client, Session, user_id = _build_client(pilots=("acme",))
+    client, Session, user_id = _build_client()
     _add_membership(Session, user_id, "acme", capabilities=("symbol_reviewer",))
     _login(client)
 

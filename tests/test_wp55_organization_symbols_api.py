@@ -125,7 +125,6 @@ def _build_client():
     settings = SymgovAPISettings(
         organizations_enabled=True,
         organization_symbols_enabled=True,
-        organization_pilot_codes=("acme",),
     )
     app.dependency_overrides[get_db_session] = override_db
     app.dependency_overrides[get_settings] = lambda: settings

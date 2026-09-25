@@ -1467,7 +1467,6 @@ def _rights_review_client(engine):
     settings = SymgovAPISettings(
         organizations_enabled=True,
         semantic_review_enabled=True,
-        organization_pilot_codes=("acme", "symgov"),
     )
 
     def override_db():

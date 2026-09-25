@@ -57,8 +57,7 @@ from symgov_backend.models import (  # noqa: E402
 from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E402
 
 # `resolve_eligible_organization_memberships` (organization_authorization.py)
-# requires the organization's normalized_code to be in the configured pilot
-# allowlist AND the organization to be genuinely active/entitled -- unlike
+# requires the organization to be genuinely active/entitled -- unlike
 # the service-layer-only Postgres tests' `_organization`/`_membership`
 # helpers (which create an inactive org with a random code, fine when a
 # test constructs `AuthenticatedUser` by hand and never logs in for real),
@@ -188,7 +187,6 @@ def _client(engine):
     settings = SymgovAPISettings(
         organizations_enabled=True,
         organization_symbols_enabled=True,
-        organization_pilot_codes=("acme",),
     )
 
     def override_db():

@@ -69,14 +69,13 @@ def _seed_protected_owner(session) -> User:
     return user
 
 
-def test_stage1_flags_default_off_and_pilot_codes_are_normalized(monkeypatch):
+def test_stage1_flags_default_off(monkeypatch):
     monkeypatch.delenv("SYMGOV_ORGANIZATIONS_ENABLED", raising=False)
     monkeypatch.delenv("SYMGOV_ORGANIZATION_ADMIN_ENABLED", raising=False)
     monkeypatch.delenv("SYMGOV_ORGANIZATION_ICON_UPLOAD_ENABLED", raising=False)
     monkeypatch.delenv("SYMGOV_SYMBOL_SETS_ENABLED", raising=False)
     monkeypatch.delenv("SYMGOV_ORGANIZATION_SYMBOLS_ENABLED", raising=False)
     monkeypatch.delenv("SYMGOV_ORGANIZATION_AGENTS_ENABLED", raising=False)
-    monkeypatch.setenv("SYMGOV_ORGANIZATION_PILOT_CODES", " ACME-01, acme-01, BETA-2 ")
 
     settings = SymgovAPISettings()
 
@@ -86,18 +85,21 @@ def test_stage1_flags_default_off_and_pilot_codes_are_normalized(monkeypatch):
     assert settings.symbol_sets_enabled is False
     assert settings.organization_symbols_enabled is False
     assert settings.organization_agents_enabled is False
-    assert settings.organization_pilot_codes == ("acme-01", "beta-2")
 
 
-def test_invalid_organization_pilot_code_fails_closed(monkeypatch):
+def test_retired_pilot_codes_variable_is_ignored_with_a_warning(monkeypatch, caplog):
+    # I-20 as amended 2026-09-25: entitlement status is the only
+    # per-organization gate. A stale compose value, even a malformed one, must
+    # not stop the API starting, or the line could not outlive a rollback.
+    from symgov_backend.app import create_app
+
     monkeypatch.setenv("SYMGOV_ORGANIZATION_PILOT_CODES", "valid-01, bad code")
 
-    try:
-        SymgovAPISettings()
-    except ValueError as exc:
-        assert "pilot" in str(exc).lower()
-    else:
-        raise AssertionError("Expected invalid organization pilot code to fail closed.")
+    assert not hasattr(SymgovAPISettings(), "organization_pilot_codes")
+    with caplog.at_level("WARNING", logger="symgov_backend.app"):
+        create_app()
+
+    assert any("SYMGOV_ORGANIZATION_PILOT_CODES" in record.getMessage() for record in caplog.records)
 
 
 def test_symgov_bootstrap_audit_mode_is_read_only_and_reports_actions():

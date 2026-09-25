@@ -82,7 +82,7 @@ def test_promotion_acceptance_increments_the_submitting_users_own_totals(wp95_da
         summary = get_user_contributions(session, admin_id)
     assert summary == {"acceptedContributionCount": 1, "reversedContributionCount": 0}
 
-    admin_client, _ = _client(engine, pilot_codes=(org_code,))
+    admin_client, _ = _client(engine)
     _login(admin_client, _email(Session, admin_id))
     response = admin_client.get("/api/v1/profile/contributions")
     assert response.status_code == 200, response.text
@@ -97,8 +97,8 @@ def test_second_accepted_contribution_by_same_user_increments_further(wp95_datab
         reviewer_email=f"wp98rev-{uuid.uuid4().hex[:8]}@example.test",
     )
 
-    admin_client, _ = _client(engine, pilot_codes=(org_code,))
-    reviewer_client, _ = _client(engine, pilot_codes=(org_code,))
+    admin_client, _ = _client(engine)
+    reviewer_client, _ = _client(engine)
     _login(admin_client, _email(Session, admin_id))
     reviewer_email = f"wp98rev2-{uuid.uuid4().hex[:8]}@example.test"
     _create_user_with_global_roles(Session, email=reviewer_email, display_name="WP9.8 Reviewer Two", roles=["reviewer"])
@@ -137,7 +137,7 @@ def test_demotion_increments_the_original_submitters_reversed_count(wp95_databas
         reviewer_email=f"wp98rev-{uuid.uuid4().hex[:8]}@example.test",
     )
 
-    platform_client, _ = _client(engine, pilot_codes=("symgov",))
+    platform_client, _ = _client(engine)
     platform_admin_id = _create_user_with_global_roles(
         Session, email=f"wp98platform-{uuid.uuid4().hex[:8]}@example.test", display_name="WP9.8 Platform Admin", roles=[]
     )
@@ -162,7 +162,7 @@ def test_demotion_increments_the_original_submitters_reversed_count(wp95_databas
 
 def test_profile_contributions_endpoint_is_self_service_not_admin_gated(wp95_database):
     engine, _, _ = wp95_database
-    client, Session = _client(engine, pilot_codes=())
+    client, Session = _client(engine)
     # A plain user with zero global roles and zero organization membership
     # -- no admin/reviewer/organization-admin capability of any kind.
     plain_user_id = _create_user_with_global_roles(
@@ -184,7 +184,7 @@ def test_user_totals_are_scoped_to_the_individual_not_leaked_to_other_users(wp95
         reviewer_email=f"wp98rev-{uuid.uuid4().hex[:8]}@example.test",
     )
 
-    other_client, _ = _client(engine, pilot_codes=(acme_code, other_code))
+    other_client, _ = _client(engine)
     other_admin_id = _create_user_with_global_roles(
         Session, email=f"wp98other-{uuid.uuid4().hex[:8]}@example.test", display_name="WP9.8 Other Admin", roles=[]
     )
@@ -194,7 +194,7 @@ def test_user_totals_are_scoped_to_the_individual_not_leaked_to_other_users(wp95
     assert other_response.status_code == 200, other_response.text
     assert other_response.json() == {"acceptedContributionCount": 0, "reversedContributionCount": 0}
 
-    acme_client, _ = _client(engine, pilot_codes=(acme_code, other_code))
+    acme_client, _ = _client(engine)
     _login(acme_client, _email(Session, acme_admin_id))
     acme_response = acme_client.get("/api/v1/profile/contributions")
     assert acme_response.status_code == 200, acme_response.text

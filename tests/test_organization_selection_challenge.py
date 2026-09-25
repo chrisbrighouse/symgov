@@ -131,7 +131,6 @@ def _build_client(organization_count: int = 8):
 
     settings = SymgovAPISettings(
         organizations_enabled=True,
-        organization_pilot_codes=codes,
     )
     app.dependency_overrides[get_db_session] = override_db
     app.dependency_overrides[get_settings] = lambda: settings

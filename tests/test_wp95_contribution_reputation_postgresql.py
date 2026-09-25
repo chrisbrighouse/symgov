@@ -123,7 +123,7 @@ def _unique_code(prefix: str) -> str:
     return f"{prefix}{uuid.uuid4().hex[:6]}"
 
 
-def _client(engine, *, pilot_codes):
+def _client(engine):
     app = create_app()
     TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     settings = SymgovAPISettings(
@@ -132,7 +132,6 @@ def _client(engine, *, pilot_codes):
         platform_admin_enabled=True,
         symbol_sets_enabled=True,
         organization_admin_enabled=True,
-        organization_pilot_codes=tuple(pilot_codes),
     )
 
     def override_db():
@@ -177,8 +176,8 @@ def _accept_promotion(engine, *, org_code, symbol_name, reviewer_email):
     """Drives a whole org-private-draft -> organization-review-approval ->
     public-promotion-submission -> reviewer-acceptance flow over real HTTP,
     returning (Session, organization_id, admin_id, symbol_id, promotion_request_id)."""
-    admin_client, Session = _client(engine, pilot_codes=(org_code,))
-    reviewer_client, _ = _client(engine, pilot_codes=(org_code,))
+    admin_client, Session = _client(engine)
+    reviewer_client, _ = _client(engine)
 
     admin_id = _create_user_with_global_roles(
         Session, email=f"wp95admin-{uuid.uuid4().hex[:8]}@example.test", display_name=f"WP9.5 Admin {uuid.uuid4().hex[:6]}", roles=[]
@@ -248,8 +247,8 @@ def test_second_accepted_contribution_does_not_duplicate_badges(wp95_database):
         reviewer_email=f"wp95rev-{uuid.uuid4().hex[:8]}@example.test",
     )
 
-    admin_client, _ = _client(engine, pilot_codes=(org_code,))
-    reviewer_client, _ = _client(engine, pilot_codes=(org_code,))
+    admin_client, _ = _client(engine)
+    reviewer_client, _ = _client(engine)
     with Session() as session:
         existing_admin = session.query(User).filter(User.id == _admin_id).one()
         admin_email = existing_admin.email
@@ -289,7 +288,7 @@ def test_demotion_reverses_contribution_without_revoking_badges(wp95_database):
     with Session() as session:
         award = session.query(ContributionEvent).filter(ContributionEvent.governed_symbol_id == symbol_id).one()
 
-    platform_client, _ = _client(engine, pilot_codes=("symgov",))
+    platform_client, _ = _client(engine)
     platform_admin_id = _create_user_with_global_roles(
         Session, email=f"wp95platform-{uuid.uuid4().hex[:8]}@example.test", display_name="WP9.5 Platform Admin", roles=[]
     )
@@ -329,9 +328,9 @@ def test_organization_and_platform_routes_are_tenant_isolated(wp95_database):
         engine, org_code=acme_code, symbol_name="WP9.5 Tenant Isolation Symbol", reviewer_email=f"wp95rev-{uuid.uuid4().hex[:8]}@example.test"
     )
 
-    acme_client, _ = _client(engine, pilot_codes=(acme_code, other_code))
-    other_client, _ = _client(engine, pilot_codes=(acme_code, other_code))
-    platform_client, _ = _client(engine, pilot_codes=(acme_code, other_code, "symgov"))
+    acme_client, _ = _client(engine)
+    other_client, _ = _client(engine)
+    platform_client, _ = _client(engine)
 
     _login(acme_client, _email(Session, acme_admin_id))
 

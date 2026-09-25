@@ -540,8 +540,8 @@ Each of these fails in a way that looks like a product defect but is not.
    re-instantiation will not flip one.
 3. **Platform Admin is not a role assignment.** It needs an active
    `platform_admin` `PlatformRoleAssignment` **plus** an `admin` base role in
-   the `symgov` organisation itself, that org must be in
-   `organization_pilot_codes`, its code must be lowercase `symgov` with
+   the `symgov` organisation itself, that org must be active and entitled
+   (the pilot allowlist was retired on 2026-09-25), its code must be lowercase `symgov` with
    `is_protected=True` at INSERT, and the membership and assignment must land
    in one transaction.
 4. **Global roles need a `plus` subscription.** `upsert_user(…, roles=[…])` on

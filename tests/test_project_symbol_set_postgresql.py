@@ -674,7 +674,6 @@ def test_wp3_availability_default_transfer_emits_complete_audit_evidence(wp1_dat
     settings = SimpleNamespace(
         organizations_enabled=True,
         symbol_sets_enabled=True,
-        organization_pilot_codes=(owner_code.lower(),),
     )
     with SessionLocal.begin() as session:
         replace_projects(
@@ -737,7 +736,6 @@ def test_wp3_authority_shared_reads_coexist_and_writers_serialize(wp1_database):
     settings = SimpleNamespace(
         organizations_enabled=True,
         symbol_sets_enabled=True,
-        organization_pilot_codes=(owner_code.lower(),),
     )
 
     first_reader = SessionLocal()
@@ -839,7 +837,6 @@ def test_wp3_authority_recheck_observes_commit_between_probe_and_lock(
     settings = SimpleNamespace(
         organizations_enabled=True,
         symbol_sets_enabled=True,
-        organization_pilot_codes=(owner_code.lower(),),
     )
     original_query = SessionLocal.class_.query
     changed = False
@@ -927,7 +924,6 @@ def test_wp3_postgresql_lifecycle_and_default_cleanup_audits_are_complete(wp1_da
     settings = SimpleNamespace(
         organizations_enabled=True,
         symbol_sets_enabled=True,
-        organization_pilot_codes=(owner_code.lower(),),
     )
     with SessionLocal.begin() as session:
         patch_set(
@@ -1009,7 +1005,6 @@ def test_wp4_organization_default_and_availability_serialize_without_lock_upgrad
     settings = SimpleNamespace(
         organizations_enabled=True,
         symbol_sets_enabled=True,
-        organization_pilot_codes=(owner_code.lower(),),
     )
     availability_contender = threading.Barrier(2)
     release_availability = threading.Event()
@@ -1137,7 +1132,6 @@ def test_wp4_symbol_set_lifecycle_and_availability_serialize_without_lock_upgrad
     settings = SimpleNamespace(
         organizations_enabled=True,
         symbol_sets_enabled=True,
-        organization_pilot_codes=(owner_code.lower(),),
     )
     availability_contender = threading.Barrier(2)
     release_availability = threading.Event()
@@ -1256,7 +1250,7 @@ def test_wp3_service_cleanup_and_availability_paths_share_project_before_set_loc
     release_availability = threading.Event()
     outcomes = []
     request = Request({"type": "http", "headers": [(b"cookie", f"symgov_session={raw_token}".encode())]})
-    settings = SimpleNamespace(organizations_enabled=True, symbol_sets_enabled=True, organization_pilot_codes=(owner_code.lower(),))
+    settings = SimpleNamespace(organizations_enabled=True, symbol_sets_enabled=True)
 
     original_lock_anchors = symbol_set_service._lock_project_set_anchors
 
@@ -1500,7 +1494,6 @@ def test_wp4_same_session_project_selection_and_active_set_selection_share_proje
     settings = SimpleNamespace(
         organizations_enabled=True,
         symbol_sets_enabled=True,
-        organization_pilot_codes=(owner_code.lower(),),
     )
     active_set_contender = threading.Barrier(2)
     release_active_set = threading.Event()
@@ -1620,7 +1613,6 @@ def test_wp4_project_closure_and_active_set_selection_share_project_before_conte
     settings = SimpleNamespace(
         organizations_enabled=True,
         symbol_sets_enabled=True,
-        organization_pilot_codes=(owner_code.lower(),),
     )
     active_set_contender = threading.Barrier(2)
     release_active_set = threading.Event()
@@ -1746,7 +1738,6 @@ def test_wp4_concurrent_preference_updates_are_last_project_lock_winner(wp1_data
     settings = SimpleNamespace(
         organizations_enabled=True,
         symbol_sets_enabled=True,
-        organization_pilot_codes=(owner_code.lower(),),
     )
     first = SessionLocal()
     outcome = []

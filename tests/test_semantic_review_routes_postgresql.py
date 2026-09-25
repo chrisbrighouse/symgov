@@ -106,7 +106,6 @@ def _client(engine, *, semantic_review_enabled=True):
         organization_symbols_enabled=True,
         platform_admin_enabled=True,
         semantic_review_enabled=semantic_review_enabled,
-        organization_pilot_codes=("acme", "other", "symgov"),
     )
 
     def override_db():

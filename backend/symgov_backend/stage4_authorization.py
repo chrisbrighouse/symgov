@@ -85,11 +85,10 @@ def require_stage4_principal(
             OrganizationRoleAssignment.is_active.is_(True),
             OrganizationRoleAssignment.revoked_at.is_(None),
         ).with_for_update(read=True).one_or_none()
-    pilots = {str(value).strip().lower() for value in settings.organization_pilot_codes if str(value).strip()}
     if (
         user is None or not user.is_active or user.deleted_at is not None
         or organization is None or not organization.is_active or organization.entitlement_status != "active"
-        or organization.normalized_code not in pilots or membership is None or role is None
+        or membership is None or role is None
     ):
         _fail(404)
     current = session.query(UserSession).filter(

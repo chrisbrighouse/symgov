@@ -68,7 +68,6 @@ def _client(engine):
         organization_admin_enabled=True,
         platform_admin_enabled=True,
         organization_agents_enabled=True,
-        organization_pilot_codes=("acme", "acmea", "acmeb", "acmec", "acmestep", "acmeflag", "symgov"),
     )
 
     def override_db():
@@ -315,7 +314,7 @@ def test_agent_routes_return_404_when_feature_flag_disabled(wp104_database):
     TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     settings = SymgovAPISettings(
         organizations_enabled=True, organization_admin_enabled=True, platform_admin_enabled=True,
-        organization_agents_enabled=False, organization_pilot_codes=("acmeflag",),
+        organization_agents_enabled=False, 
     )
 
     def override_db():

@@ -81,7 +81,7 @@ def test_personal_session_can_browse_the_public_catalog_and_favourite_a_symbol(s
     engine, _, _ = stage11_database
     catalog_id = _published_public_symbol(engine, "WP11.4 Journey Fire Alarm")
 
-    client, Session = _client(engine, pilot_codes=("symgov",))
+    client, Session = _client(engine)
     _, personal_email = _new_user(Session, "journeypersonal")
     login = _login(client, personal_email)
     assert login.json()["user"]["session"]["mode"] == "personal"

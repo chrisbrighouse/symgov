@@ -169,7 +169,6 @@ def two_organizations(stage5_database):
         organizations_enabled=True,
         symbol_sets_enabled=True,
         organization_symbols_enabled=True,
-        organization_pilot_codes=(code_a, code_b),
     )
     return SimpleNamespace(
         engine=engine, user_a=user_a, user_b=user_b, org_a=org_a, org_b=org_b,

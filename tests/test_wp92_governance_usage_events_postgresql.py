@@ -122,7 +122,6 @@ def _client(engine):
         organization_admin_enabled=True,
         organization_custom_icons_enabled=True,
         organization_icon_upload_enabled=True,
-        organization_pilot_codes=("acme", "symgov"),
     )
 
     def override_db():

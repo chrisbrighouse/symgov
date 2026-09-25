@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -10,7 +9,6 @@ from .runtime import DEFAULT_STORAGE_ENV_FILE
 
 
 LOCAL_SECURITY_ENVIRONMENTS = frozenset({"local", "test"})
-NORMALIZED_ORGANIZATION_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 
 
 def _environment() -> str:
@@ -22,21 +20,6 @@ def _csv_setting(name: str, local_default: str = "") -> tuple[str, ...]:
     if raw is None and _environment() in LOCAL_SECURITY_ENVIRONMENTS:
         raw = local_default
     return tuple(item.strip() for item in (raw or "").split(",") if item.strip())
-
-
-def _organization_pilot_codes() -> tuple[str, ...]:
-    values = os.environ.get("SYMGOV_ORGANIZATION_PILOT_CODES", "")
-    normalized = {
-        item.strip().lower()
-        for item in values.split(",")
-        if item.strip()
-    }
-    invalid = sorted(
-        code for code in normalized if not NORMALIZED_ORGANIZATION_CODE_PATTERN.fullmatch(code)
-    )
-    if invalid:
-        raise ValueError("Organization pilot codes must use normalized lowercase code grammar.")
-    return tuple(sorted(normalized))
 
 
 def _login_hash_secret() -> str:
@@ -211,7 +194,6 @@ class SymgovAPISettings:
         "yes",
         "on",
     }
-    organization_pilot_codes: tuple[str, ...] = field(default_factory=_organization_pilot_codes)
 
 
 def get_settings() -> SymgovAPISettings:

@@ -52,11 +52,6 @@ legacy_router = APIRouter(tags=["auth"])
 
 def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | None = None) -> AuthUserResponse:
     effective = settings or SymgovAPISettings()
-    pilot_codes = {
-        str(code).strip().lower()
-        for code in effective.organization_pilot_codes
-        if str(code).strip()
-    }
     organization_icon_upload_enabled = bool(
         effective.organizations_enabled
         and effective.organization_admin_enabled
@@ -66,8 +61,6 @@ def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | No
         and user.session_mode == "organization"
         and user.active_organization_id is not None
         and user.organization_base_role == "admin"
-        and user.organization_code
-        and user.organization_code.strip().lower() in pilot_codes
     )
     symbol_sets_enabled = bool(
         effective.organizations_enabled
@@ -75,8 +68,6 @@ def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | No
         and user.session_purpose == "application"
         and user.session_mode == "organization"
         and user.active_organization_id is not None
-        and user.organization_code
-        and user.organization_code.strip().lower() in pilot_codes
     )
     return AuthUserResponse(
         id=user.id,

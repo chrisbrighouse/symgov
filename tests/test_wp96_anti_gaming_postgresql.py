@@ -107,7 +107,7 @@ def wp96_database():
         yield engine, url, raw_url
 
 
-def _client(engine, *, pilot_codes):
+def _client(engine):
     app = create_app()
     TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     settings = SymgovAPISettings(
@@ -116,7 +116,6 @@ def _client(engine, *, pilot_codes):
         platform_admin_enabled=True,
         symbol_sets_enabled=True,
         organization_admin_enabled=True,
-        organization_pilot_codes=tuple(pilot_codes),
     )
 
     def override_db():
@@ -157,8 +156,8 @@ def _submit_promotion(admin_client, symbol_id, *, reason="Broadly useful across 
 def test_reviewer_who_is_active_member_of_submitting_organization_cannot_accept(wp96_database):
     engine, _, _ = wp96_database
     org_code = _unique_code("selfrev")
-    admin_client, Session = _client(engine, pilot_codes=(org_code,))
-    reviewer_client, _ = _client(engine, pilot_codes=(org_code,))
+    admin_client, Session = _client(engine)
+    reviewer_client, _ = _client(engine)
 
     admin_id = _create_user_with_global_roles(
         Session, email=f"wp96admin-{uuid.uuid4().hex[:8]}@example.test", display_name="WP9.6 Admin", roles=[]
@@ -220,8 +219,8 @@ def test_reviewer_without_organization_membership_can_still_accept(wp96_database
     already exercises."""
     engine, _, _ = wp96_database
     org_code = _unique_code("normalrev")
-    admin_client, Session = _client(engine, pilot_codes=(org_code,))
-    reviewer_client, _ = _client(engine, pilot_codes=(org_code,))
+    admin_client, Session = _client(engine)
+    reviewer_client, _ = _client(engine)
 
     admin_id = _create_user_with_global_roles(
         Session, email=f"wp96admin2-{uuid.uuid4().hex[:8]}@example.test", display_name="WP9.6 Admin Two", roles=[]
@@ -255,8 +254,8 @@ def test_promotion_submission_flags_possible_duplicate_of_existing_public_symbol
     engine, _, _ = wp96_database
 
     publisher_code = _unique_code("dupepub")
-    publisher_client, PublisherSession = _client(engine, pilot_codes=(publisher_code,))
-    publisher_reviewer_client, _ = _client(engine, pilot_codes=(publisher_code,))
+    publisher_client, PublisherSession = _client(engine)
+    publisher_reviewer_client, _ = _client(engine)
 
     publisher_admin_id = _create_user_with_global_roles(
         PublisherSession, email=f"wp96dupepub-{uuid.uuid4().hex[:8]}@example.test", display_name="WP9.6 Dupe Publisher", roles=[]
@@ -293,7 +292,7 @@ def test_promotion_submission_flags_possible_duplicate_of_existing_public_symbol
         expected_slug = public_symbol.slug
 
     other_code = _unique_code("dupesub")
-    other_client, OtherSession = _client(engine, pilot_codes=(other_code,))
+    other_client, OtherSession = _client(engine)
     other_admin_id = _create_user_with_global_roles(
         OtherSession, email=f"wp96dupesub-{uuid.uuid4().hex[:8]}@example.test", display_name="WP9.6 Dupe Submitter", roles=[]
     )
@@ -316,7 +315,7 @@ def test_promotion_submission_flags_possible_duplicate_of_existing_public_symbol
 def test_organization_submission_rate_limit_blocks_the_eleventh_submission_in_seven_days(wp96_database):
     engine, _, _ = wp96_database
     org_code = _unique_code("ratelimit")
-    admin_client, Session = _client(engine, pilot_codes=(org_code,))
+    admin_client, Session = _client(engine)
 
     admin_id = _create_user_with_global_roles(
         Session, email=f"wp96rate-{uuid.uuid4().hex[:8]}@example.test", display_name="WP9.6 Rate Limit Admin", roles=[]

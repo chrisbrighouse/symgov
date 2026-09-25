@@ -138,7 +138,7 @@ def _semantic_client(*, enabled=True, roles=("reviewer",), platform_admin=False,
     a principal the application never saw.
     """
     client, Session, user_id, settings = _build_client(
-        enabled=True, pilots=("acme", "symgov"), platform_admin_enabled=True
+        enabled=True, platform_admin_enabled=True
     )
     _create_semantic_tables(Session.kw["bind"])
     now = datetime.now(timezone.utc).replace(microsecond=0)
@@ -205,7 +205,7 @@ def test_the_flag_is_declared_in_the_same_literal_form_as_every_other_i20_flag()
 
 
 def test_auth_me_exposes_the_capability_so_the_frontend_never_guesses():
-    client, Session, user_id, settings = _build_client(enabled=True, pilots=("acme",))
+    client, Session, user_id, settings = _build_client(enabled=True)
     _add_membership(Session, user_id, "acme", base_role="admin")
     _login(client)
 

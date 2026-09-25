@@ -25,9 +25,6 @@ def resolve_eligible_organization_memberships(
 ) -> tuple[EligibleOrganizationMembership, ...]:
     if not settings.organizations_enabled or not user.is_active or user.deleted_at is not None:
         return ()
-    pilots = frozenset(str(code).strip().lower() for code in settings.organization_pilot_codes if str(code).strip())
-    if not pilots:
-        return ()
     rows = (
         session.query(OrganizationMembership, Organization, OrganizationRoleAssignment)
         .join(Organization, Organization.id == OrganizationMembership.organization_id)
@@ -37,7 +34,6 @@ def resolve_eligible_organization_memberships(
             OrganizationMembership.status == "active",
             Organization.is_active.is_(True),
             Organization.entitlement_status == "active",
-            Organization.normalized_code.in_(pilots),
             OrganizationRoleAssignment.is_active.is_(True),
             OrganizationRoleAssignment.revoked_at.is_(None),
         )

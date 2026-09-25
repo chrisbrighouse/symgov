@@ -152,7 +152,7 @@ def _explain_last_statement_uses_index(engine, Session, organization_id) -> tupl
 
 def test_widened_eligibility_query_uses_indexes_and_is_representatively_fast(stage11_database):
     engine, _, _ = stage11_database
-    client, Session = _client(engine, pilot_codes=("wp115org",))
+    client, Session = _client(engine)
 
     from test_wp74_symbol_demotion_postgresql import _add_membership
     admin_id, admin_email = _new_user(Session, "wp115admin")

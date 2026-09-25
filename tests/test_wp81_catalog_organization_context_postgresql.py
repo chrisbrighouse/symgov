@@ -199,7 +199,6 @@ def test_feature_flags_gate_organization_private_results_off(wp81_database):
         organizations_enabled=True,
         organization_symbols_enabled=False,
         platform_admin_enabled=True,
-        organization_pilot_codes=("acme", "other", "symgov"),
     )
 
     def override_db():

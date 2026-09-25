@@ -87,7 +87,7 @@ def _build_engine_and_session():
     return Session
 
 
-def _build_client(*, platform_admin_enabled=True, organizations_enabled=True, pilot_codes=("symgov",)):
+def _build_client(*, platform_admin_enabled=True, organizations_enabled=True):
     Session = _build_engine_and_session()
     with Session() as session:
         platform_admin_user = upsert_user(
@@ -132,7 +132,6 @@ def _build_client(*, platform_admin_enabled=True, organizations_enabled=True, pi
         symbol_sets_enabled=False,
         organization_symbols_enabled=False,
         organization_agents_enabled=False,
-        organization_pilot_codes=pilot_codes,
     )
     app.dependency_overrides[get_db_session] = override_db
     app.dependency_overrides[get_settings] = lambda: settings
@@ -318,6 +317,28 @@ def test_create_organization_names_initial_admin_by_email():
     assert [(m["userId"], m["baseRole"]) for m in members] == [(str(candidate_id), "admin")]
 
 
+def test_created_organization_admin_signs_straight_into_the_new_organization():
+    # I-20 as amended 2026-09-25: no allowlist to edit. Crosswell's first admin
+    # signed in with a personal session because its code was never listed.
+    client, Session, admin_id, _, _ = _build_client()
+    org_id = _seed_symgov_org_with_platform_admin(Session, admin_id)
+    _login_and_step_up(client, "platform-admin@example.test", org_id)
+    created = client.post(
+        "/api/v1/platform/organizations",
+        json={"code": "CRWL", "displayName": "Crosswell", "initialAdminEmail": "candidate@example.test"},
+    )
+    assert created.status_code == 201, created.text
+
+    candidate_client = TestClient(client.app, headers={"origin": "http://testserver"})
+    login = candidate_client.post("/api/v1/auth/login", json={"email": "candidate@example.test", "pin": "1234"})
+
+    assert login.status_code == 200, login.text
+    user = login.json()["user"]
+    assert user["session"]["mode"] == "organization"
+    assert user["session"]["activeOrganizationId"] == created.json()["id"]
+    assert user["organization"]["code"] == "CRWL"
+
+
 def test_create_organization_with_unknown_admin_email_rejected():
     client, Session, admin_id, _, _ = _build_client()
     org_id = _seed_symgov_org_with_platform_admin(Session, admin_id)
@@ -387,7 +408,7 @@ def test_suspend_organization_sets_suspended():
 
 
 def test_suspend_revokes_bound_sessions_for_that_organization():
-    client, Session, admin_id, _, _ = _build_client(pilot_codes=("symgov", "acme"))
+    client, Session, admin_id, _, _ = _build_client()
     org_id = _seed_symgov_org_with_platform_admin(Session, admin_id)
     acme_id = _seed_commercial_org(Session, code="ACME")
     now = datetime.now(timezone.utc).replace(microsecond=0)

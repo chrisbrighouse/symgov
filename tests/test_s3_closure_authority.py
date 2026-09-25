@@ -64,7 +64,7 @@ def _create_tables(engine) -> None:
             table.constraints = original
 
 def test_s3_b6_bound_session_revalidates_live_settings():
-    """S3-B6: Existing organization sessions must respect SYMGOV_ORGANIZATIONS_ENABLED and pilot allowlist."""
+    """S3-B6: Existing organization sessions must respect SYMGOV_ORGANIZATIONS_ENABLED and organization entitlement."""
     engine = create_engine(
         "sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
@@ -73,7 +73,6 @@ def test_s3_b6_bound_session_revalidates_live_settings():
 
     current_settings = SymgovAPISettings(
         organizations_enabled=True,
-        organization_pilot_codes=("acme",),
     )
 
     with Session() as session:
@@ -144,19 +143,20 @@ def test_s3_b6_bound_session_revalidates_live_settings():
     # 2. Disable organizations globally
     current_settings = SymgovAPISettings(
         organizations_enabled=False,
-        organization_pilot_codes=("acme",),
     )
 
     response = client.get("/test-session")
     # This SHOULD fail now (S3-B6)
     assert response.status_code == 401, "Session should be rejected when organizations are disabled"
 
-    # 3. Re-enable but remove from pilot
+    # 3. Re-enable but suspend the organization's entitlement
     current_settings = SymgovAPISettings(
         organizations_enabled=True,
-        organization_pilot_codes=("other",),
     )
+    with Session() as session:
+        session.get(Organization, org.id).entitlement_status = "suspended"
+        session.commit()
 
     response = client.get("/test-session")
     # This SHOULD fail now (S3-B6)
-    assert response.status_code == 401, "Session should be rejected when org is not in pilot"
+    assert response.status_code == 401, "Session should be rejected when the organization is suspended"

@@ -77,14 +77,13 @@ def _unique_code(prefix: str) -> str:
     return f"{prefix}{uuid.uuid4().hex[:6]}"
 
 
-def _client(engine, *, pilot_codes):
+def _client(engine):
     app = create_app()
     TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     settings = SymgovAPISettings(
         organizations_enabled=True,
         organization_admin_enabled=True,
         platform_admin_enabled=True,
-        organization_pilot_codes=tuple(pilot_codes),
     )
 
     def override_db():
@@ -139,7 +138,7 @@ def _seed_raw_event(Session, *, organization_id, event_type, occurred_at, user_i
 def test_summary_endpoint_suppresses_cells_below_the_distinct_user_threshold(wp94_database):
     engine, _, _ = wp94_database
     code = _unique_code("acme")
-    admin_client, Session = _client(engine, pilot_codes=(code,))
+    admin_client, Session = _client(engine)
 
     admin_id = _create_user(Session, "admin")
     organization_id = _add_membership(Session, admin_id, code=code, base_role="admin")
@@ -189,8 +188,8 @@ def test_organization_admin_only_sees_their_own_organizations_rollups(wp94_datab
     engine, _, _ = wp94_database
     acme_code = _unique_code("acme")
     other_code = _unique_code("other")
-    acme_client, Session = _client(engine, pilot_codes=(acme_code, other_code))
-    other_client, _ = _client(engine, pilot_codes=(acme_code, other_code))
+    acme_client, Session = _client(engine)
+    other_client, _ = _client(engine)
 
     acme_admin_id = _create_user(Session, "acmeadmin")
     acme_org_id = _add_membership(Session, acme_admin_id, code=acme_code, base_role="admin")
@@ -220,8 +219,8 @@ def test_organization_admin_only_sees_their_own_organizations_rollups(wp94_datab
 def test_platform_admin_can_read_any_organizations_usage_summary(wp94_database):
     engine, _, _ = wp94_database
     acme_code = _unique_code("acme")
-    acme_client, Session = _client(engine, pilot_codes=(acme_code,))
-    platform_client, _ = _client(engine, pilot_codes=("symgov",))
+    acme_client, Session = _client(engine)
+    platform_client, _ = _client(engine)
 
     acme_admin_id = _create_user(Session, "platformviewadmin")
     acme_org_id = _add_membership(Session, acme_admin_id, code=acme_code, base_role="admin")
@@ -256,7 +255,7 @@ def test_platform_admin_can_read_any_organizations_usage_summary(wp94_database):
 def test_rollups_survive_raw_event_retention_purge(wp94_database):
     engine, _, _ = wp94_database
     code = _unique_code("acme")
-    admin_client, Session = _client(engine, pilot_codes=(code,))
+    admin_client, Session = _client(engine)
 
     admin_id = _create_user(Session, "purgeadmin")
     organization_id = _add_membership(Session, admin_id, code=code, base_role="admin")
@@ -312,7 +311,7 @@ def test_rollups_survive_raw_event_retention_purge(wp94_database):
 def test_summary_date_range_filtering_excludes_days_outside_the_window(wp94_database):
     engine, _, _ = wp94_database
     code = _unique_code("acme")
-    admin_client, Session = _client(engine, pilot_codes=(code,))
+    admin_client, Session = _client(engine)
 
     admin_id = _create_user(Session, "rangeadmin")
     organization_id = _add_membership(Session, admin_id, code=code, base_role="admin")
