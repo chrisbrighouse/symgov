@@ -7,105 +7,126 @@ description: Deploy a Symgov release to the production VPS - preflight gates, re
 
 Deploying is a live mutation. `CLAUDE.md` requires **Chris's explicit
 approval** for each deployment; this skill does not grant it. Approval to
-deploy once is not approval to deploy again.
+deploy once is not approval to deploy again. Pushing needs approval too.
 
-Every step below is one command. Complete and verify each before starting
-the next. If a step fails, stop and report rather than continuing.
+Two scripts do the work. The whole cycle is four commands, and only the last
+one touches production:
 
-## Facts about this deployment (verified 2026-09-08)
+| # | Who | Command | Changes |
+|---|-----|---------|---------|
+| 1 | Claude | `scripts/release-preflight.sh [pytest targets]` | nothing |
+| 2 | Claude | `git push origin main` (after approval) | origin |
+| 3 | Claude | `scripts/deploy-release.sh` | nothing (plan) |
+| 4 | Chris | `! scripts/deploy-release.sh --yes` | **production** |
 
-- Release directories: `/data/symgov-releases/stage11-<short-sha>/`, each a
+Step 4 is Chris's to run, typed with the `!` prefix so the output lands in
+the conversation. The agent cannot run it: the permission gate denies `npm`
+under `/data/symgov-releases`, and production database reads are blocked for
+the agent. Do not try to work around either.
+
+## 1. Preflight
+
+    scripts/release-preflight.sh
+
+It runs the frontend tests, `npm run build`, the backend tests, and the
+secret scan, and stops at the first failure. With no arguments, the backend
+tests it runs are every `tests/test_*.py` changed since the **live** release,
+committed or untracked. Pass pytest targets to widen that when the change
+reaches code whose tests did not change, e.g.
+`scripts/release-preflight.sh tests/test_platform_admin_api.py tests/test_auth_routes.py`.
+
+The secret scan only sees **tracked** changes, so `git add` new files first.
+A new file scans clean while untracked and can fail once committed. Commit,
+if asked, before running it for the release.
+
+## 2. Push
+
+Only after preflight is green and Chris has approved. Run it on its own, never
+chained after the scan with `&&` or `;`. The deploy script refuses any
+commit that is not on `origin/main`.
+
+## 3. Plan
+
+    scripts/deploy-release.sh            # origin/main
+    scripts/deploy-release.sh <sha>      # a specific pushed commit
+
+Read-only. Prints the live release, the release to deploy, the commits
+between them, and any **new migrations**. Show Chris the plan, and call out
+migrations explicitly, before asking him to run step 4. It refuses a commit
+that is already live, not pushed, or older than the live release.
+
+## 4. Deploy (Chris)
+
+    ! scripts/deploy-release.sh --yes
+
+In order, stopping at the first failure:
+
+1. `pg_dump -Fc` to `/data/symgov-backups/symgov-pre-<sha>-<ts>.dump`. It
+   fails if the dump is empty or under half the size of the previous one.
+2. `git worktree add --detach /data/symgov-releases/stage11-<sha>`, then
+   `npm ci && npm run build` at the release **root** (vite is `root:
+   'frontend'`, `outDir: '../dist'`). An existing release dir is reused.
+3. If the release's alembic head differs from `alembic_version`, it runs
+   `alembic upgrade <head>` with `SYMGOV_ALEMBIC_USE_MIGRATION_DB=1`. The app
+   role has no DDL rights. The upgrade is one transaction, so a failure leaves
+   the schema untouched and the script stops **before** touching compose.
+   Multiple heads abort.
+4. Copies the compose file to `docker-compose.yml.pre-<sha>-<ts>`, repoints
+   all four `stage11-` references, and requires four matches and zero
+   unresolved `${...}` in `compose config`. Seven telemetry variables live
+   only in `/docker/symgov-hermes/.env` (mode 0600, do not delete it), and
+   deploying with them empty silently blanks the Langfuse credentials.
+5. `up -d --build symgov-api`, then `up -d applications-web`. Never
+   `restart`: the web container's bind-mount path changed, and a restart keeps
+   serving the old `dist/`.
+6. Verifies: API health from inside the container (retried for 60s; no host
+   port is published, so a host `curl` is refused even when healthy); the
+   web mount is the new `dist/`; the served `index-*.js` equals the built one;
+   the schema revision; and the API log since restart.
+
+The full output is also written to
+`/data/symgov-releases/deploy-stage11-<sha>-<ts>.log`. If Chris's terminal
+output is truncated, read that log.
+
+On success, report the release, bundle hash, schema revision and anything
+unusual in the log lines. Then update the resume-point memory.
+
+## If a step fails
+
+The script prints `FAILED: <reason>`. Before the compose repoint, production
+is unchanged apart from a new dump, a release dir and possibly a committed
+migration. After the repoint, the message names the compose backup to
+restore. Fix the cause, then re-run `--yes`. A partly built release dir is
+reused, and a completed migration is detected and skipped.
+
+## Rollback
+
+    scripts/deploy-release.sh --rollback <old-sha>        # plan
+    ! scripts/deploy-release.sh --rollback <old-sha> --yes
+
+It repoints compose to an existing release dir, restarts both services, and
+verifies. It never downgrades the schema, and the plan prints both revisions
+so the mismatch is visible. Keep old release dirs; they are the rollback
+targets. The previous release is printed at the end of every deploy.
+
+Never downgrade the schema below the visibility floor (`20260829_0033`) once
+organization data exists; `20260829_0033`'s own `downgrade()` refuses. With
+real tenant data, "roll back" means disable the organization flags and
+redeploy at or above the floor, not a schema downgrade.
+
+## Facts about this deployment (verified 2026-09-25)
+
+- `/data` is a symlink to `/docker/openclaw-hz0t/data`. The api container
+  bind-mounts the same tree at `/data`, so a new release worktree is visible
+  inside the running container immediately.
+- Release dirs: `/data/symgov-releases/stage11-<short-sha>/`, each a
   `git worktree`, not a clone.
-- Compose file: `/docker/symgov-hermes/docker-compose.yml`. It hardcodes the
-  release directory in **four** places (build context, image tag,
-  `working_dir`, and the `applications-web` `dist/` mount).
-- Containers: `symgov-hermes-api` (FastAPI, port 8010, **not published to the
-  host**), `applications-web` (nginx), `symgov-postgres`, `symgov-minio`.
-- The api container bind-mounts `/docker/openclaw-hz0t/data:/data`, so a new
-  release worktree is visible inside the running container immediately.
-- Backups: `/data/symgov-backups/`, `pg_dump -Fc` custom-format dumps.
-
-## Preflight, from the repository root
-
-1. Run the tests that cover the change. Backend:
-   `PYTHONPATH=backend uv run --isolated --with-requirements backend/requirements.txt --with-requirements backend/requirements-test.txt python -m pytest <files> -q`.
-   Frontend: `npm run test:frontend`. Then `npm run build`.
-2. Run the secret-scan gate **as its own command**, never chained to the push
-   with `&&` or `;` -- a chained run does not gate anything and a failing scan
-   will still push:
-
-       python3 scripts/secret_scan_added_lines.py
-
-   It only sees tracked changes, so `git add` new files before trusting a
-   clean result. A new file scans clean while untracked and can fail
-   immediately after being committed.
-3. `git push origin main` once the scan exits 0.
-
-## Deploy
-
-Let `SHA` be the short commit being deployed and `OLD` the release currently
-in the compose file (`grep -n 'stage11-' /docker/symgov-hermes/docker-compose.yml`).
-
-1. **Backup** -- required whenever a migration is involved; cheap enough to do
-   regardless:
-
-       docker exec symgov-postgres pg_dump -U symgov -d symgov -Fc > /data/symgov-backups/symgov-pre-<SHA>-$(date -u +%Y%m%dT%H%M%SZ).dump
-
-   Confirm it is non-empty and comparable in size to the previous dump.
-
-2. **Release worktree and frontend build.** `npm ci && npm run build` runs at
-   the release **root**, not `frontend/` -- `package.json` and `vite.config.js`
-   are at the root and vite is configured `root: 'frontend'`, `outDir: '../dist'`:
-
-       git -C /docker/openclaw-hz0t/data/symgov worktree add --detach /data/symgov-releases/stage11-<SHA> <SHA>
-       cd /data/symgov-releases/stage11-<SHA> && npm ci && npm run build && ls dist
-
-3. **Migration**, only if the release adds one. It needs the migration role;
-   the app role has no DDL rights and fails with `permission denied for
-   schema public`:
-
-       docker exec -e SYMGOV_ALEMBIC_USE_MIGRATION_DB=1 -w /data/symgov-releases/stage11-<SHA>/backend symgov-hermes-api python3 -m alembic upgrade <revision>
-       docker exec symgov-postgres psql -U symgov -d symgov -c 'select * from alembic_version;'
-
-   The whole upgrade runs in one transaction, so a failure rolls everything
-   back and leaves the schema untouched. `Running upgrade` log lines are not
-   evidence of committed work.
-
-4. **Compose backup and repoint:**
-
-       cp /docker/symgov-hermes/docker-compose.yml /docker/symgov-hermes/docker-compose.yml.pre-<SHA>-$(date -u +%Y%m%dT%H%M%SZ)
-       sed -i 's/stage11-<OLD>/stage11-<SHA>/g' /docker/symgov-hermes/docker-compose.yml
-       grep -n 'stage11-' /docker/symgov-hermes/docker-compose.yml
-       docker compose -f /docker/symgov-hermes/docker-compose.yml config | grep -c '\${'
-
-   The grep must show all four lines updated, and the count **must be 0**.
-   Any other number means an unresolved `${...}`: seven telemetry variables
-   live only in `/docker/symgov-hermes/.env` (mode 0600, do not delete it),
-   and deploying with them empty silently blanks the Langfuse credentials.
-
-5. **Deploy both services.** `applications-web` needs `up -d`, not `restart`,
-   because its bind-mount path changed -- a restart keeps serving the old
-   `dist/`:
-
-       docker compose -f /docker/symgov-hermes/docker-compose.yml up -d --build symgov-api
-       docker compose -f /docker/symgov-hermes/docker-compose.yml up -d applications-web
-
-   Always pass `-f`; a bare `docker compose` acts on whatever compose file the
-   current directory happens to contain.
-
-## Verify
-
-    docker exec symgov-hermes-api curl -fsS http://127.0.0.1:8010/api/v1/health
-
-From the host this fails with connection refused even when healthy, because
-no host port is published. Then confirm the frontend actually changed:
-
-    docker inspect applications-web --format '{{range .Mounts}}{{if eq .Destination "/usr/share/nginx/html"}}{{.Source}}{{end}}{{end}}'
-    docker exec applications-web sh -c 'wget -qO- http://127.0.0.1/ | grep -o "assets/index-[A-Za-z0-9_-]*\.js"'
-
-The hash must match the one `npm run build` printed. Finally check the API
-log for startup errors:
-`docker logs --since 5m symgov-hermes-api 2>&1 | grep -viE ' 200 OK| 304 | 404 Not Found' | tail`.
+- Compose file: `/docker/symgov-hermes/docker-compose.yml`, which hardcodes
+  the release in four places (build context, image tag, `working_dir`, the
+  `applications-web` `dist/` mount). Always pass `-f`; a bare
+  `docker compose` acts on whatever compose file the current directory holds.
+- Containers: `symgov-hermes-api` (FastAPI, port 8010, unpublished),
+  `applications-web` (nginx), `symgov-postgres`, `symgov-minio`.
 
 ## Before believing a bug report about a fresh deployment
 
@@ -123,17 +144,6 @@ Note also that `nginx.conf` uses `try_files $uri $uri/ /index.html`, so a
 missing asset returns `index.html` as `200 text/html` rather than a 404,
 which surfaces in the browser as a module-script MIME error.
 
-## Rollback
-
-Point the compose file back at the previous release directory and image tag
-(or restore the `*.pre-*` backup) and `up -d` both services. Keep the previous
-release directory in place -- it is the rollback target.
-
-Never downgrade the schema below the visibility floor (`20260829_0033`) once
-organization data exists; `20260829_0033`'s own `downgrade()` refuses. With
-real tenant data, "roll back" means disable the organization flags and
-redeploy at or above the floor, not a schema downgrade.
-
 ## Environment settings that are fatal in production
 
 `settings.py` `_csv_setting` applies its declared default **only** in `local`
@@ -144,8 +154,10 @@ every `_csv_setting` as required in production.
 `create_app()` runs two validators, so these are the complete set of
 startup-fatal settings: `SYMGOV_AUTH_LOGIN_HASH_SECRET` (min 16 chars,
 local/test placeholders rejected) and `SYMGOV_CSRF_TRUSTED_ORIGINS` /
-`SYMGOV_CSRF_TRUSTED_HOSTS`. Both crash-loop the API on startup.
+`SYMGOV_CSRF_TRUSTED_HOSTS`. Both crash-loop the API on startup. The
+script's health check catches this; roll back, then fix the env.
 
 `SYMGOV_TRUSTED_PROXY_CIDRS` is not fatal but breaks **every authenticated
 mutation** with `403 Cross-origin request is not permitted.` when empty, while
 login still succeeds -- which makes the fault look far narrower than it is.
+The health check does **not** catch this one.
