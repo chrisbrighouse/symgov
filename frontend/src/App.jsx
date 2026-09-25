@@ -3644,7 +3644,16 @@ function isTerminalReviewStage(stage) {
   );
 }
 
-function buildPublishedPreviewCandidates(symbol, selectedFormat = '') {
+const NON_PREVIEWABLE_SOURCE = /\.(dxf|zip)$/i;
+
+// The published list and detail responses always carry `previewUrl`, and set it
+// to null when the payload has no browser-previewable asset (DXF-only symbols).
+// That answer is authoritative: guessing the preview route or the raw source
+// object for such a symbol only produces 404s before the placeholder glyph.
+export function buildPublishedPreviewCandidates(symbol, selectedFormat = '') {
+  if (symbol && Object.prototype.hasOwnProperty.call(symbol, 'previewUrl') && symbol.previewUrl === null) {
+    return [];
+  }
   const candidates = [];
   const symbolReference = symbol?.slug || symbol?.id || symbol?.symbolId;
   const format = String(selectedFormat || '').trim().toUpperCase();
@@ -3668,7 +3677,7 @@ function buildPublishedPreviewCandidates(symbol, selectedFormat = '') {
   if (!format) {
     const reviewCaseId = symbol?.payload?.review_case_id || symbol?.payload?.lineage?.parent_sheet_review_case_id;
     const objectKey = symbol?.payload?.source_object_key;
-    if (reviewCaseId && objectKey) {
+    if (reviewCaseId && objectKey && !NON_PREVIEWABLE_SOURCE.test(String(objectKey))) {
       candidates.push(
         resolveWorkspaceAssetUrl(
           `/api/v1/workspace/review-cases/${encodeURIComponent(reviewCaseId)}/children/preview?object_key=${encodeURIComponent(objectKey)}`
