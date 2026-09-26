@@ -26,7 +26,7 @@ def test_catalog_api_documentation_artifacts_cover_the_first_milestone():
         "/api/v1/catalog/symbols",
         "/api/v1/catalog/search",
         "/api/v1/catalog/ed/query",
-        "0003-12",
+        "S-1",
         "JavaScript",
         "TypeScript",
         "Python",

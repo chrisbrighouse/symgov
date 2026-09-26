@@ -291,7 +291,7 @@ def test_a_queue_row_carries_the_human_readable_symbol_identity(seeded):
     # (`catalog_symbol_ids.format_catalog_symbol_id`: "S-" + six digits)
     # rather than a value this fixture cannot pin.
     assert ordinary.symbol.catalog_symbol_id is not None
-    assert re.fullmatch(r"S-\d{6}", ordinary.symbol.catalog_symbol_id)
+    assert re.fullmatch(r"S-[1-9]\d*", ordinary.symbol.catalog_symbol_id)
     assert ordinary.scheme_code == "SYMBOL-CATEGORY-FAMILY"
     assert ordinary.node_code == "VALVES"
     assert ordinary.node_label == "Valves"

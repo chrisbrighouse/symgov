@@ -59,8 +59,8 @@ test('builds C# HttpClient example for drawing review integrations', () => {
 });
 
 for (const path of [
-  '/catalog/symbols/0003-12/thumbnail',
-  '/catalog/symbols/0003-12/preview'
+  '/catalog/symbols/S-1/thumbnail',
+  '/catalog/symbols/S-1/preview'
 ]) {
   test(`builds binary-aware TypeScript example for ${path}`, () => {
     const output = buildCatalogCodeExample({ ...request, language: 'typescript', method: 'GET', path, body: undefined });
@@ -88,7 +88,7 @@ test('preserves JSON decoding for non-binary examples', () => {
 });
 
 test('builds binary-aware batch download examples', () => {
-  const body = { symbolIds: ['0003-12', '00023-3'], format: 'PNG' };
+  const body = { symbolIds: ['S-1', 'S-2'], format: 'PNG' };
   const options = { ...request, method: 'POST', path: '/catalog/symbols/download', body };
   assert.match(buildCatalogCodeExample({ ...options, language: 'typescript' }), /response\.arrayBuffer\(\)/);
   assert.match(buildCatalogCodeExample({ ...options, language: 'python' }), /response\.content/);
@@ -100,7 +100,7 @@ test('keeps curl binary endpoints as raw-output requests', () => {
     ...request,
     language: 'curl',
     method: 'GET',
-    path: '/catalog/symbols/0003-12/preview',
+    path: '/catalog/symbols/S-1/preview',
     body: undefined
   });
   assert.match(output, /curl --request GET/);
@@ -118,7 +118,7 @@ test('normalizes only allowlisted Catalog endpoints', () => {
 test('maps supported reference endpoints to read-only sandbox operations', () => {
   assert.equal(sandboxOperationForEndpoint('GET', '/catalog/capabilities'), 'capabilities');
   assert.equal(sandboxOperationForEndpoint('POST', '/catalog/search'), 'contextual_search');
-  assert.equal(sandboxOperationForEndpoint('POST', '/catalog/symbols/0003-12/feedback'), null);
+  assert.equal(sandboxOperationForEndpoint('POST', '/catalog/symbols/S-1/feedback'), null);
   assert.equal(sandboxOperationForEndpoint('POST', '/catalog/symbols/download'), null);
 });
 
@@ -146,7 +146,7 @@ test('builds endpoint-specific POST examples', () => {
     limit: 10
   });
   assert.deepEqual(catalogExampleBodyForEndpoint('POST', '/api/v1/catalog/symbols/download'), {
-    symbolIds: ['0003-12', '00023-3'],
+    symbolIds: ['S-1', 'S-2'],
     format: 'PNG'
   });
   assert.deepEqual(catalogExampleBodyForEndpoint('POST', '/api/v1/catalog/symbols/{symbol_ref}/feedback'), {
@@ -158,8 +158,8 @@ test('builds endpoint-specific POST examples', () => {
 });
 
 test('materializes either backend or frontend symbol placeholders', () => {
-  assert.equal(materializeCatalogEndpoint('/catalog/symbols/{symbol_ref}/preview'), '/catalog/symbols/0003-12/preview');
-  assert.equal(materializeCatalogEndpoint('/catalog/symbols/{symbolRef}/preview'), '/catalog/symbols/0003-12/preview');
+  assert.equal(materializeCatalogEndpoint('/catalog/symbols/{symbol_ref}/preview'), '/catalog/symbols/S-1/preview');
+  assert.equal(materializeCatalogEndpoint('/catalog/symbols/{symbolRef}/preview'), '/catalog/symbols/S-1/preview');
 });
 
 test('maps only allowlisted developer citations to page sections or support', () => {

@@ -80,7 +80,7 @@ export function normalizeCatalogEndpoint(path) {
   return normalized;
 }
 
-export function materializeCatalogEndpoint(path, symbolRef = '0003-12') {
+export function materializeCatalogEndpoint(path, symbolRef = 'S-1') {
   return String(path || '').replace(/\{symbol_?ref\}/gi, symbolRef);
 }
 
@@ -97,7 +97,7 @@ export function catalogExampleBodyForEndpoint(method, path) {
     };
   }
   if (normalized === '/catalog/symbols/download') {
-    return { symbolIds: ['0003-12', '00023-3'], format: 'PNG' };
+    return { symbolIds: ['S-1', 'S-2'], format: 'PNG' };
   }
   if (/^\/catalog\/symbols\/[^/]+\/feedback$/.test(normalized)) {
     return {

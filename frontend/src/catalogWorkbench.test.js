@@ -12,6 +12,8 @@ import {
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
   canonicalDiscipline,
+  symbolIdLabel,
+  symbolIdLabelOrState,
   catalogScopeBadge,
   catalogStatusBadge,
   catalogTaxonomyForSymbol,
@@ -116,7 +118,7 @@ test('application clipboard adds unique symbols with available format metadata',
   assert.equal(clipboard.length, 2);
   assert.deepEqual(clipboard[0], {
     id: 'smoke-detector',
-    displayName: '007F-2',
+    displayName: 'Draft 007F-2',
     name: 'Smoke Detector',
     availableFormats: ['DXF', 'PNG']
   });
@@ -136,7 +138,7 @@ test('builds compact card summaries for symbol browsing', () => {
 
   assert.deepEqual(summary, {
     id: 'smoke-detector',
-    displayId: '007F-2',
+    displayId: 'Draft 007F-2',
     name: 'Smoke Detector',
     categories: ['Fire Alarm Devices', 'Sensors / Detectors', 'Drawing Symbols'],
     disciplines: ['Electrical', 'Fire & Life Safety'],
@@ -337,4 +339,14 @@ test('canonicalDiscipline turns every stored spelling into one standard name, an
   assert.equal(canonicalDiscipline('structural'), 'Civil / Structural');
   assert.equal(canonicalDiscipline('I&C'), '');
   assert.equal(canonicalDiscipline(''), '');
+});
+
+test('a symbol ID is shown as S-<n> once published, and never as a slug or UUID before that', () => {
+  assert.equal(symbolIdLabel({ catalogSymbolId: 'S-1', packageDisplayId: '0003', packageSymbolSequence: 12 }), 'S-1');
+  assert.equal(symbolIdLabel({ displayName: 's-42' }), 'S-42');
+  assert.equal(symbolIdLabel({ packageDisplayId: '0003', packageSymbolSequence: 12 }), 'Draft 0003-12');
+  assert.equal(symbolIdLabel({ source: 'organization', displayId: '007F-2' }), 'Private 007F-2');
+  assert.equal(symbolIdLabel({ slug: 'org-draft-5d2c7a1e-8f3b-4a61-9c0e-1b2d3e4f5a6b' }), '');
+  assert.equal(symbolIdLabelOrState({ slug: 'org-draft-5d2c7a1e' }), 'Draft');
+  assert.equal(symbolIdLabelOrState({ visibility: 'organization_private', slug: 'x' }), 'Private');
 });

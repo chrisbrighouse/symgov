@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 
 # Bump when any rule below changes. Rows computed under another version are
 # treated as missing and recomputed on the next search (or by the backfill).
-CATALOG_FACET_RULES_VERSION = 1
+CATALOG_FACET_RULES_VERSION = 2  # 2: the display ID prefers the canonical S-<n> ID
 
 CATALOG_DISCIPLINE_ORDER = [
     "Electrical",
@@ -480,6 +480,10 @@ def build_catalog_search_text(symbol: dict) -> str:
 
 
 def app_display_symbol_id(record: dict) -> str:
+    # A published symbol is always shown by its canonical S-<n> ID (2026-09-26).
+    canonical = _js_text(_js_or(record.get("catalogSymbolId"), record.get("catalog_symbol_id"))).strip()
+    if canonical:
+        return canonical
     package_id = _js_or(record.get("packageDisplayId"), record.get("package_display_id"))
     sequence = record.get("packageSymbolSequence")
     if sequence is None:

@@ -16,6 +16,8 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from psycopg.conninfo import make_conninfo
+from sqlalchemy.engine import URL
 
 BACKEND = Path(__file__).resolve().parents[1] / "backend"
 if str(BACKEND) not in sys.path:
@@ -62,7 +64,7 @@ def migrated():
     )
     try:
         port = int(_docker("port", name, "5432/tcp").stdout.strip().rsplit(":", 1)[1])
-        raw = f"postgresql://postgres:{password}@127.0.0.1:{port}/{DATABASE}"
+        raw = make_conninfo(host="127.0.0.1", port=port, user="postgres", password=password, dbname=DATABASE)
         deadline = time.monotonic() + POSTGRES_READY_TIMEOUT
         while True:
             try:
@@ -77,7 +79,9 @@ def migrated():
         # Earlier migrations grant to the app role, so it must exist first.
         with psycopg.connect(raw, autocommit=True) as connection:
             connection.execute("CREATE ROLE symgov_app NOLOGIN")
-        url = raw.replace("postgresql://", "postgresql+psycopg://", 1)
+        url = URL.create(
+            "postgresql+psycopg", username="postgres", password=password, host="127.0.0.1", port=port, database=DATABASE
+        ).render_as_string(hide_password=False)
         _alembic(url, "upgrade", BEFORE)
         ids: dict[str, uuid.UUID] = {}
         with psycopg.connect(raw, autocommit=True) as connection:

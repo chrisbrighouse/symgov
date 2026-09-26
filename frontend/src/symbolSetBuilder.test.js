@@ -104,7 +104,7 @@ describe('SymbolSetBuilderPanel', () => {
     const text = JSON.stringify(renderer.toJSON());
     assert.match(text, /Existing Symbol/);
     const nameElement = renderer.root.findByType('strong');
-    assert.equal(nameElement.children.join(''), 'Existing Symbol · existing-symbol');
+    assert.equal(nameElement.children.join(''), 'Existing Symbol · Draft');
     assert.match(text, /Public/);
     await act(async () => renderer.unmount());
   });

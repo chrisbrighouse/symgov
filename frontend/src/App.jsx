@@ -129,6 +129,8 @@ import {
   catalogStatusBadge,
   CATALOG_DISCIPLINE_ORDER,
   canonicalDiscipline,
+  symbolIdLabel,
+  symbolIdLabelOrState,
   catalogTaxonomyForSymbol,
   interpretEdCatalogPrompt,
   removeSymbolFromClipboard,
@@ -2726,46 +2728,13 @@ function displaySymbolName(record) {
   );
 }
 
+// One label everywhere (2026-09-26): S-<n> once published, else a labelled
+// provisional reference, else "Draft"/"Private" -- never a slug or UUID.
 function displaySymbolId(record) {
   if (!record) {
     return '';
   }
-  const packageId = record.packageDisplayId || record.package_display_id;
-  const sequence = record.packageSymbolSequence ?? record.package_symbol_sequence;
-  const packageDisplay = packageId && sequence != null ? `${packageId}-${sequence}` : '';
-  const candidates = [
-    record.publishedDisplayId,
-    record.published_display_id,
-    record.symbolDisplayId,
-    record.symbol_display_id,
-    record.displayName,
-    record.display_name,
-    record.workspaceDisplayName,
-    record.workspace_display_name,
-    packageDisplay,
-    record.symbolId,
-    record.proposedSymbolId,
-    record.symbol_slug,
-    record.slug
-  ];
-  const shortId = candidates.find((value) => /^[0-9A-F]{4}-\d+$/i.test(String(value || '').trim()));
-  return (
-    shortId ||
-    record.symbolDisplayId ||
-    record.symbol_display_id ||
-    record.publishedDisplayId ||
-    record.published_display_id ||
-    record.displayName ||
-    record.display_name ||
-    record.workspaceDisplayName ||
-    record.workspace_display_name ||
-    packageDisplay ||
-    packageId ||
-    record.symbolId ||
-    record.proposedSymbolId ||
-    record.id ||
-    ''
-  );
+  return symbolIdLabelOrState(record);
 }
 
 function displayReviewOriginalFilename(record) {
@@ -3457,6 +3426,7 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
         queueFamily: queueItem.queueFamily,
         reviewCaseId: queueItem.payload?.review_case_id || queueItem.payload?.reviewCaseId || null,
         publishedSymbolId: queueItem.publishedSymbolId,
+        publishedCatalogSymbolId: queueItem.publishedCatalogSymbolId,
         publishedPageCode: queueItem.publishedPageCode,
         publishedPackCode: queueItem.publishedPackCode,
         publishedStandardsPath: queueItem.publishedStandardsPath,
@@ -3472,6 +3442,7 @@ function buildWorkspaceMonitorItems(queueItems, queueMode, reviewItems, daisyIte
           stoppedSearch?.label,
           queueItem.priority,
           queueItem.publishedSymbolId,
+          queueItem.publishedCatalogSymbolId,
           queueItem.publishedPageCode,
           queueItem.publishedPackCode,
           queueItem.publishedStandardsPath,
@@ -3635,7 +3606,7 @@ function resolveReggieSuggestionSymbolId(suggestion) {
   const pathMatch = String(evidence.runtime_path || '').match(/(?:^|\/)aqi-[^-]+-(\d{4})(?:-|$)/i);
   const sourceId = evidence.source_id || suggestion?.sourceId;
   return (
-    displaySymbolId(evidence) ||
+    symbolIdLabel(evidence) ||
     evidence.candidateSymbolId ||
     evidence.candidate_symbol_id ||
     packageDisplay ||
@@ -3650,6 +3621,10 @@ function resolveQueueItemTitle(queueItem) {
   const packageSequence =
     queueItem.packageSymbolSequence ?? payload.package_symbol_sequence ?? payload.packageSymbolSequence;
   const packageDisplay = packageId && packageSequence != null ? `${packageId}-${packageSequence}` : packageId;
+  const symbolId = queueItem.publishedCatalogSymbolId || symbolIdLabel({ ...payload, ...queueItem });
+  if (symbolId) {
+    return symbolId;
+  }
   const isShortSymbolId = (value) => /^[0-9A-F]{4}-\d+$/i.test(String(value || '').trim());
   const shortIdCandidate = [
     queueItem.displayName,
@@ -3680,7 +3655,6 @@ function resolveQueueItemTitle(queueItem) {
     payload.file_name ||
     payload.source_file_name ||
     payload.candidate_symbol_id ||
-    payload.review_case_id ||
     payload.submission_batch_id ||
     queueItem.escalationReason ||
     `${queueItem.agentName || queueItem.agentId} ${queueItem.sourceType}`
@@ -3995,7 +3969,7 @@ function WorkspaceMonitorCard({ item, onOpen }) {
       {item.publishedStandardsPath || item.publishedSymbolId ? (
         <div className="monitor-card-tools">
           <span>Standards</span>
-          <b>{item.publishedPageCode || item.publishedSymbolId}</b>
+          <b>{item.publishedCatalogSymbolId || item.publishedPageCode || 'Published'}</b>
         </div>
       ) : null}
       <b className="monitor-card-status">{statusLabel}</b>

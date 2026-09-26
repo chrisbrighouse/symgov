@@ -27,19 +27,19 @@ curl --fail-with-body --get \
   "$SYMGOV_API_BASE_URL/catalog/symbols"
 ```
 
-The response contains `items` and an opaque `nextCursor`. Use a human-readable `displayId`, such as `0003-12`, in your interface.
+The response contains `items` and an opaque `nextCursor`. Use a human-readable `displayId`, such as `S-1`, in your interface.
 
 ## 4. Read details and a preview
 
 ```bash
 curl --fail-with-body \
   --header "Authorization: Bearer $SYMGOV_CATALOG_API_KEY" \
-  "$SYMGOV_API_BASE_URL/catalog/symbols/0003-12"
+  "$SYMGOV_API_BASE_URL/catalog/symbols/S-1"
 
 curl --fail-with-body \
   --header "Authorization: Bearer $SYMGOV_CATALOG_API_KEY" \
-  --output 0003-12-preview \
-  "$SYMGOV_API_BASE_URL/catalog/symbols/0003-12/preview"
+  --output S-1-preview \
+  "$SYMGOV_API_BASE_URL/catalog/symbols/S-1/preview"
 ```
 
 ## 5. Ask Catalog Ed to find symbols
@@ -64,8 +64,8 @@ curl --fail-with-body \
   --request POST \
   --header "Authorization: Bearer $SYMGOV_CATALOG_API_KEY" \
   --header "Content-Type: application/json" \
-  --data '{"symbolIds":["0003-12"],"format":"DXF"}' \
-  --output 0003-12-download \
+  --data '{"symbolIds":["S-1"],"format":"DXF"}' \
+  --output S-1-download \
   "$SYMGOV_API_BASE_URL/catalog/symbols/download"
 ```
 

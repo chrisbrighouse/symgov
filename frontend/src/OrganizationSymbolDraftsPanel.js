@@ -6,7 +6,7 @@ import {
   listOrganizationSymbolDrafts,
   submitOrganizationSymbolDraftForReview,
 } from './api.js';
-import { CATALOG_DISCIPLINE_ORDER } from './catalogWorkbench.js';
+import { CATALOG_DISCIPLINE_ORDER, symbolIdLabelOrState } from './catalogWorkbench.js';
 import { normalizeFacetValues } from './projectContext.js';
 
 const DEFAULT_API = {
@@ -165,7 +165,7 @@ export function OrganizationSymbolDraftsPanel({ canCreate = false, api = DEFAULT
           createElement(
             'div',
             null,
-            createElement('strong', null, `${draft.canonicalName} · ${draft.slug}`),
+            createElement('strong', null, `${draft.canonicalName} · ${symbolIdLabelOrState(draft)}`),
             createElement('p', { className: 'set-admin-muted' }, `Category: ${draft.category} · Discipline: ${draft.discipline}`),
             createElement('p', { className: 'set-admin-muted' }, `Revision status: ${revision?.lifecycleState || 'none'}`),
             revision?.pendingSubmissionId

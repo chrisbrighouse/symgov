@@ -67,7 +67,8 @@ def format_allocated_catalog_symbol_id(sequence_value: int) -> str:
         raise ValueError("catalog symbol ID sequence value must be positive")
     if sequence_value > POSTGRESQL_BIGINT_MAX:
         raise ValueError("catalog symbol ID sequence value exceeds PostgreSQL BIGINT maximum")
-    return f"S-{sequence_value:06d}"
+    # No zero padding (2026-09-26): `S-1`, growing without a width limit.
+    return f"S-{sequence_value}"
 
 
 def ensure_catalog_symbol_id(

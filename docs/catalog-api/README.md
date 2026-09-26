@@ -39,7 +39,7 @@ The Developer Hub keeps a submitted key in page memory only. It does not save it
 | POST | `/api/v1/catalog/ed/query` | `catalog.ed.query` | Ask for Catalog guidance or symbol discovery. |
 | POST | `/api/v1/catalog/symbols/{symbolRef}/feedback` | `catalog.feedback.write` | Submit feedback or an explicit review request; requires a caller-stable UUID `Idempotency-Key`. |
 
-Use human-readable IDs such as `0003-12` as the primary label in integrator interfaces.
+Use human-readable IDs such as `S-1` as the primary label in integrator interfaces.
 
 Feedback and `send_for_review` create or reuse governance work while preserving the current published symbol. They do not implicitly withdraw or unpublish it.
 

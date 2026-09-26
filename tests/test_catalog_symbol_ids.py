@@ -633,8 +633,10 @@ def test_normalize_rejects_non_strings_without_stringifying(value: object) -> No
         normalize_catalog_symbol_id(value)
 
 
-def test_format_allocated_catalog_symbol_id_zero_pads_sequence_value() -> None:
-    assert format_allocated_catalog_symbol_id(1) == "S-000001"
+def test_format_allocated_catalog_symbol_id_has_no_zero_padding() -> None:
+    """Decided 2026-09-26: `S-1`, not `S-000001`."""
+    assert format_allocated_catalog_symbol_id(1) == "S-1"
+    assert format_allocated_catalog_symbol_id(123456) == "S-123456"
 
 
 def test_format_allocated_catalog_symbol_id_does_not_truncate_large_value() -> None:
@@ -702,7 +704,7 @@ def test_ensure_catalog_symbol_id_allocates_first_sequence_value_atomically() ->
         allocated_at=allocated_at,
     )
 
-    assert identifier == "S-000001"
+    assert identifier == "S-1"
     assert symbol.catalog_symbol_id == identifier
     assert session.sequence_calls == 1
     assert session.commit_calls == 0
@@ -738,7 +740,7 @@ def test_locked_lookup_is_idempotent_after_committed_assignment_is_visible() -> 
         allocated_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
     )
 
-    assert first_identifier == second_identifier == "S-000001"
+    assert first_identifier == second_identifier == "S-1"
     assert first_caller.lock_requests == [(GovernedSymbol, symbol_id, True)]
     assert second_caller.lock_requests == [(GovernedSymbol, symbol_id, True)]
     assert first_caller.sequence_calls == 1
@@ -756,7 +758,7 @@ def test_caller_rollback_discards_pending_catalog_symbol_assignment() -> None:
         symbol_id,
         allocated_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
     )
-    assert symbol.catalog_symbol_id == "S-000001"
+    assert symbol.catalog_symbol_id == "S-1"
     assert len(session.pending) == 1
 
     session.rollback()
@@ -773,7 +775,7 @@ def test_identifier_primary_key_violation_consumes_gap_and_retries() -> None:
     session = AllocationSession(
         symbol,
         sequence_values=(1, 2),
-        colliding_identifiers=("S-000001",),
+        colliding_identifiers=("S-1",),
     )
 
     identifier = ensure_catalog_symbol_id(
@@ -782,10 +784,10 @@ def test_identifier_primary_key_violation_consumes_gap_and_retries() -> None:
         allocated_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
     )
 
-    assert identifier == "S-000002"
-    assert symbol.catalog_symbol_id == "S-000002"
+    assert identifier == "S-2"
+    assert symbol.catalog_symbol_id == "S-2"
     assert session.sequence_calls == 2
-    assert [row.identifier for row in session.pending] == ["S-000002"]
+    assert [row.identifier for row in session.pending] == ["S-2"]
 
 
 def test_identifier_primary_key_violation_supports_legacy_driver_fields() -> None:
@@ -799,7 +801,7 @@ def test_identifier_primary_key_violation_supports_legacy_driver_fields() -> Non
         symbol,
         sequence_values=(1, 2),
         insert_errors={
-            "S-000001": IntegrityError("insert", {}, LegacyUniqueViolation())
+            "S-1": IntegrityError("insert", {}, LegacyUniqueViolation())
         },
     )
 
@@ -809,7 +811,7 @@ def test_identifier_primary_key_violation_supports_legacy_driver_fields() -> Non
         allocated_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
     )
 
-    assert identifier == "S-000002"
+    assert identifier == "S-2"
     assert session.sequence_calls == 2
 
 
@@ -844,7 +846,7 @@ def test_canonical_per_symbol_unique_violation_is_not_retried() -> None:
     session = AllocationSession(
         symbol,
         sequence_values=(1, 2),
-        colliding_identifiers=("S-000001",),
+        colliding_identifiers=("S-1",),
         collision_constraint_name=(
             "uq_catalog_symbol_identifiers_canonical_governed_symbol"
         ),
@@ -898,7 +900,7 @@ def test_non_unique_integrity_error_is_not_retried() -> None:
     session = AllocationSession(
         symbol,
         sequence_values=(1, 2),
-        insert_errors={"S-000001": error},
+        insert_errors={"S-1": error},
     )
 
     with pytest.raises(IntegrityError) as caught:
@@ -919,7 +921,7 @@ def test_final_identifier_primary_key_collision_is_bounded_and_re_raised() -> No
     session = AllocationSession(
         symbol,
         sequence_values=(1, 2, 3, 4),
-        colliding_identifiers=("S-000001", "S-000002", "S-000003"),
+        colliding_identifiers=("S-1", "S-2", "S-3"),
     )
 
     with pytest.raises(IntegrityError) as caught:

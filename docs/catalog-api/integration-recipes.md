@@ -9,7 +9,7 @@ Recommended flow:
 3. Proxy an allowlisted set of Catalog requests from the browser.
 4. Search with `GET /api/v1/catalog/symbols` for predictable filters.
 5. Use `POST /api/v1/catalog/search` when application or drawing context should affect ranking.
-6. Display `displayId` such as `0003-12` before UUIDs or slugs.
+6. Display `displayId` such as `S-1` before UUIDs or slugs.
 7. Render preview URLs through your authenticated backend.
 
 Do not expose the key in JavaScript delivered to the browser. CORS is deployment-dependent.

@@ -119,6 +119,7 @@ Resolved namespace policy:
 - Preserve an existing package-shaped ID such as `0003-12` when the backfill proves that it is valid and maps unambiguously to exactly one governed symbol.
 - Treat a retained package-shaped value as opaque historical identity after persistence. Its parts no longer carry mutable package, page, sequence, or sort-order semantics.
 - Allocate new IDs from a dedicated global database sequence in the form `S-000001`, increasing the decimal portion without reuse. The numeric portion starts at six digits for readability but may grow beyond six digits without changing identity or requiring renumbering.
+- **Superseded 2026-09-26:** IDs are `S-<n>` with no zero padding (`S-1`), and every padded ID issued before then was renumbered to the same number and retired as a tombstone, not kept as an alias (migration `20260926_0066`). This overrides the six-digit presentation above and, for this one correction, the no-renumbering rule in section 4.5. Before publication a symbol has no canonical ID; the UI labels it with a provisional reference such as `Draft 0003-12` and never shows a slug or UUID as an ID.
 - Reserve the `S-` prefix for this allocator. Retained legacy IDs and `S-` IDs share one normalized global uniqueness domain.
 - The source-package allocator and package-local symbol sequence are not authorized canonical-ID allocators.
 

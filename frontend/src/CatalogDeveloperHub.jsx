@@ -481,7 +481,7 @@ export default function CatalogDeveloperHub() {
         <ol>
           <li>Call <code>/catalog/capabilities</code> to discover current behavior.</li>
           <li>Load <code>/catalog/taxonomy</code> for filter labels.</li>
-          <li>Search symbols and show the human-readable ID, such as <strong>0003-12</strong>.</li>
+          <li>Search symbols and show the human-readable ID, such as <strong>S-1</strong>.</li>
           <li>Retrieve symbol details and an authenticated preview.</li>
           <li>Use contextual search or Catalog Ed when a person describes a drawing need.</li>
         </ol>

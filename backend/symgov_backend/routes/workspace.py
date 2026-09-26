@@ -863,6 +863,10 @@ def symbol_revision_display_id(revision: SymbolRevision | None) -> str | None:
 
 
 def governed_symbol_display_id(session: Session, symbol: GovernedSymbol) -> str:
+    # A published symbol is shown by its canonical S-<n> ID (2026-09-26).
+    catalog_symbol_id = getattr(symbol, "catalog_symbol_id", None) if symbol is not None else None
+    if catalog_symbol_id:
+        return catalog_symbol_id
     revision = (
         session.get(SymbolRevision, symbol.current_revision_id)
         if symbol is not None and symbol.current_revision_id is not None
@@ -1059,6 +1063,7 @@ def rupert_published_metadata(session: Session, queue_item: AgentQueueItem) -> d
     row = (
         session.query(
             GovernedSymbol.slug.label("symbol_slug"),
+            GovernedSymbol.catalog_symbol_id.label("catalog_symbol_id"),
             PublishedPage.page_code.label("page_code"),
             PublicationPack.pack_code.label("pack_code"),
         )
@@ -1078,6 +1083,7 @@ def rupert_published_metadata(session: Session, queue_item: AgentQueueItem) -> d
 
     return {
         "published_symbol_id": row.symbol_slug,
+        "published_catalog_symbol_id": row.catalog_symbol_id,
         "published_page_code": row.page_code,
         "published_pack_code": row.pack_code,
         "published_standards_path": f"/standards?symbol={quote(row.symbol_slug)}",
@@ -2131,6 +2137,7 @@ def list_workspace_agent_queue_items(
             payload=queue_item.payload_json or {},
             toolSummary=queue_item_tool_summary(definition.slug, queue_item, latest_run),
             publishedSymbolId=published_metadata.get("published_symbol_id"),
+            publishedCatalogSymbolId=published_metadata.get("published_catalog_symbol_id"),
             publishedPageCode=published_metadata.get("published_page_code"),
             publishedPackCode=published_metadata.get("published_pack_code"),
             publishedStandardsPath=published_metadata.get("published_standards_path"),

@@ -8,6 +8,7 @@ import {
 } from './api.js';
 import { canAccessSemanticReview } from './semanticReviewJourney.js';
 import { formatReviewTimestamp, symbolLabel } from './SemanticReviewPage.js';
+import { symbolIdLabelOrState } from './catalogWorkbench.js';
 
 const DEFAULT_API = {
   listDrafts: listOrganizationSymbolDrafts,
@@ -285,7 +286,7 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
             onClick: () => setActiveSymbolId(draft.id),
             'aria-label': `Review ${draft.canonicalName}`,
           },
-          createElement('strong', null, `${draft.canonicalName} · ${draft.slug}`),
+          createElement('strong', null, `${draft.canonicalName} · ${symbolIdLabelOrState(draft)}`),
           createElement('p', { className: 'set-admin-muted' }, `Submitted ${new Date(draft.currentRevision.pendingSubmissionSubmittedAt).toLocaleString()}`),
           ),
         )),
@@ -351,7 +352,7 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
             createElement(
               'div',
               null,
-              createElement('strong', null, `${draft.canonicalName} · ${draft.slug}`),
+              createElement('strong', null, `${draft.canonicalName} · ${symbolIdLabelOrState(draft)}`),
               createElement('p', { className: 'set-admin-muted' },
                 `Category: ${draft.category} · Discipline: ${draft.discipline} · ${draft.organizationWide ? 'Organization-wide' : 'Set-only'}`),
             ),

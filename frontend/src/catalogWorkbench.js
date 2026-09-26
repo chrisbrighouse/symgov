@@ -331,7 +331,67 @@ export function applySavedCatalogView(view = {}) {
   };
 }
 
+const CANONICAL_SYMBOL_ID = /^S-\d+$/i;
+const PACKAGE_SYMBOL_ID = /^[0-9A-F]{4}-\d+$/i;
+
+function isPrivateSymbol(record) {
+  return record.source === 'organization_private'
+    || record.source === 'organization'
+    || record.visibility === 'organization_private';
+}
+
+// The one way a symbol's ID is shown (decision 2026-09-26): its canonical
+// S-<n> once published; before that, a labelled provisional package
+// reference such as "Draft 0003-12" ("Private 0003-12" for an organization's
+// own symbol). '' when there is neither, so callers choose their own fallback;
+// a slug or UUID is never shown as an ID.
+export function symbolIdLabel(record) {
+  if (!record) return '';
+  const text = (value) => String(value ?? '').trim();
+  const canonical = [
+    record.catalogSymbolId,
+    record.catalog_symbol_id,
+    record.publishedCatalogSymbolId,
+    record.displayId,
+    record.displayName,
+    record.display_name,
+    record.publishedDisplayId,
+    record.published_display_id,
+    record.symbolDisplayId,
+    record.symbol_display_id
+  ].map(text).find((value) => CANONICAL_SYMBOL_ID.test(value));
+  if (canonical) return canonical.toUpperCase();
+  const packageId = text(record.packageDisplayId || record.package_display_id);
+  const sequence = record.packageSymbolSequence ?? record.package_symbol_sequence;
+  const provisional = (packageId && sequence != null ? `${packageId}-${sequence}` : '')
+    || [
+      record.displayId,
+      record.symbolDisplayId,
+      record.symbol_display_id,
+      record.publishedDisplayId,
+      record.published_display_id,
+      record.displayName,
+      record.workspaceDisplayName,
+      record.proposedSymbolId,
+      record.symbolId,
+      record.slug
+    ].map(text).find((value) => PACKAGE_SYMBOL_ID.test(value));
+  if (provisional) return `${isPrivateSymbol(record) ? 'Private' : 'Draft'} ${provisional.toUpperCase()}`;
+  return '';
+}
+
+// A label for every symbol: symbolIdLabel, else "Draft" or "Private".
+export function symbolIdLabelOrState(record) {
+  return symbolIdLabel(record) || (record && isPrivateSymbol(record) ? 'Private' : 'Draft');
+}
+
 function displaySymbolId(symbol = {}) {
+  return symbolIdLabelOrState(symbol);
+}
+
+// Every reference a symbol can be searched by, raw: the display label is for
+// reading, but search keeps matching package references and slugs.
+function searchableSymbolId(symbol = {}) {
   const packageId = symbol.packageDisplayId || symbol.package_display_id;
   const sequence = symbol.packageSymbolSequence ?? symbol.package_symbol_sequence;
   const packageDisplay = packageId && sequence != null ? `${packageId}-${sequence}` : '';
@@ -366,7 +426,7 @@ export function removeSymbolFromClipboard(current = [], symbolId) {
 export function buildCatalogSearchText(symbol = {}) {
   const taxonomy = catalogTaxonomyForSymbol(symbol);
   return compactUnique([
-    displaySymbolId(symbol),
+    searchableSymbolId(symbol),
     displaySymbolName(symbol),
     symbol.id,
     symbol.symbolId,

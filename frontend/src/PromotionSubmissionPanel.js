@@ -6,6 +6,7 @@ import {
   submitOrganizationSymbolPromotionRequest,
   withdrawOrganizationSymbolPromotionRequest,
 } from './api.js';
+import { symbolIdLabelOrState } from './catalogWorkbench.js';
 
 const DEFAULT_API = {
   listDrafts: listOrganizationSymbolDrafts,
@@ -124,7 +125,7 @@ export function PromotionSubmissionPanel({ isAdmin, api = DEFAULT_API }) {
           createElement(
             'div',
             null,
-            createElement('strong', null, `${draft.canonicalName} · ${draft.slug}`),
+            createElement('strong', null, `${draft.canonicalName} · ${symbolIdLabelOrState(draft)}`),
             createElement('p', { className: 'set-admin-muted' }, `Revision status: ${draft.currentRevision?.lifecycleState || 'none'}`),
           ),
           openRequests.length > 0

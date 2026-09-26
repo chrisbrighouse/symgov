@@ -726,6 +726,7 @@ class WorkspaceAgentQueueItemResponse(BaseModel):
     payload: dict[str, Any]
     toolSummary: list[str] = Field(default_factory=list)
     publishedSymbolId: str | None = None
+    publishedCatalogSymbolId: str | None = None
     publishedPageCode: str | None = None
     publishedPackCode: str | None = None
     publishedStandardsPath: str | None = None

@@ -11,7 +11,7 @@
   "variable": [
     { "key": "baseUrl", "value": "https://YOUR_SYMGOV_HOST" },
     { "key": "catalogApiKey", "value": "YOUR_CATALOG_API_KEY", "type": "secret" },
-    { "key": "symbolRef", "value": "0003-12" },
+    { "key": "symbolRef", "value": "S-1" },
     { "key": "feedbackIdempotencyKey", "value": "00000000-0000-4000-8000-000000000001" }
   ],
   "item": [

@@ -6,6 +6,7 @@ import {
   replaceSymbolSetItems,
   searchSymbolSetBuilder,
 } from './api.js';
+import { symbolIdLabelOrState } from './catalogWorkbench.js';
 
 // The maximum the items route accepts (routes/symbol_sets.py:21, le=200).
 export const ITEMS_PAGE_SIZE = 200;
@@ -41,7 +42,7 @@ function toInput(item) {
 }
 
 function symbolDisplayId(item) {
-  return item.displayId || item.catalogSymbolId || item.slug || '';
+  return symbolIdLabelOrState(item);
 }
 
 function reindexed(items) {

@@ -455,7 +455,7 @@ def reviewer_client(review_api_database, seeded):
 def test_the_queue_renders_the_human_readable_catalog_identifier(reviewer_client, seeded):
     """`CLAUDE.md`: human-readable symbol IDs stay prominent in compact UI.
 
-    `S-000001`, allocated by the real allocator, not the governed symbol's
+    `S-1`, allocated by the real allocator, not the governed symbol's
     UUID -- which remains available as a transport key and nothing more.
     """
     client, _Session = reviewer_client
@@ -466,7 +466,7 @@ def test_the_queue_renders_the_human_readable_catalog_identifier(reviewer_client
     rows = {row["assignmentId"]: row for row in response.json()["items"]}
     public_row = rows[str(seeded["backfilled_assignment_id"])]
 
-    assert public_row["symbol"]["catalogSymbolId"] == "S-000001"
+    assert public_row["symbol"]["catalogSymbolId"] == "S-1"
     assert public_row["symbol"]["canonicalName"] == "Public Ball Valve"
     assert public_row["schemeCode"] == "ENGINEERING-DISCIPLINE"
     assert public_row["nodeCode"] == "MECHANICAL"
@@ -756,7 +756,7 @@ def test_the_revision_detail_returns_the_whole_governed_state(reviewer_client, s
     assert response.status_code == 200, response.text
     body = response.json()
 
-    assert body["symbol"]["catalogSymbolId"] == "S-000001"
+    assert body["symbol"]["catalogSymbolId"] == "S-1"
     assert body["lifecycleState"] == "published"
     assert any(row["method"] == "legacy_backfill" for row in body["classificationAssignments"])
     assert isinstance(body["semanticAssignments"], list)
