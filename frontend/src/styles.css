@@ -2374,6 +2374,12 @@ a:not([class]):active {
   line-height: 1.35;
 }
 
+.ed-suggestion {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: start;
+}
+
 .saved-view-list {
   display: grid;
   gap: 0.35rem;

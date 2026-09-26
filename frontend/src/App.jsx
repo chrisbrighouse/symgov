@@ -81,6 +81,7 @@ import {
   buildCatalogSearchQuery,
   defaultCatalogView,
   defaultSortForView,
+  edSetTabSuggestion,
   facetOptionsForView,
   facetValueLabel,
   groupBySetGroup,
@@ -1151,6 +1152,16 @@ function StandardsPage() {
   ];
 
   const facetOptions = facetOptionsForView(view, catalogSearch.facets, facetFilters);
+  const edUnsavedFormats = (edCatalogInterpretation?.preferredFormats || [])
+    .filter((format) => !catalogPreferences.formats.includes(format));
+  const edSuggestion = edSetTabSuggestion({
+    interpretation: edCatalogInterpretation,
+    view,
+    loaded: catalogSearch.loaded,
+    loading: catalogSearch.loading,
+    error: catalogSearch.error,
+    total: catalogSearch.total
+  });
   const symbolsById = new Map(loadedSymbols.map((symbol) => [symbol.id, symbol]));
   const selectedSymbols = selectedSymbolIds
     .map((symbolId) => symbolsById.get(symbolId) || selectedSymbolCache[symbolId])
@@ -1683,14 +1694,19 @@ function StandardsPage() {
       setWorkbenchStatus({ mode: 'error', message: 'Ask Ed what kind of Catalog symbol you need first.' });
       return;
     }
-    setQuery(interpretation.searchQuery || interpretation.query);
+    setQuery(interpretation.searchQuery);
     setFacetFilters((current) => ({ ...current, ...interpretation.facetFilters }));
-    updateCatalogPreferences((current) => serializeCatalogPreferences({
-      ...current,
-      formats: interpretation.preferredFormats.length ? interpretation.preferredFormats : current.formats
-    }));
     setEdCatalogInterpretation(interpretation);
     setWorkbenchStatus({ mode: 'success', message: interpretation.explanation });
+  }
+
+  // Ed only suggests formats; saving one is the user's choice.
+  function saveEdSuggestedFormats(formats) {
+    updateCatalogPreferences((current) => serializeCatalogPreferences({
+      ...current,
+      formats: [...current.formats, ...formats.filter((format) => !current.formats.includes(format))]
+    }));
+    setWorkbenchStatus({ mode: 'success', message: `Saved ${formats.join(', ')} as preferred format(s).` });
   }
 
   function addSelectedToCatalogClipboard() {
@@ -1933,6 +1949,19 @@ function StandardsPage() {
                 </button>
                 {edCatalogInterpretation ? (
                   <p className="ed-interpretation-text">{edCatalogInterpretation.explanation}</p>
+                ) : null}
+                {edUnsavedFormats.length ? (
+                  <button type="button" className="action-button secondary compact" onClick={() => saveEdSuggestedFormats(edUnsavedFormats)}>
+                    Save {edUnsavedFormats.join(', ')} as preferred format{edUnsavedFormats.length > 1 ? 's' : ''}
+                  </button>
+                ) : null}
+                {edSuggestion ? (
+                  <div className="ed-suggestion" role="status">
+                    <p className="ed-interpretation-text">{edSuggestion}</p>
+                    <button type="button" className="action-button secondary compact" onClick={() => switchView(CATALOG_VIEW)}>
+                      Search the Catalog tab
+                    </button>
+                  </div>
                 ) : null}
               </div>
             </div>

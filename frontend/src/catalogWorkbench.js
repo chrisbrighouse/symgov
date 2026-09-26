@@ -552,20 +552,18 @@ export function interpretEdCatalogPrompt(prompt = '') {
     }
   });
 
-  const searchTerms = compactUnique([
-    ...(facetFilters.catalogDisciplines || []),
-    ...(facetFilters.catalogCategories || []),
-    ...(facetFilters.useCases || []),
-    ...(facetFilters.availableFormats || [])
-  ]);
+  const hasFilters = Object.keys(facetFilters).length > 0;
 
   return {
     query: rawPrompt,
-    searchQuery: searchTerms.join(' ') || rawPrompt,
+    // Matched terms go into filters only. Repeating them as search text as
+    // well narrows twice, since the search box and the filters must both match.
+    searchQuery: hasFilters ? '' : rawPrompt,
     facetFilters,
+    // Offered to the user to save; never saved by Ed itself.
     preferredFormats: facetFilters.availableFormats || [],
     matchedTerms: compactUnique(matchedTerms),
-    explanation: matchedTerms.length
+    explanation: hasFilters
       ? `Ed mapped ${compactUnique(matchedTerms).join(', ')} to Catalog filters. No records were changed.`
       : 'Ed did not find exact filter matches, so the prompt was applied as a Catalog search only. No records were changed.',
     mutatesRecords: false

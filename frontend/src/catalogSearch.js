@@ -140,6 +140,15 @@ export function facetOptionsForView(view, serverFacets = {}, facetFilters = {}) 
   });
 }
 
+// What Ed adds once its search has come back: when the Set tab has nothing,
+// point at the Catalog tab, which searches every published symbol.
+export function edSetTabSuggestion({ interpretation, view, loaded, loading, error, total }) {
+  if (!interpretation || view !== SET_VIEW || !loaded || loading || error || total !== 0) {
+    return null;
+  }
+  return 'Nothing in this set matches. The Catalog tab searches every published symbol and may have matches.';
+}
+
 // The workbench's preference choices for one filter, as `{ value, count }`.
 // Facet values arrive counted; the fallback list is plain strings with no
 // count, so both shapes are accepted.

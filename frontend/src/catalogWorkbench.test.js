@@ -237,17 +237,17 @@ test('Ed guided search maps electrical switchgear and lighting categories', () =
     catalogDisciplines: ['Electrical'],
     catalogCategories: ['Switchgear / Distribution', 'Lighting']
   });
-  assert.match(interpretation.searchQuery, /electrical/i);
+  assert.equal(interpretation.searchQuery, '');
   assert.equal(interpretation.mutatesRecords, false);
 });
 
-test('Ed guided search converts natural-language electrical requests into searchable query terms', () => {
+test('Ed guided search leaves the search box clear when its terms became filters', () => {
   const interpretation = interpretEdCatalogPrompt('I need electrical symbols');
 
   assert.deepEqual(interpretation.facetFilters, {
     catalogDisciplines: ['Electrical']
   });
-  assert.equal(interpretation.searchQuery, 'Electrical');
+  assert.equal(interpretation.searchQuery, '');
   assert.equal(interpretation.mutatesRecords, false);
 });
 
@@ -258,7 +258,7 @@ test('Ed guided search maps motor requests to motors and drives filters', () => 
     catalogDisciplines: ['Electrical'],
     catalogCategories: ['Motors / Drives']
   });
-  assert.match(interpretation.searchQuery, /motors\s*\/\s*drives/i);
+  assert.equal(interpretation.searchQuery, '');
   assert.equal(interpretation.mutatesRecords, false);
 });
 
@@ -305,4 +305,25 @@ test('Ed guided search never creates mutation commands for mutation-like wording
   assert.equal(Object.hasOwn(interpretation, 'command'), false);
   assert.equal(Object.hasOwn(interpretation, 'handoffPayload'), false);
   assert.match(interpretation.explanation, /No records were changed/i);
+});
+
+test('Ed applies a P&ID pump request once, as filters, and only suggests the format', () => {
+  const interpretation = interpretEdCatalogPrompt('I need a pump symbol for a P&ID drawing in DXF');
+
+  assert.deepEqual(interpretation.facetFilters, {
+    catalogDisciplines: ['Piping / P&ID'],
+    catalogCategories: ['Pumps'],
+    useCases: ['Insert into CAD drawing'],
+    availableFormats: ['DXF']
+  });
+  assert.equal(interpretation.searchQuery, '');
+  assert.deepEqual(interpretation.preferredFormats, ['DXF']);
+  assert.match(interpretation.explanation, /No records were changed/i);
+});
+
+test('Ed searches for the prompt itself when nothing maps to a filter', () => {
+  const interpretation = interpretEdCatalogPrompt('flanged spool piece');
+
+  assert.deepEqual(interpretation.facetFilters, {});
+  assert.equal(interpretation.searchQuery, 'flanged spool piece');
 });

@@ -7,6 +7,7 @@ import {
   buildCatalogSearchQuery,
   defaultCatalogView,
   defaultSortForView,
+  edSetTabSuggestion,
   facetOptionsForView,
   facetValueLabel,
   groupBySetGroup,
@@ -154,4 +155,16 @@ test('preference options read counted facet values, and plain-string fallbacks, 
     [{ value: 'DXF', count: null }, { value: 'SVG', count: null }]
   );
   assert.deepEqual(preferenceOptionsFor(options, 'catalogCategories'), []);
+});
+
+test('Ed points at the Catalog tab only once its Set tab search has come back empty', () => {
+  const interpretation = { explanation: 'Ed mapped pumps to Catalog filters.' };
+  const settled = { interpretation, view: SET_VIEW, loaded: true, loading: false, error: '', total: 0 };
+
+  assert.match(edSetTabSuggestion(settled), /Catalog tab/);
+  assert.equal(edSetTabSuggestion({ ...settled, total: 3 }), null);
+  assert.equal(edSetTabSuggestion({ ...settled, loading: true }), null);
+  assert.equal(edSetTabSuggestion({ ...settled, error: 'Search failed.' }), null);
+  assert.equal(edSetTabSuggestion({ ...settled, view: CATALOG_VIEW }), null);
+  assert.equal(edSetTabSuggestion({ ...settled, interpretation: null }), null);
 });
