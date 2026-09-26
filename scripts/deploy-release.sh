@@ -189,6 +189,17 @@ else
   echo "no migration needed"
 fi
 
+step "Fill the Catalog facet store"
+# Otherwise the first Catalog search after the release computes every row
+# itself. It runs as the app role, so a missing privilege on the facet table
+# stops the release here, while the old code (which never reads it) still
+# serves. A no-op when nothing is missing.
+if [ -f "$REL/backend/symgov_backend/catalog_facets.py" ]; then
+  docker exec -w "$REL/backend" "$API" python3 manage_symgov.py backfill-catalog-facets --apply
+else
+  echo "release predates the facet store"
+fi
+
 repoint_and_restart "$OLD" "$SHA"
 verify "$SHA"
 echo "Rollback if needed: scripts/deploy-release.sh --rollback $OLD --yes"
