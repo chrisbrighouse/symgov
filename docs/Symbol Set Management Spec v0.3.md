@@ -61,7 +61,7 @@ Prepared for the Symgov project
 
 Symgov must support two valid account patterns. A non-commercial user has no organization membership and continues to use the Public Catalog through the existing Free or Plus subscription model. A commercial user belongs to one or more organizations and works inside a selected organization context. The same User account can therefore remain the common identity model without forcing every user into a commercial tenant.
 
-After email/PIN authentication, a commercial user with more than one active organization membership selects one organization. The issued session is locked to that organization, and changing organization requires sign-out and a new sign-in. A user with one organization can enter it automatically. A user with no organizations enters personal mode and does not see organization projects, private symbols or Symbol Sets.
+After email/PIN authentication, a commercial user with more than one active organization membership selects one organization. The issued session is locked to that organization, and changing organization requires sign-out and a new sign-in. A user with one organization can enter it automatically. A user with no organizations enters personal mode and does not see organization projects, private symbols or Symbol Sets. A personal account also cannot create projects or Symbol Sets: every project and Symbol Set is owned by an organization, so this requires organization membership.
 
 Commercial customers need reusable groups of symbols that match a project or task, combining approved public symbols with symbols owned privately by their organization. All active users in the selected organization may choose from that organization's active projects; no per-user project assignment is required. Each project has a name and an optional short description of no more than 50 characters to help users distinguish similar projects.
 
@@ -199,6 +199,7 @@ The active Symbol Context is calculated at runtime. In personal mode it contains
 
 - A user may belong to zero, one or many organizations.
 - A user with no active organization membership signs in to personal mode and continues under Free/Plus entitlement.
+- Every project and Symbol Set belongs to exactly one organization. A personal account cannot create or own a project or Symbol Set.
 - A commercial user session belongs to exactly one active organization.
 - Changing active organization requires sign-out and a new sign-in.
 - An organization may contain many projects, Symbol Sets, members and organization-owned symbols.
@@ -221,7 +222,7 @@ The active Symbol Context is calculated at runtime. In personal mode it contains
 
 | **Role/capability**          | **Scope**            | **Main responsibility**                                                                                                      |
 |------------------------------|----------------------|------------------------------------------------------------------------------------------------------------------------------|
-| Non-commercial User          | Personal account     | Browse/use the Public Catalog under Free or Plus, maintain Favorites and use other personal capabilities.                   |
+| Non-commercial User          | Personal account     | Browse/use the Public Catalog under Free or Plus, maintain Favorites and use other personal capabilities. Cannot create projects or Symbol Sets. |
 | Commercial User              | Organization         | Choose projects, select/switch Symbol Sets, use symbols and maintain personal Favorites.                                    |
 | Contributor                  | Organization         | Upload or edit organization-owned symbol drafts and respond to review comments.                                             |
 | Organization Reviewer        | Organization         | Explicitly approve or reject organization-owned symbol submissions for organization use.                                    |
