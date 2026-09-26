@@ -11,6 +11,7 @@ import {
   buildCatalogFacetValues,
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
+  canonicalDiscipline,
   catalogScopeBadge,
   catalogStatusBadge,
   catalogTaxonomyForSymbol,
@@ -326,4 +327,14 @@ test('Ed searches for the prompt itself when nothing maps to a filter', () => {
 
   assert.deepEqual(interpretation.facetFilters, {});
   assert.equal(interpretation.searchQuery, 'flanged spool piece');
+});
+
+test('canonicalDiscipline turns every stored spelling into one standard name, and unknowns into nothing', () => {
+  assert.equal(canonicalDiscipline('Piping'), 'Piping / P&ID');
+  assert.equal(canonicalDiscipline('general'), 'General / Annotation');
+  assert.equal(canonicalDiscipline('process_instrumentation'), 'Instrumentation & Controls');
+  assert.equal(canonicalDiscipline('instrumentation & controls'), 'Instrumentation & Controls');
+  assert.equal(canonicalDiscipline('structural'), 'Civil / Structural');
+  assert.equal(canonicalDiscipline('I&C'), '');
+  assert.equal(canonicalDiscipline(''), '');
 });

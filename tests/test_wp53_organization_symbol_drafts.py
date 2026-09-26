@@ -226,7 +226,7 @@ def test_org_admin_can_also_create_a_draft(wp53_fixtures):
     engine = wp53_fixtures["engine"]
     with Session(engine) as session:
         symbol, _ = create_draft(
-            session, wp53_fixtures["admin"], name="Admin symbol", category="test", discipline="test", summary="s"
+            session, wp53_fixtures["admin"], name="Admin symbol", category="test", discipline="Mechanical", summary="s"
         )
         session.commit()
         assert symbol.owner_organization_id == wp53_fixtures["organization"]
@@ -239,7 +239,7 @@ def test_ordinary_member_without_contributor_capability_cannot_create_a_draft(wp
     with Session(engine) as session:
         with pytest.raises(OrganizationSymbolDraftError):
             create_draft(
-                session, wp53_fixtures["ordinary"], name="x", category="test", discipline="test", summary="s"
+                session, wp53_fixtures["ordinary"], name="x", category="test", discipline="Mechanical", summary="s"
             )
 
 
@@ -249,7 +249,7 @@ def test_creator_admin_and_reviewer_can_see_the_draft_but_ordinary_member_and_cr
     engine = wp53_fixtures["engine"]
     with Session(engine) as session:
         symbol, _ = create_draft(
-            session, wp53_fixtures["contributor"], name="Visibility test", category="test", discipline="test", summary="s"
+            session, wp53_fixtures["contributor"], name="Visibility test", category="test", discipline="Mechanical", summary="s"
         )
         session.commit()
         symbol_id = symbol.id
@@ -269,8 +269,8 @@ def test_list_drafts_scopes_contributor_to_own_but_admin_and_reviewer_see_all(wp
 
     engine = wp53_fixtures["engine"]
     with Session(engine) as session:
-        create_draft(session, wp53_fixtures["contributor"], name="Mine", category="test", discipline="test", summary="s")
-        create_draft(session, wp53_fixtures["admin"], name="Admin's", category="test", discipline="test", summary="s")
+        create_draft(session, wp53_fixtures["contributor"], name="Mine", category="test", discipline="Mechanical", summary="s")
+        create_draft(session, wp53_fixtures["admin"], name="Admin's", category="test", discipline="Mechanical", summary="s")
         session.commit()
 
     with Session(engine) as session:
@@ -296,7 +296,7 @@ def test_attach_asset_validates_image_bytes_and_creates_a_real_attachment(wp53_f
     )
     with Session(engine) as session:
         symbol, revision = create_draft(
-            session, wp53_fixtures["contributor"], name="Asset test", category="test", discipline="test", summary="s"
+            session, wp53_fixtures["contributor"], name="Asset test", category="test", discipline="Mechanical", summary="s"
         )
         session.commit()
         symbol_id, revision_id = symbol.id, revision.id
@@ -354,7 +354,7 @@ def test_non_creator_non_admin_cannot_attach_an_asset(wp53_fixtures):
     engine = wp53_fixtures["engine"]
     with Session(engine) as session:
         symbol, revision = create_draft(
-            session, wp53_fixtures["contributor"], name="Guarded", category="test", discipline="test", summary="s"
+            session, wp53_fixtures["contributor"], name="Guarded", category="test", discipline="Mechanical", summary="s"
         )
         session.commit()
         symbol_id, revision_id = symbol.id, revision.id
@@ -379,7 +379,7 @@ def test_submit_for_review_creates_a_real_submission_and_advances_lifecycle(wp53
     engine = wp53_fixtures["engine"]
     with Session(engine) as session:
         symbol, revision = create_draft(
-            session, wp53_fixtures["contributor"], name="Submit test", category="test", discipline="test", summary="s"
+            session, wp53_fixtures["contributor"], name="Submit test", category="test", discipline="Mechanical", summary="s"
         )
         session.commit()
         symbol_id, revision_id = symbol.id, revision.id
@@ -429,7 +429,7 @@ def test_cross_organization_actor_cannot_submit_a_draft_for_review(wp53_fixtures
     engine = wp53_fixtures["engine"]
     with Session(engine) as session:
         symbol, revision = create_draft(
-            session, wp53_fixtures["contributor"], name="Cross-org guard", category="test", discipline="test", summary="s"
+            session, wp53_fixtures["contributor"], name="Cross-org guard", category="test", discipline="Mechanical", summary="s"
         )
         session.commit()
         symbol_id, revision_id = symbol.id, revision.id
@@ -441,4 +441,20 @@ def test_cross_organization_actor_cannot_submit_a_draft_for_review(wp53_fixtures
                 wp53_fixtures["cross_org_admin"],
                 symbol_id=symbol_id,
                 revision_id=revision_id,
+            )
+
+
+def test_a_draft_stores_the_standard_discipline_and_refuses_an_unknown_one(wp53_fixtures):
+    """X-04: only the Catalog's standard names reach governed_symbols."""
+    from sqlalchemy.orm import Session
+
+    engine = wp53_fixtures["engine"]
+    with Session(engine) as session:
+        symbol, _ = create_draft(
+            session, wp53_fixtures["contributor"], name="Legacy spelling", category="test", discipline="piping", summary="s"
+        )
+        assert symbol.discipline == "Piping / P&ID"
+        with pytest.raises(OrganizationSymbolDraftError, match="Unknown discipline 'Process Control'"):
+            create_draft(
+                session, wp53_fixtures["contributor"], name="Unknown", category="test", discipline="Process Control", summary="s"
             )

@@ -303,6 +303,27 @@ def normalize_catalog_discipline(value: Any) -> list[str]:
     return [raw] if raw else []
 
 
+_CANONICAL_DISCIPLINES = {name.lower(): name for name in CATALOG_DISCIPLINE_ORDER}
+
+
+def canonical_discipline(value: Any) -> str | None:
+    """The one standard discipline a stored value means, or None if unknown.
+
+    What every writer stores, so the column holds only the Catalog's own
+    names. A value the map spreads over two disciplines takes the first:
+    `process_instrumentation` is Instrumentation & Controls (X-04 decision,
+    2026-09-26).
+    """
+    raw = _js_text(value).strip()
+    if not raw:
+        return None
+    exact = _CANONICAL_DISCIPLINES.get(raw.lower())
+    if exact is not None:
+        return exact
+    mapped = _DISCIPLINE_MAP.get(_normalized_key(raw))
+    return mapped[0] if mapped else None
+
+
 def normalize_catalog_category(value: Any, symbol: dict) -> list[str]:
     raw = _js_text(value).strip()
     context = symbol_context_text(symbol)

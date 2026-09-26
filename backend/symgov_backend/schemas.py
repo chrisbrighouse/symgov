@@ -604,7 +604,8 @@ class WorkspaceReviewSymbolPropertyOptionResponse(BaseModel):
     fieldName: str
     value: str
     useCount: int
-    lastUsedAt: str
+    # None for the standard discipline list, which is fixed rather than remembered.
+    lastUsedAt: str | None = None
 
 
 class WorkspaceReviewSymbolPropertyOptionListResponse(BaseModel):

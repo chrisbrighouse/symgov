@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import AuthenticatedUser
+from .catalog_facets import CATALOG_DISCIPLINE_ORDER, canonical_discipline
 from .image_content import UnsafeImageContentError, validate_stored_image
 from .models import (
     GovernedSymbol,
@@ -135,7 +136,12 @@ def create_draft(
 
     clean_name = _clean_text(name, field="name", max_length=256)
     clean_category = _clean_text(category, field="category", max_length=128)
-    clean_discipline = _clean_text(discipline, field="discipline", max_length=128)
+    clean_discipline = canonical_discipline(_clean_text(discipline, field="discipline", max_length=128))
+    if clean_discipline is None:
+        # Only the Catalog's standard names are stored (X-04).
+        raise OrganizationSymbolDraftError(
+            f"Unknown discipline '{discipline.strip()}'. Choose one of: {', '.join(CATALOG_DISCIPLINE_ORDER)}."
+        )
     clean_summary = _clean_text(summary, field="summary", max_length=2000)
     clean_description = _clean_text(description, field="description", required=False, max_length=4000)
     clean_aliases = _clean_string_list(aliases, field="aliases")

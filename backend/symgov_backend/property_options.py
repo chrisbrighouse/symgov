@@ -7,6 +7,7 @@ from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Iterable, Protocol
 
+from .catalog_facets import CATALOG_DISCIPLINE_ORDER, canonical_discipline
 from .models import ReviewSymbolPropertyOption
 
 LEGACY_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "symgov/runtime-legacy-id")
@@ -120,6 +121,31 @@ def find_similar_property_option(
     return None
 
 
+class UnknownDisciplineError(ValueError):
+    """A discipline that is not one of the Catalog's standard names."""
+
+
+def standard_discipline_options() -> list[str]:
+    """The disciplines a reviewer may choose: the Catalog's own list (X-04).
+
+    Discipline options are no longer remembered from what reviewers typed, which
+    is how legacy spellings such as `Piping` kept being offered and re-saved.
+    """
+    return list(CATALOG_DISCIPLINE_ORDER)
+
+
+def standard_discipline_value(value: str | None) -> str | None:
+    """The standard name for a submitted discipline; empty stays empty."""
+    if not str(value or "").strip():
+        return None
+    canonical = canonical_discipline(value)
+    if canonical is None:
+        raise UnknownDisciplineError(
+            f"Unknown discipline '{str(value).strip()}'. Choose one of: {', '.join(CATALOG_DISCIPLINE_ORDER)}."
+        )
+    return canonical
+
+
 def remember_property_option(
     session: _PropertyOptionSession,
     *,
@@ -127,6 +153,8 @@ def remember_property_option(
     value: str | None,
     now: datetime,
 ) -> str | None:
+    if field_name == "discipline":
+        return standard_discipline_value(value)
     if field_name not in PROPERTY_OPTION_FIELDS:
         return normalize_property_option_value(value)
 

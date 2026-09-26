@@ -61,7 +61,8 @@ from ..published_feedback_gate import published_feedback_claims_paused
 from ..tracy_operations import tracy_status_summary
 from ..publication_handoff import execute_publication_handoff
 from ..publication_authority import lock_review_case_decision_authority
-from ..property_options import remember_property_option
+from ..catalog_facets import CATALOG_DISCIPLINE_ORDER, canonical_discipline
+from ..property_options import UnknownDisciplineError, remember_property_option, standard_discipline_options
 from ..review_followup_handoff import execute_review_followup_handoff
 from ..runtime import (
     SCOTT_SOURCE_DISCOVERY_DEFAULT_SEED_QUERY,
@@ -3016,7 +3017,13 @@ def run_hannah_cleanup_action(
         )
 
     assert action == "set_discipline"
-    new_discipline = str(action_value or "").strip()
+    # Only the Catalog's standard names are stored (X-04).
+    new_discipline = canonical_discipline(action_value)
+    if new_discipline is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown discipline '{str(action_value or '').strip()}'. Choose one of: {', '.join(CATALOG_DISCIPLINE_ORDER)}.",
+        )
     old_discipline = symbol.discipline
     symbol.discipline = new_discipline
     symbol.updated_at = datetime.now(timezone.utc).replace(microsecond=0)
@@ -3893,7 +3900,10 @@ def update_workspace_review_symbol_properties(
     properties.name = request.name
     properties.description = request.description
     properties.category = remember_property_option(session, field_name="category", value=request.category, now=now)
-    properties.discipline = remember_property_option(session, field_name="discipline", value=request.discipline, now=now)
+    try:
+        properties.discipline = remember_property_option(session, field_name="discipline", value=request.discipline, now=now)
+    except UnknownDisciplineError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     properties.format = normalize_symbol_format(request.format) or properties.format
     properties.source = "reviewer"
     properties.updated_by = actor.display_name
@@ -3957,16 +3967,17 @@ def list_workspace_review_symbol_property_options(
     field: str | None = Query(default=None, pattern="^(category|discipline)$"),
     session: Session = Depends(get_db_session),
 ) -> WorkspaceReviewSymbolPropertyOptionListResponse:
-    query = session.query(ReviewSymbolPropertyOption)
-    if field:
-        query = query.filter(ReviewSymbolPropertyOption.field_name == field)
-    options = query.order_by(
-        ReviewSymbolPropertyOption.field_name.asc(),
-        ReviewSymbolPropertyOption.use_count.desc(),
-        ReviewSymbolPropertyOption.display_value.asc(),
-    ).all()
-    return WorkspaceReviewSymbolPropertyOptionListResponse(
-        items=[
+    # Categories are remembered from reviewers' saves; disciplines are the
+    # Catalog's fixed list (X-04), so legacy discipline rows are never offered.
+    items: list[WorkspaceReviewSymbolPropertyOptionResponse] = []
+    if field in (None, "category"):
+        options = session.query(ReviewSymbolPropertyOption).filter(
+            ReviewSymbolPropertyOption.field_name == "category"
+        ).order_by(
+            ReviewSymbolPropertyOption.use_count.desc(),
+            ReviewSymbolPropertyOption.display_value.asc(),
+        ).all()
+        items.extend(
             WorkspaceReviewSymbolPropertyOptionResponse(
                 fieldName=option.field_name,
                 value=option.display_value,
@@ -3974,8 +3985,13 @@ def list_workspace_review_symbol_property_options(
                 lastUsedAt=isoformat_utc(option.last_used_at),
             )
             for option in options
-        ]
-    )
+        )
+    if field in (None, "discipline"):
+        items.extend(
+            WorkspaceReviewSymbolPropertyOptionResponse(fieldName="discipline", value=value, useCount=0)
+            for value in standard_discipline_options()
+        )
+    return WorkspaceReviewSymbolPropertyOptionListResponse(items=items)
 
 
 @router.post(

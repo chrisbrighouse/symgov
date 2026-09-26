@@ -14,7 +14,13 @@ from .runtime import RuntimePersistenceBridge, coerce_uuid
 AUTOMATION_POLICY_VERSION = "symgov-automation-policy-v1"
 PLACEHOLDER_VALUES = {"", "unknown", "tbd", "todo", "pending", "uncategorized", "general", "n/a", "na", "none"}
 PLACEHOLDER_CATEGORIES = PLACEHOLDER_VALUES | {"symbol", "symbols", "unclassified_symbol", "symbol_sheet", "mixed_symbol_set"}
-PLACEHOLDER_DISCIPLINES = PLACEHOLDER_VALUES | {"general", "general_industry", "unknown_discipline"}
+# "General / Annotation" is what `general` is stored as since X-04, and it
+# still means "no discipline known" (decision 2026-09-26). Both spellings are
+# listed because the automation gate keys it `general_annotation` and the
+# classification planner casefolds it to `general / annotation`.
+PLACEHOLDER_DISCIPLINES = PLACEHOLDER_VALUES | {
+    "general", "general_industry", "unknown_discipline", "general_annotation", "general / annotation",
+}
 GENERIC_SPLIT_NAME_PATTERNS = (
     re.compile(r"^\d{1,3}[-_ ]+[a-z0-9]+[-_ ]+region[-_ ]+\d{1,4}$", re.IGNORECASE),
     re.compile(r"^region[-_ ]+\d{1,4}$", re.IGNORECASE),

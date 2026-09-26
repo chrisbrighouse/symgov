@@ -502,7 +502,8 @@ def test_organization_promotion_proposes_structured_classification_assignments(w
     assert discipline_row.node_code == "MECHANICAL"
     assert discipline_row.preferred_label == "Mechanical"
     assert discipline_row.match_basis == "exact"
-    assert discipline_row.raw_value == "mechanical"
+    # The draft stored the standard name already (X-04, 2026-09-26).
+    assert discipline_row.raw_value == "Mechanical"
 
     category_row = by_scheme["SYMBOL-CATEGORY-FAMILY"]
     assert category_row.node_code == "VALVES"
@@ -531,27 +532,33 @@ def test_organization_promotion_keeps_a_coarse_taxonomy_match_out_of_the_legacy_
     reason (SM-P0-09, commit 56677a9): the browse taxonomy maps were built for
     bucketing, and using them to rewrite a durable column destroyed
     distinctions operators had recorded. The assignment is still proposed --
-    it is real structure -- but the operator's own `civil` stays in the
+    it is real structure -- but the operator's own `Cylinder` stays in the
     column. The repaired promotion path must honour the same rule the intake
     path does.
+
+    This used `civil` until X-04 (2026-09-26): a draft now stores its
+    discipline under the standard name, so `civil` arrives as `Civil /
+    Structural` and matches exactly. Category is still free text, and
+    `Cylinder` -> `Equipment` is the coarsening the rule was measured on.
     """
     engine, _, _ = wp73_database
     symbol_id, revision_id = _promote_organization_symbol(
-        engine, suffix="coarse", name="WP1.0 Retaining Wall", category="fire", discipline="civil"
+        engine, suffix="coarse", name="WP1.0 Retaining Wall", category="Cylinder", discipline="civil"
     )
 
     rows = _classification_assignments(engine, revision_id)
     by_scheme = {row.scheme_code: row for row in rows}
 
-    # `civil` reaches `Civil / Structural` only through the browse taxonomy.
+    # `Cylinder` reaches `Equipment` only through the browse taxonomy.
+    assert by_scheme["SYMBOL-CATEGORY-FAMILY"].preferred_label == "Equipment"
+    assert by_scheme["SYMBOL-CATEGORY-FAMILY"].match_basis == "legacy_taxonomy"
+    # The standard discipline name matches its node exactly.
     assert by_scheme["ENGINEERING-DISCIPLINE"].node_code == "CIVIL_STRUCTURAL"
-    assert by_scheme["ENGINEERING-DISCIPLINE"].match_basis == "legacy_taxonomy"
-    # `fire` is a discipline short form, not a category one: no category node.
-    assert "SYMBOL-CATEGORY-FAMILY" not in by_scheme, rows
+    assert by_scheme["ENGINEERING-DISCIPLINE"].match_basis == "exact"
 
     legacy = _legacy_columns(engine, symbol_id)
-    assert legacy.discipline == "civil", "a coarse match must not rewrite the display column"
-    assert legacy.category == "fire", "an unmatched facet must not clear the display column"
+    assert legacy.category == "Cylinder", "a coarse match must not rewrite the display column"
+    assert legacy.discipline == "Civil / Structural"
 
 
 def test_a_classification_mapping_failure_still_promotes_the_symbol(wp73_database, monkeypatch):

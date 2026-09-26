@@ -314,19 +314,22 @@ def test_the_standard_relationship_is_a_real_section_8_3_type():
 def test_the_legacy_category_and_discipline_expressions_are_untouched():
     """SM-P0-09 changes what the legacy columns receive; SM-P0-07 only adds
     beside them. If either expression below changes, this package has
-    crossed into the next one."""
+    crossed into the next one.
+
+    X-04 (2026-09-26) moved discipline into `publication_discipline`, which
+    keeps the same precedence and the `general` fallback but stores the
+    standard name; that helper's own test pins what it returns."""
     primary = """    category = text_value(
         symbol_properties.category if symbol_properties else None,
         classification.category if classification else None,
         fallback="symbol",
     )
-    discipline = text_value(
+    discipline = publication_discipline(
         symbol_properties.discipline if symbol_properties else None,
         classification.discipline if classification else None,
-        fallback="general",
     )"""
     child = """    category = text_value(symbol_properties.category if symbol_properties else None, fallback="symbol")
-    discipline = text_value(symbol_properties.discipline if symbol_properties else None, fallback="general")"""
+    discipline = publication_discipline(symbol_properties.discipline if symbol_properties else None)"""
     assert primary in HANDOFF_SOURCE
     assert child in HANDOFF_SOURCE
 
@@ -549,3 +552,17 @@ def test_the_forecast_plans_with_the_writers_own_planner():
     source = inspect.getsource(mapping_service.preview_classification_mapping)
     assert "plan_classification_mapping(fields)" in source
     assert "resolve_node(" in source
+
+
+def test_publication_stores_the_standard_discipline_and_keeps_the_general_fallback():
+    """X-04: the first non-empty value wins, as before, but it is stored under
+    its standard name; with none at all it is General / Annotation, which is
+    still a classification placeholder."""
+    from symgov_backend.automation_policy import PLACEHOLDER_DISCIPLINES
+    from symgov_backend.publication_handoff import publication_discipline
+
+    assert publication_discipline("piping", "Mechanical") == "Piping / P&ID"
+    assert publication_discipline(None, " process_instrumentation ") == "Instrumentation & Controls"
+    assert publication_discipline(None, "") == "General / Annotation"
+    assert publication_discipline("I&C") == "I&C"
+    assert "General / Annotation".casefold() in PLACEHOLDER_DISCIPLINES

@@ -36,6 +36,7 @@ from .models import (
 )
 from .service_users import enforce_noninteractive_service_account, new_service_pin_hash
 from .settings import get_settings
+from .catalog_facets import canonical_discipline
 from .organization_promotion_handoff import execute_organization_promotion_handoff
 from .classification_mapping import (
     MAPPER_VERSION,
@@ -97,6 +98,17 @@ def text_value(*values: Any, fallback: str = "") -> str:
         if text:
             return text
     return fallback
+
+
+def publication_discipline(*values: Any) -> str:
+    """The discipline a publication stores: the Catalog's standard name (X-04).
+
+    With no discipline at all it stores General / Annotation, which stays a
+    placeholder for classification, as `general` was. A value the map does not
+    know is kept as given rather than blocking publication.
+    """
+    raw = text_value(*values, fallback="general")
+    return canonical_discipline(raw) or raw
 
 
 def list_value(value: Any) -> list:
@@ -548,10 +560,9 @@ def ensure_approved_symbol_revision(
         classification.category if classification else None,
         fallback="symbol",
     )
-    discipline = text_value(
+    discipline = publication_discipline(
         symbol_properties.discipline if symbol_properties else None,
         classification.discipline if classification else None,
-        fallback="general",
     )
 
     symbol = session.query(GovernedSymbol).filter_by(slug=slug).one_or_none()
@@ -819,7 +830,7 @@ def ensure_approved_child_symbol_revision(
     )
     canonical_name = text_value(symbol_properties.name if symbol_properties else None, canonical_name)
     category = text_value(symbol_properties.category if symbol_properties else None, fallback="symbol")
-    discipline = text_value(symbol_properties.discipline if symbol_properties else None, fallback="general")
+    discipline = publication_discipline(symbol_properties.discipline if symbol_properties else None)
     child_classification = load_child_classification_record(
         session,
         review_case=review_case,

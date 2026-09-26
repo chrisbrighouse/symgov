@@ -101,7 +101,7 @@ def wp54_fixtures(stage5_database):
 def _draft_and_submission(engine, fixtures):
     with Session(engine) as session:
         symbol, revision = create_draft(
-            session, fixtures["contributor"], name="Review target", category="test", discipline="test", summary="s"
+            session, fixtures["contributor"], name="Review target", category="test", discipline="Mechanical", summary="s"
         )
         session.commit()
         symbol_id, revision_id = symbol.id, revision.id

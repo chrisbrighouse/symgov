@@ -130,7 +130,7 @@ def test_organization_bound_session_sees_its_own_organization_wide_symbol(wp81_d
     assert item["effectiveDate"] is None
     assert item["name"] == "WP8.1 Acme Hydrant"
     assert item["category"] == "fire"
-    assert item["discipline"] == "civil"
+    assert item["discipline"] == "Civil / Structural"  # stored under its standard name (X-04)
     assert item["status"] == "Approved"
 
 

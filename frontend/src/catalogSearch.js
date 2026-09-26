@@ -149,6 +149,47 @@ export function edSetTabSuggestion({ interpretation, view, loaded, loading, erro
   return 'Nothing in this set matches. The Catalog tab searches every published symbol and may have matches.';
 }
 
+// Use cases the facet store derives from a symbol's formats
+// (backend catalog_facets.py `use_cases_for_formats`), so dropping a
+// format filter must drop these too: an SVG pump is never "Insert into CAD".
+export const FORMAT_DERIVED_USE_CASES = ['Insert into CAD drawing', 'Mark up / annotate drawing', 'Use in PDF/report'];
+
+// The filters for Ed's nearest-match lookup: the same, minus the format and
+// the use cases that follow from it. Null when there is no format to drop.
+export function withoutFormatFilters(facetFilters = {}) {
+  if (!(facetFilters.availableFormats || []).length) {
+    return null;
+  }
+  const { availableFormats, useCases, ...rest } = facetFilters;
+  const keptUseCases = (useCases || []).filter((value) => !FORMAT_DERIVED_USE_CASES.includes(value));
+  return keptUseCases.length ? { ...rest, useCases: keptUseCases } : rest;
+}
+
+// Ed's nearest match when its filters find nothing: how many symbols match
+// once the format is dropped, and in which formats, e.g. "No DXF pumps; 20 in SVG."
+// `relaxed` is the search result for `withoutFormatFilters`.
+export function edNearestFormatSuggestion({ interpretation, facetFilters = {}, total, relaxed }) {
+  const requested = facetFilters.availableFormats || [];
+  if (!interpretation || !requested.length || total !== 0 || !relaxed?.total) {
+    return null;
+  }
+  const alternatives = (relaxed.facets?.availableFormats || [])
+    .filter((entry) => entry.count > 0 && !requested.includes(entry.value))
+    .sort((left, right) => right.count - left.count);
+  if (!alternatives.length) {
+    return null;
+  }
+  const categories = facetFilters.catalogCategories || [];
+  const subject = categories.length === 1 ? categories[0].toLowerCase() : 'matches';
+  const where = alternatives.length === 1
+    ? `in ${alternatives[0].value}`
+    : `in other formats: ${alternatives.map((entry) => `${entry.value} ${entry.count}`).join(', ')}`;
+  return {
+    message: `No ${requested.join(' or ')} ${subject}; ${relaxed.total} ${where}.`,
+    total: relaxed.total
+  };
+}
+
 // The workbench's preference choices for one filter, as `{ value, count }`.
 // Facet values arrive counted; the fallback list is plain strings with no
 // count, so both shapes are accepted.

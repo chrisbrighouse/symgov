@@ -7,6 +7,7 @@ import {
   buildCatalogSearchQuery,
   defaultCatalogView,
   defaultSortForView,
+  edNearestFormatSuggestion,
   edSetTabSuggestion,
   facetOptionsForView,
   facetValueLabel,
@@ -15,7 +16,8 @@ import {
   normalizeCatalogView,
   preferenceOptionsFor,
   searchSeededCatalog,
-  setSourceSummary
+  setSourceSummary,
+  withoutFormatFilters
 } from './catalogSearch.js';
 
 test('the Catalog tab query leaves out Set filters, so shared filters never break it', () => {
@@ -167,4 +169,44 @@ test('Ed points at the Catalog tab only once its Set tab search has come back em
   assert.equal(edSetTabSuggestion({ ...settled, error: 'Search failed.' }), null);
   assert.equal(edSetTabSuggestion({ ...settled, view: CATALOG_VIEW }), null);
   assert.equal(edSetTabSuggestion({ ...settled, interpretation: null }), null);
+});
+
+test('dropping the format also drops the use cases that follow from it, and keeps the rest', () => {
+  assert.deepEqual(withoutFormatFilters({
+    catalogDisciplines: ['Piping / P&ID'],
+    catalogCategories: ['Pumps'],
+    useCases: ['Insert into CAD drawing', 'Use as reference only'],
+    availableFormats: ['DXF']
+  }), {
+    catalogDisciplines: ['Piping / P&ID'],
+    catalogCategories: ['Pumps'],
+    useCases: ['Use as reference only']
+  });
+  assert.deepEqual(withoutFormatFilters({ useCases: ['Insert into CAD drawing'], availableFormats: ['DXF'] }), {});
+  assert.equal(withoutFormatFilters({ catalogCategories: ['Pumps'] }), null);
+});
+
+test('Ed names the nearest format when its filters find nothing', () => {
+  const interpretation = { explanation: 'Ed mapped pumps to Catalog filters.' };
+  const facetFilters = { catalogCategories: ['Pumps'], availableFormats: ['DXF'] };
+  const relaxed = { total: 20, facets: { availableFormats: [{ value: 'SVG', count: 20 }] } };
+
+  assert.deepEqual(
+    edNearestFormatSuggestion({ interpretation, facetFilters, total: 0, relaxed }),
+    { message: 'No DXF pumps; 20 in SVG.', total: 20 }
+  );
+  assert.equal(
+    edNearestFormatSuggestion({
+      interpretation,
+      facetFilters: { ...facetFilters, catalogCategories: [] },
+      total: 0,
+      relaxed: { total: 25, facets: { availableFormats: [{ value: 'PNG', count: 5 }, { value: 'SVG', count: 20 }] } }
+    }).message,
+    'No DXF matches; 25 in other formats: SVG 20, PNG 5.'
+  );
+  // Nothing to say while Ed's search has results, is still loading, or when the relaxed search is empty too.
+  assert.equal(edNearestFormatSuggestion({ interpretation, facetFilters, total: 3, relaxed }), null);
+  assert.equal(edNearestFormatSuggestion({ interpretation, facetFilters, total: null, relaxed }), null);
+  assert.equal(edNearestFormatSuggestion({ interpretation, facetFilters, total: 0, relaxed: { total: 0, facets: {} } }), null);
+  assert.equal(edNearestFormatSuggestion({ interpretation: null, facetFilters, total: 0, relaxed }), null);
 });

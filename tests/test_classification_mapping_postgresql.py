@@ -388,7 +388,11 @@ def test_the_legacy_columns_receive_exactly_what_they_did_before(session_factory
 
     Where the line *does* move is a value the mapper normalises --
     `door` -> `Doors` -- and that is pinned in
-    `test_legacy_classification_sync_postgresql.py` rather than here."""
+    `test_legacy_classification_sync_postgresql.py` rather than here.
+
+    X-04 (2026-09-26) changed one value on purpose: the `general` fallback is
+    stored as its standard name, General / Annotation. It is still a
+    placeholder, so it still produces no assignment."""
     with session_factory() as session:
         review_case, decision = _seed_case(
             session,
@@ -411,7 +415,7 @@ def test_the_legacy_columns_receive_exactly_what_they_did_before(session_factory
 
         symbol = session.get(GovernedSymbol, revision.symbol_id)
         assert symbol.category == "symbol"
-        assert symbol.discipline == "general"
+        assert symbol.discipline == "General / Annotation"
 
 
 def test_the_structured_primary_follows_the_reviewed_value_not_the_record(session_factory):

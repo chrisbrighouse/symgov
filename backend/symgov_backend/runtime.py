@@ -30,7 +30,7 @@ from .db import create_session_factory, read_env_file
 from .publication_authority import lock_review_case_decision_authority
 from .publication_gate import describe_refusal, enforce_publication_gate
 from .published_preview_authorizations import ensure_preview_authorization
-from .property_options import remember_property_option
+from .property_options import remember_property_option, standard_discipline_options
 from .service_users import enforce_noninteractive_service_account, new_service_pin_hash
 from .models import (
     AgentDefinition,
@@ -1593,9 +1593,10 @@ class RuntimePersistenceBridge:
                 )
                 .all()
             )
-            result: dict[str, list[str]] = {"category": [], "discipline": []}
+            result: dict[str, list[str]] = {"category": [], "discipline": standard_discipline_options()}
             for row in rows:
-                result.setdefault(row.field_name, []).append(row.display_value)
+                if row.field_name != "discipline":
+                    result.setdefault(row.field_name, []).append(row.display_value)
             return result
 
     def remember_review_symbol_property_option(self, *, field_name: str, value: str | None) -> str | None:

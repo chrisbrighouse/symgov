@@ -114,7 +114,7 @@ def _organization_wide_symbol(engine, actor) -> uuid.UUID:
     with SessionLocal() as session:
         symbol, revision = create_draft(
             session, actor,
-            name="Fire alarm call point", category="fire", discipline="fire-safety",
+            name="Fire alarm call point", category="fire", discipline="Fire & Life Safety",
             summary="Test organization-wide symbol.",
         )
         session.commit()

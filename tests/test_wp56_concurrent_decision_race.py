@@ -74,7 +74,7 @@ def race_fixtures(stage5_database):
 
     with Session(engine) as session:
         symbol, revision = create_draft(
-            session, contributor, name="Race target", category="test", discipline="test", summary="s"
+            session, contributor, name="Race target", category="test", discipline="Mechanical", summary="s"
         )
         session.commit()
         symbol_id, revision_id = symbol.id, revision.id

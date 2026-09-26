@@ -81,6 +81,7 @@ import {
   buildCatalogSearchQuery,
   defaultCatalogView,
   defaultSortForView,
+  edNearestFormatSuggestion,
   edSetTabSuggestion,
   facetOptionsForView,
   facetValueLabel,
@@ -89,7 +90,8 @@ import {
   normalizeCatalogView,
   preferenceOptionsFor,
   searchSeededCatalog,
-  setSourceSummary
+  setSourceSummary,
+  withoutFormatFilters
 } from './catalogSearch.js';
 import PanelErrorBoundary from './PanelErrorBoundary.js';
 import { canMountOrganizationSymbolDrafts, canMountProjectContext, canReviewOrganizationSymbols } from './projectContext.js';
@@ -125,6 +127,8 @@ import {
   buildCatalogViewSnapshot,
   catalogScopeBadge,
   catalogStatusBadge,
+  CATALOG_DISCIPLINE_ORDER,
+  canonicalDiscipline,
   catalogTaxonomyForSymbol,
   interpretEdCatalogPrompt,
   removeSymbolFromClipboard,
@@ -1125,6 +1129,32 @@ function StandardsPage() {
     reloadKey: setsAvailable ? symbolContext.contextVersion : 0,
     search: appConfig.apiRoot ? undefined : seededSearch
   });
+  // Ed's nearest match: the same search without the format filters, sent
+  // only once Ed's own search has come back empty.
+  const edRelaxedFilters = edCatalogInterpretation ? withoutFormatFilters(facetFilters) : null;
+  const edRelaxedSearch = useCatalogSearch(edRelaxedFilters ? buildCatalogSearchQuery({
+    view,
+    projectId: setProjectId,
+    query,
+    facetFilters: edRelaxedFilters,
+    columnFilters,
+    showFavourites,
+    sort: sortState,
+    pageSize: 1
+  }) : null, {
+    enabled: Boolean(edRelaxedFilters) && catalogSearch.loaded && !catalogSearch.loading && !catalogSearch.error && catalogSearch.total === 0,
+    reloadKey: setsAvailable ? symbolContext.contextVersion : 0,
+    delayMs: 0,
+    search: appConfig.apiRoot ? undefined : seededSearch
+  });
+  // Preference counts cover the whole Catalog, not the current filters: a
+  // preference is standing, so its count should not drop as filters change.
+  const preferenceBaselineQuery = useMemo(() => buildCatalogSearchQuery({ view: CATALOG_VIEW, pageSize: 1 }), []);
+  const preferenceBaseline = useCatalogSearch(preferenceBaselineQuery, {
+    enabled: workbenchExpanded,
+    delayMs: 0,
+    search: appConfig.apiRoot ? undefined : seededSearch
+  });
   const loadedSymbols = catalogSearch.items;
   const favouriteMutationsEnabled = Boolean(appConfig.apiRoot) && catalogSearch.loaded;
   const requestedSymbolId = searchParams.get('symbol') || '';
@@ -1152,6 +1182,17 @@ function StandardsPage() {
   ];
 
   const facetOptions = facetOptionsForView(view, catalogSearch.facets, facetFilters);
+  const preferenceFacetOptions = facetOptionsForView(CATALOG_VIEW, preferenceBaseline.facets, {
+    catalogDisciplines: catalogPreferences.disciplines,
+    catalogCategories: catalogPreferences.categories,
+    availableFormats: catalogPreferences.formats
+  });
+  const edNearestMatch = edNearestFormatSuggestion({
+    interpretation: edCatalogInterpretation,
+    facetFilters,
+    total: catalogSearch.loaded && !catalogSearch.loading ? catalogSearch.total : null,
+    relaxed: edRelaxedSearch.loaded && !edRelaxedSearch.loading && !edRelaxedSearch.error ? edRelaxedSearch : null
+  });
   const edUnsavedFormats = (edCatalogInterpretation?.preferredFormats || [])
     .filter((format) => !catalogPreferences.formats.includes(format));
   const edSuggestion = edSetTabSuggestion({
@@ -1864,7 +1905,7 @@ function StandardsPage() {
             <div className="catalog-workbench-grid">
               <div className="catalog-preference-card">
                 <h4>Preferred disciplines</h4>
-                {preferenceOptionsFor(facetOptions, 'catalogDisciplines', { limit: 12 }).map(({ value, count }) => (
+                {preferenceOptionsFor(preferenceFacetOptions, 'catalogDisciplines', { limit: 12 }).map(({ value, count }) => (
                   <label key={`pref-discipline-${value}`} className="checkbox-row compact">
                     <input
                       type="checkbox"
@@ -1878,7 +1919,7 @@ function StandardsPage() {
               </div>
               <div className="catalog-preference-card">
                 <h4>Preferred categories</h4>
-                {preferenceOptionsFor(facetOptions, 'catalogCategories', { limit: 12 }).map(({ value, count }) => (
+                {preferenceOptionsFor(preferenceFacetOptions, 'catalogCategories', { limit: 12 }).map(({ value, count }) => (
                   <label key={`pref-category-${value}`} className="checkbox-row compact">
                     <input
                       type="checkbox"
@@ -1892,7 +1933,7 @@ function StandardsPage() {
               </div>
               <div className="catalog-preference-card">
                 <h4>Preferred formats</h4>
-                {preferenceOptionsFor(facetOptions, 'availableFormats', { fallback: ['DXF', 'SVG', 'PNG'], limit: 10 }).map(({ value, count }) => (
+                {preferenceOptionsFor(preferenceFacetOptions, 'availableFormats', { fallback: ['DXF', 'SVG', 'PNG'], limit: 10 }).map(({ value, count }) => (
                   <label key={`pref-format-${value}`} className="checkbox-row compact">
                     <input
                       type="checkbox"
@@ -1954,6 +1995,18 @@ function StandardsPage() {
                   <button type="button" className="action-button secondary compact" onClick={() => saveEdSuggestedFormats(edUnsavedFormats)}>
                     Save {edUnsavedFormats.join(', ')} as preferred format{edUnsavedFormats.length > 1 ? 's' : ''}
                   </button>
+                ) : null}
+                {edNearestMatch ? (
+                  <div className="ed-suggestion" role="status">
+                    <p className="ed-interpretation-text">{edNearestMatch.message}</p>
+                    <button
+                      type="button"
+                      className="action-button secondary compact"
+                      onClick={() => setFacetFilters((current) => withoutFormatFilters(current) || current)}
+                    >
+                      Show the {edNearestMatch.total} without the format filter
+                    </button>
+                  </div>
                 ) : null}
                 {edSuggestion ? (
                   <div className="ed-suggestion" role="status">
@@ -4237,7 +4290,8 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
     : [];
   const propertyNamePattern = '^[A-Za-z0-9 \\\\-/$]*$';
   const categoryOptions = mergePropertyOptions(propertyOptions?.category, propertyDraft.category);
-  const disciplineOptions = mergePropertyOptions(propertyOptions?.discipline, propertyDraft.discipline);
+  // A fixed list, not remembered values: only standard names are saved (X-04).
+  const disciplineOptions = propertyOptions?.discipline?.length ? propertyOptions.discipline : CATALOG_DISCIPLINE_ORDER;
 
   useEffect(() => {
     setImageUnavailable(!resolvedPreviewUrl);
@@ -4259,7 +4313,8 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
       description: symbolProperties.description || suggestedDescription,
       format: symbolProperties.format || suggestedFormat,
       category: symbolProperties.category || suggestedCategory,
-      discipline: symbolProperties.discipline || suggestedDiscipline
+      // Legacy spellings such as `piping` pre-select their standard name (X-04).
+      discipline: canonicalDiscipline(symbolProperties.discipline || suggestedDiscipline)
     });
     setPropertyState({ pending: false, message: '', error: '' });
   }, [
@@ -4446,26 +4501,15 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
           </label>
           <label className="field">
             <span>Discipline</span>
-            <div className="property-combo-field">
-              <input
-                type="text"
-                maxLength="80"
-                placeholder="Type discipline"
-                autoComplete="off"
-                value={propertyDraft.discipline}
-                onChange={(event) => updatePropertyDraft('discipline', event.target.value)}
-              />
-              <select
-                aria-label="Saved discipline values"
-                value=""
-                onChange={(event) => updatePropertyDraft('discipline', event.target.value)}
-              >
-                <option value="">Saved</option>
-                {disciplineOptions.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-            </div>
+            <select
+              value={propertyDraft.discipline}
+              onChange={(event) => updatePropertyDraft('discipline', event.target.value)}
+            >
+              <option value="">Choose a discipline</option>
+              {disciplineOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
           </label>
         </div>
         <div className="symbol-property-actions">

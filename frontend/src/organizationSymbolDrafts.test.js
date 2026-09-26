@@ -90,12 +90,12 @@ describe('OrganizationSymbolDraftsPanel', () => {
     await act(async () => {
       renderer.root.findByProps({ id: 'org-symbol-draft-name' }).props.onChange({ target: { value: 'Valve' } });
       renderer.root.findByProps({ id: 'org-symbol-draft-category' }).props.onChange({ target: { value: 'process' } });
-      renderer.root.findByProps({ id: 'org-symbol-draft-discipline' }).props.onChange({ target: { value: 'mechanical' } });
+      renderer.root.findByProps({ id: 'org-symbol-draft-discipline' }).props.onChange({ target: { value: 'Mechanical' } });
       renderer.root.findByProps({ id: 'org-symbol-draft-summary' }).props.onChange({ target: { value: 'A valve symbol.' } });
     });
     await act(async () => renderer.root.findByType('form').props.onSubmit({ preventDefault() {} }));
     assert.deepEqual(api.calls[0], ['create', {
-      name: 'Valve', category: 'process', discipline: 'mechanical', summary: 'A valve symbol.',
+      name: 'Valve', category: 'process', discipline: 'Mechanical', summary: 'A valve symbol.',
       description: undefined, aliases: [], keywords: [],
     }]);
     assert.match(JSON.stringify(renderer.toJSON()), /Draft created\./);

@@ -1,4 +1,4 @@
-const CATALOG_DISCIPLINE_ORDER = [
+export const CATALOG_DISCIPLINE_ORDER = [
   'Electrical',
   'Fire & Life Safety',
   'Piping / P&ID',
@@ -93,6 +93,19 @@ function symbolContextText(symbol = {}) {
     symbol.payload?.source_file,
     symbol.payload?.source_file_name
   ).join(' ');
+}
+
+// The one standard discipline a value means, or '' if unknown: what the review
+// editor and the drafts form offer and save (X-04). Mirrors the backend's
+// `canonical_discipline`: a value mapped to two disciplines takes the first,
+// so `process_instrumentation` is Instrumentation & Controls.
+export function canonicalDiscipline(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const exact = CATALOG_DISCIPLINE_ORDER.find((name) => name.toLowerCase() === raw.toLowerCase());
+  if (exact) return exact;
+  const [first] = normalizeCatalogDiscipline(raw);
+  return CATALOG_DISCIPLINE_ORDER.includes(first) ? first : '';
 }
 
 export function normalizeCatalogDiscipline(value) {

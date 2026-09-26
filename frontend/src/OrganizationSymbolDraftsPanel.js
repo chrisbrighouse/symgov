@@ -6,6 +6,7 @@ import {
   listOrganizationSymbolDrafts,
   submitOrganizationSymbolDraftForReview,
 } from './api.js';
+import { CATALOG_DISCIPLINE_ORDER } from './catalogWorkbench.js';
 import { normalizeFacetValues } from './projectContext.js';
 
 const DEFAULT_API = {
@@ -238,12 +239,16 @@ export function OrganizationSymbolDraftsPanel({ canCreate = false, api = DEFAULT
         ),
         createElement('label', { htmlFor: 'org-symbol-draft-discipline' },
           'Discipline',
-          createElement('input', {
+          // Only the Catalog's standard names are accepted (X-04).
+          createElement('select', {
             id: 'org-symbol-draft-discipline',
             value: form.discipline,
             onChange: (event) => setForm((current) => ({ ...current, discipline: event.target.value })),
             required: true,
-          }),
+          },
+            createElement('option', { value: '' }, 'Choose a discipline'),
+            ...CATALOG_DISCIPLINE_ORDER.map((name) => createElement('option', { key: name, value: name }, name)),
+          ),
         ),
         createElement('label', { htmlFor: 'org-symbol-draft-summary' },
           'Summary',

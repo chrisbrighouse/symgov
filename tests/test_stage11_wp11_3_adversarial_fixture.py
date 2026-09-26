@@ -254,7 +254,7 @@ def _approved_private_symbol(fixtures, actor_reviewer, *, name):
     so it is reachable exactly the way production would reach it."""
     SessionLocal = fixtures.Session
     with SessionLocal() as session:
-        symbol, revision = create_draft(session, actor_reviewer, name=name, category="fire", discipline="fire-safety", summary="WP11.3 fixture symbol.")
+        symbol, revision = create_draft(session, actor_reviewer, name=name, category="fire", discipline="Fire & Life Safety", summary="WP11.3 fixture symbol.")
         session.commit()
         submission = submit_for_review(session, actor_reviewer, symbol_id=symbol.id, revision_id=revision.id)
         session.commit()
