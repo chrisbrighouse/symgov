@@ -57,12 +57,12 @@ MAX_PAGE_SIZE = 200
 
 # Facet key -> (stored column or live expression, is it a JSON array?)
 FACET_FIELDS: dict[str, tuple[str, bool]] = {
-    "catalogDisciplines": ("f.disciplines", True),
-    "catalogCategories": ("f.categories", True),
-    "useCases": ("f.use_cases", True),
-    "availableFormats": ("f.formats", True),
+    "catalogDisciplines": ("c.disciplines", True),
+    "catalogCategories": ("c.categories", True),
+    "useCases": ("c.use_cases", True),
+    "availableFormats": ("c.formats", True),
     "pack": ("c.pack_title", False),
-    "symbolFamily": ("f.symbol_family", False),
+    "symbolFamily": ("c.symbol_family", False),
 }
 
 # Only the Set tab has these: a Catalog row belongs to no set.
@@ -102,8 +102,8 @@ _COMMENT_COUNT = """
 
 # Column key -> (text as the browser shows it, sort expression)
 COLUMN_FIELDS: dict[str, tuple[str, str]] = {
-    "id": ("f.display_id", 'f.id_sort_key COLLATE "C"'),
-    "name": ("f.display_name", 'f.name_sort_key COLLATE "C"'),
+    "id": ("c.display_id", 'c.id_sort_key COLLATE "C"'),
+    "name": ("c.display_name", 'c.name_sort_key COLLATE "C"'),
     "scope": (
         "CASE WHEN c.source = 'organization_private' THEN 'Organization Private' ELSE 'Public' END",
         "CASE WHEN c.source = 'organization_private' THEN 1 ELSE 0 END",
@@ -122,9 +122,9 @@ COLUMN_FIELDS: dict[str, tuple[str, str]] = {
         f" ELSE ({_COMMENT_COUNT})::text || ' comments' END",
         f"({_COMMENT_COUNT})",
     ),
-    "catalogCategories": (_joined("f.categories"), f"lower({_joined('f.categories')})"),
-    "catalogDisciplines": (_joined("f.disciplines"), f"lower({_joined('f.disciplines')})"),
-    "availableFormats": (_joined("f.formats"), f"lower({_joined('f.formats')})"),
+    "catalogCategories": (_joined("c.categories"), f"lower({_joined('c.categories')})"),
+    "catalogDisciplines": (_joined("c.disciplines"), f"lower({_joined('c.disciplines')})"),
+    "availableFormats": (_joined("c.formats"), f"lower({_joined('c.formats')})"),
     "pack": ("COALESCE(c.pack_title, '')", "lower(COALESCE(c.pack_title, ''))"),
     "revision": ("COALESCE(c.revision_label, '')", "lower(COALESCE(c.revision_label, ''))"),
 }
@@ -304,26 +304,51 @@ def _set_candidates_sql() -> str:
     recently effective publication. A private member must still belong to the
     caller's organization; its eligibility was checked when the palette was
     resolved.
+
+    The public half does not scan `PUBLISHED_SYMBOLS_SQL`: the palette has
+    just confirmed each member's current public revision through
+    `current_public_symbols`, so this only fetches their publication rows,
+    under the same conditions `active_public_symbol_projections` applies.
+    Reading every public row to find about 1,000 members cost 0.41 s at
+    52,500 public symbols. The rows a page returns are still loaded through
+    `PUBLISHED_SYMBOLS_SQL` itself (`load_public_page_rows`).
     """
     return f"""
         (SELECT DISTINCT ON (m.governed_symbol_id)
             'public'::text AS source,
             m.governed_symbol_id,
             m.symbol_revision_id,
-            p.page_id,
-            p.pack_id,
-            p.pack_title,
-            p.pack_code,
-            p.page_code,
-            p.revision_label,
-            p.effective_date,
-            p.last_updated_at,
+            pp.id::text AS page_id,
+            pk.id::text AS pack_id,
+            pk.title AS pack_title,
+            pk.pack_code,
+            pp.page_code,
+            sr.revision_label,
+            pp.effective_date,
+            GREATEST(gs.updated_at, sr.created_at, pp.updated_at, pk.updated_at) AS last_updated_at,
             {_MEMBER_COLUMNS}
         FROM {_MEMBERS}
-        JOIN ({PUBLISHED_SYMBOLS_SQL}) p
-            ON p.symbol_id::uuid = m.governed_symbol_id
-           AND p.symbol_revision_id::uuid = m.symbol_revision_id
-        ORDER BY m.governed_symbol_id, p.effective_date DESC, p.pack_code, p.page_id)
+        JOIN governed_symbols gs
+            ON gs.id = m.governed_symbol_id
+           AND gs.visibility = 'public'
+           AND gs.current_revision_id = m.symbol_revision_id
+        JOIN symbol_revisions sr
+            ON sr.id = m.symbol_revision_id
+           AND sr.symbol_id = gs.id
+           AND sr.lifecycle_state = 'published'
+        JOIN published_pages pp
+            ON pp.current_symbol_revision_id = sr.id
+           AND pp.publication_state = 'active'
+        JOIN publication_packs pk
+            ON pk.id = pp.pack_id
+           AND pk.status = 'published'
+           AND pk.audience = 'public'
+        JOIN pack_entries pe
+            ON pe.pack_id = pk.id
+           AND pe.published_page_id = pp.id
+           AND pe.symbol_revision_id = sr.id
+           AND pe.publication_state = 'active'
+        ORDER BY m.governed_symbol_id, pp.effective_date DESC, pk.pack_code, pp.id)
         UNION ALL
         SELECT
             'organization_private'::text AS source,
@@ -346,27 +371,71 @@ def _set_candidates_sql() -> str:
     """
 
 
-_FACET_JOIN = """
-    JOIN symbol_revisions sr_live ON sr_live.id = c.symbol_revision_id
-    JOIN governed_symbols gs_live ON gs_live.id = c.governed_symbol_id
-"""
+_FACET_COLUMNS = (
+    "display_id", "display_name", "id_sort_key", "name_sort_key", "search_text",
+    "symbol_family", "disciplines", "categories", "formats", "use_cases",
+)
 
 
-def _stale_revision_ids(session: Session, scope: CatalogSearchScope) -> list[uuid.UUID]:
-    sql = f"""
-        WITH c AS ({_candidates_sql(scope)})
-        SELECT DISTINCT c.symbol_revision_id
-        FROM c
-        {_FACET_JOIN}
+def _candidates_with_facets_sql(scope: "CatalogSearchScope") -> str:
+    """The candidates, each with its current facet row if there is one.
+
+    A row whose facet values are missing or outdated has `facet_missing`
+    set; the search fills those in and builds the table again.
+    """
+    facet_columns = ", ".join(f"f.{column}" for column in _FACET_COLUMNS)
+    return f"""
+        SELECT raw.*, {facet_columns}, f.symbol_revision_id IS NULL AS facet_missing
+        FROM ({_candidates_sql(scope)}) raw
+        JOIN symbol_revisions sr_live ON sr_live.id = raw.symbol_revision_id
+        JOIN governed_symbols gs_live ON gs_live.id = raw.governed_symbol_id
         LEFT JOIN catalog_symbol_facets f
-            ON f.symbol_revision_id = c.symbol_revision_id
+            ON f.symbol_revision_id = raw.symbol_revision_id
            AND f.rules_version = :rules_version
            AND f.revision_generation = sr_live.catalog_facet_generation
            AND f.symbol_generation = gs_live.catalog_facet_generation
-        WHERE f.symbol_revision_id IS NULL
     """
-    params = {"rules_version": CATALOG_FACET_RULES_VERSION, **scope.parameters()}
-    return [row.symbol_revision_id for row in session.execute(text(sql), params).all()]
+
+
+CANDIDATES_TABLE = "catalog_search_candidates"
+
+
+def _build_candidates(session: Session, scope: CatalogSearchScope) -> None:
+    """Evaluate the visibility rules once for this search, into a temporary table.
+
+    Each row carries its facet values, so the stale check, the counts and the
+    page all read this one table, and the live visibility join runs once per
+    request rather than three times. The table is dropped when the
+    transaction ends.
+
+    Nested loops are switched off for this one statement.
+    `PUBLISHED_SYMBOLS_SQL` joins the publication tables twice (directly and
+    through `active_public_symbol_projections`), and the planner estimates a
+    single row for the result, so with nested loops it probes the indexes
+    once per public symbol, or worse. Measured on 52,500 public rows
+    (2026-09-25): the Catalog build took 988 ms with nested loops and 336 ms
+    without; a 1,000-item Set build took 40 s, and 1.6 s or 14.8 s with the
+    member IDs pushed into the query, against well under a second with hash
+    joins. Hash joins make both scopes one predictable pass over the public
+    rows.
+    """
+    session.execute(text(f"DROP TABLE IF EXISTS pg_temp.{CANDIDATES_TABLE}"))
+    # The counts query unnests every facet array, and the planner assumes
+    # 100 elements per array, so its cost estimate crosses the JIT threshold
+    # and about 700 ms goes on compiling a query that runs in about 400 ms
+    # (measured on 53,001 rows, 2026-09-25). Off for this transaction only.
+    session.execute(text("SET LOCAL jit = off"))
+    session.execute(text("SET LOCAL enable_nestloop = off"))
+    session.execute(
+        text(f"CREATE TEMP TABLE {CANDIDATES_TABLE} ON COMMIT DROP AS {_candidates_with_facets_sql(scope)}"),
+        {"rules_version": CATALOG_FACET_RULES_VERSION, **scope.parameters()},
+    )
+    session.execute(text("RESET enable_nestloop"))
+
+
+def _stale_revision_ids(session: Session) -> list[uuid.UUID]:
+    sql = f"SELECT DISTINCT symbol_revision_id FROM {CANDIDATES_TABLE} WHERE facet_missing"
+    return [row.symbol_revision_id for row in session.execute(text(sql)).all()]
 
 
 def _filter_clauses(request: CatalogSearchRequest, scope: CatalogSearchScope, params: dict) -> tuple[list[str], dict[str, str]]:
@@ -376,7 +445,7 @@ def _filter_clauses(request: CatalogSearchRequest, scope: CatalogSearchScope, pa
     if query:
         params["search_pattern"] = _like_pattern(query)
         clauses.append(
-            "(f.search_text LIKE :search_pattern ESCAPE '\\'"
+            "(c.search_text LIKE :search_pattern ESCAPE '\\'"
             " OR lower(COALESCE(c.pack_title, '')) LIKE :search_pattern ESCAPE '\\'"
             " OR lower(COALESCE(c.pack_code, '')) LIKE :search_pattern ESCAPE '\\'"
             " OR lower(COALESCE(c.page_code, '')) LIKE :search_pattern ESCAPE '\\'"
@@ -425,7 +494,7 @@ def _order_by(request: CatalogSearchRequest, params: dict) -> str:
     preferred = [str(value).strip().upper() for value in request.preferred_formats if str(value or "").strip()]
     if preferred:
         ranks = " ".join(
-            f"WHEN f.formats ? :preferred_{index} THEN {index}" for index in range(len(preferred))
+            f"WHEN c.formats ? :preferred_{index} THEN {index}" for index in range(len(preferred))
         )
         for index, value in enumerate(preferred):
             params[f"preferred_{index}"] = value
@@ -433,7 +502,7 @@ def _order_by(request: CatalogSearchRequest, params: dict) -> str:
     direction = "DESC" if request.direction == "desc" else "ASC"
     nulls = "NULLS LAST" if direction == "DESC" else "NULLS FIRST"
     parts.append(f"{column_sort} {direction} {nulls}")
-    parts.extend(['f.id_sort_key COLLATE "C"', "c.symbol_revision_id", "c.pack_id NULLS FIRST", "c.page_id NULLS FIRST"])
+    parts.extend(['c.id_sort_key COLLATE "C"', "c.symbol_revision_id", "c.pack_id NULLS FIRST", "c.page_id NULLS FIRST"])
     return ", ".join(parts)
 
 
@@ -441,27 +510,23 @@ def search_catalog(session: Session, scope: CatalogSearchScope, request: Catalog
     request.validate(scope)
     facet_fields = scope.facet_fields
 
-    stale = _stale_revision_ids(session, scope)
+    _build_candidates(session, scope)
+    stale = _stale_revision_ids(session)
     if stale:
+        # Committed with the rest of the search, below. Rare once the
+        # backfill has run, so rebuilding the candidates costs little.
         compute_catalog_facets(session, stale)
-        session.commit()
+        _build_candidates(session, scope)
 
     params: dict = {"rules_version": CATALOG_FACET_RULES_VERSION, **scope.parameters()}
     clauses, facet_clauses = _filter_clauses(request, scope, params)
     base = f"""
-        WITH c AS ({_candidates_sql(scope)}),
-        base AS (
+        WITH base AS (
             SELECT c.pack_title, c.group_name, c.palette_source,
-                f.symbol_family, f.disciplines, f.categories, f.formats, f.use_cases,
+                c.symbol_family, c.disciplines, c.categories, c.formats, c.use_cases,
                 {_conjunction(clauses)} AS m_always,
                 {", ".join(f"{facet_clauses.get(key, 'TRUE')} AS m_{key}" for key in facet_fields)}
-            FROM c
-            {_FACET_JOIN}
-            JOIN catalog_symbol_facets f
-                ON f.symbol_revision_id = c.symbol_revision_id
-               AND f.rules_version = :rules_version
-               AND f.revision_generation = sr_live.catalog_facet_generation
-               AND f.symbol_generation = gs_live.catalog_facet_generation
+            FROM {CANDIDATES_TABLE} c
         )
     """
     all_match = " AND ".join(["m_always", *(f"m_{key}" for key in facet_fields)])
@@ -492,19 +557,12 @@ def search_catalog(session: Session, scope: CatalogSearchScope, request: Catalog
     for values in facets.values():
         values.sort(key=lambda item: (item["value"].casefold(), item["value"]))
 
-    # The page query orders on expressions over `c` and `f`, so it reads the
-    # joined rows directly rather than the flattened base CTE.
+    # The page query orders on expressions over the candidate rows, so it
+    # reads the table directly rather than the flattened base CTE.
     page_sql = f"""
-        WITH c AS ({_candidates_sql(scope)})
         SELECT c.source, c.governed_symbol_id, c.symbol_revision_id, c.page_id, c.pack_id,
             c.palette_source, c.set_order, c.group_name, c.display_label, c.preferred_format, c.notes
-        FROM c
-        {_FACET_JOIN}
-        JOIN catalog_symbol_facets f
-            ON f.symbol_revision_id = c.symbol_revision_id
-           AND f.rules_version = :rules_version
-           AND f.revision_generation = sr_live.catalog_facet_generation
-           AND f.symbol_generation = gs_live.catalog_facet_generation
+        FROM {CANDIDATES_TABLE} c
         WHERE {_conjunction(clauses + list(facet_clauses.values()))}
         ORDER BY {_order_by(request, params)}
         LIMIT :limit OFFSET :offset
@@ -533,6 +591,8 @@ def search_catalog(session: Session, scope: CatalogSearchScope, request: Catalog
         }
         for row in session.execute(text(page_sql), params).all()
     ]
+    # Keeps any facet rows filled above, and drops the candidates table.
+    session.commit()
     return CatalogSearchPage(entries=entries, total=total, facets=facets)
 
 
