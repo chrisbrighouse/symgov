@@ -423,7 +423,31 @@ export function removeSymbolFromClipboard(current = [], symbolId) {
   return (current || []).filter((item) => item.id !== symbolId);
 }
 
+function splitCamel(value) {
+  return value.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/([A-Z])([A-Z][a-z])/g, '$1 $2');
+}
+
+// Stored text as plain words: `ballValve`, `ball_valve` and `Ball-Valve` all
+// read "ball valve". Mirrors `search_words` in backend catalog_facets.py (P-01).
+export function searchWords(value) {
+  return splitCamel(String(value ?? '')).replace(/[_\-./]+/g, ' ').toLowerCase().split(/\s+/).filter(Boolean).join(' ');
+}
+
+// The words a search must all match: split on spaces and camelCase only.
+// Hyphens, dots and underscores stay inside a word, so an ID such as `S-12`
+// is one term and `_` is never a wildcard; the stored text already carries the
+// split words. Mirrors `search_query_terms`.
+export function searchQueryTerms(query) {
+  return splitCamel(String(query ?? '')).toLowerCase().split(/\s+/).filter(Boolean);
+}
+
 export function buildCatalogSearchText(symbol = {}) {
+  const text = buildRawCatalogSearchText(symbol);
+  const words = searchWords(text);
+  return words && words !== text.toLowerCase() ? `${text} ${words}` : text;
+}
+
+function buildRawCatalogSearchText(symbol = {}) {
   const taxonomy = catalogTaxonomyForSymbol(symbol);
   return compactUnique([
     searchableSymbolId(symbol),

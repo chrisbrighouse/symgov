@@ -1,3 +1,5 @@
+import { searchQueryTerms } from './catalogWorkbench.js';
+
 function symbolKey(symbol = {}) {
   return String(symbol.id || symbol.symbolId || '').trim();
 }
@@ -73,7 +75,8 @@ export function filterCatalogSymbols(
   { query = '', columnFilters = {}, facetFilters = {}, showFavourites = false } = {},
   { buildSearchText, getField, getFacetValues } = {}
 ) {
-  const normalizedQuery = String(query || '').trim().toLowerCase();
+  // Every word must match (P-01), as in the database search.
+  const queryTerms = searchQueryTerms(query);
 
   return (items || []).filter((symbol) => {
     if (showFavourites && !Boolean(symbol?.isFavourite)) {
@@ -81,7 +84,7 @@ export function filterCatalogSymbols(
     }
 
     const searchText = String(buildSearchText?.(symbol) || '').toLowerCase();
-    if (normalizedQuery && !searchText.includes(normalizedQuery)) {
+    if (queryTerms.some((term) => !searchText.includes(term))) {
       return false;
     }
 

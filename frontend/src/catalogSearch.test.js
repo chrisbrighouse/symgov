@@ -210,3 +210,17 @@ test('Ed names the nearest format when its filters find nothing', () => {
   assert.equal(edNearestFormatSuggestion({ interpretation, facetFilters, total: 0, relaxed: { total: 0, facets: {} } }), null);
   assert.equal(edNearestFormatSuggestion({ interpretation: null, facetFilters, total: 0, relaxed }), null);
 });
+
+test('a phrase search finds camelCase and snake_case names, one word at a time', async () => {
+  const symbols = [
+    { id: 'a', name: 'ballValve', category: 'valve', downloads: ['a.svg'] },
+    { id: 'b', name: 'Ball valve', slug: 'ball_valve', category: 'valve', downloads: ['b.svg'] },
+    { id: 'c', name: 'ButterflyValve', category: 'valve', downloads: ['c.svg'] },
+    { id: 'd', name: 'Gate valve', category: 'valve', downloads: ['d.svg'] }
+  ];
+  const getField = (symbol, key) => String(symbol[key] || '');
+  const search = (q) => searchSeededCatalog(symbols, buildCatalogSearchQuery({ view: CATALOG_VIEW, query: q }), { getField });
+  assert.deepEqual((await search('ball valve')).items.map((item) => item.id).sort(), ['a', 'b']);
+  assert.deepEqual((await search('butterfly valve')).items.map((item) => item.id), ['c']);
+  assert.equal((await search('va_ve')).total, 0);
+});

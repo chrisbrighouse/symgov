@@ -100,3 +100,19 @@ def test_app_display_symbol_name_prefers_the_served_name():
 def test_natural_sort_key_orders_numbers_by_value():
     ordered = sorted(["SYM-10", "sym-2", "SYM-1", "SYM-002a"], key=natural_sort_key)
     assert ordered == ["SYM-1", "sym-2", "SYM-002a", "SYM-10"]
+
+
+def test_search_text_carries_plain_words_so_a_phrase_finds_camel_and_snake_names():
+    """P-01: "ball valve" must find `ballValve` and `ball_valve`."""
+    from symgov_backend.catalog_facets import build_catalog_search_text, search_query_terms, search_words
+
+    assert search_words("ballValve BallValve ball_valve Butterfly-Valve HTTPServer") == (
+        "ball valve ball valve ball valve butterfly valve http server"
+    )
+    text = build_catalog_search_text({"name": "ballValve", "slug": "ball_valve"}).lower()
+    assert all(term in text for term in search_query_terms("ball valve"))
+    # Queries split on spaces and camelCase only: an ID stays one term and
+    # `_` is never a wildcard.
+    assert search_query_terms("ballValve  valve") == ["ball", "valve", "valve"]
+    assert search_query_terms("S-12") == ["s-12"]
+    assert search_query_terms("va_ve") == ["va_ve"]

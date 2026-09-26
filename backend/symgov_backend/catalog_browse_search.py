@@ -49,7 +49,7 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Session
 
-from .catalog_facets import CATALOG_FACET_RULES_VERSION, compute_catalog_facets
+from .catalog_facets import CATALOG_FACET_RULES_VERSION, compute_catalog_facets, search_query_terms
 from .published_catalog import PUBLISHED_SYMBOLS_SQL
 
 DEFAULT_PAGE_SIZE = 60
@@ -441,16 +441,18 @@ def _stale_revision_ids(session: Session) -> list[uuid.UUID]:
 def _filter_clauses(request: CatalogSearchRequest, scope: CatalogSearchScope, params: dict) -> tuple[list[str], dict[str, str]]:
     """The always-applied clauses, and one clause per ticked facet."""
     clauses: list[str] = []
-    query = request.query.strip().lower()
-    if query:
-        params["search_pattern"] = _like_pattern(query)
+    # Every word must match somewhere (P-01), so "ball valve" finds `ballValve`
+    # and `ball_valve`, whose stored search text carries the split words too.
+    for position, term in enumerate(search_query_terms(request.query)):
+        parameter = f"search_pattern_{position}"
+        params[parameter] = _like_pattern(term)
         clauses.append(
-            "(c.search_text LIKE :search_pattern ESCAPE '\\'"
-            " OR lower(COALESCE(c.pack_title, '')) LIKE :search_pattern ESCAPE '\\'"
-            " OR lower(COALESCE(c.pack_code, '')) LIKE :search_pattern ESCAPE '\\'"
-            " OR lower(COALESCE(c.page_code, '')) LIKE :search_pattern ESCAPE '\\'"
+            f"(c.search_text LIKE :{parameter} ESCAPE '\\'"
+            f" OR lower(COALESCE(c.pack_title, '')) LIKE :{parameter} ESCAPE '\\'"
+            f" OR lower(COALESCE(c.pack_code, '')) LIKE :{parameter} ESCAPE '\\'"
+            f" OR lower(COALESCE(c.page_code, '')) LIKE :{parameter} ESCAPE '\\'"
             # A set's own label for the symbol (Set tab only; null otherwise).
-            " OR lower(COALESCE(c.display_label, '')) LIKE :search_pattern ESCAPE '\\')"
+            f" OR lower(COALESCE(c.display_label, '')) LIKE :{parameter} ESCAPE '\\')"
         )
     for position, (key, value) in enumerate(sorted(request.columns.items())):
         wanted = str(value or "").strip().lower()

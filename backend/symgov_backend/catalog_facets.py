@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 
 # Bump when any rule below changes. Rows computed under another version are
 # treated as missing and recomputed on the next search (or by the backfill).
-CATALOG_FACET_RULES_VERSION = 2  # 2: the display ID prefers the canonical S-<n> ID
+CATALOG_FACET_RULES_VERSION = 3  # 2: canonical S-<n> display ID; 3: word-split search text (P-01)
 
 CATALOG_DISCIPLINE_ORDER = [
     "Electrical",
@@ -447,7 +447,39 @@ def _workbench_display_name(symbol: dict) -> Any:
     )
 
 
+_CAMEL_LOWER_UPPER = re.compile(r"([a-z0-9])([A-Z])")
+_CAMEL_ACRONYM = re.compile(r"([A-Z])([A-Z][a-z])")
+_TEXT_WORD_SEPARATORS = re.compile(r"[_\-./]+")
+
+
+def _split_camel(value: str) -> str:
+    return _CAMEL_ACRONYM.sub(r"\1 \2", _CAMEL_LOWER_UPPER.sub(r"\1 \2", value))
+
+
+def search_words(value: Any) -> str:
+    """Stored text as plain words: `ballValve`, `ball_valve` and `Ball-Valve` all read `ball valve`.
+
+    Mirrors `searchWords` in frontend/src/catalogWorkbench.js (P-01).
+    """
+    return " ".join(_TEXT_WORD_SEPARATORS.sub(" ", _split_camel(_js_text(value))).lower().split())
+
+
+def search_query_terms(query: Any) -> list[str]:
+    """The words a search must all match: split on spaces and camelCase only.
+
+    Hyphens, dots and underscores stay inside a word, so an ID such as `S-12`
+    is one term and `_` is never a wildcard; the stored text already carries
+    the split words. Mirrors `searchQueryTerms`."""
+    return _split_camel(_js_text(query)).lower().split()
+
+
 def build_catalog_search_text(symbol: dict) -> str:
+    text = _build_catalog_search_text(symbol)
+    words = search_words(text)
+    return f"{text} {words}" if words and words != text.lower() else text
+
+
+def _build_catalog_search_text(symbol: dict) -> str:
     taxonomy = catalog_taxonomy_for_symbol(symbol)
     keywords = symbol.get("keywords")
     keyword_values = keywords if isinstance(keywords, list) else (list(keywords) if isinstance(keywords, str) else [])
