@@ -71,7 +71,7 @@ import { adminRouteElements } from './adminRoutes.js';
 import { canAccessOrganizationAdmin, canAccessPlatformAdmin } from './adminJourneys.js';
 import { semanticReviewRouteElements } from './semanticReviewRoutes.js';
 import { canAccessSemanticReview } from './semanticReviewJourney.js';
-import { ProjectContextBar, ProjectContextBarView } from './ProjectContextBar.js';
+import { ProjectContextBarView } from './ProjectContextBar.js';
 import { useSymbolContext } from './useSymbolContext.js';
 import { useCatalogSearch } from './useCatalogSearch.js';
 import {
@@ -89,8 +89,7 @@ import {
   searchSeededCatalog,
   setSourceSummary
 } from './catalogSearch.js';
-import { EffectivePalettePanel } from './EffectivePalettePanel.js';
-import { canMountEffectivePalette, canMountOrganizationSymbolDrafts, canMountProjectContext, canReviewOrganizationSymbols } from './projectContext.js';
+import { canMountOrganizationSymbolDrafts, canMountProjectContext, canReviewOrganizationSymbols } from './projectContext.js';
 import { OrganizationSymbolDraftsPage } from './OrganizationSymbolDraftsPage.js';
 import { OrganizationSymbolReviewsPage } from './OrganizationSymbolReviewsPage.js';
 import { ReviewClassificationForecast } from './ReviewClassificationForecast.js';
@@ -542,9 +541,6 @@ function AppContent() {
   const location = useLocation();
   const isStandardsRoute = location.pathname.startsWith('/standards');
   const showRail = Boolean(auth.user) && location.pathname !== '/login' && location.pathname !== '/change-pin';
-  // The Catalog page has its own pickers, in its Set tab.
-  const showMemberProjectContext = !isStandardsRoute && canMountProjectContext(auth) && auth.user.organization.baseRole !== 'admin';
-  const showMemberEffectivePalette = !isStandardsRoute && canMountEffectivePalette(auth) && auth.user.organization.baseRole !== 'admin';
 
   return (
     <div className={`app-shell ${isStandardsRoute ? 'mode-standards' : 'mode-workspace'} ${showRail ? 'has-side-rail' : ''}`}>
@@ -552,8 +548,6 @@ function AppContent() {
       <Header auth={auth} />
       {showRail ? <SideRail /> : null}
       <main className="page-frame">
-        {showMemberProjectContext ? <ProjectContextBar auth={auth} /> : null}
-        {showMemberEffectivePalette ? <EffectivePalettePanel auth={auth} /> : null}
         <Routes>
           <Route path="/" element={<HomeRedirect />} />
           <Route path="/login" element={<LoginPage />} />
@@ -1123,8 +1117,9 @@ function StandardsPage() {
   );
   const catalogSearch = useCatalogSearch(searchQuery, {
     enabled: viewResolved && (view !== SET_VIEW || Boolean(setProjectId)),
-    // The Set tab follows the pickers: each fresh selection reloads it.
-    reloadKey: view === SET_VIEW ? symbolContext.contextVersion : 0,
+    // Both tabs follow the pickers: the Set tab's contents and the Catalog
+    // tab's "In set" markers change with each fresh selection.
+    reloadKey: setsAvailable ? symbolContext.contextVersion : 0,
     search: appConfig.apiRoot ? undefined : seededSearch
   });
   const loadedSymbols = catalogSearch.items;
@@ -1748,6 +1743,8 @@ function StandardsPage() {
   }
 
   const filtersActive = hasActiveFilters({ query, facetFilters, columnFilters, showFavourites });
+  // The Catalog tab marks rows in the active set once a set resolves.
+  const showSetMarkers = view === CATALOG_VIEW && Boolean(catalogSearch.activeSet);
   const setSummary = setSourceSummary(catalogSearch, catalogSearch.facets);
   const groupedBySet = view === SET_VIEW && sortState.key === SET_ORDER_SORT;
   const setGroupTotals = Object.fromEntries((catalogSearch.facets.setGroup || []).map((entry) => [entry.value, entry.count]));
@@ -2201,6 +2198,7 @@ function StandardsPage() {
                           <p className="catalog-card-set-label">{symbol.paletteEntry.displayLabel}</p>
                         ) : null}
                         <CatalogBadgeRow symbol={symbol} />
+                        <InActiveSetMarker symbol={symbol} setCode={catalogSearch.activeSet?.code} />
                         <p>{card.categories.slice(0, 2).join(' · ') || 'Category pending'}</p>
                         <div className="catalog-card-chip-row" aria-label="Disciplines">
                           {card.disciplines.slice(0, 2).map((value) => <span key={`${symbol.id}-discipline-${value}`}>{value}</span>)}
@@ -2217,6 +2215,7 @@ function StandardsPage() {
                     <th scope="col" aria-label="Select symbols" className="select-column">Select</th>
                     <th scope="col" aria-label="Favourites">Favourite</th>
                     <th scope="col">Preview</th>
+                    {showSetMarkers ? <th scope="col">In set</th> : null}
                     {standardsColumns.map(([key, label]) => (
                       <th scope="col" key={key}>
                         <button type="button" className="column-sort-button" onClick={() => toggleSort(key)}>
@@ -2282,6 +2281,11 @@ function StandardsPage() {
                           )}
                         </div>
                       </td>
+                      {showSetMarkers ? (
+                        <td>
+                          <InActiveSetMarker symbol={symbol} setCode={catalogSearch.activeSet?.code} emptyLabel="—" />
+                        </td>
+                      ) : null}
                       {standardsColumns.map(([key]) => (
                         <td key={`${symbol.id}-${key}`}>
                           {key === 'scope' ? (
@@ -2377,6 +2381,14 @@ function StandardsPage() {
                 ) : null}
                 <div className="fact-grid detail-list">
                   <Fact label="Scope" value={<CatalogBadgeRow symbol={activeSymbol} />} />
+                  {showSetMarkers && activeSymbol.inActiveSet !== undefined ? (
+                    <Fact
+                      label="In active set"
+                      value={activeSymbol.inActiveSet
+                        ? <InActiveSetMarker symbol={activeSymbol} setCode={catalogSearch.activeSet?.code} />
+                        : `Not in ${catalogSearch.activeSet?.code || 'the active set'}`}
+                    />
+                  ) : null}
                   <Fact label="Status" value={activeSymbol.status || 'Published'} />
                   <Fact label="Revision" value={activeSymbol.revision} />
                   <Fact label="Last update" value={formatPublishedDate(activeSymbol.lastUpdatedAt || activeSymbol.revisionCreatedAt)} />
@@ -2455,6 +2467,26 @@ function StandardsPage() {
       ) : null}
     </section>
   );
+}
+
+// "In set" on the Catalog tab: the row is in the selected Project's effective
+// palette, as a set item or as an organization-wide symbol.
+function InActiveSetMarker({ symbol, setCode, emptyLabel = null }) {
+  if (symbol?.inActiveSet === 'set') {
+    return (
+      <span className="catalog-in-set-marker" title={setCode ? `In Symbol Set ${setCode}` : 'In the active Symbol Set'}>
+        In set{setCode ? ` · ${setCode}` : ''}
+      </span>
+    );
+  }
+  if (symbol?.inActiveSet === 'organization_wide') {
+    return (
+      <span className="catalog-in-set-marker organization-wide" title="Organization-wide: in every Project's palette">
+        Organization-wide
+      </span>
+    );
+  }
+  return emptyLabel;
 }
 
 const CATALOG_TAB_PANEL_ID = 'catalog-view-panel';

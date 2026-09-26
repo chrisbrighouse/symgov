@@ -83,7 +83,9 @@ export function buildCatalogSearchQuery({
 } = {}) {
   const params = new URLSearchParams();
   params.set('scope', view === SET_VIEW ? 'set' : 'catalog');
-  if (view === SET_VIEW && projectId) {
+  // The Set tab shows this Project's palette; the Catalog tab uses it to mark
+  // rows that are in the active set.
+  if (projectId) {
     params.set('projectId', projectId);
   }
   const trimmed = String(query || '').trim();

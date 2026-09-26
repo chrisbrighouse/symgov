@@ -174,7 +174,9 @@ describe('mounted admin App journeys', () => {
     await act(async () => renderer.unmount());
   });
 
-  it('mounts context-only selectors for an eligible ordinary member through the authenticated App shell', async () => {
+  // Set/Catalog tab design D2: an ordinary member's Project and Symbol Set
+  // pickers live in the Catalog's Set tab, not above every page.
+  it('mounts context-only selectors for an eligible ordinary member in the Catalog Set tab', async () => {
     const requests = [];
     const currentUser = user({ organizationRole: 'user', symbolSetsEnabled: true });
     const projects = [
@@ -203,38 +205,53 @@ describe('mounted admin App journeys', () => {
           : [];
         return response(200, { items, page: 1, pageSize: 200, total: items.length });
       }
+      if (url.includes('/published/symbols/search?')) {
+        return response(200, { scope: 'set', items: [], total: 0, facets: {}, project: null, activeSet: null, reason: 'none' });
+      }
       throw new Error(`Unexpected request: ${method} ${url}`);
     };
 
-    const renderer = await mount('/support');
-    assert.ok(renderer.root.findByProps({ 'aria-label': 'Active Project' }));
-    assert.ok(renderer.root.findByProps({ 'aria-label': 'Active Symbol Set' }));
+    const elsewhere = await mount('/support');
+    assert.equal(elsewhere.root.findAllByProps({ 'aria-label': 'Active Project' }).length, 0);
+    await act(async () => elsewhere.unmount());
 
-    await act(async () => {
-      await renderer.root.findByProps({ 'aria-label': 'Active Project' }).props.onChange({ target: { value: 'p-zero' } });
-    });
-    assert.match(JSON.stringify(renderer.toJSON()), /No active Symbol Sets are available for this Project/);
+    // The Catalog page listens for arrow keys on the document; AuthRoutes
+    // stubs it the same way.
+    const originalDocument = globalThis.document;
+    globalThis.document = { activeElement: null, addEventListener() {}, removeEventListener() {}, getElementById() { return null; } };
+    try {
+      const renderer = await mount('/standards?view=set');
+      assert.ok(renderer.root.findByProps({ 'aria-label': 'Active Project' }));
+      assert.ok(renderer.root.findByProps({ 'aria-label': 'Active Symbol Set' }));
 
-    await act(async () => {
-      await renderer.root.findByProps({ 'aria-label': 'Active Project' }).props.onChange({ target: { value: 'p-active' } });
-    });
-    const setOptions = renderer.root.findByProps({ 'aria-label': 'Active Symbol Set' }).findAllByType('option');
-    assert.ok(setOptions.some((option) => option.children.join('').includes('SET-A')));
-    assert.ok(requests.some(({ url }) => url.includes('/org/me/symbol-sets?') && url.includes('status=active') && url.includes('projectId=p-active')));
+      await act(async () => {
+        await renderer.root.findByProps({ 'aria-label': 'Active Project' }).props.onChange({ target: { value: 'p-zero' } });
+      });
+      assert.match(JSON.stringify(renderer.toJSON()), /No active Symbol Sets are available for this Project/);
 
-    for (const label of [
-      'Create Project',
-      'Edit Project P-ACT',
-      'Close Project P-ACT',
-      'Create Symbol Set',
-      'Edit Symbol Set SET-A',
-      'Archive Symbol Set SET-A',
-      'Set SET-A as Organization default',
-      'Copy Symbol Set SET-A',
-    ]) {
-      assert.equal(renderer.root.findAllByProps({ 'aria-label': label }).length, 0, label);
+      await act(async () => {
+        await renderer.root.findByProps({ 'aria-label': 'Active Project' }).props.onChange({ target: { value: 'p-active' } });
+      });
+      const setOptions = renderer.root.findByProps({ 'aria-label': 'Active Symbol Set' }).findAllByType('option');
+      assert.ok(setOptions.some((option) => option.children.join('').includes('SET-A')));
+      assert.ok(requests.some(({ url }) => url.includes('/org/me/symbol-sets?') && url.includes('status=active') && url.includes('projectId=p-active')));
+
+      for (const label of [
+        'Create Project',
+        'Edit Project P-ACT',
+        'Close Project P-ACT',
+        'Create Symbol Set',
+        'Edit Symbol Set SET-A',
+        'Archive Symbol Set SET-A',
+        'Set SET-A as Organization default',
+        'Copy Symbol Set SET-A',
+      ]) {
+        assert.equal(renderer.root.findAllByProps({ 'aria-label': label }).length, 0, label);
+      }
+      await act(async () => renderer.unmount());
+    } finally {
+      globalThis.document = originalDocument;
     }
-    await act(async () => renderer.unmount());
   });
 
   it('mounts Platform Admin through App navigation and preserves backend denial', async () => {

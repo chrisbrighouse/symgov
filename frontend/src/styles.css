@@ -3211,7 +3211,6 @@ a:not([class]):active {
 }
 
 .project-context-bar,
-.effective-palette-panel,
 .organization-projects-panel,
 .organization-symbol-sets-panel {
   border: 1px solid var(--idox-border-default);
@@ -6425,4 +6424,23 @@ button.catalog-preview-format-badge:focus-visible {
     min-width: 0;
     width: 100%;
   }
+}
+
+.catalog-in-set-marker {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+  background: var(--idox-info-bg);
+  color: var(--idox-text-brand-accent);
+  font-size: 0.75rem;
+  font-weight: var(--idox-font-weight-semibold);
+  white-space: nowrap;
+}
+
+.catalog-in-set-marker.organization-wide {
+  background: var(--idox-bg-surface-light);
+  border: 1px solid var(--idox-border-default);
+  color: var(--idox-text-secondary);
 }

@@ -41,7 +41,7 @@ from ..catalog_browse_search import (
     load_public_page_rows,
     search_catalog,
 )
-from ..effective_palette import resolve_effective_palette
+from ..effective_palette import palette_membership, resolve_effective_palette
 from ..symbol_context_service import project_summary, symbol_set_summary
 from ..catalog_organization_context import (
     list_organization_wide_catalog_symbols,
@@ -808,6 +808,11 @@ def search_published_symbols(
     organization-bound session's own organization-wide private symbols,
     decided exactly as `GET /published/symbols` decides them.
 
+    On the Catalog tab, an optional `projectId` marks each returned row that
+    is in that Project's effective palette (`inActiveSet`: "set" or
+    "organization_wide"), for the "In set" marker, and adds the Project and
+    active set to the response.
+
     `scope=set&projectId=...` is the Set tab: that Project's effective
     palette, resolved and authorized exactly as
     `GET /org/me/projects/{projectId}/effective-palette` does it (including
@@ -830,8 +835,8 @@ def search_published_symbols(
         columns[key] = value
     if scope == "set" and project_id is None:
         raise _catalog_search_validation_error("projectId", "The Set tab needs a projectId.")
-    if scope == "catalog" and (project_id is not None or set_code is not None):
-        raise _catalog_search_validation_error("projectId", "projectId and setCode apply only to scope=set.")
+    if scope == "catalog" and set_code is not None:
+        raise _catalog_search_validation_error("setCode", "setCode applies only to scope=set.")
     if scope == "catalog" and (set_group or palette_source):
         raise _catalog_search_validation_error("setGroup", "Set filters apply only to scope=set.")
     if sort is None:
@@ -948,6 +953,29 @@ def search_published_symbols(
         if entry["palette_entry"] is not None:
             item["paletteEntry"] = entry["palette_entry"]
         items.append(item)
+
+    if scope == "catalog" and project_id is not None:
+        try:
+            project, symbol_set, reason, membership = palette_membership(
+                session, request, settings, project_id, [entry["governed_symbol_id"] for entry in result.entries],
+            )
+        except HTTPException as exc:
+            # The markers are extra: a Project that is gone, closed or not the
+            # caller's leaves the Catalog as it is, just unmarked.
+            if exc.status_code != 404:
+                raise
+            session.rollback()
+        else:
+            # Resolving can clear a stale set preference; keep that, as the
+            # palette route does.
+            session.commit()
+            for item in items:
+                item["inActiveSet"] = membership.get(uuid.UUID(str(item["symbolId"])))
+            palette_context = {
+                "project": project_summary(project),
+                "activeSet": symbol_set_summary(symbol_set) if symbol_set is not None else None,
+                "reason": reason,
+            }
 
     return {
         "scope": scope,

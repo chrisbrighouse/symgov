@@ -243,3 +243,45 @@ def effective_palette(
         "pageSize": page_size,
         "total": total,
     }
+
+
+def palette_membership(
+    session: Session,
+    request: Request,
+    settings,
+    project_id: uuid.UUID,
+    governed_symbol_ids,
+):
+    """Which of these symbols are in one Project's effective palette, and how.
+
+    For the Catalog tab's "In set" marker. It answers only for the symbols
+    asked about (a page of Catalog rows, which are already eligible), rather
+    than resolving the whole palette, so it costs one small query whatever
+    the set's size. Authorization and set resolution are the palette's own:
+    `get_project` (404 for another organization's Project) and
+    `_resolved_set`. As in the palette, a set item wins over the same symbol
+    being organization-wide.
+
+    Returns `(project, symbol_set, reason, {governed_symbol_id: "set" | "organization_wide"})`.
+    """
+    principal, project = get_project(session, request, settings, project_id)
+    symbol_set, reason = _resolved_set(session, principal, project)
+    ids = [symbol_id if isinstance(symbol_id, uuid.UUID) else uuid.UUID(str(symbol_id)) for symbol_id in governed_symbol_ids]
+    membership: dict[uuid.UUID, str] = {}
+    if not ids:
+        return project, symbol_set, reason, membership
+    if getattr(settings, "organization_symbols_enabled", False):
+        for (symbol_id,) in session.query(GovernedSymbol.id).filter(
+            GovernedSymbol.id.in_(ids),
+            GovernedSymbol.owner_organization_id == principal.organization.id,
+            GovernedSymbol.visibility == "organization_private",
+            GovernedSymbol.organization_wide.is_(True),
+        ).all():
+            membership[symbol_id] = "organization_wide"
+    if symbol_set is not None:
+        for (symbol_id,) in session.query(SymbolSetItem.governed_symbol_id).filter(
+            SymbolSetItem.symbol_set_id == symbol_set.id,
+            SymbolSetItem.governed_symbol_id.in_(ids),
+        ).all():
+            membership[symbol_id] = "set"
+    return project, symbol_set, reason, membership

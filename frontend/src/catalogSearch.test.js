@@ -29,7 +29,8 @@ test('the Catalog tab query leaves out Set filters, so shared filters never brea
     page: 2
   });
   assert.equal(params.get('scope'), 'catalog');
-  assert.equal(params.get('projectId'), null);
+  // On the Catalog tab the Project marks rows in its active set.
+  assert.equal(params.get('projectId'), 'p-1');
   assert.equal(params.get('q'), 'valve');
   assert.deepEqual(params.getAll('catalogCategories'), ['Valves', 'Pumps']);
   assert.deepEqual(params.getAll('setGroup'), []);

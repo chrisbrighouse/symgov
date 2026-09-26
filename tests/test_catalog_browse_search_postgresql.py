@@ -538,7 +538,7 @@ def test_set_scope_parameters_are_checked(set_tab):
     member, project_id = set_tab["member"], set_tab["project_id"]
     for params in (
         {"scope": "set"},
-        {"scope": "catalog", "projectId": project_id},
+        {"scope": "catalog", "setCode": "SET-PID"},
         {"scope": "catalog", "setGroup": "Valves"},
         {"scope": "catalog", "sort": "setOrder"},
     ):
@@ -578,3 +578,28 @@ def test_a_set_only_private_symbol_opens_while_an_active_set_holds_it(search_dat
     finally:
         _replace_set_items(set_tab["admin"], set_tab["set_id"], set_tab["items"])
     assert member.get(f"/api/v1/published/symbols/{private_id}").status_code == 200
+
+
+def test_the_catalog_tab_marks_rows_in_the_active_set(search_database, set_tab, personal_client):
+    engine, _ = search_database
+    member, project_id, seeded = set_tab["member"], set_tab["project_id"], set_tab["seeded"]
+    body = _search(member, projectId=project_id, pageSize=200)
+    assert body["activeSet"]["code"] == "SET-PID"
+    marks = {item["symbolId"]: item.get("inActiveSet") for item in body["items"]}
+    assert marks[seeded["Gate valve"]["symbol_id"]] == "set"
+    assert marks[seeded["Centrifugal pump"]["symbol_id"]] == "set"
+    assert marks[set_tab["wide_id"]] == "organization_wide"
+    assert marks[seeded["Smoke detector"]["symbol_id"]] is None
+    # The set-only private symbol is in the palette but not in the Catalog.
+    assert set_tab["private_id"] not in marks
+
+    # Without a projectId, rows carry no marker at all.
+    assert all("inActiveSet" not in item for item in _search(member, pageSize=200)["items"])
+
+    # A Project the caller cannot use leaves the Catalog unmarked, not broken.
+    outsider = _sets_session(engine, email="set-outsider-marks@example.test", code="othermarks", base_role="admin")
+    unmarked = _search(outsider, projectId=project_id, pageSize=200)
+    assert unmarked["total"] >= len(PUBLIC_SYMBOLS)
+    assert all("inActiveSet" not in item for item in unmarked["items"])
+    assert "activeSet" not in unmarked
+    assert all("inActiveSet" not in item for item in _search(personal_client, projectId=project_id)["items"])
