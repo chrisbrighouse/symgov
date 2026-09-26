@@ -1134,6 +1134,15 @@ Expected use on this VPS:
   `symgov_app`
 - schema migration commands should use the separate `symgov_migrator` role
 - both roles connect to the Docker hostname `symgov-postgres` on `ai-stack`
+- `symgov_app` needs `TEMPORARY` on the database. The Catalog and Set
+  searches (`catalog_browse_search.py`) build a temp table per request, and
+  without the privilege both fail with `permission denied to create temporary
+  tables`. PostgreSQL grants `TEMPORARY` to `PUBLIC` by default, but this
+  database revokes it, so grant it explicitly when provisioning:
+  `GRANT TEMPORARY ON DATABASE symgov TO symgov_app;` (as the database owner;
+  a migration cannot do it, because `symgov_migrator` does not own the
+  database). Production gained it on 2026-09-26; `scripts/deploy-release.sh`
+  refuses to deploy without it.
 
 #### Object storage
 

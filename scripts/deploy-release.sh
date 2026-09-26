@@ -151,6 +151,17 @@ LOG=$RELEASES/deploy-stage11-$SHA-$(date -u +%Y%m%dT%H%M%SZ).log
 exec > >(tee -a "$LOG") 2>&1
 echo "Logging to $LOG"
 
+step "Check the app role's database privileges"
+# symgov_app needs TEMPORARY on the database: every Catalog and Set search
+# builds a per-transaction temp table (catalog_browse_search._build_candidates).
+# Without it both tabs fail with 500 while everything else works, as on
+# 2026-09-26. Granted by hand in production that day; a new database needs it
+# too (see /docker/symgov-postgres/README.md, "Privilege Model").
+TEMP_OK=$(docker exec "$PG" psql -U symgov -d symgov -tA -c \
+  "select has_database_privilege('symgov_app', current_database(), 'TEMPORARY');")
+[ "$TEMP_OK" = t ] || die "symgov_app lacks TEMPORARY on the database; as the owner run: GRANT TEMPORARY ON DATABASE symgov TO symgov_app;"
+echo "symgov_app TEMPORARY: ok"
+
 step "Back up the database"
 PREV_DUMP=$(ls -1t "$BACKUPS"/symgov-pre-*.dump 2>/dev/null | head -1 || true)
 DUMP=$BACKUPS/symgov-pre-$SHA-$(date -u +%Y%m%dT%H%M%SZ).dump
