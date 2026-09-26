@@ -965,8 +965,10 @@ export function OrganizationAdminPage({ auth }) {
     symbolSetsUiEnabled
       ? createElement(ProjectContextBar, {
           auth,
+          // The panels below bump this after changing Projects or Sets. The
+          // bar must not also report back through `notifyContextChange`, or
+          // each refresh would trigger the next.
           refreshToken: contextRefreshToken,
-          onContextChanged: notifyContextChange,
         })
       : null,
     createElement(
