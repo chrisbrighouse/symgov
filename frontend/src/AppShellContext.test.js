@@ -47,7 +47,9 @@ test('Header: shows organization context only for organization sessions', () => 
   const orgMarkup = renderHeader(mockOrgAuth);
   assert.match(orgMarkup, /header-org-context/);
   assert.match(orgMarkup, /Test Organization/);
-  assert.match(orgMarkup, />T<\/span>/); // Fallback for 'Test Organization'
+  // "Org:" label, and no initial-letter fallback before the name.
+  assert.match(orgMarkup, /<span class="org-label">Org:<\/span>Test Organization/);
+  assert.doesNotMatch(orgMarkup, /org-selection-fallback/);
   assert.match(orgMarkup, /Switch organization/);
 
   const personalMarkup = renderHeader(mockPersonalAuth);

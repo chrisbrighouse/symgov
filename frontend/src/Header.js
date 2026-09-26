@@ -78,8 +78,12 @@ export function Header({ auth }) {
     isOrgSession && org && createElement(
       'div',
       { className: 'header-org-context', 'data-testid': 'header-org-context' },
-      createElement(OrganizationIcon, { organization: org }),
-      createElement('span', { className: 'org-name' }, org.displayName)
+      // An uploaded logo only: the initial-letter fallback read as a stray character.
+      org.logoUrl && createElement(OrganizationIcon, { organization: org }),
+      createElement('span', { className: 'org-name' },
+        createElement('span', { className: 'org-label' }, 'Org:'),
+        org.displayName
+      )
     ),
     createElement(
       'div',
