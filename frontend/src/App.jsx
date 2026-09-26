@@ -86,9 +86,11 @@ import {
   groupBySetGroup,
   hasActiveFilters,
   normalizeCatalogView,
+  preferenceOptionsFor,
   searchSeededCatalog,
   setSourceSummary
 } from './catalogSearch.js';
+import PanelErrorBoundary from './PanelErrorBoundary.js';
 import { canMountOrganizationSymbolDrafts, canMountProjectContext, canReviewOrganizationSymbols } from './projectContext.js';
 import { OrganizationSymbolDraftsPage } from './OrganizationSymbolDraftsPage.js';
 import { OrganizationSymbolReviewsPage } from './OrganizationSymbolReviewsPage.js';
@@ -1842,11 +1844,11 @@ function StandardsPage() {
           </div>
         </div>
         {workbenchExpanded ? (
-          <>
+          <PanelErrorBoundary label="The preferences panel">
             <div className="catalog-workbench-grid">
               <div className="catalog-preference-card">
                 <h4>Preferred disciplines</h4>
-                {(facetOptions.find((facet) => facet.key === 'catalogDisciplines')?.values || []).slice(0, 12).map((value) => (
+                {preferenceOptionsFor(facetOptions, 'catalogDisciplines', { limit: 12 }).map(({ value, count }) => (
                   <label key={`pref-discipline-${value}`} className="checkbox-row compact">
                     <input
                       type="checkbox"
@@ -1854,12 +1856,13 @@ function StandardsPage() {
                       onChange={() => toggleCatalogPreference('disciplines', value)}
                     />
                     <span>{value}</span>
+                    {count !== null ? <span className="facet-count" aria-label={`${count} matching`}>{count}</span> : null}
                   </label>
                 ))}
               </div>
               <div className="catalog-preference-card">
                 <h4>Preferred categories</h4>
-                {(facetOptions.find((facet) => facet.key === 'catalogCategories')?.values || []).slice(0, 12).map((value) => (
+                {preferenceOptionsFor(facetOptions, 'catalogCategories', { limit: 12 }).map(({ value, count }) => (
                   <label key={`pref-category-${value}`} className="checkbox-row compact">
                     <input
                       type="checkbox"
@@ -1867,12 +1870,13 @@ function StandardsPage() {
                       onChange={() => toggleCatalogPreference('categories', value)}
                     />
                     <span>{value}</span>
+                    {count !== null ? <span className="facet-count" aria-label={`${count} matching`}>{count}</span> : null}
                   </label>
                 ))}
               </div>
               <div className="catalog-preference-card">
                 <h4>Preferred formats</h4>
-                {(facetOptions.find((facet) => facet.key === 'availableFormats')?.values || ['DXF', 'SVG', 'PNG']).slice(0, 10).map((value) => (
+                {preferenceOptionsFor(facetOptions, 'availableFormats', { fallback: ['DXF', 'SVG', 'PNG'], limit: 10 }).map(({ value, count }) => (
                   <label key={`pref-format-${value}`} className="checkbox-row compact">
                     <input
                       type="checkbox"
@@ -1880,6 +1884,7 @@ function StandardsPage() {
                       onChange={() => toggleCatalogPreference('formats', value)}
                     />
                     <span>{value}</span>
+                    {count !== null ? <span className="facet-count" aria-label={`${count} matching`}>{count}</span> : null}
                   </label>
                 ))}
                 <button type="button" className="action-button secondary compact" onClick={applyCatalogPreferences}>
@@ -1957,7 +1962,7 @@ function StandardsPage() {
                 </div>
               ) : null}
             </div>
-          </>
+          </PanelErrorBoundary>
         ) : null}
       </section>
 

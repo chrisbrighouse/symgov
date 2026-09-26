@@ -140,6 +140,19 @@ export function facetOptionsForView(view, serverFacets = {}, facetFilters = {}) 
   });
 }
 
+// The workbench's preference choices for one filter, as `{ value, count }`.
+// Facet values arrive counted; the fallback list is plain strings with no
+// count, so both shapes are accepted.
+export function preferenceOptionsFor(facetOptions = [], key, { fallback = [], limit } = {}) {
+  const values = facetOptions.find((facet) => facet.key === key)?.values;
+  const entries = (values?.length ? values : fallback)
+    .map((entry) => (entry && typeof entry === 'object'
+      ? { value: entry.value, count: Number.isFinite(entry.count) ? entry.count : null }
+      : { value: entry, count: null }))
+    .filter((entry) => typeof entry.value === 'string' && entry.value);
+  return limit === undefined ? entries : entries.slice(0, limit);
+}
+
 export function hasActiveFilters({ query = '', facetFilters = {}, columnFilters = {}, showFavourites = false } = {}) {
   return Boolean(
     String(query || '').trim()

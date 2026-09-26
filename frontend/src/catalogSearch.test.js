@@ -12,6 +12,7 @@ import {
   groupBySetGroup,
   hasActiveFilters,
   normalizeCatalogView,
+  preferenceOptionsFor,
   searchSeededCatalog,
   setSourceSummary
 } from './catalogSearch.js';
@@ -140,4 +141,17 @@ test('the seeded search answers in the server shape, with counts that ignore the
   const categories = Object.fromEntries(result.facets.catalogCategories.map((entry) => [entry.value, entry.count]));
   assert.equal(categories.Valves, 2);
   assert.equal(categories.Pumps, 1);
+});
+
+test('preference options read counted facet values, and plain-string fallbacks, as { value, count }', () => {
+  const options = facetOptionsForView(CATALOG_VIEW, {
+    catalogDisciplines: [{ value: 'Process', count: 7 }, { value: 'Electrical', count: 3 }]
+  }, {});
+  assert.deepEqual(preferenceOptionsFor(options, 'catalogDisciplines', { limit: 1 }), [{ value: 'Process', count: 7 }]);
+  // No format values yet: the plain-string fallback is offered without counts.
+  assert.deepEqual(
+    preferenceOptionsFor(options, 'availableFormats', { fallback: ['DXF', 'SVG'] }),
+    [{ value: 'DXF', count: null }, { value: 'SVG', count: null }]
+  );
+  assert.deepEqual(preferenceOptionsFor(options, 'catalogCategories'), []);
 });
