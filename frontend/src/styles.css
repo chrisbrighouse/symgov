@@ -6243,3 +6243,186 @@ button.catalog-preview-format-badge:focus-visible {
     justify-self: start;
   }
 }
+
+/* Catalog page: the Set and Catalog tabs (Set/Catalog tab design, step 5). */
+.catalog-view-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 0.75rem 0 0.5rem;
+  border-bottom: 1px solid var(--idox-border-default);
+}
+
+.catalog-view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.4rem;
+  margin-bottom: -1px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--idox-radius-lg) var(--idox-radius-lg) 0 0;
+  padding: 0.5rem 1rem;
+  background: transparent;
+  color: var(--idox-text-tertiary);
+  font-weight: var(--idox-font-weight-bold);
+  cursor: pointer;
+}
+
+.catalog-view-tab.active {
+  border-color: var(--idox-border-default);
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-primary);
+  box-shadow: inset 0 2px 0 var(--idox-interactive-default);
+}
+
+.catalog-view-tab-count {
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  background: var(--idox-info-bg);
+  color: var(--idox-text-brand-accent);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.catalog-set-context {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.catalog-set-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--idox-text-secondary);
+  font-size: 0.9rem;
+}
+
+.catalog-set-reason {
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  background: var(--idox-info-bg);
+  color: var(--idox-text-brand-accent);
+  font-weight: var(--idox-font-weight-semibold);
+  font-size: 0.8rem;
+}
+
+.catalog-search-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.facet-count {
+  margin-left: auto;
+  color: var(--idox-text-tertiary);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.approved-symbol-grid.catalog-results-refreshing {
+  opacity: 0.55;
+  transition: opacity 120ms ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .approved-symbol-grid.catalog-results-refreshing {
+    transition: none;
+  }
+}
+
+.catalog-group-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0;
+  color: var(--idox-text-secondary);
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.catalog-group-heading span {
+  color: var(--idox-text-tertiary);
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.catalog-card-set-label {
+  margin: 0;
+  color: var(--idox-text-brand-accent);
+  font-size: 0.8rem;
+}
+
+.catalog-set-entry {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+  border: 1px solid var(--idox-border-accent);
+  border-radius: var(--idox-radius-lg);
+  padding: 0.75rem;
+  background: var(--idox-info-bg);
+}
+
+.catalog-set-entry h4 {
+  margin: 0;
+  color: var(--idox-text-brand-accent);
+  font-size: 0.85rem;
+}
+
+.catalog-loading-more {
+  padding: 0.5rem 0.75rem;
+}
+
+/* The pickers, as a compact strip above the Set tab's results. */
+.catalog-set-context .project-context-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0;
+  padding: 0.75rem 1rem;
+}
+
+.catalog-set-context .project-context-title-row {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.catalog-set-context .project-context-title-row h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.catalog-set-context .project-context-status,
+.catalog-set-context .project-context-alert,
+.catalog-set-context .project-context-project-description {
+  width: 100%;
+  margin: 0;
+}
+
+.catalog-set-context .project-context-project-description {
+  color: var(--idox-text-tertiary);
+  font-size: 0.85rem;
+}
+
+.catalog-set-context .project-context-controls select {
+  min-height: 2.25rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  padding: 0.3rem 0.6rem;
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-primary);
+}
+
+@media (max-width: 640px) {
+  .catalog-set-context .project-context-controls label {
+    min-width: 0;
+    width: 100%;
+  }
+}

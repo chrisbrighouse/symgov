@@ -28,7 +28,7 @@ export function ProjectContextBarView({ state, headingId = 'project-context-bar-
       createElement('h2', { id: headingId }, 'Project and Symbol Set context'),
       createElement('button', {
         type: 'button',
-        className: 'project-context-refresh',
+        className: 'project-context-refresh action-button secondary compact',
         disabled: busy,
         onClick: () => state.refresh(),
         'aria-label': 'Refresh Project and Symbol Set context',
@@ -78,7 +78,8 @@ export function ProjectContextBarView({ state, headingId = 'project-context-bar-
     activeProjectId && sets.total === 0
       ? createElement('p', { role: 'status', className: 'project-context-status' }, 'No active Symbol Sets are available for this Project.')
       : null,
-    createElement('div', { className: 'project-context-pagination', 'aria-label': 'Project list pagination' },
+    // Only when there is more than one page of Projects to move between.
+    projectPages > 1 ? createElement('div', { className: 'project-context-pagination', 'aria-label': 'Project list pagination' },
       createElement('button', {
         type: 'button',
         onClick: () => state.setProjectsPage(Math.max(1, projectsPage - 1)),
@@ -92,7 +93,7 @@ export function ProjectContextBarView({ state, headingId = 'project-context-bar-
         disabled: busy || projectsPage >= projectPages,
         'aria-label': 'Next Project page',
       }, 'Next'),
-    ),
+    ) : null,
   );
 }
 

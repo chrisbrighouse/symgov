@@ -230,8 +230,10 @@ test('Catalog card and table views share the favourite control and persistence h
 test('Catalog disables favourite mutations until authoritative live loading settles', async () => {
   const app = await readFile(new URL('./App.jsx', import.meta.url), 'utf8');
 
-  assert.match(app, /const standardsSymbols = catalogItemsForDisplay\(standardsState, symbols\)/);
-  assert.match(app, /const favouriteMutationsEnabled = !standardsState\.loading && standardsState\.mode === 'live'/);
+  // The rows come from the database search; favourites stay disabled until
+  // it has answered against a live API.
+  assert.match(app, /const loadedSymbols = catalogSearch\.items/);
+  assert.match(app, /const favouriteMutationsEnabled = Boolean\(appConfig\.apiRoot\) && catalogSearch\.loaded/);
   assert.equal((app.match(/disabled=\{!favouriteMutationsEnabled/g) || []).length, 2);
   assert.match(app, /applySequencedFavouriteState/);
 });
@@ -240,8 +242,10 @@ test('Catalog wires Show Favourites into the shared filtered result set used by 
   const app = await readFile(new URL('./App.jsx', import.meta.url), 'utf8');
 
   assert.match(app, /import FavouriteFilter from ['"]\.\/FavouriteFilter\.js['"]/);
-  assert.match(app, /filterCatalogSymbols/);
-  assert.match(app, /showFavourites/);
+  // Show Favourites is part of the one search both views render from.
+  assert.match(app, /buildCatalogSearchQuery\(\{[\s\S]*?showFavourites,[\s\S]*?\}\)/);
   assert.match(app, /<FavouriteFilter/);
-  assert.equal((app.match(/visibleSymbols\.map/g) || []).length, 2);
+  assert.match(app, /groupBySetGroup\(loadedSymbols\)/);
+  assert.match(app, /: loadedSymbols\.map\(\(symbol, index\)/);
+  assert.match(app, /\{loadedSymbols\.map\(\(symbol\) => \(/);
 });

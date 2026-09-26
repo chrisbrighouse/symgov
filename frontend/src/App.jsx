@@ -20,9 +20,9 @@ import {
   loginUser,
   logoutUser,
   reauthenticateCurrentSession,
+  fetchPublishedSymbol,
   fetchPublishedSymbolComments,
   fetchCatalogWorkbench,
-  fetchPublishedSymbols,
   fetchWorkspaceDaisyReports,
   fetchWorkspaceQueueItems,
   fetchWorkspaceReviewCases,
@@ -71,7 +71,24 @@ import { adminRouteElements } from './adminRoutes.js';
 import { canAccessOrganizationAdmin, canAccessPlatformAdmin } from './adminJourneys.js';
 import { semanticReviewRouteElements } from './semanticReviewRoutes.js';
 import { canAccessSemanticReview } from './semanticReviewJourney.js';
-import { ProjectContextBar } from './ProjectContextBar.js';
+import { ProjectContextBar, ProjectContextBarView } from './ProjectContextBar.js';
+import { useSymbolContext } from './useSymbolContext.js';
+import { useCatalogSearch } from './useCatalogSearch.js';
+import {
+  CATALOG_VIEW,
+  SET_ORDER_SORT,
+  SET_VIEW,
+  buildCatalogSearchQuery,
+  defaultCatalogView,
+  defaultSortForView,
+  facetOptionsForView,
+  facetValueLabel,
+  groupBySetGroup,
+  hasActiveFilters,
+  normalizeCatalogView,
+  searchSeededCatalog,
+  setSourceSummary
+} from './catalogSearch.js';
 import { EffectivePalettePanel } from './EffectivePalettePanel.js';
 import { canMountEffectivePalette, canMountOrganizationSymbolDrafts, canMountProjectContext, canReviewOrganizationSymbols } from './projectContext.js';
 import { OrganizationSymbolDraftsPage } from './OrganizationSymbolDraftsPage.js';
@@ -114,11 +131,8 @@ import {
 } from './catalogWorkbench.js';
 import {
   applyFavouriteState,
-  applySequencedCatalogLoadState,
   applySequencedFavouriteState,
-  buildFavouriteToggle,
-  catalogItemsForDisplay,
-  filterCatalogSymbols
+  buildFavouriteToggle
 } from './catalogFavourites.js';
 import {
   buildCatalogDownloadOptions,
@@ -528,8 +542,9 @@ function AppContent() {
   const location = useLocation();
   const isStandardsRoute = location.pathname.startsWith('/standards');
   const showRail = Boolean(auth.user) && location.pathname !== '/login' && location.pathname !== '/change-pin';
-  const showMemberProjectContext = canMountProjectContext(auth) && auth.user.organization.baseRole !== 'admin';
-  const showMemberEffectivePalette = canMountEffectivePalette(auth) && auth.user.organization.baseRole !== 'admin';
+  // The Catalog page has its own pickers, in its Set tab.
+  const showMemberProjectContext = !isStandardsRoute && canMountProjectContext(auth) && auth.user.organization.baseRole !== 'admin';
+  const showMemberEffectivePalette = !isStandardsRoute && canMountEffectivePalette(auth) && auth.user.organization.baseRole !== 'admin';
 
   return (
     <div className={`app-shell ${isStandardsRoute ? 'mode-standards' : 'mode-workspace'} ${showRail ? 'has-side-rail' : ''}`}>
@@ -1008,13 +1023,24 @@ function SessionScopedStandardsPage() {
 }
 
 function StandardsPage() {
+  const auth = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
-  const [sortState, setSortState] = useState({ key: 'id', direction: 'asc' });
+  // Each tab keeps its own sort: the Set tab starts in set order.
+  const [sortByView, setSortByView] = useState(() => ({
+    [CATALOG_VIEW]: defaultSortForView(CATALOG_VIEW),
+    [SET_VIEW]: defaultSortForView(SET_VIEW)
+  }));
   const [columnFilters, setColumnFilters] = useState({});
   const [facetFilters, setFacetFilters] = useState({});
   const [activeId, setActiveId] = useState('');
   const [selectedSymbolIds, setSelectedSymbolIds] = useState([]);
+  // Selected symbols stay selected when they scroll or filter out of the
+  // loaded pages, so their rows are kept here.
+  const [selectedSymbolCache, setSelectedSymbolCache] = useState({});
+  // The open symbol's row, for when it is not on the loaded pages (a link to
+  // one symbol, or a symbol filtered out while its panel is open).
+  const [pinnedSymbol, setPinnedSymbol] = useState(null);
   const [commandDialog, setCommandDialog] = useState(null);
   const [commandComment, setCommandComment] = useState('');
   const [commandStatus, setCommandStatus] = useState({ mode: '', message: '' });
@@ -1025,7 +1051,6 @@ function StandardsPage() {
   const [preparingDownload, setPreparingDownload] = useState(false);
   const [activeDetailTab, setActiveDetailTab] = useState('details');
   const [commentHistoryState, setCommentHistoryState] = useState({ symbolId: '', loading: false, mode: '', message: '', items: [] });
-  const [displayCount, setDisplayCount] = useState(60);
   // Preferences and saved views are the signed-in account's, and the clipboard
   // is the account's within this session's organization (X-01). All three are
   // loaded from and saved to the server, never kept in the browser.
@@ -1042,15 +1067,7 @@ function StandardsPage() {
   const [showFavourites, setShowFavourites] = useState(false);
   const [edCatalogPrompt, setEdCatalogPrompt] = useState('');
   const [edCatalogInterpretation, setEdCatalogInterpretation] = useState(null);
-  const [standardsState, setStandardsState] = useState({
-    loading: true,
-    mode: appConfig.apiRoot ? 'loading' : 'seeded',
-    message: appConfig.apiRoot ? 'Loading live published records…' : 'No API root configured. Showing seeded published records.',
-    items: appConfig.apiRoot ? [] : symbols
-  });
   const standardsGridRef = useRef(null);
-  const catalogLoadSequenceRef = useRef(0);
-  const catalogMutationSequenceRef = useRef(0);
   const favouriteOperationSequencesRef = useRef(new Map());
   // 'loading' until the account's saved workbench arrives; nothing is saved
   // before then, and nothing at all if it fails, so a partial local copy can
@@ -1068,8 +1085,50 @@ function StandardsPage() {
       })
     });
   }
-  const standardsSymbols = catalogItemsForDisplay(standardsState, symbols);
-  const favouriteMutationsEnabled = !standardsState.loading && standardsState.mode === 'live';
+  // The Set tab exists for sessions that can use Symbol Sets, and only with a
+  // live API: the seeded development data has no Projects.
+  const setsAvailable = Boolean(appConfig.apiRoot) && canMountProjectContext(auth);
+  const symbolContext = useSymbolContext({ auth: setsAvailable ? auth : null });
+  const requestedView = normalizeCatalogView(searchParams.get('view'));
+  const [initialView, setInitialView] = useState('');
+  useEffect(() => {
+    if (!setsAvailable || initialView) return;
+    if (symbolContext.contextVersion > 0) {
+      setInitialView(defaultCatalogView(symbolContext.context));
+    } else if (symbolContext.error) {
+      // The selection could not be loaded; the Catalog still can.
+      setInitialView(CATALOG_VIEW);
+    }
+  }, [setsAvailable, initialView, symbolContext.contextVersion, symbolContext.context, symbolContext.error]);
+  // Without a `view` in the URL, the first tab waits for the selection to load
+  // rather than searching the Catalog and then switching.
+  const viewResolved = !setsAvailable || Boolean(requestedView) || Boolean(initialView);
+  const view = setsAvailable ? requestedView || initialView || CATALOG_VIEW : CATALOG_VIEW;
+  const sortState = sortByView[view];
+  const setProjectId = symbolContext.activeProjectId;
+
+  const searchQuery = useMemo(() => buildCatalogSearchQuery({
+    view,
+    projectId: setProjectId,
+    query,
+    facetFilters,
+    columnFilters,
+    showFavourites,
+    sort: sortState,
+    preferredFormats: catalogPreferences.formats
+  }), [view, setProjectId, query, facetFilters, columnFilters, showFavourites, sortState, catalogPreferences.formats]);
+  const seededSearch = useMemo(
+    () => async (params) => searchSeededCatalog(symbols, params, { getField: getSymbolField }),
+    []
+  );
+  const catalogSearch = useCatalogSearch(searchQuery, {
+    enabled: viewResolved && (view !== SET_VIEW || Boolean(setProjectId)),
+    // The Set tab follows the pickers: each fresh selection reloads it.
+    reloadKey: view === SET_VIEW ? symbolContext.contextVersion : 0,
+    search: appConfig.apiRoot ? undefined : seededSearch
+  });
+  const loadedSymbols = catalogSearch.items;
+  const favouriteMutationsEnabled = Boolean(appConfig.apiRoot) && catalogSearch.loaded;
   const requestedSymbolId = searchParams.get('symbol') || '';
   const standardsColumns = [
     ['id', 'ID'],
@@ -1094,39 +1153,10 @@ function StandardsPage() {
     ['symbolFamily', 'Symbol family']
   ];
 
-  const facetOptions = useMemo(() => {
-    return facetDefinitions.map(([key, label]) => {
-      const values = Array.from(
-        new Set(
-          standardsSymbols
-            .flatMap((symbol) => getSymbolFacetValues(symbol, key))
-            .map((value) => String(value || '').trim())
-            .filter(Boolean)
-        )
-      ).sort((a, b) => a.localeCompare(b));
-      return { key, label, values };
-    });
-  }, [standardsSymbols]);
-
-  const filteredSymbols = useMemo(() => {
-    const filtered = filterCatalogSymbols(
-      standardsSymbols,
-      { query, columnFilters, facetFilters, showFavourites },
-      { buildSearchText: buildCatalogSearchText, getField: getSymbolField, getFacetValues: getSymbolFacetValues }
-    );
-
-    const sorted = filtered.sort((left, right) => {
-      const leftValue = getSymbolField(left, sortState.key);
-      const rightValue = getSymbolField(right, sortState.key);
-      const result = leftValue.localeCompare(rightValue, undefined, { numeric: true, sensitivity: 'base' });
-      return sortState.direction === 'asc' ? result : -result;
-    });
-    return sortSymbolsByPreferredFormats(sorted, catalogPreferences.formats);
-  }, [standardsSymbols, query, columnFilters, facetFilters, showFavourites, sortState, catalogPreferences.formats]);
-
-  const visibleSymbols = filteredSymbols.slice(0, displayCount);
+  const facetOptions = facetOptionsForView(view, catalogSearch.facets, facetFilters);
+  const symbolsById = new Map(loadedSymbols.map((symbol) => [symbol.id, symbol]));
   const selectedSymbols = selectedSymbolIds
-    .map((symbolId) => standardsSymbols.find((symbol) => symbol.id === symbolId || symbol.symbolId === symbolId))
+    .map((symbolId) => symbolsById.get(symbolId) || selectedSymbolCache[symbolId])
     .filter(Boolean);
   const selectionLimitReached = selectedSymbolIds.length >= PUBLISHED_SYMBOL_SELECTION_LIMIT;
   const downloadOptions = buildCatalogDownloadOptions(selectedSymbols);
@@ -1141,50 +1171,6 @@ function StandardsPage() {
       setDownloadFormat('');
     }
   }, [downloadFormat, downloadOptions.join('|')]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadSequence = catalogLoadSequenceRef.current + 1;
-    catalogLoadSequenceRef.current = loadSequence;
-    const mutationSequenceAtStart = catalogMutationSequenceRef.current;
-    const applyLoadedState = (loadedState) => {
-      setStandardsState((current) => applySequencedCatalogLoadState(
-        current,
-        loadedState,
-        loadSequence,
-        catalogLoadSequenceRef.current,
-        mutationSequenceAtStart,
-        catalogMutationSequenceRef.current
-      ));
-    };
-
-    fetchPublishedSymbols().then((result) => {
-      if (cancelled) {
-        return;
-      }
-
-      if (result.ok) {
-        applyLoadedState({
-          loading: false,
-          mode: 'live',
-          message: result.items.length ? result.message : 'No live published records are currently available.',
-          items: result.items
-        });
-        return;
-      }
-
-      applyLoadedState({
-        loading: false,
-        mode: result.mode,
-        message: result.message,
-        items: symbols
-      });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     clearLegacyCatalogStorage(browserLocalStorage());
@@ -1247,41 +1233,51 @@ function StandardsPage() {
     persistWorkbenchSection('clipboard', catalogClipboard);
   }, [catalogClipboard]);
 
+  // A link to one symbol opens its panel, from the loaded pages if it is
+  // there and from its own detail request if not.
   useEffect(() => {
-    if (!filteredSymbols.some((symbol) => symbol.id === activeId)) {
-      setActiveId('');
-    }
-  }, [filteredSymbols, activeId]);
-
-  useEffect(() => {
-    const available = new Set(standardsSymbols.map((symbol) => symbol.id));
-    setSelectedSymbolIds((current) => current.filter((symbolId) => available.has(symbolId)));
-  }, [standardsSymbols]);
-
-  useEffect(() => {
-    if (!requestedSymbolId || !standardsSymbols.length) {
-      return;
+    if (!requestedSymbolId || requestedSymbolId === activeId) {
+      return undefined;
     }
     const normalizedRequested = requestedSymbolId.trim().toLowerCase();
-    const requestedSymbol = standardsSymbols.find((symbol) =>
+    const loaded = loadedSymbols.find((symbol) =>
       [symbol.id, symbol.slug, symbol.symbolId, symbol.pageCode]
         .map((value) => String(value || '').trim().toLowerCase())
         .includes(normalizedRequested)
     );
-    if (requestedSymbol) {
-      setActiveId(requestedSymbol.id);
-      setColumnFilters({});
-      setFacetFilters({});
-      setShowFavourites(false);
-      setQuery('');
+    if (loaded) {
+      setPinnedSymbol(loaded);
+      setActiveId(loaded.id);
+      return undefined;
     }
-  }, [requestedSymbolId, standardsSymbols]);
+    if (!appConfig.apiRoot || !catalogSearch.loaded) {
+      return undefined;
+    }
+    let cancelled = false;
+    fetchPublishedSymbol(requestedSymbolId)
+      .then((symbol) => {
+        if (cancelled || !symbol) return;
+        setPinnedSymbol(symbol);
+        setActiveId(symbol.id);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedSymbolId, activeId, loadedSymbols, catalogSearch.loaded]);
 
+  // A new Project or Symbol Set may not hold the open symbol.
+  const lastContextVersionRef = useRef(symbolContext.contextVersion);
   useEffect(() => {
-    setDisplayCount(60);
-  }, [query, columnFilters, facetFilters, showFavourites, sortState]);
+    if (lastContextVersionRef.current === symbolContext.contextVersion) return;
+    const firstLoad = lastContextVersionRef.current === 0;
+    lastContextVersionRef.current = symbolContext.contextVersion;
+    if (!firstLoad && view === SET_VIEW) {
+      selectSymbol('');
+    }
+  }, [symbolContext.contextVersion, view]);
 
-  const activeSymbol = filteredSymbols.find((symbol) => symbol.id === activeId) || null;
+  const activeSymbol = symbolsById.get(activeId) || (pinnedSymbol && pinnedSymbol.id === activeId ? pinnedSymbol : null);
 
   useEffect(() => {
     if (!activeSymbol || activeDetailTab !== 'comments') {
@@ -1302,14 +1298,13 @@ function StandardsPage() {
         items: result.items || []
       });
       if (result.ok) {
-        setStandardsState((current) => ({
-          ...current,
-          items: current.items.map((symbol) =>
-            symbol.id === activeSymbol.id || symbol.symbolId === activeSymbol.symbolId
-              ? { ...symbol, hasComments: Number(result.commentCount || result.items.length || 0) > 0, commentCount: Number(result.commentCount || result.items.length || 0) }
-              : symbol
-          )
-        }));
+        const commentCount = Number(result.commentCount || result.items.length || 0);
+        const withCount = (symbol) =>
+          symbol.id === activeSymbol.id || symbol.symbolId === activeSymbol.symbolId
+            ? { ...symbol, hasComments: commentCount > 0, commentCount }
+            : symbol;
+        catalogSearch.updateItems((items) => items.map(withCount));
+        setPinnedSymbol((current) => (current ? withCount(current) : current));
       }
     });
     return () => {
@@ -1318,6 +1313,10 @@ function StandardsPage() {
   }, [activeSymbol?.id, activeSymbol?.symbolId, activeSymbol?.commentCount, activeDetailTab]);
 
   function selectSymbol(symbolId) {
+    const symbol = symbolId ? symbolsById.get(symbolId) : null;
+    if (symbol) {
+      setPinnedSymbol(symbol);
+    }
     setActiveId(symbolId);
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
@@ -1330,7 +1329,9 @@ function StandardsPage() {
     }, { replace: true });
   }
 
-  function toggleSymbolSelection(symbolId) {
+  function toggleSymbolSelection(symbol) {
+    const symbolId = symbol.id;
+    setSelectedSymbolCache((current) => ({ ...current, [symbolId]: symbol }));
     setCommandStatus({ mode: '', message: '' });
     setDownloadStatus({ mode: '', message: '' });
     setSelectedSymbolIds((current) => {
@@ -1385,29 +1386,25 @@ function StandardsPage() {
       return;
     }
 
-    const toggle = buildFavouriteToggle(standardsSymbols, symbolId);
+    const toggle = buildFavouriteToggle(pinnedSymbol ? [...loadedSymbols, pinnedSymbol] : loadedSymbols, symbolId);
     const operationSequence = (favouriteOperationSequencesRef.current.get(symbolId) || 0) + 1;
     favouriteOperationSequencesRef.current.set(symbolId, operationSequence);
-    catalogMutationSequenceRef.current += 1;
     setPendingFavouriteIds((current) => [...current, symbolId]);
     setFavouriteStatus({ mode: '', message: '' });
-    setStandardsState((current) => ({
-      ...current,
-      items: applyFavouriteState(current.items, symbolId, toggle.isFavourite)
-    }));
+    catalogSearch.updateItems((items) => applyFavouriteState(items, symbolId, toggle.isFavourite));
+    setPinnedSymbol((current) => (current ? applyFavouriteState([current], symbolId, toggle.isFavourite)[0] : current));
 
     try {
       const result = await updateCatalogFavourite(symbolId, toggle.isFavourite);
-      setStandardsState((current) => ({
-        ...current,
-        items: applySequencedFavouriteState(
-          current.items,
-          symbolId,
-          Boolean(result?.isFavourite),
-          operationSequence,
-          favouriteOperationSequencesRef.current.get(symbolId)
-        )
-      }));
+      const settle = (items) => applySequencedFavouriteState(
+        items,
+        symbolId,
+        Boolean(result?.isFavourite),
+        operationSequence,
+        favouriteOperationSequencesRef.current.get(symbolId)
+      );
+      catalogSearch.updateItems(settle);
+      setPinnedSymbol((current) => (current ? settle([current])[0] : current));
       if (operationSequence === favouriteOperationSequencesRef.current.get(symbolId)) {
         setFavouriteStatus({
           mode: 'success',
@@ -1415,16 +1412,15 @@ function StandardsPage() {
         });
       }
     } catch (error) {
-      setStandardsState((current) => ({
-        ...current,
-        items: applySequencedFavouriteState(
-          current.items,
-          symbolId,
-          !toggle.isFavourite,
-          operationSequence,
-          favouriteOperationSequencesRef.current.get(symbolId)
-        )
-      }));
+      const revert = (items) => applySequencedFavouriteState(
+        items,
+        symbolId,
+        !toggle.isFavourite,
+        operationSequence,
+        favouriteOperationSequencesRef.current.get(symbolId)
+      );
+      catalogSearch.updateItems(revert);
+      setPinnedSymbol((current) => (current ? revert([current])[0] : current));
       if (operationSequence === favouriteOperationSequencesRef.current.get(symbolId)) {
         setFavouriteStatus({
           mode: 'error',
@@ -1491,14 +1487,11 @@ function StandardsPage() {
       if (lifecycleNotice.mode === 'error') {
         return;
       }
-      setStandardsState((current) => ({
-        ...current,
-        items: current.items.map((symbol) =>
-          submittedSymbolIds.includes(symbol.symbolId)
-            ? { ...symbol, hasComments: true, commentCount: Number(symbol.commentCount || 0) + 1 }
-            : symbol
-        )
-      }));
+      catalogSearch.updateItems((items) => items.map((symbol) =>
+        submittedSymbolIds.includes(symbol.symbolId)
+          ? { ...symbol, hasComments: true, commentCount: Number(symbol.commentCount || 0) + 1 }
+          : symbol
+      ));
       setSelectedSymbolIds([]);
       setCommandDialog(null);
       setCommandComment('');
@@ -1515,7 +1508,7 @@ function StandardsPage() {
       return;
     }
 
-    if (!filteredSymbols.length) {
+    if (!loadedSymbols.length) {
       return;
     }
 
@@ -1533,12 +1526,12 @@ function StandardsPage() {
     // If nothing is selected yet, treat the visually-displayed fallback (first row)
     // as the current row so the very first arrow press moves to row 2 — matches
     // what a user sees in the detail panel after page load.
-    const effectiveActiveId = activeId || filteredSymbols[0]?.id || '';
+    const effectiveActiveId = activeId || loadedSymbols[0]?.id || '';
     if (!effectiveActiveId) {
       return;
     }
 
-    const currentIndex = filteredSymbols.findIndex((symbol) => symbol.id === effectiveActiveId);
+    const currentIndex = loadedSymbols.findIndex((symbol) => symbol.id === effectiveActiveId);
     if (currentIndex < 0) {
       return;
     }
@@ -1547,13 +1540,13 @@ function StandardsPage() {
     if (event.key === 'ArrowDown' || event.key === 'j') {
       // From the "no selection yet" state, ArrowDown should select the first row
       // (not skip past it to row 2).
-      nextIndex = activeId ? Math.min(currentIndex + 1, filteredSymbols.length - 1) : currentIndex;
+      nextIndex = activeId ? Math.min(currentIndex + 1, loadedSymbols.length - 1) : currentIndex;
     } else if (event.key === 'ArrowUp' || event.key === 'k') {
       nextIndex = Math.max(currentIndex - 1, 0);
     } else if (event.key === 'Home') {
       nextIndex = 0;
     } else if (event.key === 'End') {
-      nextIndex = filteredSymbols.length - 1;
+      nextIndex = loadedSymbols.length - 1;
     }
 
     // If we materialized the implicit selection on ArrowDown, we still want to commit it.
@@ -1563,9 +1556,10 @@ function StandardsPage() {
     }
 
     event.preventDefault();
-    const nextSymbol = filteredSymbols[nextIndex];
-    if (nextIndex >= visibleSymbols.length) {
-      setDisplayCount((current) => Math.min(Math.max(current + 40, nextIndex + 1), filteredSymbols.length));
+    const nextSymbol = loadedSymbols[nextIndex];
+    // Near the end of what is loaded, fetch the next page.
+    if (nextIndex >= loadedSymbols.length - 5) {
+      catalogSearch.loadMore();
     }
     selectSymbol(nextSymbol.id);
   }
@@ -1595,7 +1589,7 @@ function StandardsPage() {
     if (row) {
       row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
-  }, [activeId, visibleSymbols]);
+  }, [activeId, loadedSymbols]);
 
   function updateColumnFilter(key, value) {
     setColumnFilters((current) => ({ ...current, [key]: value }));
@@ -1718,17 +1712,88 @@ function StandardsPage() {
   }
 
   function toggleSort(key) {
-    setSortState((current) => ({
-      key,
-      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
-    }));
+    setSortByView((current) => {
+      const previous = current[view];
+      return {
+        ...current,
+        [view]: { key, direction: previous.key === key && previous.direction === 'asc' ? 'desc' : 'asc' }
+      };
+    });
+  }
+
+  function restoreSetOrder() {
+    setSortByView((current) => ({ ...current, [SET_VIEW]: defaultSortForView(SET_VIEW) }));
+  }
+
+  function switchView(nextView) {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set('view', nextView);
+      return next;
+    }, { replace: true });
+  }
+
+  function clearAllFilters() {
+    setQuery('');
+    setFacetFilters({});
+    setColumnFilters({});
+    setShowFavourites(false);
   }
 
   function handleGridScroll(event) {
     const element = event.currentTarget;
     if (element.scrollTop + element.clientHeight >= element.scrollHeight - 160) {
-      setDisplayCount((current) => Math.min(current + 40, filteredSymbols.length));
+      catalogSearch.loadMore();
     }
+  }
+
+  const filtersActive = hasActiveFilters({ query, facetFilters, columnFilters, showFavourites });
+  const setSummary = setSourceSummary(catalogSearch, catalogSearch.facets);
+  const groupedBySet = view === SET_VIEW && sortState.key === SET_ORDER_SORT;
+  const setGroupTotals = Object.fromEntries((catalogSearch.facets.setGroup || []).map((entry) => [entry.value, entry.count]));
+  const setGroupRuns = groupedBySet ? groupBySetGroup(loadedSymbols) : [];
+  const runsPerGroup = setGroupRuns.reduce((counts, group) => ({ ...counts, [group.name]: (counts[group.name] || 0) + 1 }), {});
+  const cardEntries = groupedBySet
+    ? setGroupRuns.flatMap((group, groupIndex) => [
+      {
+        key: `group-${groupIndex}-${group.name}`,
+        heading: group.name,
+        // A group's total only makes sense when the set lists it in one run.
+        count: filtersActive || runsPerGroup[group.name] > 1 ? null : setGroupTotals[group.name]
+      },
+      ...group.items.map((symbol, index) => ({ key: `${symbol.id}-${groupIndex}-${index}`, symbol }))
+    ])
+    : loadedSymbols.map((symbol, index) => ({ key: `${symbol.id}-${index}`, symbol }));
+
+  let emptyState = null;
+  if (catalogSearch.loaded && !catalogSearch.loading && !loadedSymbols.length) {
+    if (filtersActive) {
+      emptyState = {
+        title: view === SET_VIEW ? 'No symbols in this set match your filters' : 'No symbols match your filters',
+        body: 'Clear or change the filters to see more.'
+      };
+    } else if (view === SET_VIEW) {
+      emptyState = catalogSearch.activeSet
+        ? { title: `No symbols in ${catalogSearch.activeSet.code} are currently available`, body: 'Items that are withdrawn or no longer eligible are left out.' }
+        : { title: 'Choose a Symbol Set', body: 'This Project has no Symbol Set selected and no default. Pick one above.' };
+    } else {
+      emptyState = { title: 'No published records', body: 'No approved symbols are available yet.' };
+    }
+  } else if (view === SET_VIEW && viewResolved && symbolContext.contextVersion > 0 && !setProjectId) {
+    emptyState = { title: 'Choose a Project to see its symbols', body: 'Pick a Project above; its Symbol Set and your organization-wide symbols appear here.' };
+  }
+
+  let catalogStatusText;
+  if (!appConfig.apiRoot) {
+    catalogStatusText = `No API root configured. Showing seeded published records. Showing ${loadedSymbols.length} of ${catalogSearch.total}.`;
+  } else if (!catalogSearch.loaded) {
+    catalogStatusText = view === SET_VIEW && !setProjectId ? 'Choose a Project to see its Symbol Set.' : 'Loading symbols…';
+  } else if (catalogSearch.loading) {
+    catalogStatusText = view === SET_VIEW && symbolContext.activeSetCode
+      ? `Loading ${symbolContext.activeSetCode}…`
+      : 'Updating results…';
+  } else {
+    catalogStatusText = `Showing ${loadedSymbols.length} of ${catalogSearch.total} ${view === SET_VIEW ? 'symbols in this set view' : 'records'}.`;
   }
 
   return (
@@ -1747,8 +1812,8 @@ function StandardsPage() {
           />
         </label>
       </div>
-      <p className={`page-status-text status-${standardsState.mode}`}>
-        {standardsState.loading ? 'Loading published symbols...' : `${standardsState.message} Showing ${filteredSymbols.length} records.`}
+      <p className={`page-status-text status-${appConfig.apiRoot ? 'live' : 'seeded'}`} role="status">
+        {catalogStatusText}
       </p>
       {workbenchStatus.message ? (
         <p className={`inline-status ${workbenchStatus.mode || 'info'}`}>{workbenchStatus.message}</p>
@@ -1899,7 +1964,36 @@ function StandardsPage() {
         ) : null}
       </section>
 
-      <div className={`standards-browser-grid ${activeId && activeSymbol ? 'has-detail' : ''}`}>
+      {setsAvailable ? (
+        <CatalogViewTabs
+          view={view}
+          onSelect={switchView}
+          total={catalogSearch.loaded && !catalogSearch.loading ? catalogSearch.total : null}
+        />
+      ) : null}
+      {view === SET_VIEW ? (
+        <section className="catalog-set-context" aria-label="Project and Symbol Set shown in the Set tab">
+          <ProjectContextBarView state={symbolContext} headingId="catalog-set-context-heading" />
+          {setProjectId && catalogSearch.loaded && (setSummary.reason || setSummary.counts) ? (
+            <p className="catalog-set-summary">
+              {setSummary.reason ? <span className="catalog-set-reason">{setSummary.reason}</span> : null}
+              {setSummary.counts ? <span>{setSummary.counts}</span> : null}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+      {catalogSearch.error ? (
+        <p className="inline-status error catalog-search-error" role="alert">
+          {catalogSearch.error}{' '}
+          {loadedSymbols.length ? 'Showing the last results that loaded.' : ''}{' '}
+          <button type="button" className="action-button secondary compact" onClick={catalogSearch.retry}>Retry</button>
+        </p>
+      ) : null}
+
+      <div
+        className={`standards-browser-grid ${activeId && activeSymbol ? 'has-detail' : ''}`}
+        {...(setsAvailable ? { id: CATALOG_TAB_PANEL_ID, role: 'tabpanel', 'aria-labelledby': catalogTabId(view) } : {})}
+      >
         <section className="glass-panel pane facets-panel">
           <SectionHeading title="Filter symbols" subtitle="Narrow by properties" />
           <div className="facet-group">
@@ -1910,14 +2004,15 @@ function StandardsPage() {
             <div key={facet.key} className="facet-group">
               <h4>{facet.label}</h4>
               {facet.values.length ? (
-                facet.values.map((value) => (
+                facet.values.map(({ value, count }) => (
                   <label key={`${facet.key}-${value}`} className="checkbox-row">
                     <input
                       type="checkbox"
                       checked={(facetFilters[facet.key] || []).includes(value)}
                       onChange={() => toggleFacetValue(facet.key, value)}
                     />
-                    <span>{value}</span>
+                    <span>{facetValueLabel(facet.key, value)}</span>
+                    <span className="facet-count" aria-label={`${count} matching`}>{count}</span>
                   </label>
                 ))
               ) : (
@@ -1930,8 +2025,21 @@ function StandardsPage() {
         <section className="glass-panel pane standards-grid-panel">
           <div className="standards-result-meta">
             <div>
-              <strong>{filteredSymbols.length} approved symbols</strong>
-              <span>{visibleSymbols.length < filteredSymbols.length ? `Showing ${visibleSymbols.length}; scroll for more` : 'All visible'}</span>
+              <strong>{catalogSearch.total} {view === SET_VIEW ? 'symbols in this set view' : 'approved symbols'}</strong>
+              <span>
+                {loadedSymbols.length < catalogSearch.total ? `Showing ${loadedSymbols.length}; scroll for more` : 'All loaded'}
+                {view === SET_VIEW && sortState.key === SET_ORDER_SORT ? ' · in set order' : ''}
+              </span>
+              {view === SET_VIEW && sortState.key !== SET_ORDER_SORT ? (
+                <button type="button" className="action-button secondary compact" onClick={restoreSetOrder}>
+                  Back to set order
+                </button>
+              ) : null}
+              {filtersActive ? (
+                <button type="button" className="action-button secondary compact" onClick={clearAllFilters}>
+                  Clear filters
+                </button>
+              ) : null}
             </div>
             <div className="catalog-view-toggle" role="group" aria-label="Catalog result view">
               <button
@@ -2020,7 +2128,8 @@ function StandardsPage() {
             </p>
           ) : null}
           <div
-            className="approved-symbol-grid"
+            className={`approved-symbol-grid ${catalogSearch.loading && loadedSymbols.length ? 'catalog-results-refreshing' : ''}`}
+            aria-busy={catalogSearch.loading}
             ref={standardsGridRef}
             onScroll={handleGridScroll}
             onKeyDown={handleStandardsGridKeyDown}
@@ -2030,7 +2139,16 @@ function StandardsPage() {
           >
             {catalogResultView === 'cards' ? (
               <div className="catalog-card-grid" role="list" aria-label="Published symbol compact cards">
-                {visibleSymbols.map((symbol) => {
+                {cardEntries.map((entry) => {
+                  if (entry.heading) {
+                    return (
+                      <h4 key={entry.key} className="catalog-group-heading">
+                        {entry.heading}
+                        {entry.count != null ? <span>{entry.count}</span> : null}
+                      </h4>
+                    );
+                  }
+                  const symbol = entry.symbol;
                   const card = buildCatalogCardSummary(symbol);
                   return (
                     <article
@@ -2057,7 +2175,7 @@ function StandardsPage() {
                           aria-label={`Select ${card.displayId}`}
                           checked={selectedSymbolIds.includes(symbol.id)}
                           disabled={!selectedSymbolIds.includes(symbol.id) && selectionLimitReached}
-                          onChange={() => toggleSymbolSelection(symbol.id)}
+                          onChange={() => toggleSymbolSelection(symbol)}
                         />
                       </div>
                       <div className="catalog-card-preview">
@@ -2079,6 +2197,9 @@ function StandardsPage() {
                           </span>
                         </div>
                         <h4>{card.name || 'Unnamed symbol'}</h4>
+                        {symbol.paletteEntry?.displayLabel ? (
+                          <p className="catalog-card-set-label">{symbol.paletteEntry.displayLabel}</p>
+                        ) : null}
                         <CatalogBadgeRow symbol={symbol} />
                         <p>{card.categories.slice(0, 2).join(' · ') || 'Category pending'}</p>
                         <div className="catalog-card-chip-row" aria-label="Disciplines">
@@ -2113,7 +2234,7 @@ function StandardsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleSymbols.map((symbol) => (
+                  {loadedSymbols.map((symbol) => (
                     <tr
                       key={symbol.id}
                       data-symbol-id={symbol.id}
@@ -2139,7 +2260,7 @@ function StandardsPage() {
                           aria-label={`Select ${displaySymbolId(symbol)}`}
                           checked={selectedSymbolIds.includes(symbol.id)}
                           disabled={!selectedSymbolIds.includes(symbol.id) && selectionLimitReached}
-                          onChange={() => toggleSymbolSelection(symbol.id)}
+                          onChange={() => toggleSymbolSelection(symbol)}
                         />
                       </td>
                       <td onClick={(event) => event.stopPropagation()}>
@@ -2191,9 +2312,10 @@ function StandardsPage() {
                 </tbody>
               </table>
             )}
-            {!visibleSymbols.length ? (
-              <EmptyState title="No published records" body="Adjust the search or filters to find approved symbols." />
+            {!loadedSymbols.length && emptyState ? (
+              <EmptyState title={emptyState.title} body={emptyState.body} />
             ) : null}
+            {catalogSearch.loadingMore ? <p className="muted-text catalog-loading-more" role="status">Loading more…</p> : null}
           </div>
         </section>
 
@@ -2238,6 +2360,21 @@ function StandardsPage() {
                   <PublishedSymbolPreview symbol={activeSymbol} large />
                 </div>
                 <SupplementalPhotoStrip photos={activeSymbol.supplementalPhotos || []} />
+                {activeSymbol.paletteEntry ? (
+                  <section className="catalog-set-entry" aria-label="In the Symbol Set">
+                    <h4>
+                      {activeSymbol.paletteEntry.source === 'organization_wide'
+                        ? 'Organization-wide symbol'
+                        : `In Symbol Set ${catalogSearch.activeSet?.code || ''}`.trim()}
+                    </h4>
+                    <div className="fact-grid detail-list">
+                      <Fact label="Group" value={activeSymbol.paletteEntry.groupName || 'Ungrouped'} />
+                      {activeSymbol.paletteEntry.displayLabel ? <Fact label="Label" value={activeSymbol.paletteEntry.displayLabel} /> : null}
+                      {activeSymbol.paletteEntry.preferredFormat ? <Fact label="Preferred format" value={activeSymbol.paletteEntry.preferredFormat} /> : null}
+                      {activeSymbol.paletteEntry.notes ? <Fact label="Notes" value={activeSymbol.paletteEntry.notes} /> : null}
+                    </div>
+                  </section>
+                ) : null}
                 <div className="fact-grid detail-list">
                   <Fact label="Scope" value={<CatalogBadgeRow symbol={activeSymbol} />} />
                   <Fact label="Status" value={activeSymbol.status || 'Published'} />
@@ -2317,6 +2454,58 @@ function StandardsPage() {
         </div>
       ) : null}
     </section>
+  );
+}
+
+const CATALOG_TAB_PANEL_ID = 'catalog-view-panel';
+const CATALOG_VIEW_TABS = [
+  { view: SET_VIEW, label: 'Set' },
+  { view: CATALOG_VIEW, label: 'Catalog' }
+];
+
+function catalogTabId(view) {
+  return `catalog-view-tab-${view}`;
+}
+
+// The Set and Catalog tabs. Roving tabindex, as `role="tablist"` promises:
+// arrow keys move between the tabs and Tab leaves the group. Only the open
+// tab's count is known, since each tab is its own search.
+function CatalogViewTabs({ view, onSelect, total }) {
+  function onKeyDown(event) {
+    const index = CATALOG_VIEW_TABS.findIndex((tab) => tab.view === view);
+    let next = null;
+    if (event.key === 'ArrowRight') next = (index + 1) % CATALOG_VIEW_TABS.length;
+    if (event.key === 'ArrowLeft') next = (index - 1 + CATALOG_VIEW_TABS.length) % CATALOG_VIEW_TABS.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = CATALOG_VIEW_TABS.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    const target = CATALOG_VIEW_TABS[next].view;
+    onSelect(target);
+    document.getElementById(catalogTabId(target))?.focus();
+  }
+  return (
+    <nav className="catalog-view-tabs" role="tablist" aria-label="Catalog views" onKeyDown={onKeyDown}>
+      {CATALOG_VIEW_TABS.map((tab) => {
+        const active = tab.view === view;
+        return (
+          <button
+            key={tab.view}
+            id={catalogTabId(tab.view)}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            aria-controls={CATALOG_TAB_PANEL_ID}
+            tabIndex={active ? 0 : -1}
+            className={`catalog-view-tab${active ? ' active' : ''}`}
+            onClick={() => onSelect(tab.view)}
+          >
+            {tab.label}
+            {active && total != null ? <span className="catalog-view-tab-count">{total}</span> : null}
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 

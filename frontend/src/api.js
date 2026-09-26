@@ -1690,6 +1690,31 @@ export async function fetchPublishedSymbols() {
   };
 }
 
+// One page of the Catalog or Set tab, searched in the database. `query` is a
+// URLSearchParams, since filters repeat (`catalogCategories=a&catalogCategories=b`).
+export async function searchPublishedSymbols(query, { signal } = {}) {
+  const suffix = query.toString();
+  const result = await requestJson(`/published/symbols/search${suffix ? `?${suffix}` : ''}`, { cache: 'no-store', signal });
+  const payload = requireOk(result, 'Catalog search failed.');
+  return {
+    scope: payload?.scope || 'catalog',
+    items: Array.isArray(payload?.items) ? payload.items : [],
+    total: Number(payload?.total || 0),
+    page: Number(payload?.page || 1),
+    pageSize: Number(payload?.pageSize || 0),
+    facets: payload?.facets && typeof payload.facets === 'object' ? payload.facets : {},
+    project: payload?.project || null,
+    activeSet: payload?.activeSet || null,
+    reason: payload?.reason || null
+  };
+}
+
+// One symbol by its ID, for a link to a symbol that is not on the loaded pages.
+export async function fetchPublishedSymbol(symbolId) {
+  const result = await requestJson(`/published/symbols/${encodeURIComponent(symbolId)}`, { cache: 'no-store' });
+  return requireOk(result, 'Symbol could not be loaded.')?.item || null;
+}
+
 export async function updateCatalogFavourite(symbolId, isFavourite) {
   const result = await requestJson(`/published/favourites/${encodeURIComponent(symbolId)}`, {
     method: isFavourite ? 'PUT' : 'DELETE'

@@ -117,6 +117,7 @@ function ordinaryLoginFetch({ initialUser = null, loginFrom = null } = {}) {
       return response(200, { user: loginFrom || user() });
     }
     if (url.endsWith('/published/symbols')) return response(200, { items: [] });
+    if (url.includes('/published/symbols/search?')) return response(200, { scope: 'catalog', items: [], total: 0, facets: {} });
     throw new Error(`Unexpected request: ${method} ${url}`);
   };
   return { fetchImpl, requests };
@@ -151,6 +152,7 @@ function authFlowFetch({ me = null, login, select, changePin, logout } = {}) {
     if (url.endsWith('/auth/change-pin')) return resolve(changePin, response(200, { user: user() }));
     if (url.endsWith('/auth/logout')) return resolve(logout, response(200, { ok: true, revoked: true }));
     if (url.endsWith('/published/symbols')) return response(200, { items: [] });
+    if (url.includes('/published/symbols/search?')) return response(200, { scope: 'catalog', items: [], total: 0, facets: {} });
     throw new Error(`Unexpected request: ${method} ${url}`);
   };
   return { fetchImpl, requests };
@@ -512,6 +514,7 @@ test('a stale authenticated refresh cannot restore the session after successful 
     }
     if (url.endsWith('/auth/logout')) return response(200, { ok: true, revoked: true });
     if (url.endsWith('/published/symbols')) return response(200, { items: [] });
+    if (url.includes('/published/symbols/search?')) return response(200, { scope: 'catalog', items: [], total: 0, facets: {} });
     throw new Error(`Unexpected request: ${method} ${url}`);
   };
   const { renderer } = await mount('/profile', fetchImpl);
@@ -567,6 +570,7 @@ test('a stale unauthenticated refresh cannot overwrite a newer successful login'
     if (url.endsWith('/auth/logout')) return response(200, { ok: true, revoked: true });
     if (url.endsWith('/auth/login')) return response(200, { user: currentUser });
     if (url.endsWith('/published/symbols')) return response(200, { items: [] });
+    if (url.includes('/published/symbols/search?')) return response(200, { scope: 'catalog', items: [], total: 0, facets: {} });
     throw new Error(`Unexpected request: ${method} ${url}`);
   };
   const { renderer, locations } = await mount('/profile', fetchImpl);
