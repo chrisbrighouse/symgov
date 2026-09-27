@@ -12,6 +12,7 @@ from symgov_backend.ed_knowledge import (
     KnowledgeTopic,
     Visibility,
     load_manifest,
+    source_path_issues,
     validate_manifest,
 )
 
@@ -181,6 +182,16 @@ def test_validator_reports_missing_allowlisted_repository_source(tmp_path):
 
     assert report.valid is False
     assert "missing_source" in _error_codes(report)
+
+
+def test_public_source_path_policy_preserves_allowlist_and_missing_file_checks(tmp_path):
+    assert [issue.code for issue in source_path_issues("../private.env", "source:test", tmp_path)] == [
+        "disallowed_source_path"
+    ]
+    assert [
+        issue.code
+        for issue in source_path_issues("docs/missing-approved-source.md", "source:test", tmp_path)
+    ] == ["missing_source"]
 
 
 def test_validator_rejects_allowlisted_symlink_to_private_repository_source(tmp_path):

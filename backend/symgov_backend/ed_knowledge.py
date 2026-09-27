@@ -268,49 +268,52 @@ def _source_path_error(source_path: str) -> str | None:
     return None
 
 
+def source_path_issues(
+    source_path: str,
+    reference: str,
+    repository_root: str | Path | None = None,
+) -> tuple[ValidationIssue, ...]:
+    """Apply the shared repository knowledge-source boundary to one path."""
+    reason = _source_path_error(source_path)
+    if reason is not None:
+        return (_issue("disallowed_source_path", reference, reason),)
+    if repository_root is None:
+        return ()
+
+    resolved_root = Path(repository_root).resolve()
+    candidate = resolved_root
+    for part in PurePosixPath(source_path).parts:
+        candidate /= part
+        if candidate.is_symlink():
+            return (
+                _issue(
+                    "disallowed_source_path",
+                    reference,
+                    "source path must not traverse symbolic links",
+                ),
+            )
+    source = (resolved_root / source_path).resolve()
+    try:
+        source.relative_to(resolved_root)
+    except ValueError:
+        return (
+            _issue(
+                "disallowed_source_path",
+                reference,
+                "source path resolves outside the repository",
+            ),
+        )
+    if not source.is_file():
+        return (_issue("missing_source", reference, "allowlisted source file does not exist"),)
+    return ()
+
+
 def _source_issues(
     records: tuple[SourceMetadata, ...], repository_root: Path | None
 ) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
-    resolved_root = repository_root.resolve() if repository_root is not None else None
     for record in records:
-        reason = _source_path_error(record.source_path)
-        if reason is not None:
-            issues.append(_issue("disallowed_source_path", record.id, reason))
-            continue
-        if resolved_root is not None:
-            candidate = resolved_root
-            traverses_symlink = False
-            for part in PurePosixPath(record.source_path).parts:
-                candidate /= part
-                if candidate.is_symlink():
-                    traverses_symlink = True
-                    break
-            if traverses_symlink:
-                issues.append(
-                    _issue(
-                        "disallowed_source_path",
-                        record.id,
-                        "source path must not traverse symbolic links",
-                    )
-                )
-                continue
-            source = (resolved_root / record.source_path).resolve()
-            try:
-                source.relative_to(resolved_root)
-            except ValueError:
-                issues.append(
-                    _issue(
-                        "disallowed_source_path",
-                        record.id,
-                        "source path resolves outside the repository",
-                    )
-                )
-                continue
-            if not source.is_file():
-                issues.append(
-                    _issue("missing_source", record.id, "allowlisted source file does not exist")
-                )
+        issues.extend(source_path_issues(record.source_path, record.id, repository_root))
     return issues
 
 

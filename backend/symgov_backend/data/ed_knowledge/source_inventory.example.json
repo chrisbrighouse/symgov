@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "inventory_version": "ed-source-inventory-example-v1",
+  "sources": [
+    {
+      "id": "source:repository-docs:v1",
+      "title": "Repository documentation",
+      "topic": "support",
+      "source_path": "docs/README.md",
+      "source_version": "sha256:dacc8dc3f55996340ce70f6c107a85638a2af39d5b419021722b09ebb97a83fd",
+      "source_kind": "markdown"
+    },
+    {
+      "id": "source:authenticated-user:v1",
+      "title": "Authenticated user context",
+      "topic": "security",
+      "source_path": "backend/symgov_backend/auth.py",
+      "source_version": "sha256:7b0de0dd3be33ed250fe1b284d9ecc512914afa3e0e6b2c0b832fe0f87060125",
+      "source_kind": "python",
+      "source_symbol": "AuthenticatedUser"
+    }
+  ]
+}
