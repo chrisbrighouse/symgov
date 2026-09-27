@@ -1,0 +1,94 @@
+{
+  "schema_version": "1.0",
+  "knowledge_version": "ed-foundation-example-v1",
+  "generated_at": "2026-09-27T00:00:00Z",
+  "documents": [
+    {
+      "id": "document:application-overview:v1",
+      "title": "Ed application scope",
+      "topic": "application",
+      "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+      "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+      "extracted_at": "2026-09-27T00:00:00Z",
+      "source_line_start": 7,
+      "source_line_end": 32,
+      "visibility": "authenticated",
+      "approval_state": "published",
+      "supersedes": [],
+      "superseded_by": [],
+      "claims": [
+        {
+          "id": "claim:application-read-only:v1",
+          "title": "Ed starts as a read-only assistant",
+          "topic": "application",
+          "text": "The initial Ed capability explains Symgov and retrieves permitted read-only facts without changing Symgov records.",
+          "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+          "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+          "extracted_at": "2026-09-27T00:00:00Z",
+          "source_line_start": 9,
+          "source_line_end": 32,
+          "visibility": "authenticated",
+          "approval_state": "published",
+          "supersedes": [],
+          "superseded_by": []
+        }
+      ]
+    },
+    {
+      "id": "document:security-boundary:v1",
+      "title": "Authenticated application boundary",
+      "topic": "security",
+      "source_path": "backend/symgov_backend/auth.py",
+      "source_version": "c9cb088",
+      "extracted_at": "2026-09-27T00:00:00Z",
+      "source_symbol": "AuthenticatedUser",
+      "visibility": "authenticated",
+      "approval_state": "published",
+      "supersedes": [],
+      "superseded_by": [],
+      "claims": [
+        {
+          "id": "claim:security-authenticated-user:v1",
+          "title": "User context is server-derived",
+          "topic": "security",
+          "text": "Authenticated application features use server-resolved user context rather than trusting identity supplied in prompt text.",
+          "source_path": "backend/symgov_backend/auth.py",
+          "source_version": "c9cb088",
+          "extracted_at": "2026-09-27T00:00:00Z",
+          "source_symbol": "AuthenticatedUser",
+          "visibility": "authenticated",
+          "approval_state": "published",
+          "supersedes": [],
+          "superseded_by": []
+        }
+      ]
+    },
+    {
+      "id": "document:support-entry:v1",
+      "title": "Symgov support entry point",
+      "topic": "support",
+      "source_path": "docs/README.md",
+      "source_version": "c9cb088",
+      "extracted_at": "2026-09-27T00:00:00Z",
+      "visibility": "authenticated",
+      "approval_state": "published",
+      "supersedes": [],
+      "superseded_by": [],
+      "claims": [
+        {
+          "id": "claim:support-repository-docs:v1",
+          "title": "Repository support documentation",
+          "topic": "support",
+          "text": "Approved repository documentation is a source for bounded support explanations.",
+          "source_path": "docs/README.md",
+          "source_version": "c9cb088",
+          "extracted_at": "2026-09-27T00:00:00Z",
+          "visibility": "authenticated",
+          "approval_state": "published",
+          "supersedes": [],
+          "superseded_by": []
+        }
+      ]
+    }
+  ]
+}
