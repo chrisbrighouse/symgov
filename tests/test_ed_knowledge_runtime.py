@@ -17,7 +17,9 @@ import pytest
 from symgov_backend.settings import SymgovAPISettings
 
 
-pytestmark = pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="ssh-keygen is required")
+# Contract review 14: only the signing tests need ssh-keygen; the committed
+# bundle check below must never be skipped.
+requires_ssh_keygen = pytest.mark.skipif(shutil.which("ssh-keygen") is None, reason="ssh-keygen is required")
 NAMESPACE = "symgov-ed-knowledge"
 
 
@@ -73,6 +75,7 @@ def _fresh_cache():
     _runtime().clear_approved_knowledge_cache()
 
 
+@requires_ssh_keygen
 def test_nothing_is_loaded_unless_both_settings_are_present(tmp_path: Path, monkeypatch):
     runtime = _runtime()
     monkeypatch.delenv("SYMGOV_ED_KNOWLEDGE_BUNDLE", raising=False)
@@ -85,6 +88,7 @@ def test_nothing_is_loaded_unless_both_settings_are_present(tmp_path: Path, monk
     ) is None
 
 
+@requires_ssh_keygen
 def test_a_steward_signed_bundle_loads_and_answers(tmp_path: Path):
     runtime = _runtime()
     repository, settings, _home, index = _signed_release(tmp_path)
@@ -99,6 +103,7 @@ def test_a_steward_signed_bundle_loads_and_answers(tmp_path: Path):
     assert result.items[0].citation.reference == f"knowledge:{knowledge.version}:claim:guide-read-only:v1"
 
 
+@requires_ssh_keygen
 @pytest.mark.parametrize("problem", ["unsigned", "unlisted", "tampered", "bad_name"])
 def test_an_unapproved_bundle_is_never_served(tmp_path: Path, problem: str):
     runtime = _runtime()
@@ -116,6 +121,7 @@ def test_an_unapproved_bundle_is_never_served(tmp_path: Path, problem: str):
     assert runtime.load_approved_knowledge(settings, repository_root=repository) is None
 
 
+@requires_ssh_keygen
 def test_a_source_changed_after_approval_stops_answers(tmp_path: Path):
     """The signature still holds, but the cited bytes moved on: fail closed."""
     runtime = _runtime()
@@ -143,3 +149,30 @@ def test_the_committed_initial_bundle_matches_its_unsigned_receipt():
 
     assert receipt["indexDigest"] == result.index_digest
     assert receipt["manifestDigest"] == result.manifest_digest
+
+
+@requires_ssh_keygen
+def test_a_load_in_progress_never_blocks_another_request(tmp_path: Path):
+    """Security review L4: a load held the global lock while ssh-keygen ran."""
+    runtime = _runtime()
+    repository, settings, _home, _index = _signed_release(tmp_path)
+    key = (settings.ed_knowledge_bundle, settings.ed_allowed_signers, str(repository.resolve()))
+    runtime._loading.add(key)
+    try:
+        assert runtime.load_approved_knowledge(settings, repository_root=repository) is None
+    finally:
+        runtime._loading.discard(key)
+
+    assert runtime.load_approved_knowledge(settings, repository_root=repository) is not None
+
+
+@requires_ssh_keygen
+def test_a_loaded_bundle_is_verified_again_after_its_ttl(tmp_path: Path, monkeypatch):
+    """Contract review 10: removing a steward key used to need a restart."""
+    runtime = _runtime()
+    repository, settings, _home, _index = _signed_release(tmp_path)
+    assert runtime.load_approved_knowledge(settings, repository_root=repository) is not None
+    Path(settings.ed_allowed_signers).write_text("")
+    monkeypatch.setattr(runtime, "_SUCCESS_REVERIFY_SECONDS", 0.0)
+
+    assert runtime.load_approved_knowledge(settings, repository_root=repository) is None

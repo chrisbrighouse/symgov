@@ -57,6 +57,15 @@ _PROMPT_INJECTION = re.compile(
 )
 
 
+def looks_like_prompt_injection(text: str) -> bool:
+    """Whether text contains a known instruction-override shape.
+
+    Applied to knowledge passages here and to live record text before it
+    reaches the model. A narrow list: defence in depth, not a guarantee.
+    """
+    return bool(_PROMPT_INJECTION.search(unicodedata.normalize("NFKC", text)))
+
+
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 

@@ -705,7 +705,8 @@ def prepare_receipt(
 
 
 def _ssh_keygen(arguments: list[str], *, stdin: bytes | None = None) -> subprocess.CompletedProcess[bytes]:
-    executable = shutil.which("ssh-keygen")
+    # Security review L3: a fixed system location, never the caller's PATH.
+    executable = shutil.which("ssh-keygen", path="/usr/bin:/bin")
     if executable is None:
         raise BundleError("approval_unavailable", "ssh-keygen is required to verify an approval")
     try:
@@ -773,6 +774,10 @@ def verify_approval(
     if _inside(signers_path.resolve(), root) or _inside(signers_path.resolve(), bundle_path):
         raise BundleError("unsafe_signers", "allowed signers must live outside the repository and the bundle")
     _read_regular(signers_path, maximum=MAX_SIGNERS_BYTES, code="unsafe_signers", label="allowed signers")
+    # The signer list decides who may approve, so nobody but its owner may
+    # be able to change it (security review L3).
+    if signers_path.stat().st_mode & 0o022:
+        raise BundleError("unsafe_signers", "allowed signers must not be writable by group or others")
     receipt_path = Path(receipt).absolute()
     signature_path = Path(signature).absolute()
     receipt_bytes = _read_regular(

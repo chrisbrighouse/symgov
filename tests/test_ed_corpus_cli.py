@@ -831,3 +831,19 @@ def test_a_source_over_the_old_64_kb_limit_builds_and_is_retrievable(tmp_path: P
     )
 
     assert result.status == "answered"
+
+
+@requires_ssh_keygen
+def test_a_signer_list_others_can_write_is_refused(tmp_path: Path):
+    """Security review L3: the signer list is the control, so it must not be
+    writable by anyone but its owner."""
+    module, repository, bundle, key, signers, receipt = _approval_setup(tmp_path)
+    signature = _sign(key, receipt)
+    signers.chmod(0o666)
+
+    with pytest.raises(module.BundleError) as exc:
+        module.verify_approval(
+            bundle=bundle, repository=repository, receipt=receipt, signature=signature, allowed_signers=signers,
+        )
+
+    assert exc.value.code == "unsafe_signers"
