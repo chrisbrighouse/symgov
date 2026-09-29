@@ -22,4 +22,9 @@ def ed_pilot_allows(user: AuthenticatedUser, settings: SymgovAPISettings) -> boo
     if user.session_mode != "organization" or not user.active_organization_id:
         return False
     code = (user.organization_code or "").strip().lower()
-    return bool(code) and code in settings.ed_pilot_organization_codes
+    if not code:
+        return False
+    # "*" admits every organization, including ones created later (Chris,
+    # 2026-09-29). Personal sessions stay outside: Ed's live answers need an
+    # organization context.
+    return "*" in settings.ed_pilot_organization_codes or code in settings.ed_pilot_organization_codes

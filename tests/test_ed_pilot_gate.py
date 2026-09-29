@@ -160,3 +160,20 @@ def test_a_credential_change_session_is_outside_the_pilot():
     user = replace(_user(organization_code="ACME"), session_purpose="credential_change")
 
     assert ed_pilot_allows(user, SymgovAPISettings(ed_pilot_organization_codes=("acme",))) is False
+
+
+def test_a_star_admits_every_organization_including_new_ones():
+    """Chris, 2026-09-29: every organization, and any created later."""
+    from symgov_backend.routes.ed import ed_pilot_allows
+
+    everyone = SymgovAPISettings(ed_pilot_organization_codes=("*",))
+
+    assert ed_pilot_allows(_user(organization_code="ACME"), everyone) is True
+    assert ed_pilot_allows(_user(organization_code="NEWORG"), everyone) is True
+    assert ed_pilot_allows(_user(organization_code=None), everyone) is False
+
+
+def test_a_star_is_read_from_the_environment(monkeypatch):
+    monkeypatch.setenv("SYMGOV_ED_PILOT_ORGANIZATION_CODES", "*")
+
+    assert SymgovAPISettings().ed_pilot_organization_codes == ("*",)

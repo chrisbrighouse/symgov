@@ -168,6 +168,8 @@ Slice D (authorised 2026-09-29, step 3 of decision §7.5):
 - Steward key: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIByhljffC50Mhhj2pthIJKpw7jv29t2srjoBx/iZKBYe` ("Ed Knowledge Steward")
 - Fingerprint: `SHA256:0zsTEZ4Gq8EBcmuoB9BV1TX+qzqaaCxR9GRsjmBpqgE`. The server's signer list must name exactly this key; the deploy preflight can compare the two (Stage 6 report §5.1).
 
+**Activation decisions (2026-09-29).** Chris accepted the Stage 6 report §5.1 risk (root on this host) for a small pilot and approved activation. He then chose to put every organization in the pilot, including any created later. The gate therefore accepts `*`. Before this it had deliberately had no "all organizations" value. Personal sessions remain excluded.
+
 Not changed, and why:
 
 - **`sourceCommit` is recorded provenance only.** A release tree need not be a Git checkout, and the per-file hashes are the binding check. The runbook now says so.

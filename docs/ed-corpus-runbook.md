@@ -136,6 +136,7 @@ The Ed API serves product knowledge only when two settings name a bundle and a s
 
 - `SYMGOV_ED_KNOWLEDGE_BUNDLE` holds the bundle's directory name under `backend/symgov_backend/data/ed_knowledge/bundles/`, which is the first 12 hex of its index digest (for example `3755a0df9286`).
 - `SYMGOV_ED_ALLOWED_SIGNERS` holds the path to the steward signer list, mounted read-only from server configuration.
+- `SYMGOV_ED_PILOT_ORGANIZATION_CODES` lists the organization codes that may use Ed. `*` admits every organization, including ones created later, and personal sessions are never admitted. Empty means Ed is off for everyone.
 
 On first use the API runs the full `verify-approval` check against its own release tree, so it needs `ssh-keygen` at `/usr/bin` in the image. The signer file must not be writable by group or others. A bundle that passes is verified again every ten minutes, so removing a steward key takes effect within that time. A failed load is logged by error code and retried after a minute. Ed serves no product knowledge in the meantime. A load never blocks other requests: while one runs, they use the previous good load, or no knowledge at all. Every query re-hashes the source file behind each scored passage; if any one has drifted, that query gets no knowledge at all. After approval, Ed shows an answer only if it names an approved passage or a live record that the server offered it. A reference the server did not offer is refused. Either setting empty means no product knowledge; Ed then answers only from live records that it names.
 
