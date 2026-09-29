@@ -1,0 +1,173 @@
+{
+  "schemaVersion": "1.0",
+  "status": "stage6-evaluation",
+  "purpose": "Retrieval evaluation over the committed, steward-reviewed bundle. Each question names the claim that should support it and the rank it must reach (top-k of 4 returned). This measures retrieval only; live model answers need the pilot environment.",
+  "retrieval": [
+    {
+      "question": "What is Symgov for?",
+      "expectClaim": "claim:application.product.scope:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "What can Ed do?",
+      "expectClaim": "claim:application.ed.purpose:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Is Ed read-only, and what can it not do?",
+      "expectClaim": "claim:application.ed.read-only:v1",
+      "withinTop": 2
+    },
+    {
+      "question": "Can Ed change my data?",
+      "expectClaim": "claim:support.ed.change-requests:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "What kinds of questions can I ask Ed?",
+      "expectClaim": "claim:support.ed.what-to-ask:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Will Ed show me another user's profile?",
+      "expectClaim": "claim:support.ed.privacy-boundaries:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Why can't I use Ed?",
+      "expectClaim": "claim:known_limitations.ed.pilot-availability:v1",
+      "withinTop": 4
+    },
+    {
+      "question": "Does Ed keep my chat history?",
+      "expectClaim": "claim:known_limitations.ed.no-saved-history:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Are ISO standards documents included in Symgov?",
+      "expectClaim": "claim:known_limitations.ics.codes-only:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Which organizations can I work in?",
+      "expectClaim": "claim:organization.eligibility.active-membership-entitlement-role:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Why does it say I need an organization session?",
+      "expectClaim": "claim:organization.session.organization-bound-required:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "What can an Organization Admin do?",
+      "expectClaim": "claim:organization.roles.admin-only-actions:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "How do I choose an organization when I sign in?",
+      "expectClaim": "claim:user_setup.sign-in.select-organization:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Why am I asked to change my PIN after signing in?",
+      "expectClaim": "claim:user_setup.sign-in.must-change-pin:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "What is on my profile page?",
+      "expectClaim": "claim:user_setup.profile.identity-and-subscription:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Can I see projects from another organization?",
+      "expectClaim": "claim:project.organization-visibility:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "What happens when a project is closed?",
+      "expectClaim": "claim:project.closing:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Why did my selected project disappear?",
+      "expectClaim": "claim:project.session-selection:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "What is a symbol set?",
+      "expectClaim": "claim:symbol_set.definition:v1",
+      "withinTop": 2
+    },
+    {
+      "question": "How is my active symbol set chosen?",
+      "expectClaim": "claim:symbol_set.active-set-resolution:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Which symbol sets can Ed list?",
+      "expectClaim": "claim:symbol_set.ed-listed-sets:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "When is a private symbol visible?",
+      "expectClaim": "claim:symbol.private.eligibility:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Can private symbols go into a symbol set?",
+      "expectClaim": "claim:symbol.private.symbol-set-items:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "What is a classification scheme?",
+      "expectClaim": "claim:classification.scheme.definition:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "How do classification schemes relate to a symbol's discipline?",
+      "expectClaim": "claim:classification.scheme.seeded-facets:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Where did the ICS taxonomy come from?",
+      "expectClaim": "claim:classification.ics.provenance:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "What does ICS 29 mean?",
+      "expectClaim": "claim:classification.ics.provenance:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Why do I have to confirm my identity again?",
+      "expectClaim": "claim:security.step-up.sensitive-admin-actions:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Why must I change my PIN before doing anything else?",
+      "expectClaim": "claim:security.pin-change.required-before-access:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Why is something suddenly reported as not found?",
+      "expectClaim": "claim:security.access-rechecked-every-request:v1",
+      "withinTop": 1
+    }
+  ],
+  "noAnswer": [
+    "What's the weather in Paris?",
+    "Tell me a joke",
+    "Who won the football?",
+    "Translate hello into French"
+  ],
+  "knownGaps": [
+    {
+      "question": "How do I switch organization?",
+      "reason": "No approved source covers switching; the sign-in and switch logic lives in the auth routes, which are not an approved source."
+    },
+    {
+      "question": "Why can't I edit this symbol?",
+      "reason": "No approved source describes edit rights for symbols."
+    }
+  ]
+}

@@ -146,12 +146,24 @@ Hashing whole files means any edit to a cited code file invalidates the approval
 Slice D (authorised 2026-09-29, step 3 of decision §7.5):
 
 - `ed_knowledge_runtime.py` loads the bundle named by `SYMGOV_ED_KNOWLEDGE_BUNDLE`, but only after `verify-approval` passes against `SYMGOV_ED_ALLOWED_SIGNERS`. Retrieval runs after authentication and the topic gates, and before the model is called. Passages go to the model as labelled data. The model returns `knowledge_refs`, and the server accepts only references it offered, turning them into `approved_knowledge` citations.
-- `knowledgeVersion` is the bundle's manifest digest, and mode is `knowledge`, `live_data` or `mixed`.
+- `knowledgeVersion` is the bundle's index digest (it was the manifest digest until the Stage 6 review), and mode is `knowledge`, `live_data` or `mixed`.
 - An answer with neither a permitted live record nor an approved passage is not shown. This closes the Stage 3 uncited-answer defect. `routes/ed.py` is unchanged.
 - The topic gate admits Ed, administrator and membership questions, and a "why" question is no longer read as a change request, so all eight spec §3.3 examples reach Ed.
 - Prompt `ed-guru-2026-09-29-v3`.
 
+**Current state after Stage 6 (2026-09-29).** This supersedes the digests and receipt times recorded above.
+
+- **The bundle.** It is `3755a0df9286`: index `sha256:3755a0df9286c4c1b71ac6eba96c81e34515cf23d32ab91ec53d596bd53151b1`, manifest `sha256:fa014d1632cf36e9743e14db37d47a770433f525aa4abbb137548da2701a74bf`, source commit `592efc4`.
+  - The claims and cited bytes are unchanged from the approval. It was rebuilt because single-letter tokens are now ignored, which changed the index.
+  - Its receipt (`approvedAt` `2026-09-29T20:06:44Z`) is committed beside it and awaits the steward's signature.
+  - The `198fca6e…` bundle, the `1b8202a1…` digest and the `e8b201ed…` receipt were never signed and no longer exist.
+- **The prompt** is `ed-guru-2026-09-29-v4`.
+- **Stage 6 changes.** The Stage 6 security and contract review changed the answer rules (see `docs/plans/2026-09-29-ed-stage6-evaluation-report.md`):
+  - A live record counts as evidence only if the answer names it, and only if its data actually reached the model.
+  - A refusal written by the model is replaced by a server template.
+  - `knowledgeVersion` is the index digest.
+
 Not changed, and why:
 
 - **`sourceCommit` is recorded provenance only.** A release tree need not be a Git checkout, and the per-file hashes are the binding check. The runbook now says so.
-- **The 65,536-byte source ceiling stays** until decision §7.4. It excludes `docs/Symbol Set Management Spec v0.3.md` (112,910 bytes).
+- The 65,536-byte source ceiling was kept until decision §7.4, which raised it to 262,144 bytes. That limit now admits `docs/Symbol Set Management Spec v0.3.md` (112,910 bytes) should a later claim cite it.
