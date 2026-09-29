@@ -194,6 +194,16 @@ class SymgovAPISettings:
         "yes",
         "on",
     }
+    # Ed spec section 10.1: Ed opens only to named pilot organizations until
+    # permission isolation and answer quality are verified. Organization
+    # codes, not display names, compared lowercase. Empty means Ed is absent
+    # for everyone; there is deliberately no "all organizations" value, so
+    # general availability is a code change rather than a config edit.
+    ed_pilot_organization_codes: tuple[str, ...] = field(
+        default_factory=lambda: tuple(
+            code.lower() for code in _csv_setting("SYMGOV_ED_PILOT_ORGANIZATION_CODES")
+        )
+    )
 
 
 def get_settings() -> SymgovAPISettings:

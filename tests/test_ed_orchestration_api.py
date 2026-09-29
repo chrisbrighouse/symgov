@@ -14,6 +14,7 @@ from sqlalchemy.pool import StaticPool
 from symgov_backend.app import create_app
 from symgov_backend.auth import AuthenticatedUser, upsert_user
 from symgov_backend.dependencies import get_current_user, get_db_session
+from symgov_backend.routes.ed import require_ed_pilot
 from symgov_backend.models import (
     AuthLoginAttemptEvent,
     AuthLoginThrottleBucket,
@@ -171,6 +172,9 @@ def _user(
 
 def _override_client(user: AuthenticatedUser, session: object | None = None) -> TestClient:
     app = create_app()
+    # The pilot gate has its own suite (test_ed_pilot_gate.py); these tests
+    # exercise what sits behind it.
+    app.dependency_overrides[require_ed_pilot] = lambda: None
     app.dependency_overrides[get_current_user] = lambda: user
     db_session = session if session is not None else MagicMock()
     app.dependency_overrides[get_db_session] = lambda: db_session
@@ -208,6 +212,7 @@ def _real_login_client() -> TestClient:
         session.commit()
 
     app = create_app()
+    app.dependency_overrides[require_ed_pilot] = lambda: None
 
     def override_db_session():
         with Session() as session:
@@ -1001,6 +1006,7 @@ def test_per_organization_rate_limit_spans_users(monkeypatch):
     organization_id = str(uuid.uuid4())
     current = {"user": _user(organization_id=organization_id, base_role="user")}
     app = create_app()
+    app.dependency_overrides[require_ed_pilot] = lambda: None
     app.dependency_overrides[get_current_user] = lambda: current["user"]
     app.dependency_overrides[get_db_session] = lambda: MagicMock()
     client = TestClient(app, headers=SAFE_HEADERS)
