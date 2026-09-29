@@ -163,6 +163,11 @@ Slice D (authorised 2026-09-29, step 3 of decision §7.5):
   - A refusal written by the model is replaced by a server template.
   - `knowledgeVersion` is the index digest.
 
+**Steward signature (2026-09-29).** Chris signed the receipt for bundle `3755a0df9286` with the steward key below, held on his own machine. The signature is committed as `approval.json.sig` beside the bundle, and `verify-approval` passes against a signer list naming this key. The bundle is approved, but it is not served until activation installs the signer list on the server and sets `SYMGOV_ED_KNOWLEDGE_BUNDLE`.
+
+- Steward key: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIByhljffC50Mhhj2pthIJKpw7jv29t2srjoBx/iZKBYe` ("Ed Knowledge Steward")
+- Fingerprint: `SHA256:0zsTEZ4Gq8EBcmuoB9BV1TX+qzqaaCxR9GRsjmBpqgE`. The server's signer list must name exactly this key; the deploy preflight can compare the two (Stage 6 report §5.1).
+
 Not changed, and why:
 
 - **`sourceCommit` is recorded provenance only.** A release tree need not be a Git checkout, and the per-file hashes are the binding check. The runbook now says so.
