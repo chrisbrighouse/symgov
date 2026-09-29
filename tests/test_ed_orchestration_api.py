@@ -961,7 +961,7 @@ def test_ed_guru_attribution_redaction_and_pseudonym_are_server_owned(monkeypatc
     assert kwargs["feature"] == "ed_guru"
     assert kwargs["use_case"] == "ed_guru"
     assert kwargs["service_name"] == "symgov-api"
-    assert kwargs["prompt_version"] == "ed-guru-2026-09-28-v1"
+    assert kwargs["prompt_version"] == "ed-guru-2026-09-29-v2"
     assert kwargs["timeout"] == 30
     assert kwargs["max_tokens"] == 800
     assert kwargs["response_format"] == {"type": "json_object"}
@@ -1020,3 +1020,97 @@ def test_per_organization_rate_limit_spans_users(monkeypatch):
     assert limited.status_code == 429
     assert limited.headers["cache-control"] == "no-store, private"
     assert "organization" not in limited.text.lower()
+
+
+# --- Decision 7.3 (2026-09-29): an answer that shows ICS labels carries the
+# ISO attribution, licence and codes-only clarification, attached by the server.
+
+
+def _ics_nodes_result():
+    from symgov_backend import ed_read_tools as tools
+
+    provenance = tools.EdClassificationProvenanceRead(
+        dataset="iso_ics", edition=7, publication_year=2015, source_update_year=2025,
+        page_url="https://www.iso.org/open-data.html",
+        browse_url="https://www.iso.org/standards-catalogue/browse-by-ics.html",
+        license_url="https://opendatacommons.org/licenses/by/1-0/", license_code="ODC-By-1.0",
+        attribution="Stored attribution: ICS 7th edition (2015), (c) ISO, ODC-By v1.0.",
+        clarification="Stored clarification: codes only.",
+        retrieved_at="2026-09-16T00:00:00+00:00",
+    )
+    node = tools.EdClassificationNodeRead(
+        id=str(uuid.uuid4()), scheme_id=str(uuid.uuid4()), node_code="29",
+        parent_node_id=None, preferred_label="Label A", description=None,
+        sort_order=1, status="active",
+    )
+    return tools.EdClassificationNodesRead(scheme_code="ISO-ICS-7", provenance=provenance, nodes=(node,))
+
+
+def test_an_answer_built_from_ics_nodes_carries_the_stored_attribution(monkeypatch):
+    from symgov_backend.services import ed_orchestration
+
+    provider = MagicMock(side_effect=[
+        _provider_result(tool_calls=[{"tool": "get_classification_nodes", "scheme_code": "ISO-ICS-7"}]),
+        _provider_result(answer="ICS 29 is labelled Label A in Symgov's classification."),
+    ])
+    monkeypatch.setattr(ed_orchestration, "request_llm_completion", provider)
+    monkeypatch.setattr(ed_orchestration, "resolve_model_for_feature", lambda feature: "openai/gpt-5-mini")
+    monkeypatch.setattr(ed_orchestration, "execute_ed_read_tool", MagicMock(return_value=_ics_nodes_result()))
+
+    response = _override_client(_user()).post(
+        "/api/v1/ed/chat", json={"prompt": "What does ICS 29 mean?"}
+    )
+
+    body = response.json()
+    assert body["status"] == "answered"
+    assert body["attributions"] == [
+        {
+            "source": "iso_ics, edition 7",
+            "attribution": "Stored attribution: ICS 7th edition (2015), (c) ISO, ODC-By v1.0.",
+            "licenseCode": "ODC-By-1.0",
+            "licenseUrl": "https://opendatacommons.org/licenses/by/1-0/",
+            "clarification": "Stored clarification: codes only.",
+        }
+    ]
+
+
+def test_an_answer_naming_ics_without_a_lookup_still_carries_the_attribution(monkeypatch):
+    from symgov_backend.services import ed_orchestration
+
+    provider = MagicMock(return_value=_provider_result(answer="ICS is the International Classification for Standards."))
+    monkeypatch.setattr(ed_orchestration, "request_llm_completion", provider)
+    monkeypatch.setattr(ed_orchestration, "resolve_model_for_feature", lambda feature: "openai/gpt-5-mini")
+
+    response = _override_client(_user()).post(
+        "/api/v1/ed/chat", json={"prompt": "Where does the ICS classification come from?"}
+    )
+
+    [attribution] = response.json()["attributions"]
+    assert "© ISO" in attribution["attribution"]
+    assert "not reproduced" in attribution["clarification"]
+    assert attribution["licenseUrl"] == "https://opendatacommons.org/licenses/by/1-0/"
+
+
+def test_an_answer_without_ics_carries_no_attribution(monkeypatch):
+    from symgov_backend.services import ed_orchestration
+
+    monkeypatch.setattr(ed_orchestration, "request_llm_completion", MagicMock(return_value=_provider_result(answer="Projects live in organizations.")))
+    monkeypatch.setattr(ed_orchestration, "resolve_model_for_feature", lambda feature: "openai/gpt-5-mini")
+
+    response = _override_client(_user()).post("/api/v1/ed/chat", json={"prompt": "Explain Symgov projects"})
+
+    assert response.json()["attributions"] == []
+
+
+def test_an_ics_question_is_in_scope(monkeypatch):
+    from symgov_backend.services import ed_orchestration
+
+    provider = MagicMock(return_value=_provider_result(answer="Ed answer"))
+    monkeypatch.setattr(ed_orchestration, "request_llm_completion", provider)
+    monkeypatch.setattr(ed_orchestration, "resolve_model_for_feature", lambda feature: "openai/gpt-5-mini")
+
+    _override_client(_user()).post(
+        "/api/v1/ed/chat", json={"prompt": "What does ICS 29 mean, and where did this taxonomy come from?"}
+    )
+
+    provider.assert_called_once()

@@ -2011,6 +2011,18 @@ class EdContext(BaseModel):
     scope: Literal["personal", "organization"]
 
 
+class EdAttribution(BaseModel):
+    """Third-party attribution the server attaches (decision 7.3, ICS labels)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str = Field(min_length=1, max_length=120)
+    attribution: str = Field(min_length=1, max_length=400)
+    licenseCode: str = Field(min_length=1, max_length=40)
+    licenseUrl: str = Field(min_length=1, max_length=300)
+    clarification: str = Field(min_length=1, max_length=400)
+
+
 EdWarning = Annotated[str, Field(min_length=1, max_length=240)]
 EdSuggestedFollowup = Annotated[str, Field(min_length=1, max_length=200)]
 
@@ -2027,6 +2039,11 @@ class EdChatResponse(BaseModel):
     suggestedFollowups: list[EdSuggestedFollowup] = Field(default_factory=list, max_length=4)
     readOnly: Literal[True] = True
     knowledgeVersion: str | None = Field(default=None, max_length=80)
+    attributions: list[EdAttribution] = Field(default_factory=list, max_length=2)
+
+
+# ---------------------------------------------------------------------------
+# SM-P1-01 WP1.5 -- the approval's classification forecast
 #
 # Decision Q9 (2026-09-14). Every governed semantic assertion is written by
 # the approval handoff that runs *after* the review this sits in, so there is

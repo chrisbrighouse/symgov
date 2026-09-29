@@ -774,7 +774,8 @@ def test_classification_scheme_includes_safe_latest_ics_provenance():
         dataset="ISO ICS", edition=7, publication_year=2015, source_update_year=2024,
         page_url="https://example.test/ics", browse_url="https://example.test/browse",
         license_url="https://example.test/licence", license_code="ISO-OD",
-        attribution="ISO Open Data", retrieved_at="2026-09-01T00:00:00+00:00",
+        attribution="ISO Open Data", clarification="Codes only; standards are not reproduced.",
+        retrieved_at="2026-09-01T00:00:00+00:00",
     )
 
     class SchemeSession(_Session):
@@ -789,6 +790,7 @@ def test_classification_scheme_includes_safe_latest_ics_provenance():
     assert result[0].provenance.dataset == "ISO ICS"
     assert result[0].provenance.license_code == "ISO-OD"
     assert result[0].provenance.page_url == "https://example.test/ics"
+    assert result[0].provenance.clarification == "Codes only; standards are not reproduced."
 
 
 def test_organization_mode_dispatch_revalidates_authority_and_performs_no_dml():
@@ -1067,3 +1069,74 @@ def test_real_symbol_joins_and_shared_eligibility_reject_hidden_prompt_targets(m
         assert module.search_accessible_symbols(
             session, _principal(), symbol_set_id=foreign_set,
         ) == ()
+
+
+# --- Decision 7.3 (2026-09-29): ICS labels may reach an answer only with the
+# stored import's attribution, licence and codes-only clarification.
+
+
+def _ics_provenance():
+    return SimpleNamespace(
+        dataset="iso_ics", edition=7, publication_year=2015, source_update_year=2025,
+        page_url="https://www.iso.org/open-data.html",
+        browse_url="https://www.iso.org/standards-catalogue/browse-by-ics.html",
+        license_url="https://opendatacommons.org/licenses/by/1-0/", license_code="ODC-By-1.0",
+        attribution="Taxonomy classification is based on the ICS, 7th edition (2015), (c) ISO.",
+        clarification="ICS codes are used here only as a classification taxonomy.",
+        retrieved_at="2026-09-16T00:00:00+00:00",
+    )
+
+
+def _node(code: str, label: str):
+    return SimpleNamespace(
+        id=uuid.uuid4(), scheme_id=uuid.uuid4(), node_code=code, parent_node_id=None,
+        preferred_label=label, description=None, sort_order=1, status="active",
+    )
+
+
+class _NodeSession(_Session):
+    def __init__(self, scheme, provenance, nodes):
+        super().__init__()
+        self.answers = [_Result(scalar=scheme), _Result(scalar=provenance), _Result(rows=nodes)]
+
+    def execute(self, statement):
+        self.statements.append(statement)
+        return self.answers[len(self.statements) - 1]
+
+
+def _scheme(code: str):
+    return SimpleNamespace(
+        id=uuid.uuid4(), scheme_code=code, name=code, version_label="7", status="active",
+        description=None,
+    )
+
+
+def test_ics_nodes_carry_the_stored_attribution_licence_and_clarification_once():
+    module = _module()
+    session = _NodeSession(_scheme("ISO-ICS-7"), _ics_provenance(), (_node("29", "Label A"), _node("31", "Label B")))
+
+    result = module.get_classification_nodes(session, "iso-ics-7")
+
+    assert result.scheme_code == "ISO-ICS-7"
+    assert [node.node_code for node in result.nodes] == ["29", "31"]
+    assert result.provenance.attribution.startswith("Taxonomy classification")
+    assert result.provenance.clarification == "ICS codes are used here only as a classification taxonomy."
+    assert result.provenance.license_url == "https://opendatacommons.org/licenses/by/1-0/"
+    assert result.model_dump_json().count("classification taxonomy") == 1
+
+
+def test_ics_labels_without_a_stored_import_are_not_returned():
+    module = _module()
+    session = _NodeSession(_scheme("ISO-ICS-7"), None, (_node("29", "Label A"),))
+
+    assert module.get_classification_nodes(session, "ISO-ICS-7") == ()
+
+
+def test_symgov_owned_scheme_nodes_need_no_third_party_attribution():
+    module = _module()
+    session = _NodeSession(_scheme("ENGINEERING-DISCIPLINE"), None, (_node("PIPING", "Piping"),))
+
+    result = module.get_classification_nodes(session, "ENGINEERING-DISCIPLINE")
+
+    assert result.provenance is None
+    assert [node.preferred_label for node in result.nodes] == ["Piping"]

@@ -75,6 +75,7 @@ class _EdReadModel(BaseModel):
             "EdProjectContextRead": "project_context",
             "EdClassificationSchemeRead": "classification_scheme",
             "EdClassificationNodeRead": "classification_node",
+            "EdClassificationNodesRead": "classification_nodes",
         }
         project = getattr(self, "project", None)
         record_type = types[type(self).__name__]
@@ -167,6 +168,9 @@ class EdClassificationProvenanceRead(BaseModel):
     license_url: str
     license_code: str
     attribution: str
+    # Decision 7.3: an ICS label may reach an answer only with this
+    # codes-only clarification alongside the attribution and licence.
+    clarification: str
     retrieved_at: str
 
 
@@ -189,6 +193,18 @@ class EdClassificationNodeRead(_EdReadModel):
     description: str | None
     sort_order: int
     status: str
+
+
+class EdClassificationNodesRead(_EdReadModel):
+    """Nodes from one scheme, with that scheme's third-party provenance once."""
+
+    scheme_code: str
+    provenance: EdClassificationProvenanceRead | None
+    nodes: tuple[EdClassificationNodeRead, ...]
+
+
+# Imported ICS schemes are coded ISO-ICS-<edition> (see ics_taxonomy.py).
+ICS_SCHEME_PREFIX = "ISO-ICS-"
 
 
 EdReadToolName = Literal[
@@ -659,6 +675,33 @@ def get_symbol(
     return _symbol(session, symbol, revision=revision)
 
 
+def _scheme_provenance(session: Session, scheme_id: object) -> EdClassificationProvenanceRead | None:
+    """The latest stored ISO Open Data import for a scheme, if it has one."""
+    provenance = session.execute(
+        select(ICSTaxonomyImport).where(
+            ICSTaxonomyImport.scheme_id == scheme_id
+        ).order_by(
+            ICSTaxonomyImport.retrieved_at.desc(),
+            ICSTaxonomyImport.id.desc(),
+        ).limit(1)
+    ).scalars().first()
+    if provenance is None:
+        return None
+    return EdClassificationProvenanceRead(
+        dataset=str(provenance.dataset),
+        edition=int(provenance.edition),
+        publication_year=int(provenance.publication_year),
+        source_update_year=int(provenance.source_update_year),
+        page_url=str(provenance.page_url),
+        browse_url=str(provenance.browse_url),
+        license_url=str(provenance.license_url),
+        license_code=str(provenance.license_code),
+        attribution=str(provenance.attribution),
+        clarification=str(provenance.clarification),
+        retrieved_at=str(provenance.retrieved_at),
+    )
+
+
 def list_classification_schemes(
     session: Session, *, limit: int | None = None
 ) -> tuple[EdClassificationSchemeRead, ...]:
@@ -669,14 +712,6 @@ def list_classification_schemes(
     rows = session.execute(statement).scalars().all()
     results = []
     for row in rows:
-        provenance = session.execute(
-            select(ICSTaxonomyImport).where(
-                ICSTaxonomyImport.scheme_id == row.id
-            ).order_by(
-                ICSTaxonomyImport.retrieved_at.desc(),
-                ICSTaxonomyImport.id.desc(),
-            ).limit(1)
-        ).scalars().first()
         results.append(EdClassificationSchemeRead(
             id=str(row.id),
             scheme_code=str(row.scheme_code),
@@ -684,21 +719,7 @@ def list_classification_schemes(
             version_label=str(row.version_label),
             status=str(row.status),
             description=getattr(row, "description", None),
-            provenance=(
-                EdClassificationProvenanceRead(
-                    dataset=str(provenance.dataset),
-                    edition=int(provenance.edition),
-                    publication_year=int(provenance.publication_year),
-                    source_update_year=int(provenance.source_update_year),
-                    page_url=str(provenance.page_url),
-                    browse_url=str(provenance.browse_url),
-                    license_url=str(provenance.license_url),
-                    license_code=str(provenance.license_code),
-                    attribution=str(provenance.attribution),
-                    retrieved_at=str(provenance.retrieved_at),
-                )
-                if provenance is not None else None
-            ),
+            provenance=_scheme_provenance(session, row.id),
         ))
     return tuple(results)
 
@@ -709,8 +730,13 @@ def get_classification_nodes(
     *,
     parent_code: str | None = None,
     limit: int | None = None,
-) -> tuple[EdClassificationNodeRead, ...]:
-    """Read active nodes from one active platform scheme, with bounded output."""
+) -> EdClassificationNodesRead | tuple[()]:
+    """Read active nodes from one active platform scheme, with bounded output.
+
+    An imported ICS scheme's labels are returned only together with its
+    stored attribution, licence and clarification; without a stored import
+    none are returned (decision 7.3). Vendored metadata is never substituted.
+    """
     normalized_scheme_code = str(scheme_code).strip().upper()
     scheme = session.execute(
         select(ClassificationScheme).where(
@@ -720,6 +746,9 @@ def get_classification_nodes(
         )
     ).scalars().first()
     if scheme is None:
+        return ()
+    provenance = _scheme_provenance(session, scheme.id)
+    if provenance is None and str(scheme.scheme_code).startswith(ICS_SCHEME_PREFIX):
         return ()
     statement = select(ClassificationNode).where(
         ClassificationNode.scheme_id == scheme.id,
@@ -739,7 +768,9 @@ def get_classification_nodes(
             return ()
         statement = statement.where(ClassificationNode.parent_node_id == parent)
     rows = session.execute(statement.order_by(ClassificationNode.sort_order, ClassificationNode.node_code).limit(_bounded_limit(limit))).scalars().all()
-    return tuple(
+    if not rows:
+        return ()
+    nodes = tuple(
         EdClassificationNodeRead(
             id=str(row.id),
             scheme_id=str(row.scheme_id),
@@ -751,6 +782,11 @@ def get_classification_nodes(
             status=str(row.status),
         )
         for row in rows
+    )
+    return EdClassificationNodesRead(
+        scheme_code=str(scheme.scheme_code),
+        provenance=provenance,
+        nodes=nodes,
     )
 
 
