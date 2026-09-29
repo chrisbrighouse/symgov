@@ -204,6 +204,15 @@ class SymgovAPISettings:
             code.lower() for code in _csv_setting("SYMGOV_ED_PILOT_ORGANIZATION_CODES")
         )
     )
+    # Ed decision 7.4: the approved knowledge bundle to serve, named by the
+    # first 12 hex of its index digest, and the steward signer list that must
+    # have signed it. Both empty means Ed serves no product knowledge.
+    ed_knowledge_bundle: str = field(
+        default_factory=lambda: os.environ.get("SYMGOV_ED_KNOWLEDGE_BUNDLE", "").strip()
+    )
+    ed_allowed_signers: str = field(
+        default_factory=lambda: os.environ.get("SYMGOV_ED_ALLOWED_SIGNERS", "").strip()
+    )
 
 
 def get_settings() -> SymgovAPISettings:

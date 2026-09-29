@@ -98,10 +98,14 @@ class RetrievalItem(_StrictModel):
     audit_source_path: str = Field(exclude=True)
 
 
-class OfflineFixtureRetrievalResult(_StrictModel):
+class KnowledgeRetrievalResult(_StrictModel):
     status: Literal["answered", "cannot_answer", "unavailable"]
     items: tuple[RetrievalItem, ...] = ()
     model_context: str = ""
+
+
+class OfflineFixtureRetrievalResult(KnowledgeRetrievalResult):
+    """A result from the offline fixture runner, named so it cannot pass for runtime."""
 
 
 class RetrievalIndexError(ValueError):
@@ -319,11 +323,34 @@ def query_index(
 
     `approved_index_digest` is the digest a steward approved. Nothing is
     served unless it names exactly these chunk and postings bytes. This
-    function checks that binding only; proving the approval is authentic is
-    the job of the approval record, which is not designed yet.
+    function checks that binding only. Runtime serving goes through
+    `ed_knowledge_runtime`, which first proves the approval with the
+    steward's signature.
     """
     if offline_fixture is not True:
         raise ValueError("offline fixture acknowledgement is required")
+    return retrieve(
+        postings_bytes,
+        chunks_bytes,
+        question,
+        knowledge_version=knowledge_version,
+        approved_index_digest=approved_index_digest,
+        repository_root=repository_root,
+        result_type=OfflineFixtureRetrievalResult,
+    )
+
+
+def retrieve(
+    postings_bytes: bytes,
+    chunks_bytes: bytes,
+    question: str,
+    *,
+    knowledge_version: str,
+    approved_index_digest: str | None,
+    repository_root: str | Path,
+    result_type: type[KnowledgeRetrievalResult] = KnowledgeRetrievalResult,
+) -> KnowledgeRetrievalResult:
+    """Bounded lexical retrieval over an index whose digest was approved."""
     if len(question) > MAX_QUESTION_CHARS:
         raise ValueError(f"question exceeds {MAX_QUESTION_CHARS} characters")
     if not _KNOWLEDGE_VERSION.fullmatch(knowledge_version):
@@ -331,7 +358,7 @@ def query_index(
     if approved_index_digest is None or approved_index_digest != index_digest(
         chunks_bytes, postings_bytes
     ):
-        return OfflineFixtureRetrievalResult(status="unavailable")
+        return result_type(status="unavailable")
     try:
         terms = _query_terms(question)
         postings = _load_postings(postings_bytes)
@@ -339,9 +366,9 @@ def query_index(
         if build_postings(chunks_bytes) != postings_bytes:
             raise RetrievalIndexError("postings index does not match chunks")
     except RetrievalIndexError:
-        return OfflineFixtureRetrievalResult(status="unavailable")
+        return result_type(status="unavailable")
     if not terms:
-        return OfflineFixtureRetrievalResult(status="cannot_answer")
+        return result_type(status="cannot_answer")
 
     by_id = {chunk.chunk_id: chunk for chunk in chunks}
     scores: Counter[str] = Counter()
@@ -350,10 +377,10 @@ def query_index(
         for chunk_id, frequency in postings.get(term, ()):
             scanned += 1
             if scanned > MAX_POSTINGS_SCAN:
-                return OfflineFixtureRetrievalResult(status="unavailable")
+                return result_type(status="unavailable")
             chunk = by_id.get(chunk_id)
             if chunk is None:
-                return OfflineFixtureRetrievalResult(status="unavailable")
+                return result_type(status="unavailable")
             if _eligible(chunk):
                 title_frequency = Counter(
                     _tokens(chunk.title, maximum=MAX_TOKENS_PER_CHUNK)
@@ -366,7 +393,7 @@ def query_index(
         not _model_facing_safe(chunk) or not _source_matches(chunk, root)
         for chunk in candidates
     ):
-        return OfflineFixtureRetrievalResult(status="unavailable")
+        return result_type(status="unavailable")
     ranked = sorted(
         candidates,
         key=lambda chunk: (-scores[chunk.chunk_id], chunk.chunk_id),
@@ -393,10 +420,10 @@ def query_index(
         passages.append(passage)
         context_size += separator + len(passage)
     if not items:
-        return OfflineFixtureRetrievalResult(status="cannot_answer")
+        return result_type(status="cannot_answer")
     # Each passage is labelled with its reference so the model can say which
     # one supports a claim, and the server can check that it did.
-    return OfflineFixtureRetrievalResult(
+    return result_type(
         status="answered",
         items=tuple(items),
         model_context="\n\n".join(passages),

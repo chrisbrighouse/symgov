@@ -143,6 +143,14 @@ Points 3 and 4 change live server files. They are held for activation and need s
 
 Hashing whole files means any edit to a cited code file invalidates the approval, even an unrelated one. Over time a range-content pin would churn less; this is a follow-up, not a change made here.
 
+Slice D (authorised 2026-09-29, step 3 of decision §7.5):
+
+- `ed_knowledge_runtime.py` loads the bundle named by `SYMGOV_ED_KNOWLEDGE_BUNDLE`, but only after `verify-approval` passes against `SYMGOV_ED_ALLOWED_SIGNERS`. Retrieval runs after authentication and the topic gates, and before the model is called. Passages go to the model as labelled data. The model returns `knowledge_refs`, and the server accepts only references it offered, turning them into `approved_knowledge` citations.
+- `knowledgeVersion` is the bundle's manifest digest, and mode is `knowledge`, `live_data` or `mixed`.
+- An answer with neither a permitted live record nor an approved passage is not shown. This closes the Stage 3 uncited-answer defect. `routes/ed.py` is unchanged.
+- The topic gate admits Ed, administrator and membership questions, and a "why" question is no longer read as a change request, so all eight spec §3.3 examples reach Ed.
+- Prompt `ed-guru-2026-09-29-v3`.
+
 Not changed, and why:
 
 - **`sourceCommit` is recorded provenance only.** A release tree need not be a Git checkout, and the per-file hashes are the binding check. The runbook now says so.

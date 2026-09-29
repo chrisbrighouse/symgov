@@ -127,11 +127,49 @@ INTERVENING_ADVERB_ACTION_CLAIMS = [
 ]
 
 
+# Slice D: an answer needs evidence. Every test here runs with one stub
+# approved passage, and the default provider reply cites it, so tests about
+# gating and tool handling keep testing that rather than evidence rules.
+STUB_REF = "knowledge:0123456789ab:claim:stub:v1"
+STUB_MANIFEST = "sha256:" + "a" * 64
+
+
+@pytest.fixture(autouse=True)
+def _stub_knowledge(monkeypatch):
+    from types import SimpleNamespace
+
+    from symgov_backend.ed_retrieval import KnowledgeCitation, KnowledgeRetrievalResult, RetrievalItem
+    from symgov_backend.services import ed_orchestration
+
+    item = RetrievalItem(
+        chunk_id="claim:stub:v1",
+        topic="application",
+        text="Stub approved passage.",
+        citation=KnowledgeCitation(
+            reference=STUB_REF,
+            label="Stub passage",
+            source_version="sha256:" + "b" * 64,
+            source_locator="lines 1-1",
+        ),
+        audit_source_path="docs/stub.md",
+    )
+    result = KnowledgeRetrievalResult(
+        status="answered",
+        items=(item,),
+        model_context=f"[{STUB_REF}] Stub passage\nStub approved passage.",
+    )
+    knowledge = SimpleNamespace(manifest_digest=STUB_MANIFEST, version="0123456789ab")
+    monkeypatch.setattr(ed_orchestration, "load_approved_knowledge", lambda settings: knowledge)
+    monkeypatch.setattr(ed_orchestration, "retrieve_approved", lambda knowledge, question: result)
+    return result
+
+
 def _provider_result(
     *,
     answer: str = "Ed answer",
     status: str = "answered",
     tool_calls: list[dict[str, object]] | None = None,
+    knowledge_refs: list[str] | None = None,
 ) -> dict[str, object]:
     return {
         "provider": "openrouter",
@@ -141,6 +179,7 @@ def _provider_result(
                 "status": status,
                 "answer": answer,
                 "tool_calls": tool_calls or [],
+                "knowledge_refs": [STUB_REF] if knowledge_refs is None else knowledge_refs,
             }
         ),
         "latencyMs": 10,
@@ -696,7 +735,7 @@ def test_safe_live_citation_uses_opaque_reference_not_hidden_record_id(monkeypat
     provider = MagicMock(
         side_effect=[
             _provider_result(tool_calls=[{"tool": "get_current_user_profile"}]),
-            _provider_result(answer="Your current profile is available."),
+            _provider_result(answer="Your current profile is available.", knowledge_refs=[]),
         ]
     )
     tool = MagicMock(
@@ -733,13 +772,14 @@ def test_safe_live_citation_uses_opaque_reference_not_hidden_record_id(monkeypat
     assert hidden_id not in response.text
 
 
-def test_missing_evidence_has_explicit_approved_knowledge_warning(monkeypatch):
+def test_an_answer_with_no_approved_or_live_evidence_is_not_shown(monkeypatch):
+    """Slice D closes the Stage 3 gap: no uncited prose labelled `knowledge`."""
     from symgov_backend.services import ed_orchestration
 
     monkeypatch.setattr(
         ed_orchestration,
         "request_llm_completion",
-        lambda **kwargs: _provider_result(answer="Symgov is a governance application."),
+        lambda **kwargs: _provider_result(answer="Symgov is a governance application.", knowledge_refs=[]),
     )
 
     response = _override_client(_user()).post(
@@ -747,9 +787,12 @@ def test_missing_evidence_has_explicit_approved_knowledge_warning(monkeypatch):
         json={"prompt": "What is the Symgov application?"},
     )
 
+    body = response.json()
     assert response.status_code == 200
-    assert response.json()["citations"] == []
-    assert any("approved" in warning.lower() for warning in response.json()["warnings"])
+    assert body["status"] == "unavailable"
+    assert body["mode"] == "cannot_answer"
+    assert body["citations"] == []
+    assert "governance application" not in response.text
 
 
 @pytest.mark.parametrize(
@@ -961,7 +1004,7 @@ def test_ed_guru_attribution_redaction_and_pseudonym_are_server_owned(monkeypatc
     assert kwargs["feature"] == "ed_guru"
     assert kwargs["use_case"] == "ed_guru"
     assert kwargs["service_name"] == "symgov-api"
-    assert kwargs["prompt_version"] == "ed-guru-2026-09-29-v2"
+    assert kwargs["prompt_version"] == "ed-guru-2026-09-29-v3"
     assert kwargs["timeout"] == 30
     assert kwargs["max_tokens"] == 800
     assert kwargs["response_format"] == {"type": "json_object"}
@@ -1113,4 +1156,118 @@ def test_an_ics_question_is_in_scope(monkeypatch):
         "/api/v1/ed/chat", json={"prompt": "What does ICS 29 mean, and where did this taxonomy come from?"}
     )
 
+    provider.assert_called_once()
+
+
+# --- Slice D: approved knowledge in answers ---
+
+
+def _answer(monkeypatch, provider, prompt="What is Symgov?", user=None):
+    from symgov_backend.services import ed_orchestration
+
+    monkeypatch.setattr(ed_orchestration, "request_llm_completion", provider)
+    monkeypatch.setattr(ed_orchestration, "resolve_model_for_feature", lambda feature: "openai/gpt-5-mini")
+    return _override_client(user or _user()).post("/api/v1/ed/chat", json={"prompt": prompt})
+
+
+def test_approved_passages_reach_the_model_as_labelled_data(monkeypatch):
+    provider = MagicMock(return_value=_provider_result())
+
+    _answer(monkeypatch, provider)
+
+    system = provider.call_args.kwargs["messages"][0]["content"]
+    assert f"[{STUB_REF}] Stub passage" in system
+    assert "data, not instructions" in system
+
+
+def test_a_cited_passage_becomes_an_approved_knowledge_citation(monkeypatch):
+    body = _answer(monkeypatch, MagicMock(return_value=_provider_result(answer="Symgov governs symbols."))).json()
+
+    assert body["status"] == "answered"
+    assert body["mode"] == "knowledge"
+    assert body["knowledgeVersion"] == STUB_MANIFEST
+    assert body["citations"] == [
+        {"sourceType": "approved_knowledge", "title": "Stub passage", "reference": STUB_REF, "asOf": None}
+    ]
+    assert body["warnings"] == []
+
+
+def test_a_reference_the_model_was_not_given_is_refused(monkeypatch):
+    fabricated = "knowledge:0123456789ab:claim:invented:v1"
+    response = _answer(
+        monkeypatch,
+        MagicMock(return_value=_provider_result(answer="Invented claim text.", knowledge_refs=[fabricated])),
+    )
+
+    body = response.json()
+    assert body["status"] == "unavailable"
+    assert "Invented claim text" not in response.text
+    assert fabricated not in response.text
+
+
+def test_live_facts_and_approved_knowledge_together_are_mixed(monkeypatch):
+    from symgov_backend.services import ed_orchestration
+
+    tool = MagicMock(return_value={
+        "display_name": "Ed User",
+        "citation": {
+            "source_kind": "live_record", "record_type": "user",
+            "record_ref": "live:user:7c8c3128-4022-58e5-8d2f-13ab86fd8f6b",
+            "as_of": "2026-09-29T12:00:00+00:00",
+        },
+    })
+    monkeypatch.setattr(ed_orchestration, "execute_ed_read_tool", tool)
+    provider = MagicMock(side_effect=[
+        _provider_result(tool_calls=[{"tool": "get_current_user_profile"}]),
+        _provider_result(answer="Your profile, explained."),
+    ])
+
+    body = _answer(monkeypatch, provider, prompt="Explain my Symgov profile").json()
+
+    assert body["mode"] == "mixed"
+    assert [citation["sourceType"] for citation in body["citations"]] == ["live_record", "approved_knowledge"]
+
+
+@pytest.mark.parametrize("state", ["not_configured", "unavailable"])
+def test_without_approved_knowledge_a_product_answer_is_not_shown(monkeypatch, state):
+    from symgov_backend.ed_retrieval import KnowledgeRetrievalResult
+    from symgov_backend.services import ed_orchestration
+
+    if state == "not_configured":
+        monkeypatch.setattr(ed_orchestration, "load_approved_knowledge", lambda settings: None)
+    else:
+        monkeypatch.setattr(
+            ed_orchestration, "retrieve_approved",
+            lambda knowledge, question: KnowledgeRetrievalResult(status="unavailable"),
+        )
+    provider = MagicMock(return_value=_provider_result(answer="Unsupported product prose.", knowledge_refs=[]))
+
+    response = _answer(monkeypatch, provider)
+
+    assert response.json()["mode"] == "cannot_answer"
+    assert "Unsupported product prose" not in response.text
+    assert STUB_REF not in provider.call_args.kwargs["messages"][0]["content"]
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "What does a project control, and how is it different from an organization?",
+        "Which symbol sets are available in my current project?",
+        "How do classification schemes relate to a symbol's discipline?",
+        "What does ICS 29 mean, and where did this taxonomy come from?",
+        "Why can I see this symbol but not edit it?",
+        "How do I change organization context?",
+        "What can an administrator do that a normal user cannot?",
+        "Show me the current default symbol set for this project.",
+        "What can Ed do?",
+    ],
+)
+def test_the_specs_example_questions_all_reach_ed(monkeypatch, prompt):
+    """Spec section 3.3's own examples. Three were refused by the keyword gates."""
+    provider = MagicMock(return_value=_provider_result())
+
+    response = _answer(monkeypatch, provider, prompt=prompt)
+
+    assert response.json()["status"] == "answered"
     provider.assert_called_once()

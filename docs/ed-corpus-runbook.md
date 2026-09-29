@@ -130,6 +130,15 @@ The Ed Knowledge Steward approves a bundle by signing a small receipt with an SS
 
 The allowed-signers file is the real control. Each line is `principal namespaces="symgov-ed-knowledge" <public key>`. Keep it in server configuration outside the repository. Changing it adds or removes a steward, so treat any change as a live configuration change that needs the owner's approval; delegating the steward role is one such change. The CLI can check a signature against the file it is given; it cannot prove which file that should be. Nothing here loads a bundle into the running application. Serving is Slice D and remains separately gated.
 
+## Serving an approved bundle (Slice D)
+
+The Ed API serves product knowledge only when two settings name a bundle and a signer list:
+
+- `SYMGOV_ED_KNOWLEDGE_BUNDLE` holds the bundle's directory name under `backend/symgov_backend/data/ed_knowledge/bundles/`, which is the first 12 hex of its index digest (for example `198fca6e359e`).
+- `SYMGOV_ED_ALLOWED_SIGNERS` holds the path to the steward signer list, mounted read-only from server configuration.
+
+On first use the API runs the full `verify-approval` check against its own release tree, so it needs `ssh-keygen` in the image. A bundle that passes is cached for the life of the process. A failure is logged by error code, retried after a minute, and means Ed serves no product knowledge in the meantime. Every query re-checks the cited source bytes. After approval, Ed shows an answer only if it rests on a permitted live record or an approved passage the server offered. The model must name the passages it relied on, and a reference the server did not offer is refused. Either setting empty means no product knowledge; in that case Ed answers only from live records. Changing the signer list takes effect on restart.
+
 ## Manual review checklist — not executed by this runbook
 
 The following are required human/release controls, but this runbook does not perform them:
