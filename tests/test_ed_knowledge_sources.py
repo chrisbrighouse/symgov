@@ -187,10 +187,40 @@ def test_inventory_rejects_duplicate_ids_paths_and_kind_path_mismatches(tmp_path
     assert report.valid is False
     assert [issue.code for issue in report.errors] == [
         "duplicate_source_id",
-        "duplicate_source_path",
+        "duplicate_source_locator",
         "source_kind_path_mismatch",
         "source_kind_path_mismatch",
     ]
+
+
+def test_inventory_allows_one_file_under_several_reviewed_locators(tmp_path: Path):
+    """Stage 4 reviews ranges, not files: one file may back several topics,
+    provided every entry for it pins the same bytes and kind."""
+    module = _sources_module()
+    source = tmp_path / "docs" / "guide.md"
+    source.parent.mkdir()
+    source.write_text("# One\nA.\n# Two\nB.\n", encoding="utf-8")
+    first = _entry(module, source_line_start=1, source_line_end=2)
+    second = _entry(
+        module,
+        id="source:guide-two:v1",
+        topic=KnowledgeTopic.SUPPORT,
+        source_line_start=3,
+        source_line_end=4,
+    )
+
+    report = module.validate_source_inventory(
+        module.SourceInventory(inventory_version="commit:abc123", sources=(first, second)),
+        repository_root=tmp_path,
+    )
+    assert report.errors == ()
+
+    drifted = second.model_copy(update={"source_version": "commit:def456"})
+    report = module.validate_source_inventory(
+        module.SourceInventory(inventory_version="commit:abc123", sources=(first, drifted)),
+        repository_root=tmp_path,
+    )
+    assert [issue.code for issue in report.errors] == ["inconsistent_source_path"]
 
 
 def test_inventory_reuses_shared_private_path_and_symlink_policy(tmp_path: Path):
@@ -423,3 +453,23 @@ def test_inventory_loader_reports_malformed_json_without_crashing(tmp_path: Path
         ("malformed_inventory_json", "inventory")
     ]
     assert str(tmp_path) not in report.errors[0].message
+
+
+def test_markdown_units_stay_valid_for_long_entry_ids_and_headings(tmp_path: Path):
+    """A 90-character entry ID plus a long heading slug once overflowed the
+    128-character unit ID and crashed extraction instead of reporting."""
+    module = _sources_module()
+    source = tmp_path / "docs" / "guide.md"
+    source.parent.mkdir()
+    long_heading = "Symgov Ed application guru assistant product and technical specification " * 5
+    source.write_text(f"# {long_heading}\nBody.\n# Short\nMore.\n", encoding="utf-8")
+    entry = _entry(module, id="source:" + "known-limitations.ed.pilot-availability." * 2 + "v1")
+
+    result = module.extract_source(entry, repository_root=tmp_path)
+
+    assert result.errors == ()
+    ids = [unit.id for unit in result.units]
+    assert len(ids) == len(set(ids)) == 2
+    assert all(len(identifier) <= 128 for identifier in ids)
+    assert all(len(unit.title) <= 240 for unit in result.units)
+    assert result.units[1].source_heading == "short"

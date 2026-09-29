@@ -1,0 +1,42 @@
+{
+  "factualCoverage": {
+    "incompleteTopics": [
+      "application",
+      "classification",
+      "organization",
+      "project",
+      "symbol_set",
+      "symbol",
+      "security",
+      "user_setup",
+      "known_limitations",
+      "support"
+    ],
+    "status": "incomplete"
+  },
+  "purpose": "synthetic retrieval mechanics only; not factual approval",
+  "queries": [
+    {"expectedChunkIds": ["claim:synthetic-application:v1"], "expectedStatus": "answered", "question": "applicationfixturetoken", "topic": "application"},
+    {"expectedChunkIds": [], "expectedStatus": "cannot_answer", "question": "quasarapplicationabsence", "topic": "application"},
+    {"expectedChunkIds": ["claim:synthetic-classification:v1"], "expectedStatus": "answered", "question": "classificationfixturetoken", "topic": "classification"},
+    {"expectedChunkIds": [], "expectedStatus": "cannot_answer", "question": "quasarclassificationabsence", "topic": "classification"},
+    {"expectedChunkIds": ["claim:synthetic-organization:v1"], "expectedStatus": "answered", "question": "organizationfixturetoken", "topic": "organization"},
+    {"expectedChunkIds": [], "expectedStatus": "cannot_answer", "question": "quasarorganizationabsence", "topic": "organization"},
+    {"expectedChunkIds": ["claim:synthetic-project:v1"], "expectedStatus": "answered", "question": "projectfixturetoken", "topic": "project"},
+    {"expectedChunkIds": [], "expectedStatus": "cannot_answer", "question": "quasarprojectabsence", "topic": "project"},
+    {"expectedChunkIds": ["claim:synthetic-symbol_set:v1"], "expectedStatus": "answered", "question": "symbolsetfixturetoken", "topic": "symbol_set"},
+    {"expectedChunkIds": [], "expectedStatus": "cannot_answer", "question": "quasarsymbolsetabsence", "topic": "symbol_set"},
+    {"expectedChunkIds": ["claim:synthetic-symbol:v1"], "expectedStatus": "answered", "question": "symbolfixturetoken", "topic": "symbol"},
+    {"expectedChunkIds": [], "expectedStatus": "cannot_answer", "question": "quasarsymbolabsence", "topic": "symbol"},
+    {"expectedChunkIds": ["claim:synthetic-security:v1"], "expectedStatus": "answered", "question": "securityfixturetoken", "topic": "security"},
+    {"expectedChunkIds": [], "expectedStatus": "cannot_answer", "question": "quasarsecurityabsence", "topic": "security"},
+    {"expectedChunkIds": ["claim:synthetic-user_setup:v1"], "expectedStatus": "answered", "question": "usersetupfixturetoken", "topic": "user_setup"},
+    {"expectedChunkIds": [], "expectedStatus": "cannot_answer", "question": "quasarusersetupabsence", "topic": "user_setup"},
+    {"expectedChunkIds": ["claim:synthetic-known_limitations:v1"], "expectedStatus": "answered", "question": "knownlimitationsfixturetoken", "topic": "known_limitations"},
+    {"expectedChunkIds": [], "expectedStatus": "cannot_answer", "question": "quasarknownlimitationsabsence", "topic": "known_limitations"},
+    {"expectedChunkIds": ["claim:synthetic-support:v1"], "expectedStatus": "answered", "question": "supportfixturetoken", "topic": "support"},
+    {"expectedChunkIds": [], "expectedStatus": "cannot_answer", "question": "quasarsupportabsence", "topic": "support"}
+  ],
+  "schemaVersion": "1.0",
+  "status": "draft"
+}

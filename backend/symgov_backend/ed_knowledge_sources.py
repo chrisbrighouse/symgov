@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import re
 from enum import StrEnum
@@ -14,6 +15,8 @@ from symgov_backend.ed_knowledge import KnowledgeTopic, ValidationIssue, source_
 
 
 _ID_PATTERN = r"^[a-z][a-z0-9._:-]{2,127}$"
+_ID = re.compile(_ID_PATTERN)
+_MAX_TEXT = 240
 _ATX_HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?)[ \t]*#*[ \t]*|[ \t]*)$")
 _JS_DECLARATION = re.compile(
     r"^(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:async\s+)?"
@@ -153,6 +156,16 @@ def _path_kind(source_path: str) -> SourceKind | None:
     return None
 
 
+def source_locator(entry: SourceInventoryEntry) -> tuple[object, ...]:
+    """What an entry reviews: a file plus its line range and symbol or heading."""
+    return (
+        entry.source_path,
+        entry.source_line_start,
+        entry.source_line_end,
+        entry.source_symbol or entry.source_heading,
+    )
+
+
 def validate_source_inventory(
     value: SourceInventory | dict[str, object], *, repository_root: str | Path | None = None
 ) -> InventoryValidationReport:
@@ -167,19 +180,36 @@ def validate_source_inventory(
             issues.append(_issue("malformed_inventory", reference, str(error.get("msg", "Invalid value"))))
     if inventory is not None:
         ids: dict[str, int] = {}
-        paths: dict[str, int] = {}
+        locators: dict[tuple[object, ...], int] = {}
+        path_identity: dict[str, set[tuple[str, SourceKind]]] = {}
         for entry in inventory.sources:
             ids[entry.id] = ids.get(entry.id, 0) + 1
-            paths[entry.source_path] = paths.get(entry.source_path, 0) + 1
+            locator = source_locator(entry)
+            locators[locator] = locators.get(locator, 0) + 1
+            path_identity.setdefault(entry.source_path, set()).add(
+                (entry.source_version, entry.source_kind)
+            )
         issues.extend(
             _issue("duplicate_source_id", identifier, f"Duplicate source ID: {identifier}")
             for identifier, count in ids.items()
             if count > 1
         )
+        # One file may back several reviewed ranges (and so several topics),
+        # but the same range twice is a duplicate, and every entry for a file
+        # must pin the same bytes and kind.
         issues.extend(
-            _issue("duplicate_source_path", path, f"Duplicate source path: {path}")
-            for path, count in paths.items()
+            _issue("duplicate_source_locator", str(locator[0]), f"Duplicate source locator: {locator[0]}")
+            for locator, count in locators.items()
             if count > 1
+        )
+        issues.extend(
+            _issue(
+                "inconsistent_source_path",
+                path,
+                f"Entries for {path} must share one source version and kind",
+            )
+            for path, identities in path_identity.items()
+            if len(identities) > 1
         )
         for entry in inventory.sources:
             path_errors = source_path_issues(entry.source_path, entry.id, repository_root)
@@ -234,9 +264,16 @@ def _unit(
     symbol: str | None = None,
     heading: str | None = None,
 ) -> SourceUnit:
+    unit_id = f"{entry.id}:{identity}"
+    if not _ID.fullmatch(unit_id):
+        # A long entry ID plus a long heading slug, or a symbol with capitals,
+        # cannot form a valid ID. Keep it unique and stable with a digest of
+        # the full identity rather than failing the whole extraction.
+        digest = hashlib.sha256(unit_id.encode("utf-8")).hexdigest()[:16]
+        unit_id = f"{entry.id[: 128 - len(digest) - 1]}:{digest}"
     return SourceUnit(
-        id=f"{entry.id}:{identity}",
-        title=title,
+        id=unit_id,
+        title=title[:_MAX_TEXT],
         topic=entry.topic,
         source_path=entry.source_path,
         source_version=entry.source_version,
@@ -244,7 +281,7 @@ def _unit(
         source_line_start=start,
         source_line_end=end,
         source_symbol=symbol,
-        source_heading=heading,
+        source_heading=heading[:_MAX_TEXT] if heading else heading,
         content=content,
     )
 
