@@ -1,0 +1,1114 @@
+{
+  "schemaVersion": "1.0",
+  "manifest": {
+    "schema_version": "1.0",
+    "knowledge_version": "draft:stage4-initial",
+    "generated_at": "2026-09-29T00:00:00Z",
+    "documents": [
+      {
+        "title": "What Symgov is for",
+        "topic": "application",
+        "source_path": "docs/README.md",
+        "source_version": "sha256:dacc8dc3f55996340ce70f6c107a85638a2af39d5b419021722b09ebb97a83fd",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 5,
+        "source_line_end": 5,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:application.product.scope:v1",
+        "claims": [
+          {
+            "title": "What Symgov is for",
+            "topic": "application",
+            "source_path": "docs/README.md",
+            "source_version": "sha256:dacc8dc3f55996340ce70f6c107a85638a2af39d5b419021722b09ebb97a83fd",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 5,
+            "source_line_end": 5,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:application.product.scope:v1",
+            "text": "Symgov is a product for governing and referencing engineering symbols. It is not a general drawing-management or document-management system. Individuals can have Free or Plus access, and a Plus subscription does not by itself give you privileged roles."
+          }
+        ]
+      },
+      {
+        "title": "What Ed is",
+        "topic": "application",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 9,
+        "source_line_end": 11,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:application.ed.purpose:v1",
+        "claims": [
+          {
+            "title": "What Ed is",
+            "topic": "application",
+            "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+            "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 9,
+            "source_line_end": 11,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:application.ed.purpose:v1",
+            "text": "Ed is a chat assistant inside Symgov for signed-in users. It explains how Symgov works and answers read-only questions about the data you are allowed to see. Ed is not a user manual or a governance approver, and it does not replace the application's own rules and workflows."
+          }
+        ]
+      },
+      {
+        "title": "What Ed can and cannot do",
+        "topic": "application",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 25,
+        "source_line_end": 32,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:application.ed.read-only:v1",
+        "claims": [
+          {
+            "title": "What Ed can and cannot do",
+            "topic": "application",
+            "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+            "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 25,
+            "source_line_end": 32,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:application.ed.read-only:v1",
+            "text": "Ed is read-only. It cannot create, edit, delete, approve, publish or withdraw Symgov records, and it cannot change users, roles, organizations, projects, symbol sets, classifications or settings. Ed does not send external messages, and it will not reveal credentials, secrets or its hidden instructions."
+          }
+        ]
+      },
+      {
+        "title": "What you can ask Ed about",
+        "topic": "support",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 13,
+        "source_line_end": 23,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:support.ed.what-to-ask:v1",
+        "claims": [
+          {
+            "title": "What you can ask Ed about",
+            "topic": "support",
+            "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+            "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 13,
+            "source_line_end": 23,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:support.ed.what-to-ask:v1",
+            "text": "Ed explains Symgov features and workflows: classification schemes such as ICS, organizations, memberships and roles, projects, symbol sets, symbols and revisions, security and sign-in, and setup tasks such as choosing an organization. It can look up read-only facts you are allowed to see, and says whether an answer comes from documentation, live records or inference."
+          }
+        ]
+      },
+      {
+        "title": "Asking Ed to change something",
+        "topic": "support",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 96,
+        "source_line_end": 96,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:support.ed.change-requests:v1",
+        "claims": [
+          {
+            "title": "Asking Ed to change something",
+            "topic": "support",
+            "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+            "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 96,
+            "source_line_end": 96,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:support.ed.change-requests:v1",
+            "text": "If you ask Ed to change something in Symgov, it declines because it is read-only. Where a documented workflow exists, Ed points you to the part of the application where you can make the change yourself."
+          }
+        ]
+      },
+      {
+        "title": "Ed and other people's information",
+        "topic": "support",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 221,
+        "source_line_end": 223,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:support.ed.privacy-boundaries:v1",
+        "claims": [
+          {
+            "title": "Ed and other people's information",
+            "topic": "support",
+            "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+            "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 221,
+            "source_line_end": 223,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:support.ed.privacy-boundaries:v1",
+            "text": "You can ask Ed about anything you are allowed to see. Ed will not disclose another user's profile, credentials, recovery codes, audit details or private organization data, and administrator-only information stays limited to the roles permitted to see it."
+          }
+        ]
+      },
+      {
+        "title": "Why Ed may not be available to you yet",
+        "topic": "known_limitations",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 323,
+        "source_line_end": 323,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:known_limitations.ed.pilot-availability:v1",
+        "claims": [
+          {
+            "title": "Why Ed may not be available to you yet",
+            "topic": "known_limitations",
+            "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+            "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 323,
+            "source_line_end": 323,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:known_limitations.ed.pilot-availability:v1",
+            "text": "Ed is intended for every signed-in user, but at first access is limited to selected pilot organizations while permission isolation and answer quality are checked. Ed may therefore not be available in every session."
+          }
+        ]
+      },
+      {
+        "title": "Ed does not keep your chat history",
+        "topic": "known_limitations",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 324,
+        "source_line_end": 324,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:known_limitations.ed.no-saved-history:v1",
+        "claims": [
+          {
+            "title": "Ed does not keep your chat history",
+            "topic": "known_limitations",
+            "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+            "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 324,
+            "source_line_end": 324,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:known_limitations.ed.no-saved-history:v1",
+            "text": "Your conversation with Ed is kept in your browser only. The server answers each question but does not store a conversation history you can return to later, so copy any answer you want to keep."
+          }
+        ]
+      },
+      {
+        "title": "ICS codes, not ISO standards documents",
+        "topic": "known_limitations",
+        "source_path": "docs/ics-taxonomy-runbook.md",
+        "source_version": "sha256:3793d7b89ce6aeb51e5585c4d5820eac86f6fe2a54b79ef3f87e969b0ac1aed2",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 11,
+        "source_line_end": 11,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:known_limitations.ics.codes-only:v1",
+        "claims": [
+          {
+            "title": "ICS codes, not ISO standards documents",
+            "topic": "known_limitations",
+            "source_path": "docs/ics-taxonomy-runbook.md",
+            "source_version": "sha256:3793d7b89ce6aeb51e5585c4d5820eac86f6fe2a54b79ef3f87e969b0ac1aed2",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 11,
+            "source_line_end": 11,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:known_limitations.ics.codes-only:v1",
+            "text": "Symgov uses International Classification for Standards (ICS) codes only as a classification taxonomy. The ISO/IEC standards documents listed under each code are separate copyrighted works and are not included in Symgov."
+          }
+        ]
+      },
+      {
+        "title": "Which organizations can I work in?",
+        "topic": "organization",
+        "source_path": "backend/symgov_backend/organization_authorization.py",
+        "source_version": "sha256:4a4b72d5f2beb78808ee50aca36dcbbbe8cd6e7221010b8efc75964a3f2c41d0",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 32,
+        "source_line_end": 39,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:organization.eligibility.active-membership-entitlement-role:v1",
+        "claims": [
+          {
+            "title": "Which organizations can I work in?",
+            "topic": "organization",
+            "source_path": "backend/symgov_backend/organization_authorization.py",
+            "source_version": "sha256:4a4b72d5f2beb78808ee50aca36dcbbbe8cd6e7221010b8efc75964a3f2c41d0",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 32,
+            "source_line_end": 39,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:organization.eligibility.active-membership-entitlement-role:v1",
+            "text": "You can only work in an organization if your membership in it is active, the organization itself is active and has an active entitlement, and you hold an active, unrevoked role there. If any of these is missing, that organization is not available to you."
+          }
+        ]
+      },
+      {
+        "title": "Why do some features say I need an organization session?",
+        "topic": "organization",
+        "source_path": "backend/symgov_backend/stage4_authorization.py",
+        "source_version": "sha256:db53df75ef744a3e41a02534fdefe34d69de5b2ee3c2d8f6e984400815cf2f21",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 62,
+        "source_line_end": 63,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:organization.session.organization-bound-required:v1",
+        "claims": [
+          {
+            "title": "Why do some features say I need an organization session?",
+            "topic": "organization",
+            "source_path": "backend/symgov_backend/stage4_authorization.py",
+            "source_version": "sha256:db53df75ef744a3e41a02534fdefe34d69de5b2ee3c2d8f6e984400815cf2f21",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 62,
+            "source_line_end": 63,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:organization.session.organization-bound-required:v1",
+            "text": "Project and symbol set features need a session that is signed in to a specific organization. If your current session is not bound to an organization, they are refused with a message saying an organization-bound session is required."
+          }
+        ]
+      },
+      {
+        "title": "What can an Organization Admin do that a member cannot?",
+        "topic": "organization",
+        "source_path": "backend/symgov_backend/stage4_authorization.py",
+        "source_version": "sha256:db53df75ef744a3e41a02534fdefe34d69de5b2ee3c2d8f6e984400815cf2f21",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 115,
+        "source_line_end": 118,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:organization.roles.admin-only-actions:v1",
+        "claims": [
+          {
+            "title": "What can an Organization Admin do that a member cannot?",
+            "topic": "organization",
+            "source_path": "backend/symgov_backend/stage4_authorization.py",
+            "source_version": "sha256:db53df75ef744a3e41a02534fdefe34d69de5b2ee3c2d8f6e984400815cf2f21",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 115,
+            "source_line_end": 118,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:organization.roles.admin-only-actions:v1",
+            "text": "Some project and symbol set actions are reserved for Organization Admins. A member without that role in the signed-in organization is refused with a message saying Organization Admin privileges are required."
+          }
+        ]
+      },
+      {
+        "title": "Choosing an organization when you sign in",
+        "topic": "user_setup",
+        "source_path": "frontend/src/OrganizationSelectionPage.js",
+        "source_version": "sha256:ed9e48d89fb22593b9cec00437c2178c38634a710871cfe9d5908bf88ba1c8e0",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 39,
+        "source_line_end": 72,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:user_setup.sign-in.select-organization:v1",
+        "claims": [
+          {
+            "title": "Choosing an organization when you sign in",
+            "topic": "user_setup",
+            "source_path": "frontend/src/OrganizationSelectionPage.js",
+            "source_version": "sha256:ed9e48d89fb22593b9cec00437c2178c38634a710871cfe9d5908bf88ba1c8e0",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 39,
+            "source_line_end": 72,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:user_setup.sign-in.select-organization:v1",
+            "text": "If more than one organization is available to your account, after your identity is verified you are asked to select an organization before you continue. Each choice shows the organization's name and its code."
+          }
+        ]
+      },
+      {
+        "title": "Why am I asked to change my PIN after signing in?",
+        "topic": "user_setup",
+        "source_path": "frontend/src/OrganizationSelectionPage.js",
+        "source_version": "sha256:ed9e48d89fb22593b9cec00437c2178c38634a710871cfe9d5908bf88ba1c8e0",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 141,
+        "source_line_end": 148,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:user_setup.sign-in.must-change-pin:v1",
+        "claims": [
+          {
+            "title": "Why am I asked to change my PIN after signing in?",
+            "topic": "user_setup",
+            "source_path": "frontend/src/OrganizationSelectionPage.js",
+            "source_version": "sha256:ed9e48d89fb22593b9cec00437c2178c38634a710871cfe9d5908bf88ba1c8e0",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 141,
+            "source_line_end": 148,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:user_setup.sign-in.must-change-pin:v1",
+            "text": "If your account is flagged as needing a new PIN, choosing your organization takes you straight to the Change PIN page. Once the PIN is changed you continue to where you were going."
+          }
+        ]
+      },
+      {
+        "title": "What is on my profile page?",
+        "topic": "user_setup",
+        "source_path": "frontend/src/ProfilePage.jsx",
+        "source_version": "sha256:ad6b1b22ef18b2a493bc8ac9b3aae73c5112bfb288a43ab386618f871d1d73c8",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 118,
+        "source_line_end": 129,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:user_setup.profile.identity-and-subscription:v1",
+        "claims": [
+          {
+            "title": "What is on my profile page?",
+            "topic": "user_setup",
+            "source_path": "frontend/src/ProfilePage.jsx",
+            "source_version": "sha256:ad6b1b22ef18b2a493bc8ac9b3aae73c5112bfb288a43ab386618f871d1d73c8",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 118,
+            "source_line_end": 129,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:user_setup.profile.identity-and-subscription:v1",
+            "text": "Your profile page shows your name and email address and lets you manage your Symgov subscription."
+          }
+        ]
+      },
+      {
+        "title": "Projects live inside your organization",
+        "topic": "project",
+        "source_path": "backend/symgov_backend/project_service.py",
+        "source_version": "sha256:e2d9c128b3524290bb02c5ff69abab8291d8a7f82a1bc1b1a4c77bec261b5023",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 98,
+        "source_line_end": 105,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:project.organization-visibility:v1",
+        "claims": [
+          {
+            "title": "Projects live inside your organization",
+            "topic": "project",
+            "source_path": "backend/symgov_backend/project_service.py",
+            "source_version": "sha256:e2d9c128b3524290bb02c5ff69abab8291d8a7f82a1bc1b1a4c77bec261b5023",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 98,
+            "source_line_end": 105,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:project.organization-visibility:v1",
+            "text": "A project belongs to a single organization, and you only see the projects of the organization your session is signed in to. Members see active projects only; Organization Admins can also choose to include closed projects."
+          }
+        ]
+      },
+      {
+        "title": "What happens when a project is closed",
+        "topic": "project",
+        "source_path": "backend/symgov_backend/project_service.py",
+        "source_version": "sha256:e2d9c128b3524290bb02c5ff69abab8291d8a7f82a1bc1b1a4c77bec261b5023",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 141,
+        "source_line_end": 202,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:project.closing:v1",
+        "claims": [
+          {
+            "title": "What happens when a project is closed",
+            "topic": "project",
+            "source_path": "backend/symgov_backend/project_service.py",
+            "source_version": "sha256:e2d9c128b3524290bb02c5ff69abab8291d8a7f82a1bc1b1a4c77bec261b5023",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 141,
+            "source_line_end": 202,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:project.closing:v1",
+            "text": "Only Organization Admins can change or close a project, and closing is permanent: a closed project cannot be reopened or edited. When a project is closed, its symbol set links are switched off and it no longer has a default set, every saved set choice for it is removed, and anyone who had it selected loses that selection."
+          }
+        ]
+      },
+      {
+        "title": "Your selected project is tied to your session",
+        "topic": "project",
+        "source_path": "backend/symgov_backend/symbol_context_service.py",
+        "source_version": "sha256:f45a54b49e7214dec3087211a75903dd7364b655c990c046e4b40e3e65a8dd0a",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 139,
+        "source_line_end": 155,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:project.session-selection:v1",
+        "claims": [
+          {
+            "title": "Your selected project is tied to your session",
+            "topic": "project",
+            "source_path": "backend/symgov_backend/symbol_context_service.py",
+            "source_version": "sha256:f45a54b49e7214dec3087211a75903dd7364b655c990c046e4b40e3e65a8dd0a",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 139,
+            "source_line_end": 155,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:project.session-selection:v1",
+            "text": "Your selected project is remembered for your current sign-in session. It stays selected only while it is an active project in the organization you are signed in to; if it is closed or no longer qualifies, the selection is cleared."
+          }
+        ]
+      },
+      {
+        "title": "What a symbol set is",
+        "topic": "symbol_set",
+        "source_path": "backend/symgov_backend/ed_read_tools.py",
+        "source_version": "sha256:e4877658a62c1edf05e505681980a4325bbfc98bf7fa0dea47881505e8877e20",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 116,
+        "source_line_end": 141,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:symbol_set.definition:v1",
+        "claims": [
+          {
+            "title": "What a symbol set is",
+            "topic": "symbol_set",
+            "source_path": "backend/symgov_backend/ed_read_tools.py",
+            "source_version": "sha256:e4877658a62c1edf05e505681980a4325bbfc98bf7fa0dea47881505e8877e20",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 116,
+            "source_line_end": 141,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:symbol_set.definition:v1",
+            "text": "A symbol set is a named collection of symbols with a code, a name, an optional description, the disciplines and use cases it is meant for, and a status. Each entry has a sort order, can carry a group name, a display label and a preferred format, and is either a public Catalog symbol or one of your organization's private symbols."
+          }
+        ]
+      },
+      {
+        "title": "How your active symbol set is chosen",
+        "topic": "symbol_set",
+        "source_path": "backend/symgov_backend/symbol_context_service.py",
+        "source_version": "sha256:f45a54b49e7214dec3087211a75903dd7364b655c990c046e4b40e3e65a8dd0a",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 69,
+        "source_line_end": 113,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:symbol_set.active-set-resolution:v1",
+        "claims": [
+          {
+            "title": "How your active symbol set is chosen",
+            "topic": "symbol_set",
+            "source_path": "backend/symgov_backend/symbol_context_service.py",
+            "source_version": "sha256:f45a54b49e7214dec3087211a75903dd7364b655c990c046e4b40e3e65a8dd0a",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 69,
+            "source_line_end": 113,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:symbol_set.active-set-resolution:v1",
+            "text": "Within a project, your active symbol set is picked in this order: the set you chose yourself for that project, then the project's default set, then your organization's default set. A set only counts if it is active and actively linked to the project. If your earlier choice no longer counts it is dropped and the next option is used; if nothing counts, no set is active."
+          }
+        ]
+      },
+      {
+        "title": "Which symbol sets Ed can list for you",
+        "topic": "symbol_set",
+        "source_path": "backend/symgov_backend/ed_read_tools.py",
+        "source_version": "sha256:e4877658a62c1edf05e505681980a4325bbfc98bf7fa0dea47881505e8877e20",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 461,
+        "source_line_end": 478,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:symbol_set.ed-listed-sets:v1",
+        "claims": [
+          {
+            "title": "Which symbol sets Ed can list for you",
+            "topic": "symbol_set",
+            "source_path": "backend/symgov_backend/ed_read_tools.py",
+            "source_version": "sha256:e4877658a62c1edf05e505681980a4325bbfc98bf7fa0dea47881505e8877e20",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 461,
+            "source_line_end": 478,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:symbol_set.ed-listed-sets:v1",
+            "text": "When Ed lists symbol sets, it lists the active sets owned by your organization that are actively linked to your currently selected project, and only while that project is active. With no project selected, Ed lists none."
+          }
+        ]
+      },
+      {
+        "title": "When is an organization's private symbol available?",
+        "topic": "symbol",
+        "source_path": "backend/symgov_backend/symbol_eligibility.py",
+        "source_version": "sha256:e31b9a359cf8feee51115088e6348f9075cd2a24e29b8beeaaaa341083fcfca6",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 41,
+        "source_line_end": 75,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:symbol.private.eligibility:v1",
+        "claims": [
+          {
+            "title": "When is an organization's private symbol available?",
+            "topic": "symbol",
+            "source_path": "backend/symgov_backend/symbol_eligibility.py",
+            "source_version": "sha256:e31b9a359cf8feee51115088e6348f9075cd2a24e29b8beeaaaa341083fcfca6",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 41,
+            "source_line_end": 75,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:symbol.private.eligibility:v1",
+            "text": "A private symbol is available only to the organization that owns it, and only once its current revision is approved and that same revision has an approved decision from a closed organization review. An older approval never makes a newer draft or rejected revision visible."
+          }
+        ]
+      },
+      {
+        "title": "Can private symbols go into a symbol set?",
+        "topic": "symbol",
+        "source_path": "backend/symgov_backend/symbol_eligibility.py",
+        "source_version": "sha256:e31b9a359cf8feee51115088e6348f9075cd2a24e29b8beeaaaa341083fcfca6",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 4,
+        "source_line_end": 11,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:symbol.private.symbol-set-items:v1",
+        "claims": [
+          {
+            "title": "Can private symbols go into a symbol set?",
+            "topic": "symbol",
+            "source_path": "backend/symgov_backend/symbol_eligibility.py",
+            "source_version": "sha256:e31b9a359cf8feee51115088e6348f9075cd2a24e29b8beeaaaa341083fcfca6",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 4,
+            "source_line_end": 11,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:symbol.private.symbol-set-items:v1",
+            "text": "An organization's approved private symbols can be added directly to that organization's own symbol sets, as well as public symbols. Access is never widened across organizations: another organization's private symbols are never eligible."
+          }
+        ]
+      },
+      {
+        "title": "What is a classification scheme?",
+        "topic": "classification",
+        "source_path": "backend/symgov_backend/classification_schemes.py",
+        "source_version": "sha256:f4e96847a8e89320e85a3a48af693d93e9dfe26b64fa0a8e6fd1f2f0dc1faf7e",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 1,
+        "source_line_end": 18,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:classification.scheme.definition:v1",
+        "claims": [
+          {
+            "title": "What is a classification scheme?",
+            "topic": "classification",
+            "source_path": "backend/symgov_backend/classification_schemes.py",
+            "source_version": "sha256:f4e96847a8e89320e85a3a48af693d93e9dfe26b64fa0a8e6fd1f2f0dc1faf7e",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 1,
+            "source_line_end": 18,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:classification.scheme.definition:v1",
+            "text": "A classification scheme is a governed hierarchy for browsing and reporting on symbols, such as the Catalog's browse filters. It is not an ontology: its entries are a display hierarchy, and the meaning of a term is held separately. Schemes are platform-wide and managed by platform administrators."
+          }
+        ]
+      },
+      {
+        "title": "How classification relates to a symbol's discipline",
+        "topic": "classification",
+        "source_path": "backend/symgov_backend/classification_schemes.py",
+        "source_version": "sha256:f4e96847a8e89320e85a3a48af693d93e9dfe26b64fa0a8e6fd1f2f0dc1faf7e",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 93,
+        "source_line_end": 131,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:classification.scheme.seeded-facets:v1",
+        "claims": [
+          {
+            "title": "How classification relates to a symbol's discipline",
+            "topic": "classification",
+            "source_path": "backend/symgov_backend/classification_schemes.py",
+            "source_version": "sha256:f4e96847a8e89320e85a3a48af693d93e9dfe26b64fa0a8e6fd1f2f0dc1faf7e",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 93,
+            "source_line_end": 131,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:classification.scheme.seeded-facets:v1",
+            "text": "Symgov starts with three classification schemes: Engineering Discipline, Symbol Category/Family and Use Case. Each was seeded from the list the Catalog already uses for browsing, so a symbol's discipline is a classification in the Engineering Discipline scheme. File format is deliberately not a classification scheme."
+          }
+        ]
+      },
+      {
+        "title": "Where did the ICS taxonomy come from?",
+        "topic": "classification",
+        "source_path": "docs/ics-taxonomy-runbook.md",
+        "source_version": "sha256:3793d7b89ce6aeb51e5585c4d5820eac86f6fe2a54b79ef3f87e969b0ac1aed2",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 9,
+        "source_line_end": 13,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:classification.ics.provenance:v1",
+        "claims": [
+          {
+            "title": "Where did the ICS taxonomy come from?",
+            "topic": "classification",
+            "source_path": "docs/ics-taxonomy-runbook.md",
+            "source_version": "sha256:3793d7b89ce6aeb51e5585c4d5820eac86f6fe2a54b79ef3f87e969b0ac1aed2",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 9,
+            "source_line_end": 13,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:classification.ics.provenance:v1",
+            "text": "Symgov's ICS taxonomy is based on the International Classification for Standards (ICS), 7th edition (2015), © ISO, from the iso_ics dataset published by ISO Open Data under the Open Data Commons Attribution License (ODC-By) v1.0."
+          }
+        ]
+      },
+      {
+        "title": "Why you are asked to confirm your identity again",
+        "topic": "security",
+        "source_path": "backend/symgov_backend/dependencies.py",
+        "source_version": "sha256:fa9379cf84aaa81fdf8c62813cd15d9a84081975d4d51134fa67e8efd693e821",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 604,
+        "source_line_end": 667,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:security.step-up.sensitive-admin-actions:v1",
+        "claims": [
+          {
+            "title": "Why you are asked to confirm your identity again",
+            "topic": "security",
+            "source_path": "backend/symgov_backend/dependencies.py",
+            "source_version": "sha256:fa9379cf84aaa81fdf8c62813cd15d9a84081975d4d51134fa67e8efd693e821",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 604,
+            "source_line_end": 667,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:security.step-up.sensitive-admin-actions:v1",
+            "text": "Some sensitive administration actions require you to have confirmed your identity recently: creating, changing or deleting user accounts, resetting a user's PIN, changing a user's subscription, and releasing sign-in throttling. If you have not confirmed recently, or that confirmation has run out, the action is refused until you confirm again."
+          }
+        ]
+      },
+      {
+        "title": "Why you must change your PIN before doing anything else",
+        "topic": "security",
+        "source_path": "backend/symgov_backend/dependencies.py",
+        "source_version": "sha256:fa9379cf84aaa81fdf8c62813cd15d9a84081975d4d51134fa67e8efd693e821",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 425,
+        "source_line_end": 460,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:security.pin-change.required-before-access:v1",
+        "claims": [
+          {
+            "title": "Why you must change your PIN before doing anything else",
+            "topic": "security",
+            "source_path": "backend/symgov_backend/dependencies.py",
+            "source_version": "sha256:fa9379cf84aaa81fdf8c62813cd15d9a84081975d4d51134fa67e8efd693e821",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 425,
+            "source_line_end": 460,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:security.pin-change.required-before-access:v1",
+            "text": "If your account has been flagged to change its PIN, or you are signed in only to change your credentials, Symgov allows just a few account basics until the PIN is changed: viewing your own account and profile, changing your PIN, confirming your identity again, and signing out. Anything else fails with a message saying a PIN change is required."
+          }
+        ]
+      },
+      {
+        "title": "Why something is suddenly reported as not found",
+        "topic": "security",
+        "source_path": "backend/symgov_backend/stage4_authorization.py",
+        "source_version": "sha256:db53df75ef744a3e41a02534fdefe34d69de5b2ee3c2d8f6e984400815cf2f21",
+        "extracted_at": "2026-09-29T00:00:00Z",
+        "source_line_start": 88,
+        "source_line_end": 93,
+        "source_symbol": null,
+        "visibility": "authenticated",
+        "approval_state": "draft",
+        "supersedes": [],
+        "superseded_by": [],
+        "id": "document:security.access-rechecked-every-request:v1",
+        "claims": [
+          {
+            "title": "Why something is suddenly reported as not found",
+            "topic": "security",
+            "source_path": "backend/symgov_backend/stage4_authorization.py",
+            "source_version": "sha256:db53df75ef744a3e41a02534fdefe34d69de5b2ee3c2d8f6e984400815cf2f21",
+            "extracted_at": "2026-09-29T00:00:00Z",
+            "source_line_start": 88,
+            "source_line_end": 93,
+            "source_symbol": null,
+            "visibility": "authenticated",
+            "approval_state": "draft",
+            "supersedes": [],
+            "superseded_by": [],
+            "id": "claim:security.access-rechecked-every-request:v1",
+            "text": "Project and symbol set features check your access again on every request. If your account, your membership or role, or the organization or its entitlement is no longer active, the item is reported as not found rather than as access denied."
+          }
+        ]
+      }
+    ]
+  },
+  "claimMetadata": [
+    {
+      "claim_id": "claim:application.product.scope:v1",
+      "fact_key": "application.product.scope",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:application.ed.purpose:v1",
+      "fact_key": "application.ed.purpose",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:application.ed.read-only:v1",
+      "fact_key": "application.ed.read-only",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:support.ed.what-to-ask:v1",
+      "fact_key": "support.ed.what-to-ask",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:support.ed.change-requests:v1",
+      "fact_key": "support.ed.change-requests",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:support.ed.privacy-boundaries:v1",
+      "fact_key": "support.ed.privacy-boundaries",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:known_limitations.ed.pilot-availability:v1",
+      "fact_key": "known_limitations.ed.pilot-availability",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:known_limitations.ed.no-saved-history:v1",
+      "fact_key": "known_limitations.ed.no-saved-history",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:known_limitations.ics.codes-only:v1",
+      "fact_key": "known_limitations.ics.codes-only",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:organization.eligibility.active-membership-entitlement-role:v1",
+      "fact_key": "organization.eligibility.active-membership-entitlement-role",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:organization.session.organization-bound-required:v1",
+      "fact_key": "organization.session.organization-bound-required",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:organization.roles.admin-only-actions:v1",
+      "fact_key": "organization.roles.admin-only-actions",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:user_setup.sign-in.select-organization:v1",
+      "fact_key": "user_setup.sign-in.select-organization",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:user_setup.sign-in.must-change-pin:v1",
+      "fact_key": "user_setup.sign-in.must-change-pin",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:user_setup.profile.identity-and-subscription:v1",
+      "fact_key": "user_setup.profile.identity-and-subscription",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:project.organization-visibility:v1",
+      "fact_key": "project.organization-visibility",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:project.closing:v1",
+      "fact_key": "project.closing",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:project.session-selection:v1",
+      "fact_key": "project.session-selection",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:symbol_set.definition:v1",
+      "fact_key": "symbol_set.definition",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:symbol_set.active-set-resolution:v1",
+      "fact_key": "symbol_set.active-set-resolution",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:symbol_set.ed-listed-sets:v1",
+      "fact_key": "symbol_set.ed-listed-sets",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:symbol.private.eligibility:v1",
+      "fact_key": "symbol.private.eligibility",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:symbol.private.symbol-set-items:v1",
+      "fact_key": "symbol.private.symbol-set-items",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:classification.scheme.definition:v1",
+      "fact_key": "classification.scheme.definition",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:classification.scheme.seeded-facets:v1",
+      "fact_key": "classification.scheme.seeded-facets",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:classification.ics.provenance:v1",
+      "fact_key": "classification.ics.provenance",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:security.step-up.sensitive-admin-actions:v1",
+      "fact_key": "security.step-up.sensitive-admin-actions",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:security.pin-change.required-before-access:v1",
+      "fact_key": "security.pin-change.required-before-access",
+      "scope": "product"
+    },
+    {
+      "claim_id": "claim:security.access-rechecked-every-request:v1",
+      "fact_key": "security.access-rechecked-every-request",
+      "scope": "product"
+    }
+  ]
+}

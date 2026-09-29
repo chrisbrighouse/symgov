@@ -1,0 +1,504 @@
+{
+  "schemaVersion": "1.0",
+  "inventory": {
+    "schema_version": "1.0",
+    "inventory_version": "draft:stage4-initial",
+    "sources": [
+      {
+        "id": "source:application.product.scope:v1",
+        "title": "What Symgov is for",
+        "topic": "application",
+        "source_path": "docs/README.md",
+        "source_version": "sha256:dacc8dc3f55996340ce70f6c107a85638a2af39d5b419021722b09ebb97a83fd",
+        "source_kind": "markdown",
+        "source_line_start": 5,
+        "source_line_end": 5
+      },
+      {
+        "id": "source:application.ed.purpose:v1",
+        "title": "What Ed is",
+        "topic": "application",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "source_kind": "markdown",
+        "source_line_start": 9,
+        "source_line_end": 11
+      },
+      {
+        "id": "source:application.ed.read-only:v1",
+        "title": "What Ed can and cannot do",
+        "topic": "application",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "source_kind": "markdown",
+        "source_line_start": 25,
+        "source_line_end": 32
+      },
+      {
+        "id": "source:support.ed.what-to-ask:v1",
+        "title": "What you can ask Ed about",
+        "topic": "support",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "source_kind": "markdown",
+        "source_line_start": 13,
+        "source_line_end": 23
+      },
+      {
+        "id": "source:support.ed.change-requests:v1",
+        "title": "Asking Ed to change something",
+        "topic": "support",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "source_kind": "markdown",
+        "source_line_start": 96,
+        "source_line_end": 96
+      },
+      {
+        "id": "source:support.ed.privacy-boundaries:v1",
+        "title": "Ed and other people's information",
+        "topic": "support",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "source_kind": "markdown",
+        "source_line_start": 221,
+        "source_line_end": 223
+      },
+      {
+        "id": "source:known_limitations.ed.pilot-availability:v1",
+        "title": "Why Ed may not be available to you yet",
+        "topic": "known_limitations",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "source_kind": "markdown",
+        "source_line_start": 323,
+        "source_line_end": 323
+      },
+      {
+        "id": "source:known_limitations.ed.no-saved-history:v1",
+        "title": "Ed does not keep your chat history",
+        "topic": "known_limitations",
+        "source_path": "docs/plans/2026-09-27-ed-application-guru-spec.md",
+        "source_version": "sha256:76b64204fb1c844fdc6b3a481736470d6368f037b728ce2ecc49bc9bc13fbb01",
+        "source_kind": "markdown",
+        "source_line_start": 324,
+        "source_line_end": 324
+      },
+      {
+        "id": "source:known_limitations.ics.codes-only:v1",
+        "title": "ICS codes, not ISO standards documents",
+        "topic": "known_limitations",
+        "source_path": "docs/ics-taxonomy-runbook.md",
+        "source_version": "sha256:3793d7b89ce6aeb51e5585c4d5820eac86f6fe2a54b79ef3f87e969b0ac1aed2",
+        "source_kind": "markdown",
+        "source_line_start": 11,
+        "source_line_end": 11
+      },
+      {
+        "id": "source:organization.eligibility.active-membership-entitlement-role:v1",
+        "title": "Which organizations can I work in?",
+        "topic": "organization",
+        "source_path": "backend/symgov_backend/organization_authorization.py",
+        "source_version": "sha256:4a4b72d5f2beb78808ee50aca36dcbbbe8cd6e7221010b8efc75964a3f2c41d0",
+        "source_kind": "python",
+        "source_line_start": 32,
+        "source_line_end": 39
+      },
+      {
+        "id": "source:organization.session.organization-bound-required:v1",
+        "title": "Why do some features say I need an organization session?",
+        "topic": "organization",
+        "source_path": "backend/symgov_backend/stage4_authorization.py",
+        "source_version": "sha256:db53df75ef744a3e41a02534fdefe34d69de5b2ee3c2d8f6e984400815cf2f21",
+        "source_kind": "python",
+        "source_line_start": 62,
+        "source_line_end": 63
+      },
+      {
+        "id": "source:organization.roles.admin-only-actions:v1",
+        "title": "What can an Organization Admin do that a member cannot?",
+        "topic": "organization",
+        "source_path": "backend/symgov_backend/stage4_authorization.py",
+        "source_version": "sha256:db53df75ef744a3e41a02534fdefe34d69de5b2ee3c2d8f6e984400815cf2f21",
+        "source_kind": "python",
+        "source_line_start": 115,
+        "source_line_end": 118
+      },
+      {
+        "id": "source:user_setup.sign-in.select-organization:v1",
+        "title": "Choosing an organization when you sign in",
+        "topic": "user_setup",
+        "source_path": "frontend/src/OrganizationSelectionPage.js",
+        "source_version": "sha256:ed9e48d89fb22593b9cec00437c2178c38634a710871cfe9d5908bf88ba1c8e0",
+        "source_kind": "javascript",
+        "source_line_start": 39,
+        "source_line_end": 72
+      },
+      {
+        "id": "source:user_setup.sign-in.must-change-pin:v1",
+        "title": "Why am I asked to change my PIN after signing in?",
+        "topic": "user_setup",
+        "source_path": "frontend/src/OrganizationSelectionPage.js",
+        "source_version": "sha256:ed9e48d89fb22593b9cec00437c2178c38634a710871cfe9d5908bf88ba1c8e0",
+        "source_kind": "javascript",
+        "source_line_start": 141,
+        "source_line_end": 148
+      },
+      {
+        "id": "source:user_setup.profile.identity-and-subscription:v1",
+        "title": "What is on my profile page?",
+        "topic": "user_setup",
+        "source_path": "frontend/src/ProfilePage.jsx",
+        "source_version": "sha256:ad6b1b22ef18b2a493bc8ac9b3aae73c5112bfb288a43ab386618f871d1d73c8",
+        "source_kind": "javascript",
+        "source_line_start": 118,
+        "source_line_end": 129
+      },
+      {
+        "id": "source:project.organization-visibility:v1",
+        "title": "Projects live inside your organization",
+        "topic": "project",
+        "source_path": "backend/symgov_backend/project_service.py",
+        "source_version": "sha256:e2d9c128b3524290bb02c5ff69abab8291d8a7f82a1bc1b1a4c77bec261b5023",
+        "source_kind": "python",
+        "source_line_start": 98,
+        "source_line_end": 105
+      },
+      {
+        "id": "source:project.closing:v1",
+        "title": "What happens when a project is closed",
+        "topic": "project",
+        "source_path": "backend/symgov_backend/project_service.py",
+        "source_version": "sha256:e2d9c128b3524290bb02c5ff69abab8291d8a7f82a1bc1b1a4c77bec261b5023",
+        "source_kind": "python",
+        "source_line_start": 141,
+        "source_line_end": 202
+      },
+      {
+        "id": "source:project.session-selection:v1",
+        "title": "Your selected project is tied to your session",
+        "topic": "project",
+        "source_path": "backend/symgov_backend/symbol_context_service.py",
+        "source_version": "sha256:f45a54b49e7214dec3087211a75903dd7364b655c990c046e4b40e3e65a8dd0a",
+        "source_kind": "python",
+        "source_line_start": 139,
+        "source_line_end": 155
+      },
+      {
+        "id": "source:symbol_set.definition:v1",
+        "title": "What a symbol set is",
+        "topic": "symbol_set",
+        "source_path": "backend/symgov_backend/ed_read_tools.py",
+        "source_version": "sha256:e4877658a62c1edf05e505681980a4325bbfc98bf7fa0dea47881505e8877e20",
+        "source_kind": "python",
+        "source_line_start": 116,
+        "source_line_end": 141
+      },
+      {
+        "id": "source:symbol_set.active-set-resolution:v1",
+        "title": "How your active symbol set is chosen",
+        "topic": "symbol_set",
+        "source_path": "backend/symgov_backend/symbol_context_service.py",
+        "source_version": "sha256:f45a54b49e7214dec3087211a75903dd7364b655c990c046e4b40e3e65a8dd0a",
+        "source_kind": "python",
+        "source_line_start": 69,
+        "source_line_end": 113
+      },
+      {
+        "id": "source:symbol_set.ed-listed-sets:v1",
+        "title": "Which symbol sets Ed can list for you",
+        "topic": "symbol_set",
+        "source_path": "backend/symgov_backend/ed_read_tools.py",
+        "source_version": "sha256:e4877658a62c1edf05e505681980a4325bbfc98bf7fa0dea47881505e8877e20",
+        "source_kind": "python",
+        "source_line_start": 461,
+        "source_line_end": 478
+      },
+      {
+        "id": "source:symbol.private.eligibility:v1",
+        "title": "When is an organization's private symbol available?",
+        "topic": "symbol",
+        "source_path": "backend/symgov_backend/symbol_eligibility.py",
+        "source_version": "sha256:e31b9a359cf8feee51115088e6348f9075cd2a24e29b8beeaaaa341083fcfca6",
+        "source_kind": "python",
+        "source_line_start": 41,
+        "source_line_end": 75
+      },
+      {
+        "id": "source:symbol.private.symbol-set-items:v1",
+        "title": "Can private symbols go into a symbol set?",
+        "topic": "symbol",
+        "source_path": "backend/symgov_backend/symbol_eligibility.py",
+        "source_version": "sha256:e31b9a359cf8feee51115088e6348f9075cd2a24e29b8beeaaaa341083fcfca6",
+        "source_kind": "python",
+        "source_line_start": 4,
+        "source_line_end": 11
+      },
+      {
+        "id": "source:classification.scheme.definition:v1",
+        "title": "What is a classification scheme?",
+        "topic": "classification",
+        "source_path": "backend/symgov_backend/classification_schemes.py",
+        "source_version": "sha256:f4e96847a8e89320e85a3a48af693d93e9dfe26b64fa0a8e6fd1f2f0dc1faf7e",
+        "source_kind": "python",
+        "source_line_start": 1,
+        "source_line_end": 18
+      },
+      {
+        "id": "source:classification.scheme.seeded-facets:v1",
+        "title": "How classification relates to a symbol's discipline",
+        "topic": "classification",
+        "source_path": "backend/symgov_backend/classification_schemes.py",
+        "source_version": "sha256:f4e96847a8e89320e85a3a48af693d93e9dfe26b64fa0a8e6fd1f2f0dc1faf7e",
+        "source_kind": "python",
+        "source_line_start": 93,
+        "source_line_end": 131
+      },
+      {
+        "id": "source:classification.ics.provenance:v1",
+        "title": "Where did the ICS taxonomy come from?",
+        "topic": "classification",
+        "source_path": "docs/ics-taxonomy-runbook.md",
+        "source_version": "sha256:3793d7b89ce6aeb51e5585c4d5820eac86f6fe2a54b79ef3f87e969b0ac1aed2",
+        "source_kind": "markdown",
+        "source_line_start": 9,
+        "source_line_end": 13
+      },
+      {
+        "id": "source:security.step-up.sensitive-admin-actions:v1",
+        "title": "Why you are asked to confirm your identity again",
+        "topic": "security",
+        "source_path": "backend/symgov_backend/dependencies.py",
+        "source_version": "sha256:fa9379cf84aaa81fdf8c62813cd15d9a84081975d4d51134fa67e8efd693e821",
+        "source_kind": "python",
+        "source_line_start": 604,
+        "source_line_end": 667
+      },
+      {
+        "id": "source:security.pin-change.required-before-access:v1",
+        "title": "Why you must change your PIN before doing anything else",
+        "topic": "security",
+        "source_path": "backend/symgov_backend/dependencies.py",
+        "source_version": "sha256:fa9379cf84aaa81fdf8c62813cd15d9a84081975d4d51134fa67e8efd693e821",
+        "source_kind": "python",
+        "source_line_start": 425,
+        "source_line_end": 460
+      },
+      {
+        "id": "source:security.access-rechecked-every-request:v1",
+        "title": "Why something is suddenly reported as not found",
+        "topic": "security",
+        "source_path": "backend/symgov_backend/stage4_authorization.py",
+        "source_version": "sha256:db53df75ef744a3e41a02534fdefe34d69de5b2ee3c2d8f6e984400815cf2f21",
+        "source_kind": "python",
+        "source_line_start": 88,
+        "source_line_end": 93
+      }
+    ]
+  },
+  "sourceApprovals": [
+    {
+      "source_id": "source:application.product.scope:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 5,
+      "approved_line_end": 5,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:application.ed.purpose:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 9,
+      "approved_line_end": 11,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:application.ed.read-only:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 25,
+      "approved_line_end": 32,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:support.ed.what-to-ask:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 13,
+      "approved_line_end": 23,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:support.ed.change-requests:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 96,
+      "approved_line_end": 96,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:support.ed.privacy-boundaries:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 221,
+      "approved_line_end": 223,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:known_limitations.ed.pilot-availability:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 323,
+      "approved_line_end": 323,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:known_limitations.ed.no-saved-history:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 324,
+      "approved_line_end": 324,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:known_limitations.ics.codes-only:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 11,
+      "approved_line_end": 11,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:organization.eligibility.active-membership-entitlement-role:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 32,
+      "approved_line_end": 39,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:organization.session.organization-bound-required:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 62,
+      "approved_line_end": 63,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:organization.roles.admin-only-actions:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 115,
+      "approved_line_end": 118,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:user_setup.sign-in.select-organization:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 39,
+      "approved_line_end": 72,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:user_setup.sign-in.must-change-pin:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 141,
+      "approved_line_end": 148,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:user_setup.profile.identity-and-subscription:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 118,
+      "approved_line_end": 129,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:project.organization-visibility:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 98,
+      "approved_line_end": 105,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:project.closing:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 141,
+      "approved_line_end": 202,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:project.session-selection:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 139,
+      "approved_line_end": 155,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:symbol_set.definition:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 116,
+      "approved_line_end": 141,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:symbol_set.active-set-resolution:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 69,
+      "approved_line_end": 113,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:symbol_set.ed-listed-sets:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 461,
+      "approved_line_end": 478,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:symbol.private.eligibility:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 41,
+      "approved_line_end": 75,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:symbol.private.symbol-set-items:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 4,
+      "approved_line_end": 11,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:classification.scheme.definition:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 1,
+      "approved_line_end": 18,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:classification.scheme.seeded-facets:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 93,
+      "approved_line_end": 131,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:classification.ics.provenance:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 9,
+      "approved_line_end": 13,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:security.step-up.sensitive-admin-actions:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 604,
+      "approved_line_end": 667,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:security.pin-change.required-before-access:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 425,
+      "approved_line_end": 460,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:security.access-rechecked-every-request:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 88,
+      "approved_line_end": 93,
+      "approved_symbol": null
+    }
+  ]
+}
