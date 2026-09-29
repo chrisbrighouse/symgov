@@ -459,3 +459,17 @@ def test_model_context_labels_each_passage_with_its_reference(tmp_path: Path):
         "[knowledge:fixture-v1:claim:first:v1] First\nlabelneedle one\n\n"
         "[knowledge:fixture-v1:claim:second:v1] Second\nlabelneedle two"
     )
+
+
+def test_a_stray_letter_from_a_contraction_matches_nothing(tmp_path: Path):
+    """"What's" tokenises to "what" + "s"; the lone "s" matched every "Ed's"."""
+    chunks = [_chunk(tmp_path, text="Ed's first phase is read-only.")]
+
+    assert _query(tmp_path, chunks, "What's the weather in Paris?").status == "cannot_answer"
+    assert _query(tmp_path, chunks, "What's Ed's first phase?").status == "answered"
+
+
+def test_digits_still_count_on_their_own(tmp_path: Path):
+    chunks = [_chunk(tmp_path, text="Edition 7 of the taxonomy.")]
+
+    assert _query(tmp_path, chunks, "Which edition, 7?").status == "answered"

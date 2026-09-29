@@ -127,10 +127,16 @@ def test_a_source_changed_after_approval_stops_answers(tmp_path: Path):
 
 
 def test_the_committed_initial_bundle_matches_its_unsigned_receipt():
-    """The repository's own bundle verifies; only the steward's signature is missing."""
+    """The repository's own bundle still verifies against the current sources.
+
+    This fails whenever a cited source file, the tokenizer or the bundle
+    changes. That is the point: the steward's approval no longer covers the
+    bytes, so the bundle must be rebuilt and approved again.
+    """
     cli = importlib.import_module("symgov_backend.ed_corpus_cli")
     root = Path(__file__).resolve().parents[1]
-    home = root / "backend/symgov_backend/data/ed_knowledge/bundles/198fca6e359e"
+    [home] = sorted((root / "backend/symgov_backend/data/ed_knowledge/bundles").iterdir())
+    assert home.name == json.loads((home / "approval.json").read_bytes())["indexDigest"].removeprefix("sha256:")[:12]
 
     result = cli.verify_bundle(bundle=home / "bundle", repository=root)
     receipt = json.loads((home / "approval.json").read_bytes())

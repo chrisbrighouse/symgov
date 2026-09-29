@@ -142,7 +142,9 @@ def _tokens(value: str, *, maximum: int) -> tuple[str, ...]:
     result: list[str] = []
     for match in _TOKEN.finditer(normalized):
         token = match.group(0)
-        if len(token) > MAX_TOKEN_CHARS or token in _STOP_WORDS:
+        # A lone letter is noise: "what's" and "Ed's" both leave an "s".
+        # A lone digit is not ("edition 7").
+        if len(token) > MAX_TOKEN_CHARS or token in _STOP_WORDS or (len(token) == 1 and not token.isdigit()):
             continue
         result.append(token)
         if len(result) > maximum:
