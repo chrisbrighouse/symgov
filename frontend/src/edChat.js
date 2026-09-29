@@ -113,6 +113,10 @@ export function describeEdError(result) {
       return `Ed could not read that question. Keep it to ${ED_PROMPT_LIMIT.toLocaleString('en-GB')} characters or fewer.`;
     case 429:
       return 'You have asked Ed several questions in a short time. Wait a minute, then try again.';
+    case 502:
+    case 503:
+    case 504:
+      return 'Ed took too long to answer. Try again, perhaps with a shorter question.';
     case 0:
     case undefined:
       return 'Ed could not be reached. Check your connection and try again.';

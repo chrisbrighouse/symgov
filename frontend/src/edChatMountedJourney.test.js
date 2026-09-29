@@ -177,6 +177,21 @@ describe('mounted Ed journey', () => {
     await act(async () => renderer.unmount());
   });
 
+  it('clearing the conversation also clears the context it reported', async () => {
+    const renderer = await mount('/ed', user(), [], () => response(200, ANSWER));
+
+    await ask(renderer, 'What does a project control?');
+    assert.match(text(renderer), /Answering for Acme Engineering · P-01/);
+    const clear = renderer.root.findAllByType('button').find((button) => button.props.children === 'Clear conversation');
+    await act(async () => clear.props.onClick());
+
+    const markup = text(renderer);
+    assert.doesNotMatch(markup, /P-01/);
+    assert.match(markup, /Answering for Acme Engineering/);
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Suggested questions' }));
+    await act(async () => renderer.unmount());
+  });
+
   it('can cancel a question in flight', async () => {
     let release;
     const renderer = await mount('/ed', user(), [], (options) => new Promise((resolve, reject) => {

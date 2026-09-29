@@ -82,6 +82,7 @@ describe('Ed response handling', () => {
     assert.match(describeEdError({ status: 401 }), /Sign in again/);
     assert.match(describeEdError({ status: 422 }), new RegExp(ED_PROMPT_LIMIT.toLocaleString('en-GB')));
     assert.match(describeEdError({ status: 0 }), /could not be reached/);
+    assert.match(describeEdError({ status: 504 }), /took too long/);
     assert.match(describeEdError({ status: 500, message: 'Traceback at /srv/app.py' }), /^Ed is unavailable right now/);
   });
 

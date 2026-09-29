@@ -153,6 +153,12 @@ export function EdChatPage({ auth }) {
     promptRef.current?.focus();
   }
 
+  function clearConversation() {
+    setTurns([]);
+    setContext(null);
+    promptRef.current?.focus();
+  }
+
   function chooseSuggestion(question) {
     setPrompt(question);
     promptRef.current?.focus();
@@ -269,7 +275,7 @@ export function EdChatPage({ auth }) {
             ? h('button', { type: 'button', className: 'action-button ghost', onClick: () => controllerRef.current?.abort() }, 'Cancel')
             : h(
               'button',
-              { type: 'button', className: 'action-button ghost', disabled: turns.length === 0, onClick: () => setTurns([]) },
+              { type: 'button', className: 'action-button ghost', disabled: turns.length === 0, onClick: clearConversation },
               'Clear conversation',
             ),
           h('button', { type: 'submit', className: 'action-button primary', disabled: pending || !trimmed }, pending ? 'Asking…' : 'Ask Ed'),
