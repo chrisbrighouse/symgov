@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import date, datetime
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic_core import PydanticCustomError
@@ -1977,8 +1977,56 @@ class ExternalMappingDecisionRequest(BaseModel):
     verificationBasis: str | None = Field(default=None, min_length=1, max_length=64)
 
 
-# ---------------------------------------------------------------------------
-# SM-P1-01 WP1.5 -- the approval's classification forecast
+# --- Stage 3: Ed application guru (WP1.3) ---
+
+
+class EdChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("prompt")
+    @classmethod
+    def normalize_prompt(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("A question is required.")
+        return normalized
+
+
+class EdCitation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sourceType: Literal["live_record", "approved_knowledge"]
+    title: str = Field(min_length=1, max_length=120)
+    reference: str = Field(min_length=1, max_length=200)
+    asOf: str | None = Field(default=None, max_length=40)
+
+
+class EdContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    organization: str | None = Field(default=None, max_length=200)
+    project: str | None = Field(default=None, max_length=200)
+    scope: Literal["personal", "organization"]
+
+
+EdWarning = Annotated[str, Field(min_length=1, max_length=240)]
+EdSuggestedFollowup = Annotated[str, Field(min_length=1, max_length=200)]
+
+
+class EdChatResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer: str = Field(min_length=1, max_length=4000)
+    status: Literal["answered", "refused", "unavailable"]
+    mode: Literal["knowledge", "live_data", "mixed", "cannot_answer", "blocked"]
+    citations: list[EdCitation] = Field(default_factory=list, max_length=12)
+    context: EdContext
+    warnings: list[EdWarning] = Field(default_factory=list, max_length=8)
+    suggestedFollowups: list[EdSuggestedFollowup] = Field(default_factory=list, max_length=4)
+    readOnly: Literal[True] = True
+    knowledgeVersion: str | None = Field(default=None, max_length=80)
 #
 # Decision Q9 (2026-09-14). Every governed semantic assertion is written by
 # the approval handoff that runs *after* the review this sits in, so there is

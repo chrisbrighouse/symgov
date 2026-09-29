@@ -7,7 +7,7 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -22,6 +22,7 @@ from .routes.auth import legacy_router as legacy_auth_router
 from .routes.auth import router as auth_router
 from .routes.catalog import router as catalog_router
 from .routes.catalog_developer import router as catalog_developer_router
+from .routes.ed import router as ed_router
 from .routes.public import legacy_router as legacy_public_router
 from .routes.public import router as public_router
 from .routes.published import legacy_router as legacy_published_router
@@ -86,8 +87,16 @@ def create_app() -> FastAPI:
         max_body_bytes=settings.mutation_max_body_bytes,
     )
 
+    ed_chat_path = f"{settings.api_prefix}/ed/chat"
+
+    def private_error_headers(request: Request, headers: dict[str, str] | None = None) -> dict[str, str] | None:
+        response_headers = dict(headers or {})
+        if request.url.path == ed_chat_path:
+            response_headers["Cache-Control"] = "no-store, private"
+        return response_headers or None
+
     @app.exception_handler(StarletteHTTPException)
-    async def http_exception_handler(_, exc: StarletteHTTPException) -> JSONResponse:
+    async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         code = None
         if isinstance(exc.detail, dict):
             code_value = exc.detail.get("code")
@@ -103,11 +112,11 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=exc.status_code,
             content=response_body,
-            headers=exc.headers,
+            headers=private_error_headers(request, exc.headers),
         )
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(_, exc: RequestValidationError) -> JSONResponse:
+    async def validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
         return JSONResponse(
             status_code=422,
             # A validator that raises ValueError leaves the exception object in
@@ -117,6 +126,7 @@ def create_app() -> FastAPI:
                 "detail": "Request validation failed.",
                 "issues": jsonable_encoder(exc.errors(), custom_encoder={Exception: str}),
             },
+            headers=private_error_headers(request),
         )
 
     csrf = Depends(require_cookie_mutation_security)
@@ -145,6 +155,7 @@ def create_app() -> FastAPI:
         dependencies=[csrf, session_access, Depends(require_workspace_access)],
     )
     app.include_router(llm_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
+    app.include_router(ed_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
     app.include_router(
         projects_router,
         prefix=settings.api_prefix,
