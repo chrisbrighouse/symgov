@@ -6450,3 +6450,255 @@ button.catalog-preview-format-badge:focus-visible {
   border: 1px solid var(--idox-border-default);
   color: var(--idox-text-secondary);
 }
+
+/*
+ * Ed application guru chat (Stage 5). Idox tokens only; the transcript is a
+ * log region and every control takes the shared action-button / field
+ * classes, so focus and hover states come from the existing rules.
+ */
+.ed-page {
+  gap: var(--idox-space-4);
+}
+
+.ed-hero-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.ed-context {
+  margin: 0;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+}
+
+.ed-empty p {
+  margin: 0 0 0.75rem;
+  color: var(--idox-text-secondary);
+}
+
+.ed-suggestions,
+.ed-transcript,
+.ed-source-list,
+.ed-warnings {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ed-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.ed-suggestions .action-button,
+.ed-followups .action-button {
+  white-space: normal;
+  text-align: left;
+}
+
+.ed-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ed-turn {
+  border: 1px solid var(--idox-border-subtle);
+  border-radius: var(--idox-radius-lg);
+  padding: 0.75rem 1rem;
+  background: var(--idox-bg-surface-default);
+}
+
+.ed-turn-user {
+  align-self: flex-end;
+  max-width: min(42rem, 85%);
+  background: var(--idox-bg-surface-subtle);
+}
+
+.ed-turn-ed,
+.ed-turn-error,
+.ed-turn-pending {
+  align-self: flex-start;
+  max-width: min(52rem, 100%);
+}
+
+.ed-turn-pending p {
+  margin: 0;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+}
+
+.ed-turn-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+/* Status pills never wrap elsewhere; the longest mode label must here. */
+.ed-turn-heading .status-pill {
+  white-space: normal;
+}
+
+.ed-turn-speaker {
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ed-question-text,
+.ed-answer-text {
+  margin: 0;
+  color: var(--idox-text-primary);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ed-answer-refused .ed-answer-text,
+.ed-answer-unavailable .ed-answer-text {
+  color: var(--idox-text-secondary);
+}
+
+.ed-warnings {
+  margin-top: 0.5rem;
+}
+
+.ed-warnings li {
+  border-left: 3px solid var(--idox-warning-border);
+  background: var(--idox-warning-bg);
+  color: var(--idox-warning-text-color);
+  padding: 0.35rem 0.6rem;
+  font-size: var(--idox-font-size-sm);
+}
+
+.ed-attributions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.ed-attribution {
+  border: 1px solid var(--idox-info-border);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-info-bg);
+  padding: 0.5rem 0.75rem;
+  font-size: var(--idox-font-size-xs);
+  color: var(--idox-text-secondary);
+}
+
+.ed-attribution p {
+  margin: 0;
+}
+
+.ed-attribution p + p {
+  margin-top: 0.25rem;
+}
+
+.ed-attribution a {
+  color: var(--idox-link-default);
+  text-decoration: underline;
+}
+
+.ed-sources {
+  margin-top: 0.6rem;
+  font-size: var(--idox-font-size-sm);
+}
+
+.ed-sources summary {
+  cursor: pointer;
+  color: var(--idox-text-brand-accent);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.ed-sources summary:focus-visible,
+.ed-attribution a:focus-visible {
+  outline: 2px solid var(--idox-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--idox-radius-sm);
+}
+
+.ed-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.ed-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+}
+
+.ed-source-title {
+  color: var(--idox-text-primary);
+  font-weight: var(--idox-font-weight-medium);
+}
+
+.ed-source-meta {
+  margin: 0;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+}
+
+.ed-source-meta code {
+  font-family: var(--idox-font-family-mono);
+  overflow-wrap: anywhere;
+}
+
+.ed-followups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+
+.ed-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.ed-composer-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.ed-composer-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.ed-hint {
+  margin: 0;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+}
+
+@media (max-width: 1120px) {
+  .ed-hero-meta {
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .ed-turn-user {
+    max-width: 100%;
+  }
+
+  .ed-composer-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}

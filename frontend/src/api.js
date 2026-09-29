@@ -112,6 +112,18 @@ export async function askCatalogIntegrationEd(apiKey, payload, signal) {
   });
 }
 
+// The Ed application guru (session-authenticated), distinct from the Catalog
+// Integration Ed above (API-key authenticated). Answers are private: never
+// cached, and the response carries no-store.
+export async function askEd(prompt, signal) {
+  return requestJson('/ed/chat', {
+    method: 'POST',
+    signal,
+    cache: 'no-store',
+    body: JSON.stringify({ prompt: String(prompt || '').trim() })
+  });
+}
+
 export async function runCatalogDeveloperSandbox(apiKey, payload, signal) {
   const { operation, ...input } = payload || {};
   const allowedByOperation = {

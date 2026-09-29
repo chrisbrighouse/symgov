@@ -6,6 +6,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ..auth import AuthenticatedUser
 from ..dependencies import get_db_session, require_user
+from ..ed_pilot import ed_pilot_allows
 from ..schemas import EdChatRequest, EdChatResponse
 from ..services.ed_orchestration import orchestrate_ed_chat
 from ..settings import SymgovAPISettings, get_settings
@@ -14,17 +15,7 @@ from ..settings import SymgovAPISettings, get_settings
 router = APIRouter(tags=["ed"])
 
 
-def ed_pilot_allows(user: AuthenticatedUser, settings: SymgovAPISettings) -> bool:
-    """Whether the session's active organization is a named Ed pilot.
-
-    The organization comes from the authenticated session, never the
-    request. A personal session belongs to no organization, so it is outside
-    every pilot.
-    """
-    if user.session_mode != "organization" or not user.active_organization_id:
-        return False
-    code = (user.organization_code or "").strip().lower()
-    return bool(code) and code in settings.ed_pilot_organization_codes
+__all__ = ["ed_pilot_allows", "require_ed_pilot", "router"]
 
 
 def require_ed_pilot(

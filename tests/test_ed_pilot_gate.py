@@ -134,3 +134,29 @@ def test_gate_does_not_count_against_the_rate_limit(provider):
         assert client.post("/api/v1/ed/chat", json=PROMPT).status_code == 404
 
     assert user.id not in ed_orchestration._USER_RATE_LIMITS
+
+
+@pytest.mark.parametrize(
+    ("organization_code", "pilot_codes", "expected"),
+    [("ACME", ("acme",), True), ("BSCO", ("acme",), False), (None, ("acme",), False), ("ACME", (), False)],
+)
+def test_the_session_tells_the_ui_whether_ed_is_open(organization_code, pilot_codes, expected):
+    """Stage 5 shows the Ed entry only when the same gate would let the request through."""
+    from symgov_backend.routes.auth import auth_user_response
+
+    response = auth_user_response(
+        _user(organization_code=organization_code),
+        SymgovAPISettings(ed_pilot_organization_codes=pilot_codes),
+    )
+
+    assert response.capabilities["edEnabled"] is expected
+
+
+def test_a_credential_change_session_is_outside_the_pilot():
+    from dataclasses import replace
+
+    from symgov_backend.routes.ed import ed_pilot_allows
+
+    user = replace(_user(organization_code="ACME"), session_purpose="credential_change")
+
+    assert ed_pilot_allows(user, SymgovAPISettings(ed_pilot_organization_codes=("acme",))) is False

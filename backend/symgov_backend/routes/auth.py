@@ -27,6 +27,7 @@ from ..dependencies import (
     resolve_client_ip,
 )
 from ..models import AuthOrganizationSelectionChallenge, User
+from ..ed_pilot import ed_pilot_allows
 from ..organization_authorization import resolve_eligible_organization_memberships
 from ..schemas import (
     AuthChangePinRequest,
@@ -106,6 +107,9 @@ def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | No
             # authority on reachability. This only tells the frontend
             # whether to render the surface at all.
             "semanticReviewEnabled": effective.semantic_review_enabled,
+            # Ed's pilot gate, evaluated exactly as the Ed route does. Like the
+            # others, this only tells the frontend whether to show the surface.
+            "edEnabled": ed_pilot_allows(user, effective),
         },
         recentStepUpAt=user.recent_step_up_at.isoformat() if user.recent_step_up_at else None,
     )

@@ -71,6 +71,8 @@ import { adminRouteElements } from './adminRoutes.js';
 import { canAccessOrganizationAdmin, canAccessPlatformAdmin } from './adminJourneys.js';
 import { semanticReviewRouteElements } from './semanticReviewRoutes.js';
 import { canAccessSemanticReview } from './semanticReviewJourney.js';
+import { edRouteElements } from './edRoutes.js';
+import { canUseEd } from './edChat.js';
 import { ProjectContextBarView } from './ProjectContextBar.js';
 import { useSymbolContext } from './useSymbolContext.js';
 import { useCatalogSearch } from './useCatalogSearch.js';
@@ -578,6 +580,7 @@ function AppContent() {
           <Route path="/developers/catalog" element={<RequireAnyRole roles={['admin', 'integrator']}><Navigate to="/integrator/catalog" replace /></RequireAnyRole>} />
           <Route path="/standards/submit" element={<RequireAnyRole roles={['admin', 'submitter']}><SubmissionPage /></RequireAnyRole>} />
           <Route path="/support" element={<RequireAuth><SupportPage /></RequireAuth>} />
+          {edRouteElements(auth, RequireAuth)}
           <Route path="*" element={<HomeRedirect />} />
         </Routes>
       </main>
@@ -797,6 +800,7 @@ function SideRail() {
   const canUseOrganizationSymbolDrafts = canMountOrganizationSymbolDrafts({ user });
   const canReviewOrganizationSymbolSubmissions = canReviewOrganizationSymbols({ user });
   const canReviewSemantics = canAccessSemanticReview(user);
+  const canAskEd = canUseEd(user);
 
   return (
     <aside className="side-rail" aria-label="Primary navigation">
@@ -807,6 +811,7 @@ function SideRail() {
         {canReview ? <RailNavLink to="/rights" label="Rights" icon="rights" /> : null}
         {canReview ? <RailNavLink to="/reviews" label="Reviews" icon="reviews" /> : null}
         {canReviewSemantics ? <RailNavLink to="/semantic-review" label="Semantics" icon="semantics" /> : null}
+        {canAskEd ? <RailNavLink to="/ed" label="Ed" icon="ed" /> : null}
         <RailNavLink to="/support" label="Support" icon="support" />
       </nav>
       {canAdmin ? (
@@ -897,6 +902,14 @@ function NavIcon({ name }) {
           <path d="M10.2 7.4 7.8 14.6" />
           <path d="m13.8 7.4 2.4 7.2" />
           <path d="M8.5 17h7" />
+        </svg>
+      );
+    case 'ed':
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M4 5h16v11H9l-5 4z" />
+          <path d="M8 9.5h8" />
+          <path d="M8 12.5h5" />
         </svg>
       );
     case 'support':
