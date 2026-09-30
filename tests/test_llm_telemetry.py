@@ -130,7 +130,7 @@ def test_builder_emits_complete_plain_normalized_schema():
     assert built["queue_item_id"] == BASE["queue_item_id"]
 
 
-@pytest.mark.parametrize("use_case", ["workspace_chat", "admin_llm_test", "symbol_property_vision", "vlad_graphic_edit"])
+@pytest.mark.parametrize("use_case", ["workspace_chat", "admin_llm_test", "symbol_property_vision", "vlad_graphic_edit", "ed_guru"])
 @pytest.mark.parametrize("service", ["symgov-api", "libby", "vlad"])
 @pytest.mark.parametrize("agent", [None, "libby", "vlad", "ed"])
 def test_approved_use_cases_services_and_optional_agents(use_case, service, agent):

@@ -536,6 +536,26 @@ def _parse_provider_output(result: Any) -> _ProviderOutput | None:
         return None
 
 
+def _offered_reference(reference: str, offered: Mapping[str, Any]) -> str | None:
+    """The offered reference a model citation names, or None.
+
+    Live evaluation 2026-09-30: the model sometimes kept the passage's
+    brackets or cited only its claim id ("project.closing:v1"), and correct
+    answers were refused as uncited. Only a reference the server offered can
+    come back, and a bare claim id must name exactly one offered passage.
+    """
+    cited = reference.strip()
+    if cited.startswith("[") and cited.endswith("]"):
+        cited = cited[1:-1].strip()
+    if cited in offered:
+        return cited
+    claim = cited.removeprefix("claim:")
+    if not claim:
+        return None
+    matches = [ref for ref in offered if ref.partition(":claim:")[2] == claim]
+    return matches[0] if len(matches) == 1 else None
+
+
 def _citation_from_mapping(value: Mapping[str, Any]) -> EdCitation | None:
     citation = value.get("citation")
     if not isinstance(citation, Mapping):
@@ -816,22 +836,21 @@ def _orchestrate(
         if output.status == "cannot_answer":
             return _unavailable(user_context)
         if not output.tool_calls:
-            unknown = [ref for ref in output.knowledge_refs if ref not in offered] + [
-                ref for ref in output.live_refs if ref not in offered_live
-            ]
-            if unknown:
+            knowledge_refs = [_offered_reference(ref, offered) for ref in output.knowledge_refs]
+            live_refs = [_offered_reference(ref, offered_live) for ref in output.live_refs]
+            if None in knowledge_refs or None in live_refs:
                 return _unavailable(
                     user_context,
                     warning="Ed cited evidence it was not given; no unvalidated content was shown.",
                 )
-            live_citations = [offered_live[ref] for ref in dict.fromkeys(output.live_refs)]
+            live_citations = [offered_live[ref] for ref in dict.fromkeys(live_refs)]
             knowledge_citations = [
                 EdCitation(
                     sourceType="approved_knowledge",
                     title=offered[reference].citation.label[:120],
                     reference=reference,
                 )
-                for reference in dict.fromkeys(output.knowledge_refs)
+                for reference in dict.fromkeys(knowledge_refs)
             ]
             if not live_citations and not knowledge_citations:
                 # No uncited prose (Slice D), and a live record counts only
@@ -841,7 +860,7 @@ def _orchestrate(
                     warning="Ed has no approved information or permitted live record for that question yet.",
                 )
             ics = ics or any(
-                _ICS_MENTION.search(offered[reference].text) for reference in dict.fromkeys(output.knowledge_refs)
+                _ICS_MENTION.search(offered[reference].text) for reference in dict.fromkeys(knowledge_refs)
             )
             if live_citations and knowledge_citations:
                 mode = "mixed"

@@ -66,7 +66,7 @@ _LINEAGE_FIELDS = {
 }
 _CATEGORIES = {
     "environment": {"development", "test", "staging", "production"},
-    "use_case": {"workspace_chat", "admin_llm_test", "symbol_property_vision", "vlad_graphic_edit"},
+    "use_case": {"workspace_chat", "admin_llm_test", "symbol_property_vision", "vlad_graphic_edit", "ed_guru"},
     "service_name": {"symgov-api", "libby", "vlad"},
     "agent_slug": {None, "libby", "vlad", "ed"},
     "provider": {"openrouter", "google", "ollama"},

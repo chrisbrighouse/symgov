@@ -1544,3 +1544,40 @@ def test_the_model_is_shown_the_tool_call_envelope(monkeypatch):
     system = provider.call_args.kwargs["messages"][0]["content"]
     assert '"tool_calls":[{"tool":' in system
     assert "never guess a tool result" in system
+
+
+@pytest.mark.parametrize("cited", [f"[{STUB_REF}]", "stub:v1", "claim:stub:v1", f" {STUB_REF} "])
+def test_a_bracketed_or_bare_claim_citation_names_the_offered_passage(monkeypatch, cited):
+    """Live evaluation 2026-09-30: correct answers were refused as uncited."""
+    body = _answer(monkeypatch, MagicMock(return_value=_provider_result(knowledge_refs=[cited]))).json()
+
+    assert body["status"] == "answered"
+    assert [item["reference"] for item in body["citations"]] == [STUB_REF]
+
+
+@pytest.mark.parametrize("cited", ["other:v1", "[claim:other:v1]", "v1", "claim:", "[]"])
+def test_a_bare_citation_still_has_to_name_an_offered_passage(monkeypatch, cited):
+    body = _answer(monkeypatch, MagicMock(return_value=_provider_result(knowledge_refs=[cited]))).json()
+
+    assert body["status"] == "unavailable"
+    assert body["citations"] == []
+
+
+def test_eds_use_case_is_one_the_usage_ledger_accepts(monkeypatch):
+    """Live evaluation 2026-09-30: ed_guru was on neither allowlist, so every
+    Ed call was dropped from the usage ledger and the telemetry export."""
+    from symgov_backend.models import Base
+    from symgov_backend.services import llm_telemetry
+
+    provider = MagicMock(return_value=_provider_result())
+
+    _answer(monkeypatch, provider)
+
+    use_case = provider.call_args.kwargs["use_case"]
+    assert use_case in llm_telemetry._CATEGORIES["use_case"]
+    checks = " ".join(
+        str(constraint.sqltext)
+        for constraint in Base.metadata.tables["llm_usage_events"].constraints
+        if constraint.__class__.__name__ == "CheckConstraint"
+    )
+    assert f"'{use_case}'" in checks

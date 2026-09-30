@@ -667,7 +667,7 @@ class LLMUsageEvent(Base):
     __tablename__ = "llm_usage_events"
     __table_args__ = (
         CheckConstraint("environment in ('development', 'test', 'staging', 'production')", name="llm_usage_events_environment"),
-        CheckConstraint("use_case in ('workspace_chat', 'admin_llm_test', 'symbol_property_vision', 'vlad_graphic_edit')", name="llm_usage_events_use_case"),
+        CheckConstraint("use_case in ('workspace_chat', 'admin_llm_test', 'symbol_property_vision', 'vlad_graphic_edit', 'ed_guru')", name="llm_usage_events_use_case"),
         CheckConstraint("service_name in ('symgov-api', 'libby', 'vlad')", name="llm_usage_events_service_name"),
         CheckConstraint("agent_slug is null or agent_slug in ('libby', 'vlad', 'ed')", name="llm_usage_events_agent_slug"),
         CheckConstraint("provider in ('openrouter', 'google', 'ollama')", name="llm_usage_events_provider"),

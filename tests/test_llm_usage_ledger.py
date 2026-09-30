@@ -122,7 +122,7 @@ def test_model_has_soft_lineage_constraints_and_useful_indexes():
         for constraint in table.constraints
     )
     checks = "\n".join(str(constraint.sqltext) for constraint in table.constraints if constraint.__class__.__name__ == "CheckConstraint")
-    for value in ("development", "production", "workspace_chat", "vlad_graphic_edit", "openrouter", "ollama", "succeeded", "cancelled", "provider_reported", "unknown"):
+    for value in ("development", "production", "workspace_chat", "vlad_graphic_edit", "ed_guru", "openrouter", "ollama", "succeeded", "cancelled", "provider_reported", "unknown"):
         assert value in checks
     for field in ("attempt_number", "input_tokens", "output_tokens", "cached_input_tokens", "cache_write_input_tokens", "reasoning_tokens", "image_input_units", "image_output_units"):
         assert field in checks and f"{field} >=" in checks
