@@ -6510,6 +6510,9 @@ button.catalog-preview-format-badge:focus-visible {
   border-radius: var(--idox-radius-lg);
   padding: 0.75rem 1rem;
   background: var(--idox-bg-surface-default);
+  /* Clear the sticky header above and the sticky composer below. */
+  scroll-margin-top: 4.5rem;
+  scroll-margin-bottom: 11rem;
 }
 
 .ed-turn-user {
@@ -6661,10 +6664,24 @@ button.catalog-preview-format-badge:focus-visible {
   margin-top: 0.6rem;
 }
 
+/*
+ * The question box stays on screen at the bottom of the viewport while the
+ * conversation scrolls behind it. .app-shell's overflow: hidden would make it
+ * the sticky scrollport (and it never scrolls), so this page clips instead.
+ */
+.app-shell:has(.ed-page) {
+  overflow: clip;
+}
+
 .ed-composer {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
+  margin-bottom: var(--idox-space-2);
+  box-shadow: 0 -10px 15px -3px rgba(2, 6, 23, 0.1), 0 -4px 6px -4px rgba(2, 6, 23, 0.1);
 }
 
 .ed-composer-row {

@@ -31,7 +31,7 @@ from ..settings import SymgovAPISettings
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "ed-guru-2026-09-29-v4"
+PROMPT_VERSION = "ed-guru-2026-09-30-v5"
 _MAX_TOOL_CALLS = 3
 # The whole request, across every provider round, ends well inside the
 # proxy's 60-second read timeout (Stage 6 contract review).
@@ -527,7 +527,10 @@ def _parse_provider_output(result: Any) -> _ProviderOutput | None:
     if not isinstance(output_text, str) or not output_text or len(output_text) > 12_000:
         return None
     try:
-        decoded = json.loads(output_text)
+        # Only the first JSON object counts. After a tool request the model
+        # tends to carry on and write the next turn itself, guessing the
+        # tool results; that tail is discarded unread, never shown.
+        decoded, _end = json.JSONDecoder().raw_decode(output_text.lstrip())
         return _ProviderOutput.model_validate(decoded)
     except (json.JSONDecodeError, TypeError, ValidationError):
         return None
@@ -658,8 +661,17 @@ def _provider_call(
 
 # Contract review 3: the model was never told which tools exist or what they
 # take, so every live question relied on it guessing names and arguments.
+# Live evaluation 2026-09-30: "call one with {tool: ...}" read as an
+# instruction to emit bare tool objects, so the model sent several JSON
+# documents and invented their results. The envelope is now spelled out.
 _TOOL_CATALOGUE = (
-    "Read tools. Call one with {\"tool\": <name>, ...arguments}; never pass user or organization scope.\n"
+    "Read tools. To use them, return the usual single JSON object with status \"answered\", a short "
+    "answer such as \"Checking.\", and tool_calls listing each call as {\"tool\": <name>, ...arguments}, "
+    "for example {\"status\":\"answered\",\"answer\":\"Checking.\",\"tool_calls\":[{\"tool\":"
+    "\"list_accessible_symbol_sets\",\"limit\":50}],\"knowledge_refs\":[],\"live_refs\":[]}. "
+    "Then stop: the server runs the calls and sends the results in the next message. Never write a tool "
+    "call outside tool_calls, and never guess a tool result. Return tool_calls empty only in your final "
+    "answer. Never pass user or organization scope.\n"
     "- get_current_user_profile: your own name and roles.\n"
     "- list_accessible_organizations (limit): organizations you may sign in to.\n"
     "- get_current_organization: the organization this session is signed in to.\n"

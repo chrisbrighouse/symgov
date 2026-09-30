@@ -1019,7 +1019,7 @@ def test_ed_guru_attribution_redaction_and_pseudonym_are_server_owned(monkeypatc
     assert kwargs["feature"] == "ed_guru"
     assert kwargs["use_case"] == "ed_guru"
     assert kwargs["service_name"] == "symgov-api"
-    assert kwargs["prompt_version"] == "ed-guru-2026-09-29-v4"
+    assert kwargs["prompt_version"] == "ed-guru-2026-09-30-v5"
     assert kwargs["timeout"] == 30
     assert kwargs["max_tokens"] == 800
     assert kwargs["response_format"] == {"type": "json_object"}
@@ -1511,3 +1511,36 @@ def test_a_response_with_no_answer_lists_no_sources(monkeypatch):
 
     assert body["mode"] == "cannot_answer"
     assert body["citations"] == []
+
+
+def test_a_tool_request_followed_by_a_guessed_next_turn_runs_the_tool(monkeypatch):
+    """Live evaluation 2026-09-30: after asking for a tool the model wrote the
+    next turn itself, so the reply held two JSON objects and every live
+    question came back as an invalid structured response."""
+    from symgov_backend.services import ed_orchestration
+
+    first = _provider_result(tool_calls=[{"tool": "get_current_user_profile"}])
+    guessed = json.dumps({"status": "cannot_answer", "answer": "guessed-tail-text", "tool_calls": []})
+    first["outputText"] = f"{first['outputText']}\n\n{guessed}"
+    tool = _profile_tool()
+    monkeypatch.setattr(ed_orchestration, "execute_ed_read_tool", tool)
+    provider = MagicMock(side_effect=[first, _provider_result(answer="Your profile.", live_refs=[LIVE_REF])])
+
+    response = _answer(monkeypatch, provider, prompt="Explain my Symgov profile")
+
+    body = response.json()
+    assert body["status"] == "answered"
+    assert body["answer"] == "Your profile."
+    tool.assert_called_once()
+    assert "guessed-tail-text" not in response.text
+    assert "guessed-tail-text" not in provider.call_args.kwargs["messages"][2]["content"]
+
+
+def test_the_model_is_shown_the_tool_call_envelope(monkeypatch):
+    provider = MagicMock(return_value=_provider_result())
+
+    _answer(monkeypatch, provider)
+
+    system = provider.call_args.kwargs["messages"][0]["content"]
+    assert '"tool_calls":[{"tool":' in system
+    assert "never guess a tool result" in system

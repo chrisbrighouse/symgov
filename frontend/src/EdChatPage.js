@@ -16,6 +16,22 @@ const h = createElement;
 const PROMPT_ID = 'ed-prompt';
 const HINT_ID = 'ed-prompt-hint';
 
+function prefersReducedMotion() {
+  return typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+}
+
+// Bring the newest turn into view as the conversation grows: its end when it
+// fits on screen, otherwise its start, so a long answer is read from the top.
+// The composer is sticky, so .ed-turn's scroll margins keep the turn clear of it.
+function revealLatestTurn(transcript) {
+  const latest = transcript?.lastElementChild;
+  if (!latest?.scrollIntoView) return;
+  const composer = transcript.closest('.ed-page')?.querySelector('.ed-composer');
+  const room = (window.innerHeight || 0) - (composer?.offsetHeight || 0);
+  const fits = !room || latest.getBoundingClientRect().height <= room * 0.8;
+  latest.scrollIntoView({ block: fits ? 'end' : 'start', behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+}
+
 function Sources({ citations, knowledgeVersion }) {
   if (!citations.length) return null;
   const version = shortVersion(knowledgeVersion);
@@ -116,10 +132,15 @@ export function EdChatPage({ auth }) {
   const [context, setContext] = useState(null);
   const controllerRef = useRef(null);
   const promptRef = useRef(null);
+  const transcriptRef = useRef(null);
   const nextId = useRef(1);
 
   // Leaving the page abandons any question in flight.
   useEffect(() => () => controllerRef.current?.abort(), []);
+
+  useEffect(() => {
+    if (turns.length || pending) revealLatestTurn(transcriptRef.current);
+  }, [turns, pending]);
 
   const organization = context?.organization || auth?.user?.organization?.displayName || null;
   const trimmed = prompt.trim();
@@ -150,7 +171,8 @@ export function EdChatPage({ auth }) {
     }
     controllerRef.current = null;
     setPending(false);
-    promptRef.current?.focus();
+    // No scroll on focus: the effect above decides what the reader sees.
+    promptRef.current?.focus({ preventScroll: true });
   }
 
   function clearConversation() {
@@ -228,7 +250,7 @@ export function EdChatPage({ auth }) {
         : null,
       h(
         'ol',
-        { className: 'ed-transcript', role: 'log', 'aria-live': 'polite', 'aria-label': 'Conversation with Ed', 'aria-busy': pending },
+        { className: 'ed-transcript', ref: transcriptRef, role: 'log', 'aria-live': 'polite', 'aria-label': 'Conversation with Ed', 'aria-busy': pending },
         turns.map((turn) => h(Turn, { key: turn.id, turn, onFollowup: ask, disabled: pending })),
         pending
           ? h('li', { className: 'ed-turn ed-turn-pending' }, h('p', null, 'Ed is working on an answer…'))
@@ -251,7 +273,7 @@ export function EdChatPage({ auth }) {
         h('textarea', {
           id: PROMPT_ID,
           ref: promptRef,
-          rows: 3,
+          rows: 2,
           maxLength: ED_PROMPT_LIMIT,
           value: prompt,
           'aria-describedby': HINT_ID,
