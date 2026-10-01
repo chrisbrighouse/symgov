@@ -31,10 +31,9 @@ test('Support renders official attribution and mounts it through the authenticat
     assert.ok(renderer.root.findAllByType('a').some(a => a.props.href === source.license_url));
     assert.equal(renderer.root.findByProps({ 'aria-labelledby': 'symbol-library-data-sources' }).type, 'section');
     assert.ok(renderer.root.findAllByType('a').some(a => a.props.href === dexpi.license_url));
-    const textarea = renderer.root.findByType('textarea');
-    await act(async () => textarea.props.onChange({ target: { value: 'Help with classification' } }));
-    await act(async () => renderer.root.findByType('form').props.onSubmit({ preventDefault() {} }));
-    assert.ok(JSON.stringify(renderer.toJSON()).includes('Support request captured locally'));
+    assert.equal(renderer.root.findAllByType('textarea').length, 0);
+    assert.equal(renderer.root.findAllByType('form').length, 0);
+    assert.equal(renderer.root.findByProps({ 'aria-labelledby': 'support-ask-ed' }).type, 'section');
   } finally {
     if (renderer) await act(async () => renderer.unmount());
     globalThis.fetch = oldFetch;

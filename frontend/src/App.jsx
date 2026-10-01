@@ -7955,13 +7955,8 @@ function formatWhitneySignalValue(signal, key) {
 }
 
 function SupportPage() {
-  const [requestText, setRequestText] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-
-  function handleSupportSubmit(event) {
-    event.preventDefault();
-    setSubmitted(true);
-  }
+  const auth = useAuth();
+  const canAskEd = canUseEd(auth.user);
 
   return (
     <section className="experience-shell">
@@ -7972,25 +7967,16 @@ function SupportPage() {
           <p className="title-support">Requests can cover new symbols, corrections, usability issues, or service improvements.</p>
         </div>
       </div>
-      <form className="glass-panel pane support-panel" onSubmit={handleSupportSubmit}>
-        <SectionHeading title="Request" subtitle="Ed will manage this workflow in a future release" />
-        <label className="field">
-          <span>What do you need?</span>
-          <textarea
-            rows="7"
-            value={requestText}
-            onChange={(event) => {
-              setRequestText(event.target.value);
-              setSubmitted(false);
-            }}
-            placeholder="Describe the symbol, correction, question, or improvement you want Symgov to consider."
-          />
-        </label>
-        <button type="submit" className="action-button primary" disabled={!requestText.trim()}>
-          Submit request
-        </button>
-        {submitted ? <p className="success-text">Support request captured locally. Ed workflow integration will be added later.</p> : null}
-      </form>
+      <section className="glass-panel pane support-panel" aria-labelledby="support-ask-ed">
+        <SectionHeading title="Ask Ed" subtitle="Ed answers questions and takes requests in the chat" />
+        {canAskEd ? (
+          <p id="support-ask-ed">
+            To ask for help or request an improvement, <NavLink to="/ed">open the Ed chat</NavLink>.
+          </p>
+        ) : (
+          <p id="support-ask-ed" className="muted-text">Ed chat is not available in this session yet.</p>
+        )}
+      </section>
       <SupportDataSources />
     </section>
   );
