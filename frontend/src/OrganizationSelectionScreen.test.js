@@ -173,3 +173,24 @@ test('OrganizationSelectionPage: successful selection forwards the destination t
 
   assert.equal(renderer.root.findByProps({ id: 'navigation-probe' }).children[0], '/change-pin');
 });
+
+test('OrganizationSelectionScreen: switch mode labels the screen and wires its own cancel', async () => {
+  const { OrganizationSelectionScreen } = await import('./OrganizationSelectionPage.js');
+  const markup = renderToStaticMarkup(
+    createElement(OrganizationSelectionScreen, {
+      challenge: {
+        token: 't',
+        choices: [{ organizationId: 'org-1', code: 'ACME', displayName: 'Acme' }],
+        total: 1
+      },
+      onSelect: () => {},
+      eyebrow: 'Switch organization',
+      cancelLabel: 'Cancel and stay in the current organization',
+      onCancel: () => {}
+    })
+  );
+  assert.match(markup, /Switch organization/);
+  assert.match(markup, /Cancel and stay in the current organization/);
+  assert.doesNotMatch(markup, /Identity verified/);
+  assert.doesNotMatch(markup, /return to sign-in/);
+});

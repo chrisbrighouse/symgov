@@ -194,3 +194,25 @@ describe('organizationSession', () => {
     });
   });
 });
+
+it('startOrganizationSwitch posts to switch-organization and returns the challenge', async () => {
+  const { startOrganizationSwitch } = await import('./organizationSession.js');
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url: String(url), method: options?.method });
+    return new Response(JSON.stringify({
+      user: null,
+      selectionChallenge: { token: 'abc', expiresAt: 'x', choices: [], page: 1, pageSize: 5, total: 2, hasMore: false }
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  };
+  try {
+    const result = await startOrganizationSwitch();
+    assert.equal(result.ok, true);
+    assert.equal(result.challenge.token, 'abc');
+    assert.match(calls[0].url, /\/auth\/switch-organization$/);
+    assert.equal(calls[0].method, 'POST');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

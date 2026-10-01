@@ -14,6 +14,7 @@ from ..auth import (
     complete_credential_change,
     create_user_session,
     current_user_from_token,
+    hash_session_token,
     revoke_outstanding_selection_challenges,
     revoke_session,
     utc_now,
@@ -26,7 +27,7 @@ from ..dependencies import (
     require_user,
     resolve_client_ip,
 )
-from ..models import AuthOrganizationSelectionChallenge, User
+from ..models import AuthOrganizationSelectionChallenge, User, UserSession
 from ..ed_pilot import ed_pilot_allows
 from ..organization_authorization import resolve_eligible_organization_memberships
 from ..schemas import (
@@ -169,6 +170,49 @@ def _challenge_is_usable(challenge: AuthOrganizationSelectionChallenge, now: dat
     )
 
 
+def _issue_selection_challenge(
+    session: Session,
+    *,
+    user: User,
+    eligible,
+    now: datetime,
+) -> AuthSelectionChallengeResponse:
+    raw_token = secrets.token_urlsafe(32)
+    snapshot = [
+        {
+            "organizationId": str(item.organization_id),
+            "code": item.code,
+            "displayName": item.display_name,
+        }
+        for item in eligible
+    ]
+    serialized = json.dumps(snapshot, separators=(",", ":"), sort_keys=True)
+    expires_at = now + timedelta(minutes=10)
+    session.add(
+        AuthOrganizationSelectionChallenge(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
+            eligible_organizations_hash=hashlib.sha256(serialized.encode()).hexdigest(),
+            eligible_organizations_json=serialized,
+            expires_at=expires_at,
+            max_attempts=5,
+            attempt_count=0,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    return AuthSelectionChallengeResponse(
+        token=raw_token,
+        expiresAt=expires_at.isoformat(),
+        choices=snapshot[:5],
+        page=1,
+        pageSize=5,
+        total=len(snapshot),
+        hasMore=len(snapshot) > 5,
+    )
+
+
 def issue_application_context(
     session: Session,
     *,
@@ -179,40 +223,7 @@ def issue_application_context(
     revoke_outstanding_selection_challenges(session, user.id, now=now)
     eligible = resolve_eligible_organization_memberships(session, user, settings)
     if len(eligible) > 1:
-        raw_token = secrets.token_urlsafe(32)
-        snapshot = [
-            {
-                "organizationId": str(item.organization_id),
-                "code": item.code,
-                "displayName": item.display_name,
-            }
-            for item in eligible
-        ]
-        serialized = json.dumps(snapshot, separators=(",", ":"), sort_keys=True)
-        expires_at = now + timedelta(minutes=10)
-        session.add(
-            AuthOrganizationSelectionChallenge(
-                id=uuid.uuid4(),
-                user_id=user.id,
-                token_hash=hashlib.sha256(raw_token.encode()).hexdigest(),
-                eligible_organizations_hash=hashlib.sha256(serialized.encode()).hexdigest(),
-                eligible_organizations_json=serialized,
-                expires_at=expires_at,
-                max_attempts=5,
-                attempt_count=0,
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        return None, AuthSelectionChallengeResponse(
-            token=raw_token,
-            expiresAt=expires_at.isoformat(),
-            choices=snapshot[:5],
-            page=1,
-            pageSize=5,
-            total=len(snapshot),
-            hasMore=len(snapshot) > 5,
-        )
+        return None, _issue_selection_challenge(session, user=user, eligible=eligible, now=now)
     selected = eligible[0] if eligible else None
     return (
         create_user_session(
@@ -301,6 +312,17 @@ async def select_organization(
 
     challenge.consumed_at = now
     challenge.updated_at = now
+    # A selection made while signed in (Switch organization) replaces the
+    # current session; retire it so only the new organization session lives.
+    previous_token = http_request.cookies.get(SESSION_COOKIE_NAME, "")
+    if previous_token:
+        previous = session.query(UserSession).filter(
+            UserSession.token_hash == hash_session_token(previous_token),
+            UserSession.auth_user_id == user.id,
+            UserSession.revoked_at.is_(None),
+        ).one_or_none()
+        if previous is not None:
+            previous.revoked_at = now
     token = create_user_session(
         session,
         user=user,
@@ -324,6 +346,34 @@ async def select_organization(
         max_age=14 * 24 * 60 * 60,
     )
     return AuthLoginResponse(user=auth_user_response(current, settings), selectionChallenge=None)
+
+
+@router.post("/switch-organization", response_model=AuthLoginResponse)
+async def switch_organization(
+    session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> AuthLoginResponse:
+    """Start an organization switch for a signed-in organization session.
+
+    Issues the same selection challenge as sign-in but leaves the current
+    session untouched; completing the switch goes through
+    /auth/select-organization, which swaps in the new session.
+    """
+    if current_user.session_purpose != "application" or current_user.session_mode != "organization":
+        raise HTTPException(status_code=409, detail="Switching organization requires an organization session.")
+    user = session.query(User).filter(User.id == uuid.UUID(str(current_user.id))).one_or_none()
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    now = utc_now()
+    revoke_outstanding_selection_challenges(session, user.id, now=now)
+    eligible = resolve_eligible_organization_memberships(session, user, settings)
+    if len(eligible) < 2:
+        session.commit()
+        raise HTTPException(status_code=409, detail="Your account does not belong to another organization.")
+    challenge = _issue_selection_challenge(session, user=user, eligible=eligible, now=now)
+    session.commit()
+    return AuthLoginResponse(user=None, selectionChallenge=challenge)
 
 
 @router.post("/login", response_model=AuthLoginResponse)

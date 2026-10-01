@@ -1,4 +1,4 @@
-const AUTHENTICATION_PATHS = new Set(['/login', '/select-organization', '/change-pin']);
+const AUTHENTICATION_PATHS = new Set(['/login', '/select-organization', '/switch-organization', '/change-pin']);
 const PERCENT_ESCAPE = /%(?![0-9a-fA-F]{2})/;
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
 const SCHEME = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;

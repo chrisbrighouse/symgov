@@ -121,3 +121,18 @@ export async function selectOrganization({ token, organizationId, page, pageSize
     session: result.ok ? normalizeSessionResponse(result.payload) : null
   };
 }
+
+/**
+ * Calls the /auth/switch-organization endpoint for a signed-in organization
+ * session. The current session stays active; the returned challenge is
+ * completed with selectOrganization().
+ */
+export async function startOrganizationSwitch() {
+  const result = await requestJson('/auth/switch-organization', { method: 'POST' });
+  const session = result.ok ? normalizeSessionResponse(result.payload) : null;
+
+  return {
+    ...result,
+    challenge: session?.challenge || null
+  };
+}

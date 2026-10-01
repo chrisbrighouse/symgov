@@ -1,6 +1,7 @@
-import { createElement, useState } from 'react';
+import { createElement, useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { destinationFromRouterState } from './catalogRoutes.js';
+import { selectOrganization, startOrganizationSwitch } from './organizationSession.js';
 
 export function OrganizationIcon({ organization }) {
   if (organization.logoUrl) {
@@ -24,7 +25,10 @@ export function OrganizationSelectionScreen({
   challenge,
   onSelect,
   isSubmitting = false,
-  message = ''
+  message = '',
+  eyebrow = 'Identity verified',
+  cancelLabel = 'Cancel and return to sign-in',
+  onCancel = () => (typeof window !== 'undefined' && window.location.reload())
 }) {
   if (!challenge || !challenge.choices) {
     return null;
@@ -36,7 +40,7 @@ export function OrganizationSelectionScreen({
     createElement(
       'header',
       { className: 'org-selection-header' },
-      createElement('p', { className: 'eyebrow' }, 'Identity verified'),
+      createElement('p', { className: 'eyebrow' }, eyebrow),
       createElement('h2', null, 'Select an organization'),
       createElement(
         'p',
@@ -94,9 +98,9 @@ export function OrganizationSelectionScreen({
         {
           type: 'button',
           className: 'link-button',
-          onClick: () => (typeof window !== 'undefined' && window.location.reload())
+          onClick: onCancel
         },
-        'Cancel and return to sign-in'
+        cancelLabel
       )
     )
   );
@@ -164,6 +168,86 @@ export default function OrganizationSelectionPage({ auth }) {
       onSelect: handleSelect,
       isSubmitting,
       message: error || auth.message
+    })
+  );
+}
+
+export function OrganizationSwitchPage({ auth }) {
+  const navigate = useNavigate();
+  const [challenge, setChallenge] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const startedRef = useRef(false);
+
+  useEffect(() => {
+    if (startedRef.current) return undefined;
+    startedRef.current = true;
+    let cancelled = false;
+    startOrganizationSwitch().then((result) => {
+      if (cancelled) return;
+      if (result.ok && result.challenge) {
+        setChallenge(result.challenge);
+      } else {
+        setLoadError(result.message || 'Organization choices could not be loaded.');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleSelect = async (organizationId) => {
+    setIsSubmitting(true);
+    setError('');
+    try {
+      const result = await selectOrganization({ token: challenge.token, organizationId });
+      if (!result.ok) {
+        setError(result.message || 'Organization could not be selected.');
+        return;
+      }
+      await auth.refresh();
+      navigate('/standards', { replace: true });
+    } catch (err) {
+      setError(err.message || 'An unexpected error occurred.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const goBack = () => navigate('/standards', { replace: true });
+
+  if (loadError) {
+    return createElement(
+      'section',
+      { className: 'page-frame workspace-empty-state', 'aria-labelledby': 'switch-unavailable-title' },
+      createElement('p', { className: 'eyebrow' }, 'Switch organization'),
+      createElement('h2', { id: 'switch-unavailable-title' }, 'Organizations cannot be switched right now'),
+      createElement('p', { className: 'form-message error', role: 'alert' }, loadError),
+      createElement('button', { type: 'button', className: 'primary-button', onClick: goBack }, 'Back to Standards')
+    );
+  }
+
+  if (!challenge) {
+    return createElement(
+      'section',
+      { className: 'workspace-empty-state' },
+      createElement('p', { className: 'eyebrow' }, 'Switch organization'),
+      createElement('h2', null, 'Loading your organizations…')
+    );
+  }
+
+  return createElement(
+    'div',
+    { className: 'page-frame mode-auth' },
+    createElement(OrganizationSelectionScreen, {
+      challenge,
+      onSelect: handleSelect,
+      isSubmitting,
+      message: error,
+      eyebrow: 'Switch organization',
+      cancelLabel: 'Cancel and stay in the current organization',
+      onCancel: goBack
     })
   );
 }

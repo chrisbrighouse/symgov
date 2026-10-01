@@ -104,7 +104,7 @@ export function Header({ auth }) {
         {
           type: 'button',
           className: 'ghost-button switch-org-button',
-          onClick: handleLogout
+          onClick: () => navigate('/switch-organization')
         },
         'Switch organization'
       ),

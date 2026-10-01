@@ -398,3 +398,69 @@ def test_supersession_replay_logout_revocation_and_eligibility_loss():
         assert challenge_d_row.revoked_at is not None
         assert challenge_d_row.consumed_at is None
         assert challenge_d_row.attempt_count == 0
+
+
+def _sign_in_to(client: TestClient, organization_id) -> str:
+    challenge = _login(client).json()["selectionChallenge"]
+    response = client.post(
+        "/api/v1/auth/select-organization",
+        json={"token": challenge["token"], "organizationId": str(organization_id)},
+    )
+    assert response.status_code == 200
+    return response.cookies.get("symgov_session")
+
+
+def test_switch_organization_offers_choices_without_touching_the_current_session():
+    client, Session, _, organization_ids = _build_client()
+    first_token = _sign_in_to(client, organization_ids[0])
+
+    response = client.post("/api/v1/auth/switch-organization")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["user"] is None
+    assert body["selectionChallenge"]["total"] == 8
+    assert len(body["selectionChallenge"]["choices"]) == 5
+    assert response.cookies.get("symgov_session") is None
+    with Session() as session:
+        live = session.query(UserSession).filter(UserSession.revoked_at.is_(None)).one()
+        assert live.token_hash == hash_session_token(first_token)
+
+
+def test_switch_organization_completes_into_new_session_and_retires_the_old_one():
+    client, Session, user_id, organization_ids = _build_client()
+    first_token = _sign_in_to(client, organization_ids[0])
+    challenge = client.post("/api/v1/auth/switch-organization").json()["selectionChallenge"]
+
+    response = client.post(
+        "/api/v1/auth/select-organization",
+        json={"token": challenge["token"], "organizationId": str(organization_ids[3])},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["organization"]["id"] == str(organization_ids[3])
+    new_token = response.cookies.get("symgov_session")
+    assert new_token and new_token != first_token
+    with Session() as session:
+        live = session.query(UserSession).filter(UserSession.revoked_at.is_(None)).all()
+        assert [row.token_hash for row in live] == [hash_session_token(new_token)]
+        assert live[0].active_organization_id == organization_ids[3]
+    me = client.get("/api/v1/auth/me")
+    assert me.status_code == 200
+    assert me.json()["user"]["organization"]["id"] == str(organization_ids[3])
+
+
+def test_switch_organization_requires_sign_in():
+    client, _, _, _ = _build_client()
+    client.cookies.clear()
+
+    assert client.post("/api/v1/auth/switch-organization").status_code == 401
+
+
+def test_switch_organization_refuses_when_there_is_nothing_to_switch_to():
+    client, _, _, organization_ids = _build_client(organization_count=1)
+    _login(client)
+
+    response = client.post("/api/v1/auth/switch-organization")
+
+    assert response.status_code == 409

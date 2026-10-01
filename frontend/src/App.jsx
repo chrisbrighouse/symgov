@@ -66,7 +66,7 @@ import { appConfig } from './config.js';
 import LlmConsumptionReport, { LlmConsumptionControls } from './LlmConsumptionView.js';
 import CatalogDeveloperHub from './CatalogDeveloperHub.jsx';
 import ProfilePage from './ProfilePage.jsx';
-import OrganizationSelectionPage from './OrganizationSelectionPage.js';
+import OrganizationSelectionPage, { OrganizationSwitchPage } from './OrganizationSelectionPage.js';
 import { adminRouteElements } from './adminRoutes.js';
 import { canAccessOrganizationAdmin, canAccessPlatformAdmin } from './adminJourneys.js';
 import { semanticReviewRouteElements } from './semanticReviewRoutes.js';
@@ -563,6 +563,7 @@ function AppContent() {
           <Route path="/" element={<HomeRedirect />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/select-organization" element={<OrganizationSelectionPage auth={auth} />} />
+          <Route path="/switch-organization" element={<RequireAuth><OrganizationSwitchPage auth={auth} /></RequireAuth>} />
           <Route path="/change-pin" element={<RequireAuth><ChangePinPage /></RequireAuth>} />
           <Route path="/profile" element={<RequireAuth><ProfilePage auth={auth} /></RequireAuth>} />
           <Route path="/workspace" element={<RequireAnyRole roles={['admin']}><WorkspacePage /></RequireAnyRole>} />
