@@ -300,6 +300,8 @@ a:not([class]):active {
   position: relative;
   min-height: 100vh;
   overflow: hidden;
+  /* clip, unlike hidden, is not a scroll container, so the sticky header can stick to the viewport. */
+  overflow: clip;
 }
 
 /*
