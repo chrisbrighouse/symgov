@@ -277,11 +277,214 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
   const categoryCounts = facetCounts(items, 'category');
   const disciplineCounts = facetCounts(items, 'discipline');
   const formatCounts = facetCounts(items.filter((item) => item.preferredFormat), 'preferredFormat');
+  const selectedCount = Object.values(selectedSearchIds).filter(Boolean).length;
+  const countLabel = (counts) => Object.entries(counts).map(([key, count]) => `${key} (${count})`).join(', ');
+
+  const filterField = (id, label, value, setter) => createElement('label', { className: 'field', htmlFor: id },
+    createElement('span', null, label),
+    createElement('input', { id, value, onChange: (event) => setter(event.target.value) }),
+  );
+
+  const searchCard = createElement(
+    'div',
+    { className: 'symbol-set-builder-card symbol-set-builder-search' },
+    createElement('div', { className: 'symbol-set-builder-card-head' },
+      createElement('h3', null, '1. Find symbols'),
+      createElement('p', { className: 'set-admin-muted' }, 'Search the Public Catalog and your approved organization symbols.'),
+    ),
+    createElement('form', { className: 'field search-field', onSubmit: runSearch },
+      createElement('input', {
+        type: 'search',
+        'aria-label': 'Search symbols to add to this Symbol Set',
+        placeholder: 'Search by name, category, or discipline',
+        value: query,
+        onChange: (event) => setQuery(event.target.value),
+      }),
+      createElement('button', { type: 'submit', className: 'action-button primary', disabled: searchLoading }, searchLoading ? 'Searching…' : 'Search'),
+    ),
+    createElement('div', { className: 'symbol-set-builder-filters', role: 'group', 'aria-label': 'Symbol Set Builder filters' },
+      filterField('symbol-set-builder-category-filter', 'Category', categoryFilter, setCategoryFilter),
+      filterField('symbol-set-builder-discipline-filter', 'Discipline', disciplineFilter, setDisciplineFilter),
+      filterField('symbol-set-builder-format-filter', 'Format', formatFilter, setFormatFilter),
+    ),
+    searchError ? createElement('p', { role: 'alert', className: 'set-admin-status error' }, searchError) : null,
+    !searchLoading && !searchError && searchResults.length === 0
+      ? createElement('p', { role: 'status', className: 'set-admin-muted' }, 'No matching symbols found.')
+      : null,
+    searchResults.length > 0
+      ? createElement(
+        'div',
+        { className: 'symbol-set-builder-results' },
+        createElement('div', { className: 'symbol-set-builder-results-bar' },
+          createElement('span', { className: 'set-admin-muted', role: 'status' },
+            `${searchResults.length} result(s)${selectedCount > 0 ? ` · ${selectedCount} selected` : ''}`),
+          createElement('button', {
+            type: 'button',
+            className: 'action-button primary compact',
+            onClick: addSelectedToSet,
+            disabled: selectedCount === 0,
+            'aria-label': 'Add selected symbols to this Symbol Set',
+          }, 'Add selected to set'),
+        ),
+        createElement('ul', { className: 'set-admin-list symbol-set-builder-result-list', 'aria-label': 'Symbol Set Builder search results' },
+          searchResults.map((entry) => {
+            const alreadyPresent = presentIds.has(entry.governedSymbolId);
+            const addable = (entry.source === 'public' || entry.source === 'organization') && !alreadyPresent;
+            return createElement('li', { key: entry.governedSymbolId, className: `symbol-set-builder-result${addable ? '' : ' muted'}` },
+              createElement('label', { className: 'symbol-set-builder-result-label' },
+                createElement('input', {
+                  type: 'checkbox',
+                  disabled: !addable,
+                  checked: Boolean(selectedSearchIds[entry.governedSymbolId]),
+                  onChange: () => toggleSearchSelection(entry.governedSymbolId),
+                  'aria-label': `Select ${entry.canonicalName}`,
+                }),
+                createElement('span', { className: 'symbol-set-builder-result-text' },
+                  createElement('span', { className: 'symbol-set-builder-name' },
+                    createElement('strong', null, `${entry.canonicalName} · ${symbolDisplayId(entry)}`),
+                    createElement(SourceBadge, { source: entry.source, organizationWide: entry.organizationWide }),
+                  ),
+                  createElement('span', { className: 'set-admin-muted' },
+                    `Category: ${entry.category} · Discipline: ${entry.discipline}`
+                    + (alreadyPresent ? ' · Already in this set' : '')
+                    + (entry.source === 'organization' ? ' · Approved organization symbol' : '')),
+                ),
+              ),
+            );
+          }),
+        ),
+      )
+      : null,
+  );
+
+  const summaryBlock = items.length > 0
+    ? createElement('details', { className: 'symbol-set-builder-summary' },
+      createElement('summary', null, `${items.length} item(s) in this set · breakdown`),
+      createElement('dl', null,
+        createElement('dt', null, 'Categories'),
+        createElement('dd', null, countLabel(categoryCounts)),
+        createElement('dt', null, 'Disciplines'),
+        createElement('dd', null, countLabel(disciplineCounts)),
+        Object.keys(formatCounts).length > 0 ? createElement('dt', null, 'Preferred formats') : null,
+        Object.keys(formatCounts).length > 0 ? createElement('dd', null, countLabel(formatCounts)) : null,
+      ),
+    )
+    : null;
+
+  const itemsCard = createElement(
+    'div',
+    { className: 'symbol-set-builder-card symbol-set-builder-items' },
+    createElement('div', { className: 'symbol-set-builder-card-head' },
+      createElement('h3', null, '2. Symbol Set items'),
+      createElement('p', { className: 'set-admin-muted' }, 'Drag rows or use Move up / Move down to set the order. Changes are saved only when you press Save changes.'),
+    ),
+    createElement(
+      'div',
+      { className: `symbol-set-builder-savebar${dirty ? ' dirty' : ''}`, role: 'group', 'aria-label': 'Symbol Set changes' },
+      createElement('span', { className: 'symbol-set-builder-savebar-state', role: 'status' }, dirty ? 'Unsaved changes' : 'All changes saved'),
+      createElement('div', { className: 'set-admin-actions' },
+        createElement('button', {
+          type: 'button',
+          className: 'action-button primary compact',
+          disabled: !dirty || saving,
+          onClick: saveChanges,
+          'aria-label': 'Save Symbol Set changes',
+        }, saving ? 'Saving…' : 'Save changes'),
+        createElement('button', {
+          type: 'button',
+          className: 'action-button compact',
+          disabled: !dirty || saving,
+          onClick: discardChanges,
+          'aria-label': 'Discard Symbol Set changes',
+        }, 'Discard changes'),
+      ),
+    ),
+    itemsLoading ? createElement('p', { role: 'status' }, 'Loading Symbol Set items…') : null,
+    !itemsLoading && items.length === 0
+      ? createElement('p', { role: 'status', className: 'set-admin-muted' }, 'This Symbol Set has no items yet. Add symbols from search.')
+      : null,
+    summaryBlock,
+    createElement('ul', { className: 'set-admin-list symbol-set-builder-item-list', 'aria-label': 'Current Symbol Set items, in order' },
+      items.map((item, index) => {
+        const name = item.canonicalName || item.governedSymbolId;
+        return createElement('li', {
+          key: item.governedSymbolId,
+          className: `symbol-set-builder-item${item.availabilityStatus === 'unavailable' ? ' unavailable' : ''}`,
+          draggable: true,
+          onDragStart: (event) => handleDragStart(event, item.governedSymbolId),
+          onDragOver: (event) => event.preventDefault(),
+          onDrop: (event) => handleDrop(event, item.governedSymbolId),
+        },
+        createElement('span', { className: 'symbol-set-builder-position', 'aria-hidden': 'true' }, index + 1),
+        createElement(
+          'div',
+          { className: 'symbol-set-builder-item-main' },
+          createElement('div', { className: 'symbol-set-builder-name' },
+            createElement('strong', null, `${name} · ${symbolDisplayId(item)}`),
+            createElement(SourceBadge, { source: item.source || 'public', organizationWide: item.organizationWide }),
+            item.availabilityStatus === 'unavailable'
+              ? createElement('span', { className: 'symbol-set-builder-badge unavailable' }, 'Unavailable')
+              : null,
+          ),
+          createElement('p', { className: 'set-admin-muted' }, `Category: ${item.category || 'unknown'} · Discipline: ${item.discipline || 'unknown'}`),
+          item.availabilityStatus === 'unavailable' && item.availabilityReason
+            ? createElement('p', { className: 'set-admin-muted' }, item.availabilityReason)
+            : null,
+          createElement('div', { className: 'symbol-set-builder-item-fields' },
+            createElement('label', { className: 'field', htmlFor: `builder-group-${item.governedSymbolId}` },
+              createElement('span', null, 'Group'),
+              createElement('input', {
+                id: `builder-group-${item.governedSymbolId}`,
+                value: item.groupName || '',
+                onChange: (event) => updateField(item.governedSymbolId, 'groupName', event.target.value),
+              }),
+            ),
+            createElement('label', { className: 'field', htmlFor: `builder-format-${item.governedSymbolId}` },
+              createElement('span', null, 'Preferred format'),
+              createElement('input', {
+                id: `builder-format-${item.governedSymbolId}`,
+                value: item.preferredFormat || '',
+                onChange: (event) => updateField(item.governedSymbolId, 'preferredFormat', event.target.value),
+              }),
+            ),
+          ),
+        ),
+        createElement(
+          'div',
+          { className: 'symbol-set-builder-item-actions', role: 'group', 'aria-label': `Reorder or remove ${name}` },
+          createElement('button', {
+            type: 'button',
+            className: 'action-button compact',
+            disabled: index === 0,
+            onClick: () => moveItem(item.governedSymbolId, -1),
+            'aria-label': `Move ${name} up`,
+          }, 'Move up'),
+          createElement('button', {
+            type: 'button',
+            className: 'action-button compact',
+            disabled: index === items.length - 1,
+            onClick: () => moveItem(item.governedSymbolId, 1),
+            'aria-label': `Move ${name} down`,
+          }, 'Move down'),
+          createElement('button', {
+            type: 'button',
+            className: 'action-button compact danger',
+            onClick: () => removeItem(item.governedSymbolId),
+            'aria-label': `Remove ${name} from this Symbol Set`,
+          }, 'Remove'),
+        ),
+        );
+      }),
+    ),
+  );
 
   return createElement(
     'section',
     { className: 'symbol-set-builder-panel', 'aria-labelledby': 'symbol-set-builder-heading' },
-    createElement('h2', { id: 'symbol-set-builder-heading' }, 'Symbol Set Builder'),
+    createElement('div', { className: 'symbol-set-builder-head' },
+      createElement('h2', { id: 'symbol-set-builder-heading' }, 'Symbol Set Builder'),
+      createElement('p', { className: 'set-admin-muted' }, 'Choose a Symbol Set, find symbols to add, then arrange and save its items.'),
+    ),
     loading ? createElement('p', { role: 'status' }, 'Loading Symbol Sets…') : null,
     error ? createElement('p', { role: 'alert', className: 'set-admin-status error' }, error) : null,
     !loading && !error && sets.length === 0
@@ -289,8 +492,8 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
       : null,
     StatusMessage({ status }),
     sets.length > 0
-      ? createElement('label', { htmlFor: 'symbol-set-builder-set-select' },
-        'Symbol Set',
+      ? createElement('label', { className: 'field symbol-set-builder-set-picker', htmlFor: 'symbol-set-builder-set-select' },
+        createElement('span', null, 'Symbol Set'),
         createElement('select', {
           id: 'symbol-set-builder-set-select',
           value: selectedSetId,
@@ -299,184 +502,7 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
       )
       : null,
     selectedSetId
-      ? createElement(
-        'div',
-        { className: 'symbol-set-builder-layout' },
-        createElement(
-          'div',
-          { className: 'symbol-set-builder-search' },
-          createElement('h3', null, 'Search Public Catalog and organization symbols'),
-          createElement('form', { className: 'field search-field', onSubmit: runSearch },
-            createElement('input', {
-              type: 'search',
-              'aria-label': 'Search symbols to add to this Symbol Set',
-              placeholder: 'Search by name, category, or discipline',
-              value: query,
-              onChange: (event) => setQuery(event.target.value),
-            }),
-            createElement('button', { type: 'submit', disabled: searchLoading }, searchLoading ? 'Searching…' : 'Search'),
-          ),
-          createElement('div', { className: 'symbol-set-builder-filters', role: 'group', 'aria-label': 'Symbol Set Builder filters' },
-            createElement('label', { htmlFor: 'symbol-set-builder-category-filter' },
-              'Category',
-              createElement('input', {
-                id: 'symbol-set-builder-category-filter',
-                value: categoryFilter,
-                onChange: (event) => setCategoryFilter(event.target.value),
-              }),
-            ),
-            createElement('label', { htmlFor: 'symbol-set-builder-discipline-filter' },
-              'Discipline',
-              createElement('input', {
-                id: 'symbol-set-builder-discipline-filter',
-                value: disciplineFilter,
-                onChange: (event) => setDisciplineFilter(event.target.value),
-              }),
-            ),
-            createElement('label', { htmlFor: 'symbol-set-builder-format-filter' },
-              'Format',
-              createElement('input', {
-                id: 'symbol-set-builder-format-filter',
-                value: formatFilter,
-                onChange: (event) => setFormatFilter(event.target.value),
-              }),
-            ),
-          ),
-          searchError ? createElement('p', { role: 'alert', className: 'set-admin-status error' }, searchError) : null,
-          !searchLoading && !searchError && searchResults.length === 0
-            ? createElement('p', { role: 'status' }, 'No matching symbols found.')
-            : null,
-          searchResults.length > 0
-            ? createElement(
-              'div',
-              null,
-              createElement('button', {
-                type: 'button',
-                onClick: addSelectedToSet,
-                disabled: Object.values(selectedSearchIds).every((value) => !value),
-                'aria-label': 'Add selected symbols to this Symbol Set',
-              }, 'Add selected to set'),
-              createElement('ul', { className: 'set-admin-list', 'aria-label': 'Symbol Set Builder search results' },
-                searchResults.map((entry) => {
-                  const alreadyPresent = presentIds.has(entry.governedSymbolId);
-                  const addable = (entry.source === 'public' || entry.source === 'organization') && !alreadyPresent;
-                  return createElement('li', { key: entry.governedSymbolId, className: 'set-admin-item' },
-                    createElement('label', null,
-                      createElement('input', {
-                        type: 'checkbox',
-                        disabled: !addable,
-                        checked: Boolean(selectedSearchIds[entry.governedSymbolId]),
-                        onChange: () => toggleSearchSelection(entry.governedSymbolId),
-                        'aria-label': `Select ${entry.canonicalName}`,
-                      }),
-                      createElement('strong', null, ` ${entry.canonicalName} · ${symbolDisplayId(entry)}`),
-                      createElement(SourceBadge, { source: entry.source, organizationWide: entry.organizationWide }),
-                    ),
-                    createElement('p', { className: 'set-admin-muted' },
-                      `Category: ${entry.category} · Discipline: ${entry.discipline}`
-                      + (alreadyPresent ? ' · Already in this set' : '')
-                      + (entry.source === 'organization' ? ' · Approved organization symbol' : '')),
-                  );
-                }),
-              ),
-            )
-            : null,
-        ),
-        createElement(
-          'div',
-          { className: 'symbol-set-builder-items' },
-          createElement('h3', null, 'Symbol Set items'),
-          itemsLoading ? createElement('p', { role: 'status' }, 'Loading Symbol Set items…') : null,
-          !itemsLoading && items.length === 0
-            ? createElement('p', { role: 'status' }, 'This Symbol Set has no items yet. Add symbols from search.')
-            : null,
-          items.length > 0
-            ? createElement('p', { className: 'set-admin-muted', role: 'status' },
-              `${items.length} item(s) · Categories: ${Object.entries(categoryCounts).map(([key, count]) => `${key} (${count})`).join(', ')}`
-              + ` · Disciplines: ${Object.entries(disciplineCounts).map(([key, count]) => `${key} (${count})`).join(', ')}`
-              + (Object.keys(formatCounts).length > 0
-                ? ` · Preferred formats: ${Object.entries(formatCounts).map(([key, count]) => `${key} (${count})`).join(', ')}`
-                : ''))
-            : null,
-          createElement('ul', { className: 'set-admin-list symbol-set-builder-item-list', 'aria-label': 'Current Symbol Set items, in order' },
-            items.map((item, index) => createElement('li', {
-              key: item.governedSymbolId,
-              className: `set-admin-item${item.availabilityStatus === 'unavailable' ? ' unavailable' : ''}`,
-              draggable: true,
-              onDragStart: (event) => handleDragStart(event, item.governedSymbolId),
-              onDragOver: (event) => event.preventDefault(),
-              onDrop: (event) => handleDrop(event, item.governedSymbolId),
-            },
-            createElement(
-              'div',
-              null,
-              createElement('strong', null, `${item.canonicalName || item.governedSymbolId} · ${symbolDisplayId(item)}`),
-              createElement(SourceBadge, { source: item.source || 'public', organizationWide: item.organizationWide }),
-              item.availabilityStatus === 'unavailable'
-                ? createElement('span', { className: 'symbol-set-builder-badge unavailable' }, 'Unavailable')
-                : null,
-              createElement('p', { className: 'set-admin-muted' }, `Category: ${item.category || 'unknown'} · Discipline: ${item.discipline || 'unknown'}`),
-              item.availabilityStatus === 'unavailable' && item.availabilityReason
-                ? createElement('p', { className: 'set-admin-muted' }, item.availabilityReason)
-                : null,
-              createElement('label', { htmlFor: `builder-group-${item.governedSymbolId}` },
-                'Group',
-                createElement('input', {
-                  id: `builder-group-${item.governedSymbolId}`,
-                  value: item.groupName || '',
-                  onChange: (event) => updateField(item.governedSymbolId, 'groupName', event.target.value),
-                }),
-              ),
-              createElement('label', { htmlFor: `builder-format-${item.governedSymbolId}` },
-                'Preferred format',
-                createElement('input', {
-                  id: `builder-format-${item.governedSymbolId}`,
-                  value: item.preferredFormat || '',
-                  onChange: (event) => updateField(item.governedSymbolId, 'preferredFormat', event.target.value),
-                }),
-              ),
-            ),
-            createElement(
-              'div',
-              { className: 'set-admin-actions', role: 'group', 'aria-label': `Reorder or remove ${item.canonicalName || item.governedSymbolId}` },
-              createElement('button', {
-                type: 'button',
-                disabled: index === 0,
-                onClick: () => moveItem(item.governedSymbolId, -1),
-                'aria-label': `Move ${item.canonicalName || item.governedSymbolId} up`,
-              }, 'Move up'),
-              createElement('button', {
-                type: 'button',
-                disabled: index === items.length - 1,
-                onClick: () => moveItem(item.governedSymbolId, 1),
-                'aria-label': `Move ${item.canonicalName || item.governedSymbolId} down`,
-              }, 'Move down'),
-              createElement('button', {
-                type: 'button',
-                onClick: () => removeItem(item.governedSymbolId),
-                'aria-label': `Remove ${item.canonicalName || item.governedSymbolId} from this Symbol Set`,
-              }, 'Remove'),
-            ),
-            )),
-          ),
-          createElement(
-            'div',
-            { className: 'set-admin-actions' },
-            createElement('button', {
-              type: 'button',
-              disabled: !dirty || saving,
-              onClick: saveChanges,
-              'aria-label': 'Save Symbol Set changes',
-            }, saving ? 'Saving…' : 'Save changes'),
-            createElement('button', {
-              type: 'button',
-              disabled: !dirty || saving,
-              onClick: discardChanges,
-              'aria-label': 'Discard Symbol Set changes',
-            }, 'Discard changes'),
-          ),
-        ),
-      )
+      ? createElement('div', { className: 'symbol-set-builder-layout' }, searchCard, itemsCard)
       : null,
   );
 }

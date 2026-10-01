@@ -3411,15 +3411,6 @@ a:not([class]):active {
   color: var(--idox-text-secondary);
 }
 
-.symbol-set-builder-item-list .set-admin-item {
-  align-items: center;
-  cursor: grab;
-}
-
-.symbol-set-builder-item-list .set-admin-item.unavailable {
-  opacity: 0.6;
-}
-
 .support-panel {
   width: min(52rem, 100%);
 }
@@ -6746,4 +6737,224 @@ button.catalog-preview-format-badge:focus-visible {
     width: 100%;
     justify-content: flex-end;
   }
+}
+
+/* Symbol Set Builder — grouped cards, one-row result/item layouts, and a
+   save bar that stays in view above a long item list. */
+.symbol-set-builder-head {
+  margin-bottom: 0.75rem;
+}
+
+.symbol-set-builder-head h2,
+.symbol-set-builder-head p,
+.symbol-set-builder-card-head h3,
+.symbol-set-builder-card-head p {
+  margin: 0;
+}
+
+.symbol-set-builder-head p,
+.symbol-set-builder-card-head p {
+  margin-top: 0.25rem;
+}
+
+.symbol-set-builder-set-picker {
+  max-width: 26rem;
+  margin-bottom: 1rem;
+}
+
+.symbol-set-builder-layout {
+  grid-template-columns: minmax(280px, 1fr) minmax(340px, 1.3fr);
+  gap: 1rem;
+}
+
+@media (max-width: 960px) {
+  .symbol-set-builder-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.symbol-set-builder-card {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+  padding: 1rem;
+  border: 1px solid var(--idox-border-subtle);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-bg-surface-default);
+}
+
+.symbol-set-builder-search > .search-field {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.symbol-set-builder-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.75rem;
+}
+
+.symbol-set-builder-results {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.symbol-set-builder-results-bar,
+.symbol-set-builder-savebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+}
+
+.symbol-set-builder-result-list {
+  display: grid;
+  gap: 0.35rem;
+  max-height: 28rem;
+  overflow: auto;
+}
+
+.symbol-set-builder-result {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--idox-border-subtle);
+  border-radius: var(--idox-radius-md);
+}
+
+.symbol-set-builder-result.muted {
+  background: var(--idox-bg-surface-subtle);
+}
+
+.symbol-set-builder-result-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  cursor: pointer;
+}
+
+.symbol-set-builder-result-label input {
+  margin-top: 0.2rem;
+}
+
+.symbol-set-builder-result-text,
+.symbol-set-builder-item-main {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.symbol-set-builder-name {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.25rem 0;
+}
+
+.symbol-set-builder-item-main p {
+  margin: 0;
+}
+
+/* Pinned just under the sticky app header so Save/Discard are always reachable. */
+.symbol-set-builder-savebar {
+  position: sticky;
+  top: 4.5rem;
+  z-index: 5;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-md);
+  background: var(--idox-bg-surface-subtle);
+}
+
+.symbol-set-builder-savebar.dirty {
+  border-color: var(--idox-border-selected);
+  background: var(--idox-interactive-subtle-selected);
+}
+
+.symbol-set-builder-savebar-state {
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
+  color: var(--idox-text-secondary);
+}
+
+.symbol-set-builder-savebar.dirty .symbol-set-builder-savebar-state {
+  color: var(--idox-text-primary);
+}
+
+.symbol-set-builder-summary {
+  font-size: var(--idox-font-size-sm);
+  color: var(--idox-text-secondary);
+}
+
+.symbol-set-builder-summary summary {
+  cursor: pointer;
+  font-weight: var(--idox-font-weight-medium);
+}
+
+.symbol-set-builder-summary dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 0.75rem;
+  margin: 0.5rem 0 0;
+}
+
+.symbol-set-builder-summary dt {
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.symbol-set-builder-summary dd {
+  margin: 0;
+}
+
+.symbol-set-builder-item-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.symbol-set-builder-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.5rem 0.75rem;
+  align-items: start;
+  padding: 0.75rem;
+  border: 1px solid var(--idox-border-subtle);
+  border-radius: var(--idox-radius-md);
+  background: var(--idox-bg-surface-default);
+  cursor: grab;
+}
+
+.symbol-set-builder-item.unavailable {
+  opacity: 0.6;
+}
+
+.symbol-set-builder-position {
+  min-width: 1.75rem;
+  padding: 0.15rem 0;
+  border-radius: var(--idox-radius-full);
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+  font-weight: var(--idox-font-weight-semibold);
+  text-align: center;
+}
+
+.symbol-set-builder-item-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+/* Actions sit on their own row under the fields, aligned with the text. */
+.symbol-set-builder-item-actions {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--idox-border-subtle);
+}
+
+.symbol-set-builder-item-actions .danger {
+  margin-left: auto;
 }

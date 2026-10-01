@@ -330,7 +330,7 @@ describe('organization admin section tabs', () => {
     await act(async () => renderer.unmount());
   });
 
-  it('omits the Projects & symbol sets tab when the organization has no symbol-set session', async () => {
+  it('omits the Projects & Symbol Sets tab when the organization has no symbol-set session', async () => {
     const renderer = await mountOrganizationAdmin(pageFetch());
     assert.equal(renderer.root.findAllByProps({ id: 'organization-admin-tab-library' }).length, 0);
     await act(async () => renderer.unmount());

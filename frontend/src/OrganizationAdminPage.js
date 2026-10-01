@@ -892,7 +892,7 @@ export function OrganizationAdminPage({ auth }) {
   const tabs = [
     { key: 'members', label: 'Members' },
     { key: 'organization', label: 'Organization' },
-    libraryTabEnabled ? { key: 'library', label: 'Projects & symbol sets' } : null,
+    libraryTabEnabled ? { key: 'library', label: 'Projects & Symbol Sets' } : null,
     { key: 'activity', label: 'Activity' },
   ].filter(Boolean);
   const currentTab = tabs.some((tab) => tab.key === activeTab) ? activeTab : tabs[0].key;
