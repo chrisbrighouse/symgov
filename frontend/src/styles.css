@@ -4389,6 +4389,32 @@ button.catalog-preview-format-badge:focus-visible {
   padding: clamp(1.2rem, 3vw, 1.65rem);
 }
 
+/* Change-PIN screen: a single centred card, fields stacked full width. */
+.change-pin-screen {
+  display: grid;
+  justify-items: center;
+  padding: clamp(1rem, 4vw, 3rem) 1rem;
+}
+
+.change-pin-card {
+  width: min(100%, 26rem);
+}
+
+.change-pin-intro h3 {
+  margin: 0.15rem 0 0.5rem;
+}
+
+.change-pin-intro p:not(.eyebrow) {
+  margin: 0;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+}
+
+.change-pin-card .auth-field input {
+  letter-spacing: 0.42em;
+  text-align: center;
+}
+
 .auth-card-header {
   display: flex;
   align-items: center;

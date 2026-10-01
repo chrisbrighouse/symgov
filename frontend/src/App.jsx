@@ -760,28 +760,29 @@ function ChangePinPage() {
   };
 
   return (
-    <section className="submission-panel auth-panel">
-      <div>
-        <p className="eyebrow">Change default PIN</p>
-        <h2>Set your own 4 digit PIN</h2>
-        <p>You need to change the default PIN before using Symgov.</p>
-      </div>
-      <form className="submission-form" onSubmit={handleSubmit}>
-        <label>
-          Current PIN
-          <input type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={currentPin} onChange={(event) => setCurrentPin(event.target.value)} autoComplete="current-password" required />
+    <section className="change-pin-screen" aria-labelledby="change-pin-title">
+      <form className="auth-card change-pin-card" onSubmit={handleSubmit}>
+        <div className="change-pin-intro">
+          <p className="eyebrow">Change default PIN</p>
+          <h3 id="change-pin-title">Set your own 4 digit PIN</h3>
+          <p>You need to change the default PIN before using Symgov.</p>
+        </div>
+        <label className="auth-field">
+          <span>Current PIN</span>
+          <input type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={currentPin} onChange={(event) => setCurrentPin(event.target.value.replace(/\D/g, '').slice(0, 4))} autoComplete="current-password" required />
         </label>
-        <label>
-          New PIN
-          <input type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={newPin} onChange={(event) => setNewPin(event.target.value)} autoComplete="new-password" required />
+        <label className="auth-field">
+          <span>New PIN</span>
+          <input type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={newPin} onChange={(event) => setNewPin(event.target.value.replace(/\D/g, '').slice(0, 4))} autoComplete="new-password" required />
         </label>
-        <label>
-          Confirm new PIN
-          <input type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={confirmPin} onChange={(event) => setConfirmPin(event.target.value)} autoComplete="new-password" required />
+        <label className="auth-field">
+          <span>Confirm new PIN</span>
+          <input type="password" inputMode="numeric" pattern="[0-9]{4}" maxLength="4" value={confirmPin} onChange={(event) => setConfirmPin(event.target.value.replace(/\D/g, '').slice(0, 4))} autoComplete="new-password" required />
         </label>
-        {message ? <p className={`form-message ${message.includes('changed') ? 'success' : 'error'}`}>{message}</p> : null}
-        <button type="submit" className="primary-button" disabled={isSubmitting}>
-          {isSubmitting ? 'Changing PIN…' : 'Change PIN'}
+        {message ? <p className={`form-message ${message.includes('changed') ? 'success' : 'error'}`} role={message.includes('changed') ? 'status' : 'alert'}>{message}</p> : null}
+        <button type="submit" className="auth-submit-button" disabled={isSubmitting}>
+          <span>{isSubmitting ? 'Changing PIN…' : 'Change PIN'}</span>
+          <span aria-hidden="true">→</span>
         </button>
       </form>
     </section>

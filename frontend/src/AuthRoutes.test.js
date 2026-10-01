@@ -159,7 +159,7 @@ function authFlowFetch({ me = null, login, select, changePin, logout } = {}) {
 }
 
 async function submitPinChange(renderer) {
-  const form = renderer.root.find((node) => node.type === 'form' && node.props.className === 'submission-form');
+  const form = renderer.root.find((node) => node.type === 'form' && (node.props.className || '').split(' ').includes('change-pin-card'));
   const inputs = form.findAllByType('input');
   await act(async () => {
     inputs[0].props.onChange({ target: { value: '1234' } });
