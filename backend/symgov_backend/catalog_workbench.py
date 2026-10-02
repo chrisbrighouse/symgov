@@ -139,6 +139,16 @@ def _find_clipboard(
     return query.one_or_none()
 
 
+def load_catalog_clipboard(
+    session: Session,
+    user_id: str | uuid.UUID,
+    organization_id: uuid.UUID | None = None,
+) -> list:
+    """The clipboard items for one session scope, without the rest of the workbench."""
+    clipboard = _find_clipboard(session, _user_uuid(user_id), organization_id)
+    return list((clipboard.items_json if clipboard else None) or [])
+
+
 def load_catalog_workbench(
     session: Session,
     user_id: str | uuid.UUID,

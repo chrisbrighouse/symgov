@@ -40,11 +40,12 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from .catalog_search import catalog_symbol_filters
-from .models import OrganizationMemberCapability
+from .catalog_workbench import load_catalog_clipboard
+from .models import GovernedSymbol, OrganizationMemberCapability
 from .project_service import get_principal
 from .published_catalog import PUBLISHED_SYMBOLS_SQL
 from .symbol_eligibility import eligible_organization_private_symbols
@@ -84,6 +85,10 @@ def _search_public_symbols(
         ),
         params,
     ).all()
+    return _public_entries(rows)
+
+
+def _public_entries(rows) -> list[dict]:
     seen: set[str] = set()
     entries = []
     for row in rows:
@@ -103,6 +108,21 @@ def _search_public_symbols(
             "currentRevisionId": uuid.UUID(row.symbol_revision_id),
         })
     return entries
+
+
+def _organization_entry(session: Session, governed) -> dict:
+    return {
+        "governedSymbolId": governed.id,
+        "catalogSymbolId": governed.catalog_symbol_id,
+        "displayId": governed_symbol_human_readable_id(session, governed),
+        "source": "organization",
+        "canonicalName": governed.canonical_name,
+        "category": governed.category,
+        "discipline": governed.discipline,
+        "slug": governed.slug,
+        "organizationWide": bool(governed.organization_wide),
+        "currentRevisionId": governed.current_revision_id,
+    }
 
 
 def _search_organization_symbols(
@@ -126,21 +146,7 @@ def _search_organization_symbols(
     if discipline:
         discipline_key = discipline.casefold()
         rows = [row for row in rows if discipline_key in (row.discipline or "").casefold()]
-    return [
-        {
-            "governedSymbolId": governed.id,
-            "catalogSymbolId": governed.catalog_symbol_id,
-            "displayId": governed_symbol_human_readable_id(session, governed),
-            "source": "organization",
-            "canonicalName": governed.canonical_name,
-            "category": governed.category,
-            "discipline": governed.discipline,
-            "slug": governed.slug,
-            "organizationWide": bool(governed.organization_wide),
-            "currentRevisionId": governed.current_revision_id,
-        }
-        for governed in rows
-    ]
+    return [_organization_entry(session, governed) for governed in rows]
 
 
 def search_symbol_set_builder(
@@ -186,3 +192,55 @@ def search_symbol_set_builder(
         "pageSize": page_size,
         "total": total,
     }
+
+
+def _public_symbols_by_slug(session: Session, slugs: list[str]) -> list[dict]:
+    query = text(PUBLISHED_SYMBOLS_SQL + " AND gs.slug IN :slugs ORDER BY gs.id").bindparams(
+        bindparam("slugs", expanding=True),
+    )
+    return _public_entries(session.execute(query, {"slugs": slugs}).all())
+
+
+def _organization_symbols_by_slug(session: Session, organization_id: uuid.UUID, slugs: list[str]) -> list[dict]:
+    symbol_ids = [row.id for row in session.query(GovernedSymbol.id).filter(GovernedSymbol.slug.in_(slugs)).all()]
+    if not symbol_ids:
+        return []
+    rows = eligible_organization_private_symbols(session, organization_id, symbol_ids=symbol_ids)
+    return [_organization_entry(session, governed) for governed in rows]
+
+
+def symbol_set_builder_clipboard(session: Session, request, settings):
+    """The session's Catalog clipboard, resolved for the Builder.
+
+    Read-only: the Catalog page writes the clipboard whole, so a Builder
+    write would be undone by any Catalog page still open. Clipboard items
+    carry the Catalog slug (globally unique, `uq_governed_symbols_slug`),
+    and each is resolved through the same two halves as Builder search, so
+    an item is addable only if search could have returned it. The rest
+    come back as `unavailable`, in clipboard order like the addable items.
+    """
+    principal = get_principal(session, request, settings)
+    clipboard = load_catalog_clipboard(session, principal.user.id, principal.organization.id)
+    slugs = [str(item.get("id") or "") for item in clipboard if item.get("id")]
+
+    resolved: dict[str, dict] = {}
+    if slugs:
+        for entry in _public_symbols_by_slug(session, slugs):
+            resolved[entry["slug"]] = entry
+        if settings.organization_symbols_enabled and _has_organization_wide_toggle_authority(session, principal):
+            for entry in _organization_symbols_by_slug(session, principal.organization.id, slugs):
+                resolved.setdefault(entry["slug"], entry)
+
+    items, unavailable = [], []
+    for item in clipboard:
+        slug = str(item.get("id") or "")
+        if slug in resolved:
+            items.append(resolved[slug])
+        elif slug:
+            unavailable.append({
+                "slug": slug,
+                "displayId": item.get("displayName") or None,
+                "name": item.get("name") or None,
+            })
+
+    return principal, {"items": items, "unavailable": unavailable, "total": len(clipboard)}

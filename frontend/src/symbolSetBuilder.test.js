@@ -32,11 +32,23 @@ function baseItem(overrides = {}) {
   };
 }
 
-function buildApi({ sets = [baseSet()], items = [], searchResults = [] } = {}) {
+function clipboardEntry(overrides = {}) {
+  return {
+    governedSymbolId: 'sym-clip', catalogSymbolId: 'S-000207', displayId: 'S-000207', source: 'public',
+    canonicalName: 'Clip Valve', category: 'valve', discipline: 'piping', slug: 'clip-valve',
+    organizationWide: null, currentRevisionId: 'rev-clip', ...overrides,
+  };
+}
+
+function buildApi({ sets = [baseSet()], items = [], searchResults = [], clipboard = { items: [], unavailable: [], total: 0 } } = {}) {
   const calls = [];
   let currentItems = items;
   return {
     calls,
+    loadClipboard: async () => {
+      calls.push(['clipboard']);
+      return clipboard;
+    },
     listSymbolSets: async () => ({ items: sets }),
     listItems: async () => ({ items: currentItems, page: 1, pageSize: 200, total: currentItems.length }),
     search: async (params) => {
@@ -224,5 +236,190 @@ describe('SymbolSetBuilderPanel', () => {
     assert.deepEqual(payload.map((entry) => entry.governedSymbolId), ['sym-b', 'sym-a']);
     assert.deepEqual(payload.map((entry) => entry.sortOrder), [0, 1]);
     await act(async () => renderer.unmount());
+  });
+
+  describe('clipboard view', () => {
+    async function openClipboard(api) {
+      let renderer;
+      await act(async () => { renderer = create(createElement(SymbolSetBuilderPanel, { isAdmin: true, api })); });
+      await act(async () => { renderer.root.findByProps({ id: 'symbol-set-builder-find-tab-clipboard' }).props.onClick(); });
+      return renderer;
+    }
+
+    function savedIds(api) {
+      const [, , payload] = api.calls.find((call) => call[0] === 'replace');
+      return payload.map((entry) => entry.governedSymbolId);
+    }
+
+    it('loads the clipboard only when its tab is first opened, and shows what cannot be added', async () => {
+      const api = buildApi({
+        items: [baseItem({ governedSymbolId: 'sym-existing', canonicalName: 'Existing Symbol' })],
+        clipboard: {
+          items: [
+            clipboardEntry(),
+            clipboardEntry({ governedSymbolId: 'sym-existing', canonicalName: 'Existing Symbol', slug: 'existing-symbol' }),
+          ],
+          unavailable: [{ slug: 'gone', displayId: '0003-12', name: 'Withdrawn Symbol' }],
+          total: 3,
+        },
+      });
+      let renderer;
+      await act(async () => { renderer = create(createElement(SymbolSetBuilderPanel, { isAdmin: true, api })); });
+      assert.equal(api.calls.filter((call) => call[0] === 'clipboard').length, 0);
+
+      await act(async () => { renderer.root.findByProps({ id: 'symbol-set-builder-find-tab-clipboard' }).props.onClick(); });
+      assert.equal(api.calls.filter((call) => call[0] === 'clipboard').length, 1);
+      const tab = renderer.root.findByProps({ id: 'symbol-set-builder-find-tab-clipboard' });
+      assert.equal(tab.props['aria-selected'], true);
+
+      const text = JSON.stringify(renderer.toJSON());
+      assert.match(text, /Clip Valve · S-000207/);
+      assert.match(text, /3 on clipboard · 1 can be added/);
+      assert.match(text, /Withdrawn Symbol · 0003-12/);
+      assert.match(text, /Can no longer be added/);
+      // The search filters belong to the search view only.
+      assert.equal(renderer.root.findAllByProps({ id: 'symbol-set-builder-category-filter' }).length, 0);
+      const existing = renderer.root.findAllByProps({ 'aria-label': 'Select Existing Symbol' });
+      assert.equal(existing[0].props.disabled, true);
+
+      // Going back and forth does not reload; Refresh does.
+      await act(async () => { renderer.root.findByProps({ id: 'symbol-set-builder-find-tab-search' }).props.onClick(); });
+      await act(async () => { renderer.root.findByProps({ id: 'symbol-set-builder-find-tab-clipboard' }).props.onClick(); });
+      assert.equal(api.calls.filter((call) => call[0] === 'clipboard').length, 1);
+      await act(async () => { await renderer.root.findByProps({ 'aria-label': 'Refresh clipboard' }).props.onClick(); });
+      assert.equal(api.calls.filter((call) => call[0] === 'clipboard').length, 2);
+      await act(async () => renderer.unmount());
+    });
+
+    it('adds every addable clipboard symbol, in clipboard order, and only on save', async () => {
+      const api = buildApi({
+        items: [baseItem()],
+        clipboard: {
+          items: [
+            clipboardEntry({ governedSymbolId: 'sym-b', canonicalName: 'B Valve', slug: 'b-valve' }),
+            clipboardEntry({ governedSymbolId: 'sym-existing', canonicalName: 'Existing Symbol', slug: 'existing-symbol' }),
+            clipboardEntry({ governedSymbolId: 'sym-a', canonicalName: 'A Beacon', slug: 'a-beacon', source: 'organization', organizationWide: true, displayId: 'ACME-3' }),
+          ],
+          unavailable: [],
+          total: 3,
+        },
+      });
+      const renderer = await openClipboard(api);
+      const addAll = renderer.root.findByProps({ 'aria-label': 'Add every clipboard symbol that can be added to this Symbol Set' });
+      assert.equal(addAll.children.join(''), 'Add all (2)');
+      await act(async () => { addAll.props.onClick(); });
+      assert.equal(api.calls.some((call) => call[0] === 'replace'), false);
+
+      await act(async () => { renderer.root.findByProps({ 'aria-label': 'Save Symbol Set changes' }).props.onClick(); });
+      assert.deepEqual(savedIds(api), ['sym-existing', 'sym-b', 'sym-a']);
+      await act(async () => renderer.unmount());
+    });
+
+    it('selects all, or some, and keeps its selection apart from the search selection', async () => {
+      const api = buildApi({
+        searchResults: [clipboardEntry({ governedSymbolId: 'sym-search', canonicalName: 'Search Beacon', slug: 'search-beacon' })],
+        clipboard: {
+          items: [
+            clipboardEntry({ governedSymbolId: 'sym-1', canonicalName: 'One', slug: 'one' }),
+            clipboardEntry({ governedSymbolId: 'sym-2', canonicalName: 'Two', slug: 'two' }),
+          ],
+          unavailable: [],
+          total: 2,
+        },
+      });
+      let renderer;
+      await act(async () => { renderer = create(createElement(SymbolSetBuilderPanel, { isAdmin: true, api })); });
+      const form = renderer.root.findByProps({ className: 'field search-field' });
+      await act(async () => { await form.props.onSubmit({ preventDefault: () => {} }); });
+      await act(async () => { renderer.root.findByProps({ 'aria-label': 'Select Search Beacon' }).props.onChange(); });
+
+      await act(async () => { renderer.root.findByProps({ id: 'symbol-set-builder-find-tab-clipboard' }).props.onClick(); });
+      const selectAll = () => renderer.root.findByProps({ 'aria-label': 'Select all clipboard symbols that can be added' });
+      await act(async () => { selectAll().props.onChange(); });
+      assert.equal(selectAll().props.checked, true);
+      await act(async () => { renderer.root.findByProps({ 'aria-label': 'Select Two' }).props.onChange(); });
+      assert.equal(selectAll().props.checked, false);
+
+      await act(async () => { renderer.root.findByProps({ 'aria-label': 'Add selected clipboard symbols to this Symbol Set' }).props.onClick(); });
+      await act(async () => { renderer.root.findByProps({ 'aria-label': 'Save Symbol Set changes' }).props.onClick(); });
+      // The ticked search result was not added from the clipboard view.
+      assert.deepEqual(savedIds(api), ['sym-1']);
+      await act(async () => renderer.unmount());
+    });
+
+    it('says where to collect symbols when the clipboard is empty', async () => {
+      const api = buildApi();
+      const renderer = await openClipboard(api);
+      assert.match(JSON.stringify(renderer.toJSON()), /Your clipboard is empty/);
+      assert.equal(renderer.root.findByType('a').props.href, '#/standards');
+      await act(async () => renderer.unmount());
+    });
+
+    it('shows a load failure without breaking the search view', async () => {
+      const api = buildApi();
+      api.loadClipboard = async () => { throw new Error('Your clipboard could not be loaded.'); };
+      const renderer = await openClipboard(api);
+      assert.match(JSON.stringify(renderer.toJSON()), /Your clipboard could not be loaded/);
+      await act(async () => { renderer.root.findByProps({ id: 'symbol-set-builder-find-tab-search' }).props.onClick(); });
+      assert.ok(renderer.root.findByProps({ 'aria-label': 'Search symbols to add to this Symbol Set' }));
+      await act(async () => renderer.unmount());
+    });
+  });
+
+  describe('the 1,000-item limit', () => {
+    const nearlyFull = () => Array.from({ length: 999 }, (_, index) => baseItem({
+      id: `item-${index}`, governedSymbolId: `sym-${index}`, sortOrder: index, canonicalName: `Symbol ${index}`,
+    }));
+
+    it('warns and adds nothing when the clipboard would take the set past 1,000', async () => {
+      const api = buildApi({
+        items: nearlyFull(),
+        clipboard: {
+          items: [
+            clipboardEntry({ governedSymbolId: 'sym-x', canonicalName: 'X', slug: 'x' }),
+            clipboardEntry({ governedSymbolId: 'sym-y', canonicalName: 'Y', slug: 'y' }),
+          ],
+          unavailable: [],
+          total: 2,
+        },
+      });
+      let renderer;
+      await act(async () => { renderer = create(createElement(SymbolSetBuilderPanel, { isAdmin: true, api })); });
+      await act(async () => { renderer.root.findByProps({ id: 'symbol-set-builder-find-tab-clipboard' }).props.onClick(); });
+      await act(async () => { renderer.root.findByProps({ 'aria-label': 'Add every clipboard symbol that can be added to this Symbol Set' }).props.onClick(); });
+
+      const alert = renderer.root.findByProps({ className: 'set-admin-status error symbol-set-builder-limit' });
+      assert.equal(alert.props.role, 'alert');
+      assert.match(alert.children.join(''), /at most 1,000 symbols\. This set has 999, so 1 more can be added, and you tried to add 2\. Nothing was added/);
+      assert.equal(renderer.root.findByProps({ 'aria-label': 'Save Symbol Set changes' }).props.disabled, true);
+
+      // Choosing fewer clears the warning and adds them.
+      await act(async () => { renderer.root.findByProps({ 'aria-label': 'Select X' }).props.onChange(); });
+      await act(async () => { renderer.root.findByProps({ 'aria-label': 'Add selected clipboard symbols to this Symbol Set' }).props.onClick(); });
+      assert.equal(renderer.root.findAllByProps({ className: 'set-admin-status error symbol-set-builder-limit' }).length, 0);
+      await act(async () => { renderer.root.findByProps({ 'aria-label': 'Save Symbol Set changes' }).props.onClick(); });
+      const [, , payload] = api.calls.find((call) => call[0] === 'replace');
+      assert.equal(payload.length, 1000);
+      await act(async () => renderer.unmount());
+    });
+
+    it('applies the same limit to search results', async () => {
+      const api = buildApi({
+        items: nearlyFull(),
+        searchResults: [
+          clipboardEntry({ governedSymbolId: 'sym-x', canonicalName: 'X', slug: 'x' }),
+          clipboardEntry({ governedSymbolId: 'sym-y', canonicalName: 'Y', slug: 'y' }),
+        ],
+      });
+      let renderer;
+      await act(async () => { renderer = create(createElement(SymbolSetBuilderPanel, { isAdmin: true, api })); });
+      const form = renderer.root.findByProps({ className: 'field search-field' });
+      await act(async () => { await form.props.onSubmit({ preventDefault: () => {} }); });
+      await act(async () => { renderer.root.findByProps({ 'aria-label': 'Select X' }).props.onChange(); });
+      await act(async () => { renderer.root.findByProps({ 'aria-label': 'Select Y' }).props.onChange(); });
+      await act(async () => { renderer.root.findByProps({ 'aria-label': 'Add selected symbols to this Symbol Set' }).props.onClick(); });
+      assert.match(JSON.stringify(renderer.toJSON()), /Nothing was added; choose fewer symbols/);
+      await act(async () => renderer.unmount());
+    });
   });
 });

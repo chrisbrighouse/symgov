@@ -672,6 +672,18 @@ export async function replaceSymbolSetItems(setId, items, etag = '') {
   return requireOkWithStatus(result, 'Symbol Set items update failed.');
 }
 
+// The session's Catalog clipboard, resolved for the Builder. Read-only: the
+// Catalog page owns the clipboard and writes it whole.
+export async function loadSymbolSetBuilderClipboard() {
+  const result = await requestJson('/org/me/symbol-sets/builder-clipboard', { cache: 'no-store' });
+  const payload = requireOk(result, 'Your clipboard could not be loaded.');
+  return {
+    items: Array.isArray(payload?.items) ? payload.items : [],
+    unavailable: Array.isArray(payload?.unavailable) ? payload.unavailable : [],
+    total: Number(payload?.total || 0)
+  };
+}
+
 export async function searchSymbolSetBuilder({
   q = '',
   category = '',

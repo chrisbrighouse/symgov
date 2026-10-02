@@ -7,10 +7,10 @@ from sqlalchemy.orm import Session
 
 from ..dependencies import get_db_session
 from ..schemas import (APIErrorResponse, APIValidationErrorResponse, OrganizationDefaultSymbolSetRequest, OrganizationDefaultSymbolSetResponse, PagedSymbolSetResponse,
-                       SymbolSetBuilderSearchResponse, SymbolSetCopyRequest, SymbolSetCreateRequest, SymbolSetItemsRequest, SymbolSetItemsResponse,
+                       SymbolSetBuilderClipboardResponse, SymbolSetBuilderSearchResponse, SymbolSetCopyRequest, SymbolSetCreateRequest, SymbolSetItemsRequest, SymbolSetItemsResponse,
                        SymbolSetPatchRequest, SymbolSetProjectsRequest, SymbolSetProjectsResponse, SymbolSetResponse)
 from ..settings import SymgovAPISettings, get_settings
-from ..symbol_set_builder import search_symbol_set_builder
+from ..symbol_set_builder import search_symbol_set_builder, symbol_set_builder_clipboard
 from ..symbol_set_service import (clear_organization_default, copy_set, create_set, get_set, list_items, list_projects_for_set,
                                    list_sets, patch_set, replace_items, replace_projects, set_dict, set_organization_default)
 
@@ -47,6 +47,13 @@ def builder_search(
         session, request, settings, query_text=q, page=page, page_size=page_size,
         category=category, discipline=discipline, format_=format_,
     )
+    return result
+
+
+# Also ahead of `/{setId}`. Reads the session's Catalog clipboard; never writes it.
+@router.get("/builder-clipboard", response_model=SymbolSetBuilderClipboardResponse, responses={401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}})
+def builder_clipboard(request: Request, session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
+    _, result = symbol_set_builder_clipboard(session, request, settings)
     return result
 
 

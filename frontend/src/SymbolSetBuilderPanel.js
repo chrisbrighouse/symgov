@@ -3,6 +3,7 @@ import { createElement, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   listOrganizationSymbolSets,
   listSymbolSetItems,
+  loadSymbolSetBuilderClipboard,
   replaceSymbolSetItems,
   searchSymbolSetBuilder,
 } from './api.js';
@@ -11,12 +12,31 @@ import { symbolIdLabelOrState } from './catalogWorkbench.js';
 // The maximum the items route accepts (routes/symbol_sets.py:21, le=200).
 export const ITEMS_PAGE_SIZE = 200;
 
+// The most items a set may hold (schemas.py SymbolSetItemsRequest,
+// max_length=1000). The server rejects a larger save; the Builder warns
+// before an add would go past it.
+export const SYMBOL_SET_ITEM_LIMIT = 1000;
+
 const DEFAULT_API = {
   listSymbolSets: listOrganizationSymbolSets,
   listItems: listSymbolSetItems,
   replaceItems: replaceSymbolSetItems,
   search: searchSymbolSetBuilder,
+  loadClipboard: loadSymbolSetBuilderClipboard,
 };
+
+// "1. Find symbols" has two views: a search, and the session's Catalog clipboard.
+const FIND_VIEWS = [
+  { key: 'search', label: 'Search' },
+  { key: 'clipboard', label: 'Clipboard' },
+];
+const FIND_PANEL_ID = 'symbol-set-builder-find-panel';
+
+function findTabId(key) {
+  return `symbol-set-builder-find-tab-${key}`;
+}
+
+const EMPTY_CLIPBOARD = { loading: false, loaded: false, error: '', items: [], unavailable: [], total: 0 };
 
 function StatusMessage({ status }) {
   if (!status?.message) return null;
@@ -79,6 +99,12 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
   const [searchError, setSearchError] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [selectedSearchIds, setSelectedSearchIds] = useState({});
+  const [findView, setFindView] = useState('search');
+  const [clipboard, setClipboard] = useState(EMPTY_CLIPBOARD);
+  // Kept apart from the search selection, so ticks in the hidden view are
+  // never added unseen.
+  const [selectedClipboardIds, setSelectedClipboardIds] = useState({});
+  const [limitWarning, setLimitWarning] = useState('');
 
   const refreshSets = useCallback(async () => {
     setLoading(true);
@@ -167,14 +193,74 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
     setSelectedSearchIds((current) => ({ ...current, [governedSymbolId]: !current[governedSymbolId] }));
   }
 
+  function toggleClipboardSelection(governedSymbolId) {
+    setSelectedClipboardIds((current) => ({ ...current, [governedSymbolId]: !current[governedSymbolId] }));
+  }
+
+  // Read-only: the Catalog page owns the clipboard and saves it whole, so the
+  // Builder never changes it.
+  async function loadClipboard() {
+    setClipboard((current) => ({ ...current, loading: true, error: '' }));
+    try {
+      const next = await api.loadClipboard();
+      setClipboard({
+        loading: false,
+        loaded: true,
+        error: '',
+        items: next?.items || [],
+        unavailable: next?.unavailable || [],
+        total: Number(next?.total || 0),
+      });
+      setSelectedClipboardIds({});
+    } catch (err) {
+      setClipboard((current) => ({ ...current, loading: false, error: err.message || 'Your clipboard could not be loaded.' }));
+    }
+  }
+
+  function selectFindView(key) {
+    setFindView(key);
+    setLimitWarning('');
+    if (key === 'clipboard' && !clipboard.loaded && !clipboard.loading) {
+      loadClipboard();
+    }
+  }
+
+  // Roving tabindex, as `role="tablist"` promises: arrow keys move between
+  // the views and Tab leaves the group.
+  function onFindTabKeyDown(event) {
+    const index = FIND_VIEWS.findIndex((view) => view.key === findView);
+    let next = null;
+    if (event.key === 'ArrowRight') next = (index + 1) % FIND_VIEWS.length;
+    if (event.key === 'ArrowLeft') next = (index - 1 + FIND_VIEWS.length) % FIND_VIEWS.length;
+    if (event.key === 'Home') next = 0;
+    if (event.key === 'End') next = FIND_VIEWS.length - 1;
+    if (next === null) return;
+    event.preventDefault();
+    const target = FIND_VIEWS[next].key;
+    selectFindView(target);
+    globalThis.document?.getElementById(findTabId(target))?.focus();
+  }
+
   const presentIds = useMemo(() => new Set(items.map((item) => item.governedSymbolId)), [items]);
 
-  function addSelectedToSet() {
-    const toAdd = searchResults.filter((entry) => (
-      (entry.source === 'public' || entry.source === 'organization')
-      && selectedSearchIds[entry.governedSymbolId] && !presentIds.has(entry.governedSymbolId)
-    ));
-    if (toAdd.length === 0) return;
+  function isAddable(entry) {
+    return (entry.source === 'public' || entry.source === 'organization') && !presentIds.has(entry.governedSymbolId);
+  }
+
+  // Adds nothing, and says why, when the set would go past its limit.
+  function addEntriesToSet(entries) {
+    const toAdd = entries.filter(isAddable);
+    if (toAdd.length === 0) return false;
+    const room = Math.max(0, SYMBOL_SET_ITEM_LIMIT - items.length);
+    if (toAdd.length > room) {
+      setLimitWarning(
+        `A Symbol Set can hold at most ${SYMBOL_SET_ITEM_LIMIT.toLocaleString('en-GB')} symbols. `
+        + `This set has ${items.length.toLocaleString('en-GB')}, so ${room.toLocaleString('en-GB')} more can be added, `
+        + `and you tried to add ${toAdd.length.toLocaleString('en-GB')}. Nothing was added; choose fewer symbols.`,
+      );
+      return false;
+    }
+    setLimitWarning('');
     setItems((current) => reindexed([
       ...current,
       ...toAdd.map((entry) => ({
@@ -196,8 +282,26 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
         availabilityStatus: 'active',
       })),
     ]));
-    setSelectedSearchIds({});
     setStatus({ mode: '', message: '' });
+    return true;
+  }
+
+  function addSelectedToSet() {
+    if (addEntriesToSet(searchResults.filter((entry) => selectedSearchIds[entry.governedSymbolId]))) {
+      setSelectedSearchIds({});
+    }
+  }
+
+  function addSelectedClipboardToSet() {
+    if (addEntriesToSet(clipboard.items.filter((entry) => selectedClipboardIds[entry.governedSymbolId]))) {
+      setSelectedClipboardIds({});
+    }
+  }
+
+  function addAllClipboardToSet() {
+    if (addEntriesToSet(clipboard.items)) {
+      setSelectedClipboardIds({});
+    }
   }
 
   function removeItem(governedSymbolId) {
@@ -285,13 +389,41 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
     createElement('input', { id, value, onChange: (event) => setter(event.target.value) }),
   );
 
-  const searchCard = createElement(
+  // One result row, shared by the search and clipboard views.
+  const resultRow = (entry, selectedIds, onToggle) => {
+    const alreadyPresent = presentIds.has(entry.governedSymbolId);
+    const addable = isAddable(entry);
+    return createElement('li', { key: entry.governedSymbolId, className: `symbol-set-builder-result${addable ? '' : ' muted'}` },
+      createElement('label', { className: 'symbol-set-builder-result-label' },
+        createElement('input', {
+          type: 'checkbox',
+          disabled: !addable,
+          checked: addable && Boolean(selectedIds[entry.governedSymbolId]),
+          onChange: () => onToggle(entry.governedSymbolId),
+          'aria-label': `Select ${entry.canonicalName}`,
+        }),
+        createElement('span', { className: 'symbol-set-builder-result-text' },
+          createElement('span', { className: 'symbol-set-builder-name' },
+            createElement('strong', null, `${entry.canonicalName} · ${symbolDisplayId(entry)}`),
+            createElement(SourceBadge, { source: entry.source, organizationWide: entry.organizationWide }),
+          ),
+          createElement('span', { className: 'set-admin-muted' },
+            `Category: ${entry.category} · Discipline: ${entry.discipline}`
+            + (alreadyPresent ? ' · Already in this set' : '')
+            + (entry.source === 'organization' ? ' · Approved organization symbol' : '')),
+        ),
+      ),
+    );
+  };
+
+  const limitAlert = limitWarning
+    ? createElement('p', { role: 'alert', className: 'set-admin-status error symbol-set-builder-limit' }, limitWarning)
+    : null;
+
+  const searchView = createElement(
     'div',
-    { className: 'symbol-set-builder-card symbol-set-builder-search' },
-    createElement('div', { className: 'symbol-set-builder-card-head' },
-      createElement('h3', null, '1. Find symbols'),
-      createElement('p', { className: 'set-admin-muted' }, 'Search the Public Catalog and your approved organization symbols.'),
-    ),
+    { className: 'symbol-set-builder-find-view' },
+    createElement('p', { className: 'set-admin-muted' }, 'Search the Public Catalog and your approved organization symbols.'),
     createElement('form', { className: 'field search-field', onSubmit: runSearch },
       createElement('input', {
         type: 'search',
@@ -326,35 +458,128 @@ export function SymbolSetBuilderPanel({ isAdmin, api = DEFAULT_API }) {
             'aria-label': 'Add selected symbols to this Symbol Set',
           }, 'Add selected to set'),
         ),
+        limitAlert,
         createElement('ul', { className: 'set-admin-list symbol-set-builder-result-list', 'aria-label': 'Symbol Set Builder search results' },
-          searchResults.map((entry) => {
-            const alreadyPresent = presentIds.has(entry.governedSymbolId);
-            const addable = (entry.source === 'public' || entry.source === 'organization') && !alreadyPresent;
-            return createElement('li', { key: entry.governedSymbolId, className: `symbol-set-builder-result${addable ? '' : ' muted'}` },
-              createElement('label', { className: 'symbol-set-builder-result-label' },
-                createElement('input', {
-                  type: 'checkbox',
-                  disabled: !addable,
-                  checked: Boolean(selectedSearchIds[entry.governedSymbolId]),
-                  onChange: () => toggleSearchSelection(entry.governedSymbolId),
-                  'aria-label': `Select ${entry.canonicalName}`,
-                }),
-                createElement('span', { className: 'symbol-set-builder-result-text' },
-                  createElement('span', { className: 'symbol-set-builder-name' },
-                    createElement('strong', null, `${entry.canonicalName} · ${symbolDisplayId(entry)}`),
-                    createElement(SourceBadge, { source: entry.source, organizationWide: entry.organizationWide }),
-                  ),
-                  createElement('span', { className: 'set-admin-muted' },
-                    `Category: ${entry.category} · Discipline: ${entry.discipline}`
-                    + (alreadyPresent ? ' · Already in this set' : '')
-                    + (entry.source === 'organization' ? ' · Approved organization symbol' : '')),
-                ),
-              ),
-            );
-          }),
+          searchResults.map((entry) => resultRow(entry, selectedSearchIds, toggleSearchSelection)),
         ),
       )
       : null,
+  );
+
+  const clipboardAddable = clipboard.items.filter(isAddable);
+  const clipboardSelected = clipboardAddable.filter((entry) => selectedClipboardIds[entry.governedSymbolId]);
+  const allClipboardSelected = clipboardAddable.length > 0 && clipboardSelected.length === clipboardAddable.length;
+
+  function toggleAllClipboard() {
+    setSelectedClipboardIds(allClipboardSelected
+      ? {}
+      : Object.fromEntries(clipboardAddable.map((entry) => [entry.governedSymbolId, true])));
+  }
+
+  const clipboardView = createElement(
+    'div',
+    { className: 'symbol-set-builder-find-view' },
+    createElement('div', { className: 'symbol-set-builder-clipboard-head' },
+      createElement('p', { className: 'set-admin-muted' }, 'Symbols you collected on your Catalog clipboard. Adding them here leaves your clipboard as it is.'),
+      createElement('button', {
+        type: 'button',
+        className: 'action-button compact',
+        onClick: loadClipboard,
+        disabled: clipboard.loading,
+        'aria-label': 'Refresh clipboard',
+      }, clipboard.loading ? 'Refreshing…' : 'Refresh'),
+    ),
+    clipboard.loading && !clipboard.loaded ? createElement('p', { role: 'status' }, 'Loading your clipboard…') : null,
+    clipboard.error ? createElement('p', { role: 'alert', className: 'set-admin-status error' }, clipboard.error) : null,
+    clipboard.loaded && !clipboard.error && clipboard.total === 0
+      ? createElement('p', { role: 'status', className: 'set-admin-muted' },
+        'Your clipboard is empty. Add symbols to it from the ',
+        createElement('a', { href: '#/standards' }, 'Catalog'),
+        ', then come back here.')
+      : null,
+    clipboard.loaded && clipboard.total > 0
+      ? createElement(
+        'div',
+        { className: 'symbol-set-builder-results' },
+        createElement('div', { className: 'symbol-set-builder-results-bar' },
+          createElement('label', { className: 'symbol-set-builder-select-all' },
+            createElement('input', {
+              type: 'checkbox',
+              disabled: clipboardAddable.length === 0,
+              checked: allClipboardSelected,
+              onChange: toggleAllClipboard,
+              'aria-label': 'Select all clipboard symbols that can be added',
+            }),
+            createElement('span', null, `Select all that can be added (${clipboardAddable.length})`),
+          ),
+          createElement('div', { className: 'set-admin-actions' },
+            createElement('button', {
+              type: 'button',
+              className: 'action-button primary compact',
+              onClick: addSelectedClipboardToSet,
+              disabled: clipboardSelected.length === 0,
+              'aria-label': 'Add selected clipboard symbols to this Symbol Set',
+            }, 'Add selected to set'),
+            createElement('button', {
+              type: 'button',
+              className: 'action-button compact',
+              onClick: addAllClipboardToSet,
+              disabled: clipboardAddable.length === 0,
+              'aria-label': 'Add every clipboard symbol that can be added to this Symbol Set',
+            }, `Add all (${clipboardAddable.length})`),
+          ),
+        ),
+        createElement('span', { className: 'set-admin-muted', role: 'status' },
+          `${clipboard.total} on clipboard · ${clipboardAddable.length} can be added`
+          + (clipboardSelected.length > 0 ? ` · ${clipboardSelected.length} selected` : '')),
+        limitAlert,
+        createElement('ul', { className: 'set-admin-list symbol-set-builder-result-list', 'aria-label': 'Clipboard symbols' },
+          clipboard.items.map((entry) => resultRow(entry, selectedClipboardIds, toggleClipboardSelection)),
+          clipboard.unavailable.map((entry) => createElement('li', { key: `unavailable-${entry.slug}`, className: 'symbol-set-builder-result muted' },
+            createElement('span', { className: 'symbol-set-builder-result-text' },
+              createElement('span', { className: 'symbol-set-builder-name' },
+                createElement('strong', null, [entry.name, entry.displayId].filter(Boolean).join(' · ') || entry.slug),
+                createElement('span', { className: 'symbol-set-builder-badge unavailable' }, 'Unavailable'),
+              ),
+              createElement('span', { className: 'set-admin-muted' }, 'Can no longer be added to a Symbol Set.'),
+            ),
+          )),
+        ),
+      )
+      : null,
+  );
+
+  const searchCard = createElement(
+    'div',
+    { className: 'symbol-set-builder-card symbol-set-builder-search' },
+    createElement('div', { className: 'symbol-set-builder-card-head' },
+      createElement('h3', null, '1. Find symbols'),
+    ),
+    createElement(
+      'div',
+      { className: 'symbol-set-builder-find-tabs', role: 'tablist', 'aria-label': 'Ways to find symbols', onKeyDown: onFindTabKeyDown },
+      FIND_VIEWS.map((view) => {
+        const active = view.key === findView;
+        return createElement('button', {
+          key: view.key,
+          id: findTabId(view.key),
+          type: 'button',
+          role: 'tab',
+          'aria-selected': active,
+          'aria-controls': FIND_PANEL_ID,
+          tabIndex: active ? 0 : -1,
+          className: `symbol-set-builder-find-tab${active ? ' active' : ''}`,
+          onClick: () => selectFindView(view.key),
+        },
+        view.label,
+        view.key === 'clipboard' && clipboard.loaded
+          ? createElement('span', { className: 'symbol-set-builder-find-tab-count' }, clipboard.total)
+          : null);
+      }),
+    ),
+    createElement('div', { id: FIND_PANEL_ID, role: 'tabpanel', 'aria-labelledby': findTabId(findView) },
+      findView === 'clipboard' ? clipboardView : searchView,
+    ),
   );
 
   const summaryBlock = items.length > 0

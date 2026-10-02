@@ -317,3 +317,145 @@ def test_builder_search_paginates_all_unique_public_matches_beyond_500(monkeypat
     assert len(first_page.json()["items"]) == 200
     assert len(last_page.json()["items"]) == 101
     assert last_page.json()["items"][0]["canonicalName"] == "Public Symbol 0400"
+
+
+# --- Builder clipboard: the session's Catalog clipboard, resolved read-only ---
+
+def _ensure_clipboard_table(Session):
+    from symgov_backend.models import CatalogWorkbenchClipboard
+
+    table = CatalogWorkbenchClipboard.__table__
+    original_types = {column.name: column.type for column in table.columns}
+    original_defaults = {column.name: column.server_default for column in table.columns}
+    try:
+        for column in table.columns:
+            if column.type.__class__.__name__ == "JSONB":
+                column.type = JSON()
+                column.server_default = None
+        table.create(Session.kw["bind"], checkfirst=True)
+    finally:
+        for column in table.columns:
+            column.type = original_types[column.name]
+            column.server_default = original_defaults[column.name]
+
+
+def _save_clipboard(Session, organization_id, items, *, user_id=None):
+    from symgov_backend.catalog_workbench import save_catalog_workbench_clipboard
+
+    with Session() as session:
+        account_id = user_id or session.query(OrganizationMembership).filter(
+            OrganizationMembership.organization_id == organization_id,
+        ).one().user_id
+        save_catalog_workbench_clipboard(session, account_id, organization_id, items)
+        session.commit()
+
+
+def _clipboard_item(slug, display_name="", name=""):
+    return {"id": slug, "displayName": display_name, "name": name, "availableFormats": []}
+
+
+def _fake_public_by_slug(entries):
+    def fake(session, slugs):
+        return [entry for entry in entries if entry["slug"] in slugs]
+    return fake
+
+
+def _clipboard_client(monkeypatch, *, role="admin", public_entries=()):
+    client, Session = _stage4_client(role=role)
+    _ensure_symbol_tables(Session)
+    _ensure_review_tables(Session)
+    _ensure_clipboard_table(Session)
+    monkeypatch.setattr(symbol_set_builder_module, "_public_symbols_by_slug", _fake_public_by_slug(list(public_entries)))
+    return client, Session, _organization_id(Session)
+
+
+def _public_entry(slug, name):
+    return {"governedSymbolId": uuid.uuid4(), "catalogSymbolId": slug.upper(), "displayId": slug.upper(), "source": "public",
+            "canonicalName": name, "category": "fire", "discipline": "fire-safety", "slug": slug,
+            "organizationWide": None, "currentRevisionId": uuid.uuid4()}
+
+
+def test_builder_clipboard_resolves_items_in_clipboard_order(monkeypatch):
+    public = _public_entry("public-fire-alarm", "Public Fire Alarm")
+    client, Session, organization_id = _clipboard_client(monkeypatch, public_entries=[public])
+    org_symbol_id = _approved_organization_symbol(Session, organization_id, "Org Beacon", organization_wide=True)
+    _save_clipboard(Session, organization_id, [
+        _clipboard_item("org-beacon"),
+        _clipboard_item("public-fire-alarm"),
+    ])
+
+    response = client.get("/api/v1/org/me/symbol-sets/builder-clipboard")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total"] == 2
+    assert [item["governedSymbolId"] for item in body["items"]] == [str(org_symbol_id), str(public["governedSymbolId"])]
+    assert body["items"][0]["source"] == "organization"
+    assert body["items"][0]["organizationWide"] is True
+    assert body["unavailable"] == []
+
+
+def test_builder_clipboard_reports_items_that_can_no_longer_be_added(monkeypatch):
+    client, Session, organization_id = _clipboard_client(monkeypatch)
+    _draft_organization_symbol(Session, organization_id, "Unapproved Draft")
+    _save_clipboard(Session, organization_id, [
+        _clipboard_item("unapproved-draft", "ACME-S-0007", "Unapproved Draft"),
+        _clipboard_item("withdrawn-symbol", "0003-12", "Withdrawn symbol"),
+    ])
+
+    body = client.get("/api/v1/org/me/symbol-sets/builder-clipboard").json()
+    assert body["total"] == 2
+    assert body["items"] == []
+    assert body["unavailable"] == [
+        {"slug": "unapproved-draft", "displayId": "ACME-S-0007", "name": "Unapproved Draft"},
+        {"slug": "withdrawn-symbol", "displayId": "0003-12", "name": "Withdrawn symbol"},
+    ]
+
+
+def test_builder_clipboard_is_empty_without_a_saved_clipboard(monkeypatch):
+    client, _, _ = _clipboard_client(monkeypatch)
+
+    response = client.get("/api/v1/org/me/symbol-sets/builder-clipboard")
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "unavailable": [], "total": 0}
+
+
+def test_builder_clipboard_reads_only_this_organization_sessions_clipboard(monkeypatch):
+    client, Session, organization_id = _clipboard_client(monkeypatch, public_entries=[
+        _public_entry("public-fire-alarm", "Public Fire Alarm"),
+    ])
+    with Session() as session:
+        user_id = session.query(OrganizationMembership).one().user_id
+    # The same account's personal clipboard, and its clipboard in another
+    # organization, are different scopes.
+    _save_clipboard(Session, None, [_clipboard_item("public-fire-alarm")], user_id=user_id)
+    _save_clipboard(Session, uuid.uuid4(), [_clipboard_item("public-fire-alarm")], user_id=user_id)
+
+    body = client.get("/api/v1/org/me/symbol-sets/builder-clipboard").json()
+    assert body["total"] == 0
+
+
+def test_builder_clipboard_hides_organization_symbols_from_a_plain_member(monkeypatch):
+    client, Session, organization_id = _clipboard_client(monkeypatch, role="user")
+    _approved_organization_symbol(Session, organization_id, "Org Beacon")
+    _save_clipboard(Session, organization_id, [_clipboard_item("org-beacon")])
+
+    body = client.get("/api/v1/org/me/symbol-sets/builder-clipboard").json()
+    assert body["items"] == []
+    assert [entry["slug"] for entry in body["unavailable"]] == ["org-beacon"]
+
+
+def test_builder_clipboard_never_writes_the_clipboard(monkeypatch):
+    from symgov_backend.models import CatalogWorkbenchClipboard
+
+    client, Session, organization_id = _clipboard_client(monkeypatch)
+    _save_clipboard(Session, organization_id, [_clipboard_item("withdrawn-symbol")])
+    with Session() as session:
+        before = session.query(CatalogWorkbenchClipboard).one()
+        before_items, before_updated = list(before.items_json), before.updated_at
+
+    client.get("/api/v1/org/me/symbol-sets/builder-clipboard")
+
+    with Session() as session:
+        after = session.query(CatalogWorkbenchClipboard).one()
+        assert after.items_json == before_items
+        assert after.updated_at == before_updated

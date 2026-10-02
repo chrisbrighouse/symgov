@@ -603,3 +603,32 @@ def test_the_catalog_tab_marks_rows_in_the_active_set(search_database, set_tab, 
     assert all("inActiveSet" not in item for item in unmarked["items"])
     assert "activeSet" not in unmarked
     assert all("inActiveSet" not in item for item in _search(personal_client, projectId=project_id)["items"])
+
+
+def test_the_builder_resolves_the_sessions_clipboard_by_slug(set_tab):
+    """The Builder's read-only view of the Catalog clipboard: the public slug
+    query is PostgreSQL-only, so it is checked here against the live join."""
+    admin, seeded = set_tab["admin"], set_tab["seeded"]
+    private = admin.get("/api/v1/org/me/symbol-sets/builder-search", params={"q": "Setorg relief"}).json()["items"]
+    assert [item["governedSymbolId"] for item in private] == [set_tab["private_id"]]
+    clipboard = [
+        {"id": "smoke-detector", "displayName": "TST-1", "name": "Smoke detector", "availableFormats": []},
+        {"id": private[0]["slug"], "displayName": "", "name": "Setorg relief valve", "availableFormats": []},
+        {"id": "no-such-symbol", "displayName": "TST-99", "name": "Gone", "availableFormats": []},
+        {"id": "gate-valve", "displayName": "TST-2", "name": "Gate valve", "availableFormats": []},
+    ]
+    saved = admin.put("/api/v1/published/workbench/clipboard", json={"items": clipboard})
+    assert saved.status_code == 200, saved.text
+
+    response = admin.get("/api/v1/org/me/symbol-sets/builder-clipboard")
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 4
+    assert [item["governedSymbolId"] for item in body["items"]] == [
+        seeded["Smoke detector"]["symbol_id"], set_tab["private_id"], seeded["Gate valve"]["symbol_id"],
+    ]
+    assert [item["source"] for item in body["items"]] == ["public", "organization", "public"]
+    assert body["items"][0]["displayId"] == "TST-1"
+    assert body["unavailable"] == [{"slug": "no-such-symbol", "displayId": "TST-99", "name": "Gone"}]
+    # Read-only: the clipboard is exactly as saved.
+    assert admin.get("/api/v1/published/workbench").json()["clipboard"] == clipboard

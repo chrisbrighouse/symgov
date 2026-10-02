@@ -357,6 +357,18 @@ class SymbolSetBuilderSearchResponse(BaseModel):
     total: int
 
 
+class SymbolSetBuilderClipboardUnavailableResponse(BaseModel):
+    slug: str
+    displayId: str | None = None
+    name: str | None = None
+
+
+class SymbolSetBuilderClipboardResponse(BaseModel):
+    items: list[SymbolSetBuilderSearchEntryResponse]
+    unavailable: list[SymbolSetBuilderClipboardUnavailableResponse]
+    total: int
+
+
 class ProfileUpgradeOptionResponse(BaseModel):
     years: int
     totalPricePence: int
