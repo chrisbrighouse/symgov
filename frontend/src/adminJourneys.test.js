@@ -4,6 +4,9 @@ import assert from 'node:assert/strict';
 import {
   canAccessOrganizationAdmin,
   canAccessPlatformAdmin,
+  canAccessPlatformWorkspace,
+  canManageOrganizationUsers,
+  isCustomerOrganizationSession,
   runWithStepUp,
 } from './adminJourneys.js';
 
@@ -150,5 +153,43 @@ describe('backend-authoritative admin access', () => {
       assert.equal(attempts, 1);
       assert.equal(cleared, 1);
     }
+  });
+});
+
+function adminUser({ roles = ['admin'], code = 'ACME', baseRole = 'admin', mode = 'organization' } = {}) {
+  const organizationId = 'org-1';
+  return {
+    roles,
+    session: mode === 'organization'
+      ? { mode, purpose: 'application', activeOrganizationId: organizationId }
+      : { mode, purpose: 'application', activeOrganizationId: null },
+    organization: mode === 'organization' ? { id: organizationId, code, baseRole } : null,
+    capabilities: { organizationAdminEnabled: true },
+  };
+}
+
+describe('platform workspace versus organization user management', () => {
+  it('keeps the global admin role out of the platform workspace in a customer organization', () => {
+    const user = adminUser();
+    assert.equal(isCustomerOrganizationSession(user), true);
+    assert.equal(canAccessPlatformWorkspace(user), false);
+    assert.equal(canManageOrganizationUsers(user), true);
+  });
+
+  it('grants organization user management to an Organization Admin without the global role', () => {
+    const user = adminUser({ roles: [] });
+    assert.equal(canAccessPlatformWorkspace(user), false);
+    assert.equal(canManageOrganizationUsers(user), true);
+  });
+
+  it('denies user management to an ordinary organization member', () => {
+    assert.equal(canManageOrganizationUsers(adminUser({ roles: [], baseRole: 'user' })), false);
+  });
+
+  it('keeps the platform workspace for admins in a personal or Symgov session', () => {
+    assert.equal(canAccessPlatformWorkspace(adminUser({ mode: 'personal' })), true);
+    assert.equal(canAccessPlatformWorkspace(adminUser({ code: 'symgov' })), true);
+    assert.equal(canManageOrganizationUsers(adminUser({ code: 'symgov' })), false);
+    assert.equal(canAccessPlatformWorkspace(adminUser({ mode: 'personal', roles: [] })), false);
   });
 });

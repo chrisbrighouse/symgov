@@ -3,14 +3,20 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..auth import AuthenticatedUser, hash_pin, normalize_display_name, normalize_email, normalize_roles, revoke_all_user_sessions, user_roles, utc_now, validate_pin, verify_pin
 from ..auth_security import login_throttle_policy, recover_throttle_bucket
-from ..dependencies import get_db_session, require_any_role, require_i25_protected_mutation, require_platform_admin
-from ..models import User, UserRole, UserSession, UserSubscription
+from ..dependencies import (
+    UserManagementScope,
+    get_db_session,
+    require_i25_protected_mutation,
+    require_platform_operator,
+    require_user_management_scope,
+)
+from ..models import OrganizationMembership, User, UserRole, UserSession, UserSubscription
 from ..schemas import (
     APIHealthResponse,
     AdminAuthThrottleRecoveryRequest,
@@ -76,6 +82,38 @@ def _get_user(session: Session, user_id: str) -> User:
     return user
 
 
+def _active_member_ids(organization_id: uuid.UUID):
+    return (
+        select(OrganizationMembership.user_id)
+        .where(OrganizationMembership.organization_id == organization_id, OrganizationMembership.status == "active")
+        .scalar_subquery()
+    )
+
+
+def _require_manageable(session: Session, scope: UserManagementScope, user: User) -> None:
+    """An Organization Admin may act only on accounts that belong to their organization alone.
+
+    A PIN reset or deactivation acts on the whole account, so on someone who is
+    also a member elsewhere it would reach into that other organization.
+    Non-members read as 404, as they cannot be listed either.
+    """
+    if scope.organization_id is None:
+        return
+    memberships = (
+        session.query(OrganizationMembership.organization_id)
+        .filter(OrganizationMembership.user_id == user.id, OrganizationMembership.status == "active")
+        .all()
+    )
+    organization_ids = {organization_id for (organization_id,) in memberships}
+    if scope.organization_id not in organization_ids:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if organization_ids - {scope.organization_id}:
+        raise HTTPException(
+            status_code=403,
+            detail="This user also belongs to another organization; ask a Symgov platform administrator.",
+        )
+
+
 def _parse_payload(model, request: dict):
     return model.model_validate(request.get("payload") or request)
 
@@ -92,7 +130,7 @@ def health() -> APIHealthResponse:
 async def recover_login_throttle(
     http_request: Request,
     session: Session = Depends(get_db_session),
-    current: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    current: AuthenticatedUser = Depends(require_platform_operator),
     _: AuthenticatedUser = Depends(require_i25_protected_mutation),
     settings: SymgovAPISettings = Depends(get_settings),
 ) -> dict[str, bool | int]:
@@ -124,7 +162,7 @@ def list_users(
     sort: str = Query(default="name", pattern="^(name|email|tier|start|expiry|status)$"),
     sort_direction: str = Query(default="asc", alias="sortDirection", pattern="^(asc|desc)$"),
     session: Session = Depends(get_db_session),
-    _: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    scope: UserManagementScope = Depends(require_user_management_scope),
 ) -> AdminUserListResponse:
     expired_rows = (
         session.query(User, UserSubscription)
@@ -141,6 +179,8 @@ def list_users(
         reconcile_subscription(session, expired_user, subscription=expired_subscription)
     session.flush()
     query = session.query(User, UserSubscription).join(UserSubscription, UserSubscription.user_id == User.id)
+    if scope.organization_id is not None:
+        query = query.filter(User.id.in_(_active_member_ids(scope.organization_id)))
     if not include_deleted:
         query = query.filter(User.deleted_at.is_(None))
     if q.strip():
@@ -185,7 +225,7 @@ def list_users(
 async def create_user(
     http_request: Request,
     session: Session = Depends(get_db_session),
-    _: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    _: AuthenticatedUser = Depends(require_platform_operator),
     __: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     payload = _parse_payload(AdminUserCreateRequest, await http_request.json())
@@ -224,11 +264,16 @@ async def update_user(
     user_id: str,
     http_request: Request,
     session: Session = Depends(get_db_session),
-    _: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    scope: UserManagementScope = Depends(require_user_management_scope),
     __: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     payload = _parse_payload(AdminUserUpdateRequest, await http_request.json())
+    if scope.organization_id is not None and (payload.roles is not None or payload.displayName is not None):
+        raise HTTPException(status_code=403, detail="Roles and display names are managed by Symgov platform administrators.")
     user = _get_user(session, user_id)
+    _require_manageable(session, scope, user)
+    if scope.organization_id is not None and payload.isActive is False and str(user.id) == scope.actor.id:
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account.")
     subscription = ensure_subscription(session, user)
     if payload.displayName is not None:
         try:
@@ -271,7 +316,7 @@ async def _months_request(http_request: Request) -> AdminSubscriptionMonthsReque
 @legacy_router.post("/admin/users/{user_id}/subscription/upgrade", response_model=AdminUserMutationResponse, include_in_schema=False)
 async def upgrade_subscription(
     user_id: str, http_request: Request, session: Session = Depends(get_db_session),
-    current: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    current: AuthenticatedUser = Depends(require_platform_operator),
     _: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     payload = await _months_request(http_request)
@@ -290,7 +335,7 @@ async def upgrade_subscription(
 @legacy_router.post("/admin/users/{user_id}/subscription/adjust", response_model=AdminUserMutationResponse, include_in_schema=False)
 async def adjust_subscription(
     user_id: str, http_request: Request, session: Session = Depends(get_db_session),
-    current: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    current: AuthenticatedUser = Depends(require_platform_operator),
     _: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     payload = await _months_request(http_request)
@@ -307,7 +352,7 @@ async def adjust_subscription(
 @legacy_router.post("/admin/users/{user_id}/subscription/cancel", response_model=AdminUserMutationResponse, include_in_schema=False)
 def cancel_subscription(
     user_id: str, session: Session = Depends(get_db_session),
-    current: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    current: AuthenticatedUser = Depends(require_platform_operator),
     _: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     user = _get_user(session, user_id)
@@ -323,7 +368,7 @@ def cancel_subscription(
 @legacy_router.delete("/admin/users/{user_id}", response_model=AdminUserMutationResponse, include_in_schema=False)
 def delete_user(
     user_id: str, session: Session = Depends(get_db_session),
-    current: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    current: AuthenticatedUser = Depends(require_platform_operator),
     _: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     user = _get_user(session, user_id)
@@ -344,11 +389,12 @@ def delete_user(
 @legacy_router.post("/admin/users/{user_id}/reset-pin", response_model=AdminUserMutationResponse, include_in_schema=False)
 async def reset_user_pin(
     user_id: str, http_request: Request, session: Session = Depends(get_db_session),
-    _: AuthenticatedUser = Depends(require_any_role({"admin"})),
+    scope: UserManagementScope = Depends(require_user_management_scope),
     __: AuthenticatedUser = Depends(require_i25_protected_mutation),
 ) -> AdminUserMutationResponse:
     payload = _parse_payload(AdminUserResetPinRequest, await http_request.json())
     user = _get_user(session, user_id)
+    _require_manageable(session, scope, user)
     try:
         pin = validate_pin(payload.pin)
     except ValueError as exc:

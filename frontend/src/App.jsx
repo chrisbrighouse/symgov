@@ -68,7 +68,7 @@ import CatalogDeveloperHub from './CatalogDeveloperHub.jsx';
 import ProfilePage from './ProfilePage.jsx';
 import OrganizationSelectionPage, { OrganizationSwitchPage } from './OrganizationSelectionPage.js';
 import { adminRouteElements } from './adminRoutes.js';
-import { canAccessOrganizationAdmin, canAccessPlatformAdmin } from './adminJourneys.js';
+import { canAccessOrganizationAdmin, canAccessPlatformAdmin, canAccessPlatformWorkspace, canManageOrganizationUsers } from './adminJourneys.js';
 import { semanticReviewRouteElements } from './semanticReviewRoutes.js';
 import { canAccessSemanticReview } from './semanticReviewJourney.js';
 import { edRouteElements } from './edRoutes.js';
@@ -520,6 +520,28 @@ function RequireAnyRole({ roles, children }) {
   );
 }
 
+// 'platform' for a platform operator, 'organization' for an Organization Admin
+// in their own organization's session (Manage users only), otherwise null.
+function adminAccessScope(user) {
+  if (canAccessPlatformWorkspace(user)) return 'platform';
+  if (canManageOrganizationUsers(user)) return 'organization';
+  return null;
+}
+
+function RequireAdminAccess({ platformOnly = false, children }) {
+  const auth = useAuth();
+  const scope = adminAccessScope(auth.user);
+  const allowed = platformOnly ? scope === 'platform' : Boolean(scope);
+
+  return (
+    <RequireAuth>
+      {allowed
+        ? (typeof children === 'function' ? children(scope) : children)
+        : <AccessDenied roles={platformOnly ? ['platform admin'] : ['admin', 'organization admin']} />}
+    </RequireAuth>
+  );
+}
+
 function StatusPanel({ title, message }) {
   return (
     <section className="workspace-empty-state">
@@ -566,9 +588,9 @@ function AppContent() {
           <Route path="/switch-organization" element={<RequireAuth><OrganizationSwitchPage auth={auth} /></RequireAuth>} />
           <Route path="/change-pin" element={<RequireAuth><ChangePinPage /></RequireAuth>} />
           <Route path="/profile" element={<RequireAuth><ProfilePage auth={auth} /></RequireAuth>} />
-          <Route path="/workspace" element={<RequireAnyRole roles={['admin']}><WorkspacePage /></RequireAnyRole>} />
-          <Route path="/workspace/users" element={<RequireAnyRole roles={['admin']}><AdminUsersPage /></RequireAnyRole>} />
-          <Route path="/workspace/llm" element={<RequireAnyRole roles={['admin']}><AdminLlmPage /></RequireAnyRole>} />
+          <Route path="/workspace" element={<RequireAdminAccess>{(scope) => (scope === 'platform' ? <WorkspacePage /> : <OrganizationAdminWorkspacePage />)}</RequireAdminAccess>} />
+          <Route path="/workspace/users" element={<RequireAdminAccess><AdminUsersPage /></RequireAdminAccess>} />
+          <Route path="/workspace/llm" element={<RequireAdminAccess platformOnly><AdminLlmPage /></RequireAdminAccess>} />
           {adminRouteElements(auth, RequireAuth)}
           {semanticReviewRouteElements(auth, RequireAnyRole)}
           <Route path="/organization/symbols" element={<RequireAuth><OrganizationSymbolDraftsPage auth={auth} /></RequireAuth>} />
@@ -796,7 +818,7 @@ function SideRail() {
   const canSubmit = hasAnyRole(user, ['admin', 'submitter']);
   const canReview = hasAnyRole(user, ['admin', 'reviewer']);
   const canIntegrate = hasAnyRole(user, ['admin', 'integrator']);
-  const canAdmin = hasAnyRole(user, ['admin']);
+  const canAdmin = Boolean(adminAccessScope(user));
   const canAdminOrganization = canAccessOrganizationAdmin(user);
   const canAdminPlatform = canAccessPlatformAdmin(user);
   const canUseOrganizationSymbolDrafts = canMountOrganizationSymbolDrafts({ user });
@@ -6543,7 +6565,33 @@ function useScottSourceDiscoveryControls({
   };
 }
 
+function OrganizationAdminWorkspacePage() {
+  const auth = useAuth();
+  const organizationName = auth.user?.organization?.displayName || 'Organization';
+
+  return (
+    <section className="experience-shell queue-monitor-shell">
+      <div className="workspace-titlebar glass-panel">
+        <div>
+          <p className="eyebrow">ORGANIZATION ADMIN</p>
+          <h2>{organizationName} Admin</h2>
+        </div>
+        <div className="workspace-titlebar-tools">
+          <div className="workspace-admin-link-group">
+            <NavLink to="/workspace/users" className="workspace-admin-link">
+              Manage users
+            </NavLink>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function AdminUsersPage() {
+  const auth = useAuth();
+  const organizationScoped = adminAccessScope(auth.user) === 'organization';
+  const organizationName = auth.user?.organization?.displayName || 'your organization';
   const [state, setState] = useState({ loading: true, items: [], total: 0, message: 'Loading users…' });
   const [form, setForm] = useState({ email: '', displayName: '', roles: [], pin: '4590', isActive: true });
   const [createBusy, setCreateBusy] = useState(false);
@@ -6768,14 +6816,18 @@ function AdminUsersPage() {
     <section className="experience-shell">
       <div className="hero-panel glass-panel workspace-hero">
         <div>
-          <p className="eyebrow">Workspace administration</p>
+          <p className="eyebrow">{organizationScoped ? 'Organization administration' : 'Workspace administration'}</p>
           <h2>Manage users</h2>
-          <p className="title-support">Create Free accounts, manage Plus periods and roles, and safely remove users.</p>
+          <p className="title-support">
+            {organizationScoped
+              ? `Members of ${organizationName}. Activate or deactivate accounts and reset PINs; roles and subscriptions are managed by Symgov.`
+              : 'Create Free accounts, manage Plus periods and roles, and safely remove users.'}
+          </p>
         </div>
       </div>
       <p className="page-status-text">{state.message}</p>
       {toast.message ? <p className={`admin-toast ${toast.kind}`}>{toast.message}</p> : null}
-      <form className="glass-panel pane form-panel" onSubmit={handleCreate}>
+      {organizationScoped ? null : <form className="glass-panel pane form-panel" onSubmit={handleCreate}>
         <SectionHeading title="Create user" subtitle="New users start on Free and must change PIN on first login" />
         <label className="field">
           <span>Email</span>
@@ -6793,9 +6845,12 @@ function AdminUsersPage() {
           <p className="page-status-text">Upgrade the user to Plus after creation before assigning privileged roles.</p>
           <button type="submit" className="action-button primary create-user-submit" disabled={createBusy}>{createBusy ? 'Saving…' : 'Create user'}</button>
         </div>
-      </form>
+      </form>}
       <section className="glass-panel pane">
-        <SectionHeading title="Existing users" subtitle="Subscription, account status and role management" />
+        <SectionHeading
+          title={organizationScoped ? 'Organization members' : 'Existing users'}
+          subtitle={organizationScoped ? 'Account status and PIN resets for your organization' : 'Subscription, account status and role management'}
+        />
         <form className="admin-user-search" onSubmit={submitUserSearch}>
           <label className="field"><span>Search users</span><input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="Name or email" /></label>
           <button type="submit" className="action-button compact">Search</button>
@@ -6848,7 +6903,7 @@ function AdminUsersPage() {
                             <input
                               type="checkbox"
                               checked={user.roles.includes(role)}
-                              disabled={isRowBusy(user.id) || user.subscription?.tier !== 'plus' || (user.subscription?.isProtected && role === 'admin')}
+                              disabled={organizationScoped || isRowBusy(user.id) || user.subscription?.tier !== 'plus' || (user.subscription?.isProtected && role === 'admin')}
                               onChange={(event) => toggleUserRole(user, role, event.target.checked)}
                             />
                             <span>{role}</span>
@@ -6858,7 +6913,7 @@ function AdminUsersPage() {
                     </td>
                     <td>
                       <div className="action-stack horizontal admin-user-row-actions">
-                        {user.subscription?.tier === 'plus' ? (
+                        {organizationScoped ? null : user.subscription?.tier === 'plus' ? (
                           <>
                             {!user.subscription?.isProtected ? <button type="button" className="action-button compact" disabled={isRowBusy(user.id)} onClick={() => adjustSubscription(user)}>Adjust months</button> : null}
                             {!user.subscription?.isProtected ? <button type="button" className="action-button compact danger" disabled={isRowBusy(user.id)} onClick={() => cancelSubscription(user)}>Cancel Plus</button> : null}
@@ -6868,7 +6923,7 @@ function AdminUsersPage() {
                           ? <span className="protected-owner-label">Protected owner</span>
                           : <button type="button" className="action-button compact" disabled={isRowBusy(user.id)} onClick={() => toggleActive(user)}>{isRowBusy(user.id) ? 'Saving…' : (user.isActive ? 'Deactivate' : 'Activate')}</button>}
                         <button type="button" className="action-button compact" disabled={isRowBusy(user.id)} onClick={() => openPinResetDialog(user)}>{isRowBusy(user.id) ? 'Saving…' : 'Reset PIN'}</button>
-                        {!user.subscription?.isProtected ? <button type="button" className="action-button compact danger" disabled={isRowBusy(user.id)} onClick={() => removeUser(user)}>Remove user</button> : null}
+                        {!organizationScoped && !user.subscription?.isProtected ? <button type="button" className="action-button compact danger" disabled={isRowBusy(user.id)} onClick={() => removeUser(user)}>Remove user</button> : null}
                       </div>
                     </td>
                   </tr>

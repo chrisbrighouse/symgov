@@ -40,6 +40,33 @@ export function canAccessOrganizationAdmin(user) {
   );
 }
 
+const PLATFORM_ORGANIZATION_CODE = 'symgov';
+
+// The global `admin` role is not scoped to an organization. In a session bound
+// to a customer organization it does not unlock platform administration: the
+// holder acts for that organization, and Organization Admin is the authority.
+export function isCustomerOrganizationSession(user) {
+  return Boolean(
+    user
+    && user.session?.mode === 'organization'
+    && user.session?.activeOrganizationId
+    && String(user.organization?.code || '').trim().toLowerCase() !== PLATFORM_ORGANIZATION_CODE
+  );
+}
+
+export function canAccessPlatformWorkspace(user) {
+  return Boolean(
+    Array.isArray(user?.roles)
+    && user.roles.includes('admin')
+    && !isCustomerOrganizationSession(user)
+  );
+}
+
+// Manage users narrowed to the active organization's members.
+export function canManageOrganizationUsers(user) {
+  return isCustomerOrganizationSession(user) && canAccessOrganizationAdmin(user);
+}
+
 export function canAccessPlatformAdmin(user) {
   return Boolean(
     hasActiveOrganizationContext(user)

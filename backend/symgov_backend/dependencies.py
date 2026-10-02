@@ -4,6 +4,7 @@ from collections.abc import Generator
 from dataclasses import dataclass
 import ipaddress
 import json
+import uuid
 from types import MappingProxyType
 from typing import Callable
 from urllib.parse import urlsplit
@@ -507,9 +508,59 @@ def require_workspace_access(
     current_user: AuthenticatedUser = Depends(require_user),
 ) -> AuthenticatedUser:
     policy = classify_workspace_policy(request.scope.get("method"), matched_route_template(request))
+    if policy == "admin" and is_customer_organization_session(current_user):
+        raise HTTPException(status_code=403, detail=PLATFORM_OPERATOR_ONLY_DETAIL)
     if "admin" in current_user.roles or (policy == "reviewer_admin" and "reviewer" in current_user.roles):
         return current_user
     raise HTTPException(status_code=403, detail="Insufficient role for this operation.")
+
+
+PLATFORM_ORGANIZATION_CODE = "symgov"
+PLATFORM_OPERATOR_ONLY_DETAIL = "Platform administration is not available in a customer organization session."
+
+
+def is_customer_organization_session(current_user: AuthenticatedUser) -> bool:
+    """True when the session is bound to an organization other than Symgov itself.
+
+    The global `admin` role is not scoped to an organization, so inside such a
+    session it must not unlock platform administration: there the holder is
+    acting for their own organization, and Organization Admin is the authority.
+    """
+    return (
+        current_user.session_mode == "organization"
+        and current_user.active_organization_id is not None
+        and str(current_user.organization_code or "").strip().lower() != PLATFORM_ORGANIZATION_CODE
+    )
+
+
+def require_platform_operator(current_user: AuthenticatedUser = Depends(require_user)) -> AuthenticatedUser:
+    if "admin" not in current_user.roles:
+        raise HTTPException(status_code=403, detail="Insufficient role for this operation.")
+    if is_customer_organization_session(current_user):
+        raise HTTPException(status_code=403, detail=PLATFORM_OPERATOR_ONLY_DETAIL)
+    return current_user
+
+
+@dataclass(frozen=True)
+class UserManagementScope:
+    """Who is managing users, and over which accounts.
+
+    `organization_id` is None for a platform operator (every account) and the
+    active organization for an Organization Admin (that organization's members).
+    """
+
+    actor: AuthenticatedUser
+    organization_id: uuid.UUID | None
+
+
+def require_user_management_scope(current_user: AuthenticatedUser = Depends(require_user)) -> UserManagementScope:
+    if is_customer_organization_session(current_user):
+        if current_user.organization_base_role != "admin":
+            raise HTTPException(status_code=403, detail="Organization Admin privileges are required.")
+        return UserManagementScope(actor=current_user, organization_id=uuid.UUID(str(current_user.active_organization_id)))
+    if "admin" not in current_user.roles:
+        raise HTTPException(status_code=403, detail="Insufficient role for this operation.")
+    return UserManagementScope(actor=current_user, organization_id=None)
 
 
 def require_role(role: str) -> Callable[[AuthenticatedUser], AuthenticatedUser]:

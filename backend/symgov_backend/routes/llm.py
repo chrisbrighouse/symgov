@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from starlette.concurrency import run_in_threadpool
 
-from ..dependencies import get_db_session, require_any_role, require_user
+from ..dependencies import get_db_session, require_platform_operator, require_user
 from ..db import create_session_factory
 from ..settings import SymgovAPISettings, get_settings, runtime_environment
 from ..schemas import (
@@ -43,7 +43,7 @@ def _build_settings_response() -> LLMSettingsResponse:
 @router.get("/admin/llm/settings", response_model=LLMSettingsResponse)
 @legacy_router.get("/admin/llm/settings", response_model=LLMSettingsResponse, include_in_schema=False)
 def get_llm_settings(
-    _=Depends(require_any_role({"admin"})),
+    _=Depends(require_platform_operator),
 ) -> LLMSettingsResponse:
     return _build_settings_response()
 
@@ -52,7 +52,7 @@ def get_llm_settings(
 @legacy_router.patch("/admin/llm/settings", response_model=LLMSettingsResponse, include_in_schema=False)
 async def update_llm_settings(
     http_request: Request,
-    _=Depends(require_any_role({"admin"})),
+    _=Depends(require_platform_operator),
 ) -> LLMSettingsResponse:
     request_json = await http_request.json()
     payload = LLMSettingsUpdateRequest.model_validate(request_json.get("payload") or request_json)
@@ -76,7 +76,7 @@ async def update_llm_settings(
 @router.get("/admin/llm/openrouter-models", response_model=OpenRouterModelListResponse)
 @legacy_router.get("/admin/llm/openrouter-models", response_model=OpenRouterModelListResponse, include_in_schema=False)
 def list_openrouter_models(
-    _=Depends(require_any_role({"admin"})),
+    _=Depends(require_platform_operator),
 ) -> OpenRouterModelListResponse:
     try:
         models = fetch_openrouter_models()
@@ -90,7 +90,7 @@ def list_openrouter_models(
 async def test_llm(
     http_request: Request,
     settings: SymgovAPISettings = Depends(get_settings),
-    _=Depends(require_any_role({"admin"})),
+    _=Depends(require_platform_operator),
 ) -> LLMChatResponse:
     request_json = await http_request.json()
     payload = LLMChatRequest.model_validate(request_json.get("payload") or request_json)
@@ -199,7 +199,7 @@ def get_llm_usage(
     period: str = "day",
     anchor: str | None = None,
     session=Depends(get_db_session),
-    _=Depends(require_any_role({"admin"})),
+    _=Depends(require_platform_operator),
 ):
     from datetime import datetime
     from ..services import langfuse_reporting, llm_usage_ledger
