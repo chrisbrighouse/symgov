@@ -310,6 +310,33 @@ export async function fetchPlatformOrganizationUsageSummary(organizationId) {
   return requireOkWithStatus(result, 'Usage summary load failed.');
 }
 
+// --- Organization subscriptions (platform admin) ---
+
+function platformSubscriptionPath(organizationId, suffix = '') {
+  return `/platform/organizations/${encodeURIComponent(organizationId)}/subscription${suffix}`;
+}
+
+export async function fetchPlatformOrganizationSubscription(organizationId) {
+  const result = await requestJson(platformSubscriptionPath(organizationId), { cache: 'no-store' });
+  return requireOkWithStatus(result, 'Plan load failed.');
+}
+
+export async function savePlatformOrganizationSubscription(organizationId, { seatLimit, months, reason }) {
+  const result = await requestJson(platformSubscriptionPath(organizationId), {
+    method: 'PUT',
+    body: JSON.stringify({ seatLimit, months, reason }),
+  });
+  return requireOkWithStatus(result, 'Plan change failed.');
+}
+
+export async function renewPlatformOrganizationSubscription(organizationId, { months, reason }) {
+  const result = await requestJson(platformSubscriptionPath(organizationId, '/renew'), {
+    method: 'POST',
+    body: JSON.stringify({ months, reason }),
+  });
+  return requireOkWithStatus(result, 'Plan renewal failed.');
+}
+
 // --- Stage 9 WP9.8: contribution/reputation ---
 
 export async function fetchMyContributions() {

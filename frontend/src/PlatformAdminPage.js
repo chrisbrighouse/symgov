@@ -14,6 +14,7 @@ import { PlatformOrganizationUsageDashboardSection } from './UsageDashboardSecti
 import { PlatformOrganizationContributionSection } from './ContributionSection.js';
 import { PlatformAgentFindingsDashboardSection } from './AgentFindingsDashboardSection.js';
 import { AgentConfigurationSection } from './AgentConfigurationSection.js';
+import { OrganizationSubscriptionPanel } from './OrganizationSubscriptionPanel.js';
 
 function resultValue(result) {
   if (!result.ok) {
@@ -247,6 +248,7 @@ function OrganizationRow({
     { key: 'members', label: 'Members', ariaLabel: `View members for ${organization.displayName}` },
     { key: 'usage', label: 'Usage', ariaLabel: `View usage dashboard for ${organization.displayName}` },
     { key: 'contributions', label: 'Contributions', ariaLabel: `View contributions for ${organization.displayName}` },
+    { key: 'plan', label: 'Plan', ariaLabel: `View plan for ${organization.displayName}` },
     agentOversightUiEnabled
       ? { key: 'findings', label: 'Agent findings', ariaLabel: `View Organization Steward findings for ${organization.displayName}` }
       : null,
@@ -434,12 +436,13 @@ function detailTabId(key) {
  */
 function OrganizationDetailPane({
   organization, view, onSelectView, onClose, agentOversightUiEnabled,
-  members, membersLoading, membersError, onReactivateMembership,
+  members, membersLoading, membersError, onReactivateMembership, onProtect,
 }) {
   const views = [
     { key: 'members', label: 'Members' },
     { key: 'usage', label: 'Usage' },
     { key: 'contributions', label: 'Contributions' },
+    { key: 'plan', label: 'Plan' },
     agentOversightUiEnabled ? { key: 'findings', label: 'Agent findings' } : null,
   ].filter(Boolean);
   const currentView = views.some((entry) => entry.key === view) ? view : views[0].key;
@@ -508,6 +511,9 @@ function OrganizationDetailPane({
             organizationId: organization.id,
             organizationLabel: organization.displayName,
           }))
+        : null,
+      currentView === 'plan'
+        ? createElement(OrganizationSubscriptionPanel, { organization, protect: onProtect })
         : null,
       currentView === 'findings' && agentOversightUiEnabled
         ? createElement(EmbeddedPanel, null, createElement(PlatformAgentFindingsDashboardSection, {
@@ -1646,6 +1652,7 @@ export function PlatformAdminPage({ auth }) {
                   membersLoading: diagnosticLoading,
                   membersError: diagnosticError,
                   onReactivateMembership: handleReactivateMembership,
+                  onProtect: protect,
                 })
               : null
           )

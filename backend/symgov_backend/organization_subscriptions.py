@@ -148,8 +148,50 @@ def set_organization_subscription(
             id=uuid.uuid4(), organization_id=organization_id, actor_id=actor_id, action=action,
             previous_seat_limit=previous_limit, new_seat_limit=seat_limit,
             previous_expires_on=previous_expiry, new_expires_on=expires_on,
-            reason=(reason or None), created_at=now,
+            # Full precision: the log is read newest-first, and several changes can
+            # land in one second.
+            reason=(reason or None), created_at=datetime.now(timezone.utc),
         )
     )
     session.flush()
     return current
+
+
+def renew_organization_subscription(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    months: int,
+    actor_id: uuid.UUID | None = None,
+    reason: str | None = None,
+    as_of: date | None = None,
+) -> OrganizationSubscription:
+    """Extend an existing plan by whole months, keeping its seat limit.
+
+    A plan still running is extended from its current expiry, so renewing early
+    loses no time. A lapsed plan restarts from today.
+    """
+    if isinstance(months, bool) or not isinstance(months, int) or months < 1:
+        raise ValueError("Renewal must be at least one month.")
+    today = as_of or today_utc()
+    current = get_organization_subscription(session, organization_id, lock=True)
+    if current is None:
+        raise ValueError("The organization has no subscription to renew.")
+    base = current.expires_on if is_subscription_active(current, as_of=today) else today
+    return set_organization_subscription(
+        session, organization_id, seat_limit=current.seat_limit,
+        expires_on=add_calendar_months(base, months), actor_id=actor_id, reason=reason, as_of=today,
+    )
+
+
+def list_subscription_events(
+    session: Session, organization_id: uuid.UUID, *, limit: int = 20
+) -> list[OrganizationSubscriptionEvent]:
+    return list(
+        session.execute(
+            select(OrganizationSubscriptionEvent)
+            .where(OrganizationSubscriptionEvent.organization_id == organization_id)
+            .order_by(OrganizationSubscriptionEvent.created_at.desc(), OrganizationSubscriptionEvent.id.desc())
+            .limit(limit)
+        ).scalars()
+    )
