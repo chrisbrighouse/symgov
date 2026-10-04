@@ -46,7 +46,7 @@ from symgov_backend.catalog_browse_search import (  # noqa: E402
 from postgres_image import POSTGRES_IMAGE, POSTGRES_READY_TIMEOUT  # noqa: E402
 from test_two_role_privilege_model_postgresql import _alembic, _docker  # noqa: E402
 
-MIGRATION_HEAD = "20261004_0068"
+MIGRATION_HEAD = "20261004_0069"
 DATABASE = "symgov_temp_probe"
 
 

@@ -497,6 +497,48 @@ class SubscriptionEvent(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class OrganizationMemberRole(Base):
+    """A Plus-level role (submitter, reviewer, integrator) held by one member
+    within one organization. It takes effect only in that organization's session
+    and only while the organization's subscription is active; it never touches
+    the member's personal roles.
+    """
+
+    __tablename__ = "organization_member_roles"
+    __table_args__ = (
+        CheckConstraint("role in ('integrator', 'submitter', 'reviewer')", name="role"),
+        CheckConstraint(
+            "(is_active = true and revoked_at is null) or (is_active = false and revoked_at is not null)",
+            name="active_revoked",
+        ),
+        Index(
+            "uq_org_member_role_active",
+            "membership_id",
+            "role",
+            unique=True,
+            postgresql_where=text("is_active = true"),
+        ),
+        Index("ix_org_member_roles_membership_active", "membership_id", "is_active"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    membership_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization_memberships.id", ondelete="RESTRICT"), nullable=False
+    )
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    assigned_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    assigned_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    assign_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revoked_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    revoke_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class OrganizationSubscription(Base):
     """Fixed-seat subscription for one organization.
 

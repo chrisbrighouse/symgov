@@ -13,6 +13,7 @@ from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session
 
 from .models import AuthOrganizationSelectionChallenge, User, UserRole, UserSession, UserSubscription
+from .organization_member_roles import organization_plan_roles
 from .subscriptions import PROTECTED_OWNER_EMAIL, ensure_subscription
 from .settings import SymgovAPISettings, get_settings
 
@@ -144,6 +145,14 @@ def create_session_token() -> tuple[str, str]:
 def user_roles(session: Session, user_id: uuid.UUID) -> tuple[str, ...]:
     rows = session.query(UserRole.role).filter(UserRole.user_id == user_id).order_by(UserRole.role).all()
     return tuple(row[0] for row in rows)
+
+
+def effective_roles(session: Session, user: User, subscription: UserSubscription, organization_context) -> tuple[str, ...]:
+    """Personal Plus keeps the user's global roles everywhere. In an organization
+    session, an active organization plan adds that member's organization-scoped
+    roles, so a free member of a subscribed organization is Plus there and only there."""
+    personal = user_roles(session, user.id) if subscription.tier == "plus" else ()
+    return tuple(sorted(set(personal) | set(organization_plan_roles(session, organization_context))))
 
 
 def upsert_user(
@@ -357,7 +366,7 @@ def current_user_from_token(
         id=str(user.id),
         email=user.email,
         display_name=user.display_name,
-        roles=user_roles(session, user.id) if subscription.tier == "plus" else (),
+        roles=effective_roles(session, user, subscription, organization_context),
         must_change_pin=bool(user.must_change_pin),
         subscription_tier=subscription.tier,
         subscription_started_on=subscription.started_on,
@@ -437,7 +446,7 @@ def authoritative_user_from_token(
         id=str(user.id),
         email=user.email,
         display_name=user.display_name,
-        roles=user_roles(session, user.id) if subscription.tier == "plus" else (),
+        roles=effective_roles(session, user, subscription, organization_context),
         must_change_pin=bool(user.must_change_pin),
         subscription_tier=subscription.tier,
         subscription_started_on=subscription.started_on,

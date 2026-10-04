@@ -19,6 +19,7 @@ from .routes.agents import router as agents_router
 from .routes.organizations import router as organizations_router
 from .routes.platform_admin import router as platform_admin_router
 from .routes.platform_organization_subscriptions import router as platform_organization_subscriptions_router
+from .routes.platform_organization_member_roles import router as platform_organization_member_roles_router
 from .routes.auth import legacy_router as legacy_auth_router
 from .routes.auth import router as auth_router
 from .routes.catalog import router as catalog_router
@@ -137,6 +138,7 @@ def create_app() -> FastAPI:
     app.include_router(organizations_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
     app.include_router(platform_admin_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
     app.include_router(platform_organization_subscriptions_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
+    app.include_router(platform_organization_member_roles_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
     app.include_router(agents_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
     app.include_router(catalog_router, prefix=settings.api_prefix, dependencies=[csrf])
     app.include_router(

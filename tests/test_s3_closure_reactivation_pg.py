@@ -28,8 +28,11 @@ from test_organization_postgresql_migration import organization_database
 @pytest.fixture(autouse=True)
 def _stub_seat_check():
     """`organization_database` is pinned to the 20260822_0030 snapshot, which has no
-    `organization_subscriptions` table (see test_organization_postgresql_migration)."""
-    with patch("symgov_backend.organization_service.assert_seat_available"):
+    `organization_subscriptions` or `organization_member_roles` table (see
+    test_organization_postgresql_migration)."""
+    with patch("symgov_backend.organization_service.assert_seat_available"), patch(
+        "symgov_backend.auth.organization_plan_roles", return_value=()
+    ):
         yield
 
 @pytest.fixture

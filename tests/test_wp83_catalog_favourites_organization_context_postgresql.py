@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from unittest.mock import patch
 from sqlalchemy.orm import sessionmaker
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -48,6 +49,14 @@ if str(BACKEND) not in sys.path:
 NEW_MIGRATION_HEAD = "20260904_0039"
 
 psycopg = pytest.importorskip("psycopg")
+
+
+@pytest.fixture(autouse=True)
+def _no_organization_plan_roles():
+    """This module pins its database to the 20260904_0039 snapshot, which has no
+    `organization_subscriptions` or `organization_member_roles` (0068, 0069)."""
+    with patch("symgov_backend.auth.organization_plan_roles", return_value=()):
+        yield
 
 
 @pytest.fixture(scope="module")
