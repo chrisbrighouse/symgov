@@ -48,7 +48,11 @@ def _stub_record_governance_usage_event():
     event behavior, so the call is stubbed here -- mirroring
     `test_organization_admin_api.py`'s own `_stub_emit_audit` pattern for
     the same reason."""
-    with patch("symgov_backend.organization_service.record_governance_usage_event"):
+    # Same reason for the default subscription: `organization_subscriptions` (0068)
+    # does not exist at this snapshot.
+    with patch("symgov_backend.organization_service.record_governance_usage_event"), patch(
+        "symgov_backend.organization_service.set_organization_subscription"
+    ):
         yield
 
 
