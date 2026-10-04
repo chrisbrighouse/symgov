@@ -27,7 +27,7 @@ from ..dependencies import (
     require_user,
     resolve_client_ip,
 )
-from ..models import AuthOrganizationSelectionChallenge, User, UserSession
+from ..models import AuthOrganizationSelectionChallenge, Organization, User, UserSession
 from ..ed_pilot import ed_pilot_allows
 from ..organization_authorization import resolve_eligible_organization_memberships
 from ..schemas import (
@@ -42,6 +42,7 @@ from ..schemas import (
     AuthUserResponse,
     SubscriptionResponse,
 )
+from ..organization_icons import organization_logo_url, organization_logo_version
 from ..settings import SymgovAPISettings, get_settings
 
 
@@ -50,6 +51,31 @@ SELECTION_CHALLENGE_ERROR = "Organization selection challenge is invalid or unav
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 legacy_router = APIRouter(tags=["auth"])
+
+
+def _logo_fields(settings: SymgovAPISettings, organization_id: str | None, version: str | None) -> dict[str, str]:
+    """`logoUrl` only for an uploaded logo; the generated fallback is never a header logo."""
+    if not (settings.organizations_enabled and settings.organization_custom_icons_enabled and organization_id):
+        return {}
+    url = organization_logo_url(organization_id, version)
+    return {"logoUrl": url} if url else {}
+
+
+def _choices_with_logos(
+    session: Session, settings: SymgovAPISettings, choices: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    """Add `logoUrl` at response time; the signed snapshot keeps its strict shape."""
+    if not (settings.organizations_enabled and settings.organization_custom_icons_enabled and choices):
+        return choices
+    ids = [uuid.UUID(item["organizationId"]) for item in choices]
+    rows = session.query(
+        Organization.id, Organization.uploaded_icon_storage_key, Organization.uploaded_icon_uploaded_at
+    ).filter(Organization.id.in_(ids)).all()
+    versions = {str(row.id): organization_logo_version(row.uploaded_icon_storage_key, row.uploaded_icon_uploaded_at) for row in rows}
+    return [
+        {**item, **_logo_fields(settings, item["organizationId"], versions.get(item["organizationId"]))}
+        for item in choices
+    ]
 
 
 def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | None = None) -> AuthUserResponse:
@@ -87,7 +113,8 @@ def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | No
         session={"purpose": user.session_purpose, "mode": user.session_mode, "activeOrganizationId": user.active_organization_id},
         organization=(
             {"id": user.active_organization_id, "code": user.organization_code, "displayName": user.organization_display_name,
-             "baseRole": user.organization_base_role, "capabilities": list(user.organization_capabilities)}
+             "baseRole": user.organization_base_role, "capabilities": list(user.organization_capabilities),
+             **_logo_fields(effective, user.active_organization_id, user.organization_logo_version)}
             if user.active_organization_id else None
         ),
         isPlatformAdmin=user.is_platform_admin,
@@ -176,6 +203,7 @@ def _issue_selection_challenge(
     user: User,
     eligible,
     now: datetime,
+    settings: SymgovAPISettings,
 ) -> AuthSelectionChallengeResponse:
     raw_token = secrets.token_urlsafe(32)
     snapshot = [
@@ -205,7 +233,7 @@ def _issue_selection_challenge(
     return AuthSelectionChallengeResponse(
         token=raw_token,
         expiresAt=expires_at.isoformat(),
-        choices=snapshot[:5],
+        choices=_choices_with_logos(session, settings, snapshot[:5]),
         page=1,
         pageSize=5,
         total=len(snapshot),
@@ -223,7 +251,7 @@ def issue_application_context(
     revoke_outstanding_selection_challenges(session, user.id, now=now)
     eligible = resolve_eligible_organization_memberships(session, user, settings)
     if len(eligible) > 1:
-        return None, _issue_selection_challenge(session, user=user, eligible=eligible, now=now)
+        return None, _issue_selection_challenge(session, user=user, eligible=eligible, now=now, settings=settings)
     selected = eligible[0] if eligible else None
     return (
         create_user_session(
@@ -271,7 +299,7 @@ async def select_organization(
             selectionChallenge=AuthSelectionChallengeResponse(
                 token=selection_request.token,
                 expiresAt=_aware_utc(initial.expires_at).isoformat(),
-                choices=snapshot[start:end],
+                choices=_choices_with_logos(session, settings, snapshot[start:end]),
                 page=selection_request.page,
                 pageSize=selection_request.pageSize,
                 total=len(snapshot),
@@ -371,7 +399,7 @@ async def switch_organization(
     if len(eligible) < 2:
         session.commit()
         raise HTTPException(status_code=409, detail="Your account does not belong to another organization.")
-    challenge = _issue_selection_challenge(session, user=user, eligible=eligible, now=now)
+    challenge = _issue_selection_challenge(session, user=user, eligible=eligible, now=now, settings=settings)
     session.commit()
     return AuthLoginResponse(user=None, selectionChallenge=challenge)
 

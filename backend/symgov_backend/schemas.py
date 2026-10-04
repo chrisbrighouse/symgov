@@ -1345,6 +1345,7 @@ class PlatformOrganizationItem(BaseModel):
     entitlementStatus: str
     isActive: bool
     isProtected: bool
+    hasCustomIcon: bool = False
 
 
 class PlatformOrganizationListResponse(BaseModel):

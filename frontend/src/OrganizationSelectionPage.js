@@ -3,15 +3,22 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { destinationFromRouterState } from './catalogRoutes.js';
 import { selectOrganization, startOrganizationSwitch } from './organizationSession.js';
 
-export function OrganizationIcon({ organization }) {
-  if (organization.logoUrl) {
+// `hideOnFailure` lets a caller drop the slot when the logo cannot load (the
+// header shows the name alone); the picker keeps the initial-letter fallback.
+export function OrganizationIcon({ organization, hideOnFailure = false }) {
+  const [failedUrl, setFailedUrl] = useState(null);
+  const failed = failedUrl !== null && failedUrl === organization.logoUrl;
+
+  if (organization.logoUrl && !failed) {
     return createElement('img', {
       src: organization.logoUrl,
       alt: '',
       className: 'org-selection-logo',
-      'aria-hidden': 'true'
+      'aria-hidden': 'true',
+      onError: () => setFailedUrl(organization.logoUrl)
     });
   }
+  if (hideOnFailure) return null;
 
   const fallback = (organization.displayName || organization.code || '?').charAt(0).toUpperCase();
   return createElement(

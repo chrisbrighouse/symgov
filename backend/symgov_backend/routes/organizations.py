@@ -433,6 +433,42 @@ def get_org_icon(
     )
 
 
+@router.get("/organizations/{organization_id}/logo")
+def get_organization_logo(
+    organization_id: str,
+    session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
+) -> Response:
+    """Serve an uploaded logo by organization id, for the org picker.
+
+    Needs no session: the picker runs before one exists. The id is an
+    unguessable UUID that is only disclosed to eligible members, and only an
+    uploaded logo is served (never the generated fallback).
+    """
+    if not (settings.organizations_enabled and settings.organization_custom_icons_enabled):
+        raise HTTPException(status_code=404, detail="Not found.")
+    try:
+        org = get_organization_detail(session, uuid.UUID(organization_id))
+    except ValueError:
+        org = None
+    if org is None or not org.uploaded_icon_storage_key:
+        raise HTTPException(status_code=404, detail="Not found.")
+    try:
+        downloaded = download_object_bytes(
+            object_key=org.uploaded_icon_storage_key, env_file=settings.storage_env_file
+        )
+    except Exception:
+        downloaded = None
+    if downloaded is None:
+        raise HTTPException(status_code=404, detail="Not found.")
+    return Response(
+        content=downloaded["payload"],
+        media_type=org.uploaded_icon_content_type or NORMALIZED_ICON_CONTENT_TYPE,
+        # The ?v= parameter changes on every upload, so a long cache is safe.
+        headers={"Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.post(
     ORG_ICON_PATH,
     response_model=OrgDetailResponse,

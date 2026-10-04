@@ -27,6 +27,7 @@ from symgov_backend.models import (
     OrganizationMembership,
     OrganizationRoleAssignment,
     PlatformRoleAssignment,
+    ProductUsageEvent,
     SubscriptionEvent,
     User,
     UserRole,
@@ -63,6 +64,7 @@ def _create_tables(engine) -> None:
         AuthThrottleRecoveryEvent.__table__,
         UserSubscription.__table__,
         SubscriptionEvent.__table__,
+        ProductUsageEvent.__table__,
     ):
         original = table.constraints
         try:
@@ -607,3 +609,51 @@ def test_reactivate_emits_audit_event():
     assert response.status_code == 200
     actions = [call.kwargs.get("action") for call in mock_emit.call_args_list]
     assert "organization.reactivated" in actions
+
+
+# --- Logo takedown ---
+
+def _give_logo(Session, org_id):
+    with Session() as session:
+        org = session.get(Organization, org_id)
+        org.uploaded_icon_storage_key = f"organization-icons/{org_id}/x.png"
+        org.uploaded_icon_content_type = "image/png"
+        org.uploaded_icon_uploaded_at = datetime.now(timezone.utc)
+        session.commit()
+
+
+def test_logo_takedown_requires_step_up():
+    client, Session, admin_id, _, _ = _build_client()
+    org_id = _seed_symgov_org_with_platform_admin(Session, admin_id)
+    acme_id = _seed_commercial_org(Session, code="ACME")
+    _give_logo(Session, acme_id)
+    _login_and_select_org(client, "platform-admin@example.test", org_id)
+
+    assert client.delete(f"/api/v1/platform/organizations/{acme_id}/icon").status_code == 403
+
+
+def test_logo_takedown_removes_the_logo_and_the_list_reports_it():
+    client, Session, admin_id, _, _ = _build_client()
+    org_id = _seed_symgov_org_with_platform_admin(Session, admin_id)
+    acme_id = _seed_commercial_org(Session, code="ACME")
+    _give_logo(Session, acme_id)
+    _login_and_step_up(client, "platform-admin@example.test", org_id)
+
+    listed = {i["code"]: i for i in client.get("/api/v1/platform/organizations").json()["items"]}
+    assert listed["ACME"]["hasCustomIcon"] is True
+
+    response = client.delete(f"/api/v1/platform/organizations/{acme_id}/icon")
+
+    assert response.status_code == 200
+    assert response.json()["hasCustomIcon"] is False
+    assert client.delete(f"/api/v1/platform/organizations/{acme_id}/icon").status_code == 400
+
+
+def test_logo_takedown_rejects_a_non_platform_admin():
+    client, Session, admin_id, candidate_id, _ = _build_client()
+    org_id = _seed_symgov_org_with_platform_admin(Session, admin_id)
+    acme_id = _seed_commercial_org(Session, code="ACME")
+    _give_logo(Session, acme_id)
+    _login_and_step_up(client, "candidate@example.test", org_id)
+
+    assert client.delete(f"/api/v1/platform/organizations/{acme_id}/icon").status_code in (401, 403)

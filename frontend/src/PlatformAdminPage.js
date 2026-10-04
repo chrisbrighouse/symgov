@@ -223,7 +223,7 @@ function AdminRow({ admin, onRevoke }) {
  * "View usage" cannot land on "Suspend".
  */
 function OrganizationRow({
-  organization, onSuspend, onReactivate, onSelectView, selectedView, isSelected, agentOversightUiEnabled,
+  organization, onSuspend, onReactivate, onTakeDownLogo, onSelectView, selectedView, isSelected, agentOversightUiEnabled,
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -237,6 +237,19 @@ function OrganizationRow({
     setError('');
     try {
       await action(organization.id);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleTakeDownLogo() {
+    if (!window.confirm(`Take down the logo of ${organization.displayName}? It will show the name only until the organization uploads another.`)) return;
+    setBusy(true);
+    setError('');
+    try {
+      await onTakeDownLogo(organization.id);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -305,15 +318,32 @@ function OrganizationRow({
       organization.isProtected
         ? createElement('span', { className: 'muted-text' }, '—')
         : createElement(
-            'button',
-            {
-              type: 'button',
-              onClick: handleToggle,
-              disabled: busy,
-              className: `action-button compact${suspended ? '' : ' danger'}`,
-              'aria-label': `${suspended ? 'Reactivate' : 'Suspend'} organization ${organization.displayName}`,
-            },
-            suspended ? 'Reactivate' : 'Suspend'
+            'div',
+            { className: 'platform-admin-cell-stack' },
+            organization.hasCustomIcon
+              ? createElement(
+                  'button',
+                  {
+                    type: 'button',
+                    onClick: handleTakeDownLogo,
+                    disabled: busy,
+                    className: 'action-button compact danger',
+                    'aria-label': `Take down logo of organization ${organization.displayName}`,
+                  },
+                  'Take down logo'
+                )
+              : null,
+            createElement(
+              'button',
+              {
+                type: 'button',
+                onClick: handleToggle,
+                disabled: busy,
+                className: `action-button compact${suspended ? '' : ' danger'}`,
+                'aria-label': `${suspended ? 'Reactivate' : 'Suspend'} organization ${organization.displayName}`,
+              },
+              suspended ? 'Reactivate' : 'Suspend'
+            )
           )
     )
   );
@@ -1371,6 +1401,11 @@ export function PlatformAdminPage({ auth }) {
     await loadOrganizations(orgPage);
   }
 
+  async function handleTakeDownOrganizationLogo(organizationId) {
+    await protect(() => apiDelete(`/platform/organizations/${organizationId}/icon`));
+    await loadOrganizations(orgPage);
+  }
+
   async function handleReactivateOrganization(organizationId) {
     await protect(() => apiPost(`/platform/organizations/${organizationId}/reactivate`));
     await loadOrganizations(orgPage);
@@ -1507,6 +1542,7 @@ export function PlatformAdminPage({ auth }) {
                     agentOversightUiEnabled,
                     onSuspend: handleSuspendOrganization,
                     onReactivate: handleReactivateOrganization,
+                    onTakeDownLogo: handleTakeDownOrganizationLogo,
                     onSelectView: selectOrganizationView,
                     selectedView: detailView,
                     isSelected: detailOrganization?.id === o.id,

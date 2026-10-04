@@ -4976,8 +4976,10 @@ button.catalog-preview-format-badge:focus-visible {
   gap: 1rem;
 }
 
+/* Logos may be wide: fix the height and let the width follow, within a cap. */
 .org-selection-logo {
-  width: 40px;
+  width: auto;
+  max-width: 9rem;
   height: 40px;
   border-radius: var(--idox-radius-sm);
   object-fit: contain;
@@ -5055,12 +5057,28 @@ button.catalog-preview-format-badge:focus-visible {
   margin-right: auto;
 }
 
-.header-org-context .org-selection-logo,
 .header-org-context .org-selection-fallback {
   width: 1.6rem;
   height: 1.6rem;
   font-size: 0.85rem;
   flex-shrink: 0;
+}
+
+/* A light plate keeps a logo legible whatever its colours: the banner is not
+   one fixed background. */
+.header-org-context .org-selection-logo {
+  width: auto;
+  max-width: 8rem;
+  height: 1.75rem;
+  padding: 0.1rem 0.3rem;
+  background: var(--idox-white);
+  border: 1px solid var(--idox-border-subtle);
+  flex-shrink: 0;
+}
+
+.organization-admin-header-preview {
+  display: inline-flex;
+  margin-right: 0;
 }
 
 .header-org-context .org-name {
@@ -5538,7 +5556,9 @@ button.catalog-preview-format-badge:focus-visible {
 
 .organization-admin-icon {
   display: block;
-  width: 64px;
+  width: auto;
+  min-width: 64px;
+  max-width: 14rem;
   height: 64px;
   border-radius: var(--idox-radius-lg);
   border: 1px solid var(--idox-border-subtle);

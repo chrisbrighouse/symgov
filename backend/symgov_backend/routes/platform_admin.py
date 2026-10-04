@@ -28,6 +28,7 @@ from ..organization_service import (
     replace_protected_membership_base_role,
     resolve_user_reference,
     revoke_platform_admin,
+    take_down_organization_icon,
     suspend_organization,
 )
 from ..schemas import (
@@ -84,6 +85,7 @@ def _organization_item(org) -> PlatformOrganizationItem:
         entitlementStatus=org.entitlement_status,
         isActive=bool(org.is_active),
         isProtected=bool(org.is_protected),
+        hasCustomIcon=org.uploaded_icon_storage_key is not None,
     )
 
 
@@ -360,6 +362,35 @@ def suspend_organization_route(
             org_id,
             actor_user_id=uuid.UUID(current_user.id),
             audit_source="api.suspend_organization",
+            recent_step_up_at=current_user.recent_step_up_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.commit()
+    return _organization_item(org)
+
+
+@router.delete(
+    "/platform/organizations/{organization_id}/icon",
+    response_model=PlatformOrganizationItem,
+    dependencies=[Depends(_require_platform_admin_enabled)],
+)
+def take_down_organization_logo_route(
+    organization_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_platform_admin),
+    _step_up: AuthenticatedUser = Depends(require_recent_step_up),
+) -> PlatformOrganizationItem:
+    """Remove an organization's uploaded logo; it falls back to name-only."""
+    org_id = _parse_organization_id(organization_id)
+    if get_organization_detail(session, org_id) is None:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    try:
+        org = take_down_organization_icon(
+            session,
+            org_id,
+            actor_user_id=uuid.UUID(current_user.id),
+            audit_source="api.take_down_organization_logo",
             recent_step_up_at=current_user.recent_step_up_at,
         )
     except ValueError as exc:

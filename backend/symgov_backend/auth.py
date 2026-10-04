@@ -42,6 +42,7 @@ class AuthenticatedUser:
     organization_display_name: str | None = None
     organization_base_role: str | None = None
     organization_capabilities: tuple[str, ...] = ()
+    organization_logo_version: str | None = None
     is_platform_admin: bool = False
     recent_step_up_at: datetime | None = None
 
@@ -381,6 +382,7 @@ def current_user_from_token(
         active_organization_id=str(session_row.active_organization_id) if session_row.active_organization_id else None,
         organization_code=organization_context.code if organization_context else None,
         organization_display_name=organization_context.display_name if organization_context else None,
+        organization_logo_version=organization_context.logo_version if organization_context else None,
         organization_base_role=organization_context.base_role if organization_context else None,
         organization_capabilities=organization_context.capabilities if organization_context else (),
         is_platform_admin=organization_context.is_platform_admin if organization_context else False,
@@ -461,6 +463,7 @@ def authoritative_user_from_token(
         active_organization_id=str(session_row.active_organization_id) if session_row.active_organization_id else None,
         organization_code=organization_context.code if organization_context else None,
         organization_display_name=organization_context.display_name if organization_context else None,
+        organization_logo_version=organization_context.logo_version if organization_context else None,
         organization_base_role=organization_context.base_role if organization_context else None,
         organization_capabilities=organization_context.capabilities if organization_context else (),
         is_platform_admin=organization_context.is_platform_admin if organization_context else False,

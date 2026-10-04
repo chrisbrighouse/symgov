@@ -79,7 +79,7 @@ export function Header({ auth }) {
       'div',
       { className: 'header-org-context', 'data-testid': 'header-org-context' },
       // An uploaded logo only: the initial-letter fallback read as a stray character.
-      org.logoUrl && createElement(OrganizationIcon, { organization: org }),
+      org.logoUrl && createElement(OrganizationIcon, { organization: org, hideOnFailure: true }),
       createElement('span', { className: 'org-name' },
         createElement('span', { className: 'org-label' }, 'Org:'),
         org.displayName

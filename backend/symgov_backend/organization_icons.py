@@ -109,6 +109,20 @@ def validate_and_normalize_icon_upload(payload: bytes, declared_content_type: st
     return NormalizedIcon(png_bytes=png_bytes, width=width, height=height, checksum_sha256=checksum)
 
 
+def organization_logo_version(storage_key: str | None, uploaded_at: object | None) -> str | None:
+    """Cache-busting version for an uploaded logo, or None when there is none."""
+    if not storage_key or uploaded_at is None:
+        return None
+    return str(int(uploaded_at.timestamp()))
+
+
+def organization_logo_url(organization_id: uuid.UUID | str, version: str | None) -> str | None:
+    """Return the logo URL for an organization with an uploaded logo, else None."""
+    if not version:
+        return None
+    return f"/api/v1/organizations/{uuid.UUID(str(organization_id))}/logo?v={version}"
+
+
 def build_organization_icon_object_key(organization_id: uuid.UUID | str, checksum_sha256: str) -> str:
     """Return the non-user-controlled, checksum-versioned storage key for an icon."""
     org_uuid = uuid.UUID(str(organization_id))

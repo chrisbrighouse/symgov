@@ -1214,3 +1214,105 @@ def test_remove_icon_audit_event_emitted():
 
     assert response.status_code == 200
     assert any(e["action"] == "organization.icon_removed" for e in emitted)
+
+
+# --- Header logo: session logoUrl and the public per-organization logo route ---
+
+def _upload_logo(client, **png):
+    _step_up(client)
+    response = client.post("/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes(**png)))
+    assert response.status_code == 200
+    return response
+
+
+def test_session_organization_has_no_logo_url_until_a_logo_is_uploaded():
+    client, Session, admin_id, _, _ = _build_client()
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+
+    organization = client.get("/api/v1/auth/me").json()["user"]["organization"]
+
+    assert "logoUrl" not in organization
+
+
+def test_session_organization_logo_url_follows_an_upload_and_a_removal():
+    client, Session, admin_id, _, _ = _build_client()
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _upload_logo(client)
+
+    organization = client.get("/api/v1/auth/me").json()["user"]["organization"]
+    assert organization["logoUrl"].startswith(f"/api/v1/organizations/{org_id}/logo?v=")
+
+    assert client.delete("/api/v1/org/me/icon").status_code == 200
+    assert "logoUrl" not in client.get("/api/v1/auth/me").json()["user"]["organization"]
+
+
+def test_session_logo_url_is_withheld_while_custom_icons_are_off():
+    client, Session, admin_id, _, _ = _build_client()
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _upload_logo(client)
+    with Session() as session:
+        pass
+
+    from symgov_backend.settings import get_settings as _gs
+    client.app.dependency_overrides[_gs] = lambda: SymgovAPISettings(
+        organizations_enabled=True,
+        organization_admin_enabled=True,
+        organization_custom_icons_enabled=False,
+        organization_icon_upload_enabled=False,
+        symbol_sets_enabled=False,
+        organization_symbols_enabled=False,
+        organization_agents_enabled=False,
+    )
+
+    assert "logoUrl" not in client.get("/api/v1/auth/me").json()["user"]["organization"]
+
+
+def test_public_logo_route_serves_only_an_uploaded_logo_without_a_session():
+    client, Session, admin_id, _, _ = _build_client()
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+
+    assert client.get(f"/api/v1/organizations/{org_id}/logo").status_code == 404
+    _upload_logo(client)
+    client.cookies.clear()
+
+    with _patch_download_from_fake_bridge(client):
+        response = client.get(f"/api/v1/organizations/{org_id}/logo")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert client.get("/api/v1/organizations/not-a-uuid/logo").status_code == 404
+    assert client.get(f"/api/v1/organizations/{uuid.uuid4()}/logo").status_code == 404
+
+
+def test_upload_accepts_a_wide_logo():
+    client, Session, admin_id, _, _ = _build_client()
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+
+    response = _upload_logo(client, width=600, height=80)
+
+    assert response.json()["hasCustomIcon"] is True
+
+
+def test_selection_choices_carry_a_logo_url_only_for_organizations_with_a_logo():
+    client, Session, admin_id, _, _ = _build_client()
+    first_id, _, _ = _add_org_with_members(Session, admin_id, code="ACME")
+    second_id, _, _ = _add_org_with_members(Session, admin_id, code="BSCO")
+    login = client.post("/api/v1/auth/login", json={"email": "admin@example.test", "pin": "1234"}).json()
+    challenge = login["selectionChallenge"]
+    client.post(
+        "/api/v1/auth/select-organization",
+        json={"token": challenge["token"], "organizationId": str(first_id)},
+    )
+    _upload_logo(client)
+
+    login = client.post("/api/v1/auth/login", json={"email": "admin@example.test", "pin": "1234"}).json()
+    choices = {item["organizationId"]: item for item in login["selectionChallenge"]["choices"]}
+
+    assert choices[str(first_id)]["logoUrl"].startswith(f"/api/v1/organizations/{first_id}/logo?v=")
+    assert "logoUrl" not in choices[str(second_id)]

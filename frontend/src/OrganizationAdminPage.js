@@ -250,6 +250,7 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
   const [uploading, setUploading] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState('');
+  const [iconVersion, setIconVersion] = useState(0);
 
   useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -276,6 +277,7 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
   async function handleUpload(e) {
     e.preventDefault();
     if (!file) return;
+    if (org.hasCustomIcon && !window.confirm('Replace the current logo with the selected image?')) return;
     setUploading(true);
     setError('');
     try {
@@ -291,6 +293,7 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
       });
       const updated = await protect(() => apiPost('/org/me/icon', { contentType: file.type, contentBase64: base64 }));
       onUpdate(updated);
+      setIconVersion((v) => v + 1);
       setFile(null);
       setPreviewUrl(null);
     } catch (err) {
@@ -301,12 +304,13 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
   }
 
   async function handleRemove() {
-    if (!window.confirm('Remove the custom icon and revert to the generated fallback?')) return;
+    if (!window.confirm('Remove the logo? The header and organization picker will show the organization name only.')) return;
     setRemoving(true);
     setError('');
     try {
       const updated = await protect(() => apiDeleteJson('/org/me/icon'));
       onUpdate(updated);
+      setIconVersion((v) => v + 1);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -334,9 +338,8 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
         createElement('p', { className: 'eyebrow' }, org.hasCustomIcon ? 'Custom icon' : 'Generated fallback'),
         org.iconUrl
           ? createElement('img', {
-              src: org.iconUrl,
+              src: `${org.iconUrl}?v=${iconVersion}`,
               alt: `${org.displayName} icon`,
-              width: 64,
               height: 64,
               className: 'organization-admin-icon',
             })
@@ -378,7 +381,7 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
             createElement(
               'p',
               { id: 'org-icon-constraints', className: 'organization-admin-help' },
-              'PNG, JPEG or WEBP · max 512 KB · 32–1024 px per side'
+              'PNG, JPEG or WEBP · max 512 KB · 32–1024 px per side · wide logos are fine, they are fitted to the header height'
             ),
             previewUrl
               ? createElement(
@@ -391,7 +394,19 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
                     width: 64,
                     height: 64,
                     className: 'organization-admin-icon',
-                  })
+                  }),
+                  createElement('p', { className: 'eyebrow' }, 'As it appears in the header'),
+                  createElement(
+                    'div',
+                    { className: 'header-org-context organization-admin-header-preview', 'aria-label': 'Header preview' },
+                    createElement('img', { src: previewUrl, alt: '', className: 'org-selection-logo' }),
+                    createElement(
+                      'span',
+                      { className: 'org-name' },
+                      createElement('span', { className: 'org-label' }, 'Org:'),
+                      org.displayName
+                    )
+                  )
                 )
               : null,
             createElement(
@@ -1017,7 +1032,11 @@ export function OrganizationAdminPage({ auth }) {
               org,
               isAdmin,
               iconUploadEnabled: auth?.user?.capabilities?.organizationIconUploadEnabled === true,
-              onUpdate: setOrg,
+              // The header reads the logo from the signed-in user, so refresh it.
+              onUpdate: (updated) => {
+                setOrg(updated);
+                auth?.refresh?.();
+              },
               protect,
             })
           )

@@ -5,6 +5,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
+from .organization_icons import organization_logo_version
 from .models import Organization, OrganizationMemberCapability, OrganizationMembership, OrganizationRoleAssignment, PlatformRoleAssignment, User
 from .settings import SymgovAPISettings
 
@@ -18,6 +19,7 @@ class EligibleOrganizationMembership:
     base_role: str
     capabilities: tuple[str, ...]
     is_platform_admin: bool
+    logo_version: str | None = None
 
 
 def resolve_eligible_organization_memberships(
@@ -61,6 +63,9 @@ def resolve_eligible_organization_memberships(
             base_role=role.base_role,
             capabilities=capabilities,
             is_platform_admin=(organization.normalized_code == "symgov" and role.base_role == "admin" and platform_admin_active),
+            logo_version=organization_logo_version(
+                organization.uploaded_icon_storage_key, organization.uploaded_icon_uploaded_at
+            ),
         ))
     return tuple(resolved)
 

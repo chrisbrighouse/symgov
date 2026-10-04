@@ -1609,6 +1609,54 @@ def remove_organization_icon(
     return org
 
 
+def take_down_organization_icon(
+    session: Session,
+    organization_id: uuid.UUID,
+    *,
+    actor_user_id: uuid.UUID,
+    audit_source: str = "organization_service",
+    recent_step_up_at: datetime | None = None,
+) -> Organization:
+    """Platform takedown of an uploaded logo; the stored object is left in place."""
+    _acquire_administration_lock(session)
+    _locked_active_user(session, actor_user_id, label="Actor")
+    _require_effective_platform_admin(session, actor_user_id, user_locked=True)
+    org = session.execute(
+        select(Organization).where(Organization.id == organization_id).with_for_update()
+    ).scalar_one_or_none()
+    if org is None:
+        raise ValueError("Organization not found.")
+    if org.uploaded_icon_storage_key is None:
+        raise ValueError("This organization has no uploaded logo to take down.")
+
+    removed_content_type = org.uploaded_icon_content_type
+    org.uploaded_icon_storage_key = None
+    org.uploaded_icon_content_type = None
+    org.uploaded_icon_uploaded_at = None
+    org.updated_at = _utc_now()
+    session.flush()
+    _emit_audit(
+        session,
+        entity_type="organization",
+        entity_id=organization_id,
+        action="organization.icon_taken_down",
+        actor_id=actor_user_id,
+        payload=_mutation_audit_payload(
+            organization_id=organization_id,
+            effective_authority="platform_admin",
+            before={"has_custom_icon": True, "content_type": removed_content_type},
+            after={"has_custom_icon": False, "content_type": None},
+            source=audit_source,
+            reason="platform_logo_takedown",
+            recent_step_up_at=recent_step_up_at,
+        ),
+    )
+    record_governance_usage_event(
+        session, event_type="organization_icon_removed", user_id=actor_user_id, organization_id=organization_id
+    )
+    return org
+
+
 def list_organization_members(
     session: Session,
     organization_id: uuid.UUID,
