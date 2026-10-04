@@ -10,7 +10,7 @@ function user(overrides = {}) {
     id: 'u-1',
     roles: ['reviewer'],
     session: { mode: 'organization', purpose: 'application', activeOrganizationId: 'org-1' },
-    organization: { id: 'org-1', code: 'acme', baseRole: 'user' },
+    organization: { id: 'org-1', code: 'symgov', baseRole: 'user' },
     capabilities: { semanticReviewEnabled: true },
     ...overrides,
   };
@@ -19,6 +19,12 @@ function user(overrides = {}) {
 describe('semantic review capability gate', () => {
   it('admits a reviewer whose session carries the capability', () => {
     assert.equal(canAccessSemanticReview(user()), true);
+  });
+
+  it('ignores global roles in a customer-organization session', () => {
+    const acme = { id: 'org-1', code: 'acme', baseRole: 'user' };
+    assert.equal(canAccessSemanticReview(user({ organization: acme })), false);
+    assert.equal(canAccessSemanticReview(user({ roles: ['admin'], organization: acme })), false);
   });
 
   it('admits an admin', () => {

@@ -1,4 +1,5 @@
 import { createElement } from 'react';
+import { isCustomerOrganizationSession } from './adminJourneys.js';
 
 // SM-P1-01 WP1.4. The capability gate for the semantic review surface.
 //
@@ -18,6 +19,7 @@ export const SEMANTIC_REVIEW_ROLES = ['admin', 'reviewer'];
 export function canAccessSemanticReview(user) {
   if (!user) return false;
   if (user.session?.purpose !== 'application') return false;
+  if (isCustomerOrganizationSession(user)) return false;
   const roles = Array.isArray(user.roles) ? user.roles : [];
   if (!SEMANTIC_REVIEW_ROLES.some((role) => roles.includes(role))) return false;
   return user.capabilities?.semanticReviewEnabled === true;

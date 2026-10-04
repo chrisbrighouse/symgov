@@ -68,7 +68,7 @@ import CatalogDeveloperHub from './CatalogDeveloperHub.jsx';
 import ProfilePage from './ProfilePage.jsx';
 import OrganizationSelectionPage, { OrganizationSwitchPage } from './OrganizationSelectionPage.js';
 import { adminRouteElements } from './adminRoutes.js';
-import { canAccessOrganizationAdmin, canAccessPlatformAdmin, canAccessPlatformWorkspace, canManageOrganizationUsers } from './adminJourneys.js';
+import { canAccessOrganizationAdmin, isCustomerOrganizationSession, canAccessPlatformAdmin, canAccessPlatformWorkspace, canManageOrganizationUsers } from './adminJourneys.js';
 import { semanticReviewRouteElements } from './semanticReviewRoutes.js';
 import { canAccessSemanticReview } from './semanticReviewJourney.js';
 import { edRouteElements } from './edRoutes.js';
@@ -367,7 +367,11 @@ const WORKSPACE_MONITOR_SCREENS = {
 const WORKSPACE_MONITOR_SCREEN_SEQUENCE = ['pipeline', 'intelligence'];
 export const AuthContext = createContext(null);
 
+// Global roles (admin, reviewer, submitter, integrator) describe platform
+// access. In a customer-organization session the organization role governs
+// instead, so global roles do not unlock rail items or routes there.
 function roleList(user) {
+  if (isCustomerOrganizationSession(user)) return [];
   return Array.isArray(user?.roles) ? user.roles : [];
 }
 

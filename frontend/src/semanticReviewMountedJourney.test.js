@@ -22,7 +22,7 @@ function response(status, payload) {
   };
 }
 
-function user({ roles = ['reviewer'], semanticReviewEnabled = true, mode = 'organization' } = {}) {
+function user({ roles = ['reviewer'], semanticReviewEnabled = true, mode = 'organization', orgCode = 'symgov' } = {}) {
   return {
     id: 'u-1',
     email: 'reviewer@example.test',
@@ -32,7 +32,7 @@ function user({ roles = ['reviewer'], semanticReviewEnabled = true, mode = 'orga
     subscription: { tier: 'free', status: 'active' },
     session: { mode, purpose: 'application', activeOrganizationId: mode === 'organization' ? 'org-1' : null },
     organization: mode === 'organization'
-      ? { id: 'org-1', code: 'acme', displayName: 'Acme', baseRole: 'user', capabilities: [] }
+      ? { id: 'org-1', code: orgCode, displayName: 'Org', baseRole: 'user', capabilities: [] }
       : null,
     isPlatformAdmin: false,
     capabilities: { organizationAdminEnabled: false, platformAdminEnabled: false, symbolSetsEnabled: false, semanticReviewEnabled },
@@ -221,6 +221,17 @@ describe('mounted semantic review journey', () => {
     const markup = JSON.stringify(renderer.toJSON());
     assert.match(markup, /You do not have access to this area/);
     assert.equal(requests.some(({ url }) => url.includes('/semantic-review/queues')), false);
+    await act(async () => renderer.unmount());
+  });
+
+  it('shows a platform user only org-role rail items in a customer organization', async () => {
+    const requests = [];
+    const renderer = await mount('/semantic-review', user({ roles: ['admin', 'reviewer', 'submitter', 'integrator'], orgCode: 'acme' }), requests);
+
+    for (const label of ['Reviews', 'Rights', 'Semantics', 'Submissions', 'Integrator']) {
+      assert.equal(renderer.root.findAllByProps({ 'aria-label': label }).length, 0, label);
+    }
+    assert.ok(renderer.root.findByProps({ 'aria-label': 'Catalog' }));
     await act(async () => renderer.unmount());
   });
 
