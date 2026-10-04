@@ -52,3 +52,54 @@ export function describeEventChange(event) {
     : `expires ${event.newExpiresOn}`;
   return `${seats}, ${expiry}`;
 }
+
+/**
+ * What each plan role lets a member do. Each line is the effect in the product,
+ * not the internal role name: "reviewer" here is governance review in Symgov's
+ * Reviews, which is a different thing from the Reviewer setting an organization
+ * admin gives for the organization's own private symbols.
+ */
+export const PLAN_ROLE_INFO = {
+  submitter: {
+    label: 'Submissions',
+    summary: 'Submit symbols and files to Symgov for governance review.',
+  },
+  reviewer: {
+    label: 'Governance review',
+    summary: 'Decide review and rights-review cases and triage promotion requests in Reviews.',
+  },
+  integrator: {
+    label: 'Catalog developer',
+    summary: 'Use the Catalog developer hub: create an API key, and use the OpenAPI spec, sandbox and integration assistant.',
+  },
+};
+
+export const PLAN_ROLES_SCOPE_NOTE =
+  'Plan roles apply to this member only while they work as this organization and only while its plan is active.';
+
+export const ORGANIZATION_CAPABILITY_NOTE =
+  'They are separate from the Contributor and Reviewer settings an organization admin gives for the organization’s own private symbols.';
+
+export function describeRole(role) {
+  return PLAN_ROLE_INFO[role] || { label: role, summary: '' };
+}
+
+/** `{ [membershipId]: Set<role> }` from the member-roles listing. */
+export function rolesByMembership(items) {
+  const grouped = {};
+  for (const item of items || []) {
+    (grouped[item.membershipId] ||= new Set()).add(item.role);
+  }
+  return grouped;
+}
+
+/** Why plan roles are not changing anyone's access right now, or '' when they are. */
+export function describeRolesEffect(plan, rolesEnabled) {
+  if (!rolesEnabled) {
+    return 'Not switched on yet: assignments are saved but do not change anyone’s access until plan roles are activated.';
+  }
+  if (plan?.status === 'expired') {
+    return 'The plan has expired, so assigned roles give no access until it is renewed.';
+  }
+  return '';
+}

@@ -337,6 +337,43 @@ export async function renewPlatformOrganizationSubscription(organizationId, { mo
   return requireOkWithStatus(result, 'Plan renewal failed.');
 }
 
+export async function fetchPlatformOrganizationMembers(organizationId) {
+  const result = await requestJson(
+    `/platform/organizations/${encodeURIComponent(organizationId)}/members?page=1&pageSize=200`,
+    { cache: 'no-store' }
+  );
+  return requireOkWithStatus(result, 'Member load failed.');
+}
+
+export async function fetchPlatformOrganizationMemberRoles(organizationId) {
+  const result = await requestJson(
+    `/platform/organizations/${encodeURIComponent(organizationId)}/member-roles`,
+    { cache: 'no-store' }
+  );
+  return requireOkWithStatus(result, 'Plan roles load failed.');
+}
+
+function memberRolePath(organizationId, membershipId, role, suffix = '') {
+  return `/platform/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(membershipId)}`
+    + `/roles/${encodeURIComponent(role)}${suffix}`;
+}
+
+export async function grantPlatformMemberRole(organizationId, membershipId, role, reason) {
+  const result = await requestJson(memberRolePath(organizationId, membershipId, role), {
+    method: 'PUT',
+    body: JSON.stringify({ reason }),
+  });
+  return requireOkWithStatus(result, 'Plan role change failed.');
+}
+
+export async function revokePlatformMemberRole(organizationId, membershipId, role, reason) {
+  const result = await requestJson(memberRolePath(organizationId, membershipId, role, '/revoke'), {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+  return requireOkWithStatus(result, 'Plan role change failed.');
+}
+
 // --- Stage 9 WP9.8: contribution/reputation ---
 
 export async function fetchMyContributions() {

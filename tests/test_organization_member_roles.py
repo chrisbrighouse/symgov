@@ -93,6 +93,8 @@ def test_assigned_role_applies_in_the_organization_session_and_personal_tier_is_
     response = client.put(_url(acme_id, membership_id, "submitter"), json={"reason": REASON})
     assert response.status_code == 200
     assert [(i["email"], i["role"]) for i in response.json()["items"]] == [("member@example.test", "submitter")]
+    assert response.json()["rolesEnabled"] is True
+    assert response.json()["assignableRoles"] == ["integrator", "reviewer", "submitter"]
     roles, tier = _member_roles_in_org_session(client, acme_id)
     assert roles == ["submitter"]
     assert tier == "free"  # the personal plan is untouched; only the session's roles change
@@ -220,7 +222,9 @@ def test_assigning_requires_step_up_and_a_platform_admin():
 
 def test_while_the_flag_is_off_assigned_roles_have_no_effect_and_the_tables_are_not_read():
     client, Session, _, acme_id, membership_id, _ = _setup(plan_roles_enabled=False)
-    assert client.put(_url(acme_id, membership_id, "submitter"), json={"reason": REASON}).status_code == 200
+    granted = client.put(_url(acme_id, membership_id, "submitter"), json={"reason": REASON})
+    assert granted.status_code == 200
+    assert granted.json()["rolesEnabled"] is False  # recorded, not yet in effect
     assert _member_roles_in_org_session(client, acme_id) == ([], "free")
 
     from symgov_backend.auth import effective_roles

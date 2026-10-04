@@ -14,6 +14,7 @@ import {
   describeSeats,
 } from './organizationSubscription.js';
 import { formatReviewTimestamp } from './SemanticReviewPage.js';
+import { OrganizationMemberRolesSection } from './OrganizationMemberRolesSection.js';
 
 function Message({ kind, children }) {
   if (!children) return null;
@@ -230,6 +231,9 @@ export function OrganizationSubscriptionPanel({ organization, protect }) {
                 plan.metered ? createElement(RenewForm, { organization, plan, disabled: busy, onSubmit: renew }) : null,
                 createElement(ChangeForm, { key: plan.version ?? 'none', organization, plan, disabled: busy, onSubmit: change })
               ),
+          plan.metered && !organization.isProtected
+            ? createElement(OrganizationMemberRolesSection, { organization, plan, protect })
+            : null,
           createElement(PlanHistory, { events: plan.events })
         )
       : null

@@ -36,6 +36,9 @@ class MemberRoleItem(BaseModel):
 class MemberRoleListResponse(BaseModel):
     organizationId: str
     assignableRoles: list[str]
+    # False until SYMGOV_ORGANIZATION_PLAN_ROLES_ENABLED is on: assignments are recorded
+    # but do not yet change anyone's roles.
+    rolesEnabled: bool
     items: list[MemberRoleItem]
 
 
@@ -52,10 +55,11 @@ def _parse_uuid(value: str, what: str) -> uuid.UUID:
         raise HTTPException(status_code=404, detail=f"{what} not found.") from exc
 
 
-def _listing(session: Session, organization_id: uuid.UUID) -> MemberRoleListResponse:
+def _listing(session: Session, organization_id: uuid.UUID, settings: SymgovAPISettings) -> MemberRoleListResponse:
     return MemberRoleListResponse(
         organizationId=str(organization_id),
         assignableRoles=list(ORG_SCOPED_ROLES),
+        rolesEnabled=settings.organization_plan_roles_enabled,
         items=[
             MemberRoleItem(
                 membershipId=str(membership_id), email=email, displayName=display_name, role=role,
@@ -79,11 +83,12 @@ def _require_organization(session: Session, organization_id: uuid.UUID) -> None:
 def list_member_roles_route(
     organization_id: str,
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
     _current_user: AuthenticatedUser = Depends(require_platform_admin),
 ) -> MemberRoleListResponse:
     org_id = _parse_uuid(organization_id, "Organization")
     _require_organization(session, org_id)
-    return _listing(session, org_id)
+    return _listing(session, org_id, settings)
 
 
 @router.put(
@@ -97,6 +102,7 @@ def grant_member_role_route(
     role: str,
     payload: MemberRoleChangeRequest,
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
     current_user: AuthenticatedUser = Depends(require_platform_admin),
     _step_up: AuthenticatedUser = Depends(require_recent_step_up),
 ) -> MemberRoleListResponse:
@@ -111,7 +117,7 @@ def grant_member_role_route(
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
-    return _listing(session, org_id)
+    return _listing(session, org_id, settings)
 
 
 @router.post(
@@ -125,6 +131,7 @@ def revoke_member_role_route(
     role: str,
     payload: MemberRoleChangeRequest,
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
     current_user: AuthenticatedUser = Depends(require_platform_admin),
     _step_up: AuthenticatedUser = Depends(require_recent_step_up),
 ) -> MemberRoleListResponse:
@@ -139,4 +146,4 @@ def revoke_member_role_route(
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
-    return _listing(session, org_id)
+    return _listing(session, org_id, settings)
