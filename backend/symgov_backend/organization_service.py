@@ -1733,6 +1733,7 @@ def add_organization_member(
         raise ValueError("User is already an active member of this organization.")
     if existing is not None:
         raise ValueError("A membership record already exists for this user; contact platform admin to reactivate.")
+    assert_seat_available(session, organization_id)
 
     now = _utc_now()
     membership = OrganizationMembership(
@@ -1781,7 +1782,6 @@ def add_organization_member(
         actor_id=actor_user_id,
         payload=_mutation_audit_payload(
             organization_id=organization_id,
-    assert_seat_available(session, organization_id)
             effective_authority=(
                 "platform_admin" if _bypass_admin_check else "organization_admin"
             ),
@@ -2125,6 +2125,8 @@ def reactivate_membership(
     ).scalar_one_or_none()
     if existing_active:
         raise ValueError("User already has an active membership in this organization.")
+    # An invited membership already holds a seat, so it is excluded from the count.
+    assert_seat_available(session, membership.organization_id, excluding_membership_id=membership.id)
 
     now = _utc_now()
     membership.status = "active"
@@ -2173,8 +2175,6 @@ def reactivate_membership(
             source=audit_source,
             reason=reason,
             recent_step_up_at=recent_step_up_at,
-    # An invited membership already holds a seat, so it is excluded from the count.
-    assert_seat_available(session, membership.organization_id, excluding_membership_id=membership.id)
             details={"membership_id": str(membership.id)},
         ),
     )
