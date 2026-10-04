@@ -156,6 +156,7 @@ Alembic revision `20260721_0024_profile_subscription_outbox.py` adds an origin t
 - Email transport is optional and selected with `SYMGOV_EMAIL_TRANSPORT` (`smtp` by default, or `agentmail`).
 - Pat/AgentMail delivery uses `SYMGOV_AGENTMAIL_INBOX` (normally `alfi-bot@agentmail.to`), optional `SYMGOV_AGENTMAIL_TIMEOUT_SECONDS`, and `AGENTMAIL_API_KEY`. The key is read from the process environment first, then only by name from the protected Hermes profile `.env`; it is excluded from settings representations. Delivery is pinned to AgentMail's official HTTPS API and refuses redirects so runtime configuration cannot redirect the bearer token.
 - SMTP remains available through `SYMGOV_SMTP_HOST`, `SYMGOV_SMTP_PORT`, `SYMGOV_SMTP_USERNAME`, `SYMGOV_SMTP_PASSWORD`, `SYMGOV_SMTP_FROM_EMAIL`, `SYMGOV_SMTP_STARTTLS`, and `SYMGOV_SMTP_SSL`.
+- Setup, the current shared-sender choice, testing, and how to move to a `mail.symgov.org` sender later are in `docs/ops/email-setup.md`.
 - Both transports use `SYMGOV_SUBSCRIPTION_ADMIN_EMAIL` and `SYMGOV_EMAIL_WORKER_INTERVAL_SECONDS`.
 - When the selected transport is configured, the API worker sends pending rows and marks them sent. AgentMail requests use the outbox UUID as the stable `Idempotency-Key`, so retries within AgentMail's 24-hour idempotency window return the original send instead of creating a duplicate. Transport failures retain a sanitized error category and HTTP status (when available) plus exponential retry time; they do not undo a committed entitlement change.
 
