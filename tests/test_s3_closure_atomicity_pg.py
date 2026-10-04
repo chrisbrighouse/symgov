@@ -43,8 +43,11 @@ def _stub_record_governance_usage_event():
     snapshot. This file only tests audit/domain rollback atomicity, not
     product-usage-event behavior, so the call is stubbed here -- mirroring
     `test_organization_admin_api.py`'s own `_stub_emit_audit` pattern for
-    the same reason."""
-    with patch("symgov_backend.organization_service.record_governance_usage_event"):
+    the same reason. The subscription calls are stubbed for the same reason:
+    `organization_subscriptions` (0068) does not exist at the snapshot."""
+    with patch("symgov_backend.organization_service.record_governance_usage_event"), patch(
+        "symgov_backend.organization_service.set_organization_subscription"
+    ), patch("symgov_backend.organization_service.assert_seat_available"):
         yield
 
 

@@ -15,7 +15,7 @@
       "title": "Authenticated user context",
       "topic": "security",
       "source_path": "backend/symgov_backend/auth.py",
-      "source_version": "sha256:7b0de0dd3be33ed250fe1b284d9ecc512914afa3e0e6b2c0b832fe0f87060125",
+      "source_version": "sha256:e33451dbdce05ebed61fb56e499412aa2984161eeb03c0a8b45367f97b4d01ef",
       "source_kind": "python",
       "source_symbol": "AuthenticatedUser"
     }
