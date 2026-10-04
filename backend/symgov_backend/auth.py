@@ -147,11 +147,15 @@ def user_roles(session: Session, user_id: uuid.UUID) -> tuple[str, ...]:
     return tuple(row[0] for row in rows)
 
 
-def effective_roles(session: Session, user: User, subscription: UserSubscription, organization_context) -> tuple[str, ...]:
+def effective_roles(
+    session: Session, user: User, subscription: UserSubscription, organization_context, settings: SymgovAPISettings
+) -> tuple[str, ...]:
     """Personal Plus keeps the user's global roles everywhere. In an organization
     session, an active organization plan adds that member's organization-scoped
     roles, so a free member of a subscribed organization is Plus there and only there."""
     personal = user_roles(session, user.id) if subscription.tier == "plus" else ()
+    if not settings.organization_plan_roles_enabled:
+        return personal
     return tuple(sorted(set(personal) | set(organization_plan_roles(session, organization_context))))
 
 
@@ -366,7 +370,7 @@ def current_user_from_token(
         id=str(user.id),
         email=user.email,
         display_name=user.display_name,
-        roles=effective_roles(session, user, subscription, organization_context),
+        roles=effective_roles(session, user, subscription, organization_context, resolved_settings),
         must_change_pin=bool(user.must_change_pin),
         subscription_tier=subscription.tier,
         subscription_started_on=subscription.started_on,
@@ -446,7 +450,7 @@ def authoritative_user_from_token(
         id=str(user.id),
         email=user.email,
         display_name=user.display_name,
-        roles=effective_roles(session, user, subscription, organization_context),
+        roles=effective_roles(session, user, subscription, organization_context, resolved_settings),
         must_change_pin=bool(user.must_change_pin),
         subscription_tier=subscription.tier,
         subscription_started_on=subscription.started_on,

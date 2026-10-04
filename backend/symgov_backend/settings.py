@@ -159,6 +159,14 @@ class SymgovAPISettings:
         "yes",
         "on",
     }
+    # Organization-scoped Plus roles in organization sessions. Off until activated, so the
+    # sign-in path does not read the organization plan tables.
+    organization_plan_roles_enabled: bool = os.environ.get("SYMGOV_ORGANIZATION_PLAN_ROLES_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     symbol_sets_enabled: bool = os.environ.get("SYMGOV_SYMBOL_SETS_ENABLED", "").strip().lower() in {
         "1",
         "true",

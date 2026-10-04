@@ -17,6 +17,7 @@ from symgov_backend.models import (  # noqa: E402
     UserRole,
 )
 from symgov_backend.organization_subscriptions import set_organization_subscription  # noqa: E402
+from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E402
 from symgov_backend.subscriptions import today_utc, upgrade_to_plus  # noqa: E402
 from test_platform_organizations_api import (  # noqa: E402
     _build_client,
@@ -47,8 +48,17 @@ def _seed_member(Session, org_id, email="member@example.test", *, status="active
         return membership.id, user.id
 
 
-def _setup(*, plan=True):
+def _settings(*, plan_roles_enabled=True):
+    return SymgovAPISettings(
+        organizations_enabled=True, platform_admin_enabled=True, organization_admin_enabled=False,
+        symbol_sets_enabled=False, organization_symbols_enabled=False, organization_agents_enabled=False,
+        organization_plan_roles_enabled=plan_roles_enabled,
+    )
+
+
+def _setup(*, plan=True, plan_roles_enabled=True):
     client, Session, admin_id, _, _ = _build_client()
+    client.app.dependency_overrides[get_settings] = lambda: _settings(plan_roles_enabled=plan_roles_enabled)
     symgov_id = _seed_symgov_org_with_platform_admin(Session, admin_id)
     acme_id = _seed_commercial_org(Session, code="ACME")
     if plan:
@@ -158,9 +168,9 @@ def test_the_role_applies_only_in_its_own_organization():
                 capabilities=(), is_platform_admin=False,
             )
 
-        assert effective_roles(session, user, subscription, context(acme_id, membership_id)) == ("submitter",)
-        assert effective_roles(session, user, subscription, context(other_org, other_membership)) == ()
-        assert effective_roles(session, user, subscription, None) == ()
+        assert effective_roles(session, user, subscription, context(acme_id, membership_id), _settings()) == ("submitter",)
+        assert effective_roles(session, user, subscription, context(other_org, other_membership), _settings()) == ()
+        assert effective_roles(session, user, subscription, None, _settings()) == ()
 
 
 def test_granting_is_checked_idempotent_and_step_up_protected():
@@ -206,3 +216,19 @@ def test_assigning_requires_step_up_and_a_platform_admin():
     membership2, _ = _seed_member(Session2, acme2)
     _login_and_select_org(client2, ADMIN, symgov2)  # signed in, no step-up
     assert client2.put(_url(acme2, membership2, "submitter"), json={"reason": REASON}).status_code == 403
+
+
+def test_while_the_flag_is_off_assigned_roles_have_no_effect_and_the_tables_are_not_read():
+    client, Session, _, acme_id, membership_id, _ = _setup(plan_roles_enabled=False)
+    assert client.put(_url(acme_id, membership_id, "submitter"), json={"reason": REASON}).status_code == 200
+    assert _member_roles_in_org_session(client, acme_id) == ([], "free")
+
+    from symgov_backend.auth import effective_roles
+    from symgov_backend.models import User
+    from symgov_backend.subscriptions import ensure_subscription
+    from unittest.mock import patch
+
+    with Session() as session, patch("symgov_backend.auth.organization_plan_roles") as lookup:
+        user = session.query(User).filter_by(email="member@example.test").one()
+        assert effective_roles(session, user, ensure_subscription(session, user), object(), _settings(plan_roles_enabled=False)) == ()
+        lookup.assert_not_called()
