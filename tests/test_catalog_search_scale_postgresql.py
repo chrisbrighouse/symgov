@@ -41,7 +41,7 @@ from test_catalog_browse_search_postgresql import (  # noqa: E402
 )
 from test_organization_symbol_postgresql import _alembic, _database  # noqa: E402
 
-MIGRATION_HEAD = "20260930_0067"
+MIGRATION_HEAD = "20261004_0068"
 PUBLIC_SYMBOLS = 50_000
 PRIVATE_ORGANIZATION_WIDE_SYMBOLS = 500
 SET_ITEMS = 1_000

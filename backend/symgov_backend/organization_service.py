@@ -23,6 +23,11 @@ from symgov_backend.organization_icons import (
     ICON_UPLOAD_MIN_INTERVAL_SECONDS,
     generate_organization_fallback_icon,
 )
+from symgov_backend.organization_subscriptions import (
+    DEFAULT_SEAT_LIMIT,
+    DEFAULT_TERM_MONTHS,
+    set_organization_subscription,
+)
 from symgov_backend.product_usage_events import record_governance_usage_event
 from symgov_backend.subscriptions import PROTECTED_OWNER_EMAIL
 
@@ -751,6 +756,14 @@ def create_organization_with_initial_admin(
         ]
     )
     session.flush()
+    set_organization_subscription(
+        session,
+        organization_id,
+        seat_limit=DEFAULT_SEAT_LIMIT,
+        months=DEFAULT_TERM_MONTHS,
+        actor_id=actor_user_id,
+        reason="Default plan on organization creation.",
+    )
     _emit_audit(
         session,
         entity_type="organization",

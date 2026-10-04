@@ -497,6 +497,54 @@ class SubscriptionEvent(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class OrganizationSubscription(Base):
+    """Fixed-seat subscription for one organization.
+
+    An organization with no row here is unmetered (every organization that
+    predates this table, and the protected symgov organization).
+    """
+
+    __tablename__ = "organization_subscriptions"
+    __table_args__ = (
+        CheckConstraint("seat_limit >= 1", name="seat_limit"),
+        CheckConstraint("expires_on > started_on", name="dates"),
+        Index("ix_organization_subscriptions_expires_on", "expires_on"),
+    )
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True
+    )
+    seat_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_on: Mapped[object] = mapped_column(Date, nullable=False)
+    expires_on: Mapped[object] = mapped_column(Date, nullable=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class OrganizationSubscriptionEvent(Base):
+    __tablename__ = "organization_subscription_events"
+    __table_args__ = (
+        CheckConstraint("action in ('created', 'updated')", name="action"),
+        Index("ix_org_subscription_events_org_created", "organization_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_seat_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    new_seat_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    previous_expires_on: Mapped[object | None] = mapped_column(Date, nullable=True)
+    new_expires_on: Mapped[object] = mapped_column(Date, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class EmailOutbox(Base):
     __tablename__ = "email_outbox"
     __table_args__ = (
