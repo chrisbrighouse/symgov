@@ -401,7 +401,7 @@ describe('mounted admin App journeys', () => {
     const renderer = await mount('/organization/admin');
     assert.equal(renderer.root.findAllByType('main').length, 1);
     await openOrganizationAdminTab(renderer, 'organization');
-    assert.equal(renderer.root.findByProps({ alt: 'Acme icon' }).props.src, '/api/v1/org/me/icon?v=0');
+    assert.equal(renderer.root.findByProps({ alt: 'Acme icon' }).props.src, '/api/v1/org/me/icon');
     assert.equal(renderer.root.findAllByProps({ id: 'org-icon-file' }).length, 0);
     await act(async () => renderer.unmount());
   });

@@ -21,6 +21,7 @@ from ..organization_icons import (
     NORMALIZED_ICON_CONTENT_TYPE,
     IconUploadError,
     build_organization_icon_object_key,
+    organization_logo_version,
     validate_and_normalize_icon_upload,
 )
 from ..organization_service import (
@@ -102,6 +103,12 @@ def _parse_membership_id(membership_id: str) -> uuid.UUID:
         raise HTTPException(status_code=404, detail="Membership not found.") from exc
 
 
+def _org_icon_url(org) -> str:
+    """The icon URL, versioned by upload time so a new upload is never served from cache."""
+    version = organization_logo_version(org.uploaded_icon_storage_key, org.uploaded_icon_uploaded_at)
+    return f"/api/v1{ORG_ICON_PATH}" + (f"?v={version}" if version else "")
+
+
 def _org_detail_response(org, *, custom_icon_enabled: bool = False) -> OrgDetailResponse:
     return OrgDetailResponse(
         id=str(org.id),
@@ -112,7 +119,7 @@ def _org_detail_response(org, *, custom_icon_enabled: bool = False) -> OrgDetail
         entitlementStatus=org.entitlement_status,
         isActive=bool(org.is_active),
         isProtected=bool(org.is_protected),
-        iconUrl=f"/api/v1{ORG_ICON_PATH}",
+        iconUrl=_org_icon_url(org),
         hasCustomIcon=org.uploaded_icon_storage_key is not None,
         customIconEnabled=custom_icon_enabled,
     )

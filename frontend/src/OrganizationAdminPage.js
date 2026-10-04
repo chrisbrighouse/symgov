@@ -250,7 +250,6 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
   const [uploading, setUploading] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState('');
-  const [iconVersion, setIconVersion] = useState(0);
 
   useEffect(() => () => {
     if (previewUrl) URL.revokeObjectURL(previewUrl);
@@ -293,7 +292,6 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
       });
       const updated = await protect(() => apiPost('/org/me/icon', { contentType: file.type, contentBase64: base64 }));
       onUpdate(updated);
-      setIconVersion((v) => v + 1);
       setFile(null);
       setPreviewUrl(null);
     } catch (err) {
@@ -310,7 +308,6 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
     try {
       const updated = await protect(() => apiDeleteJson('/org/me/icon'));
       onUpdate(updated);
-      setIconVersion((v) => v + 1);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -338,7 +335,7 @@ function OrgIconSection({ org, isAdmin, iconUploadEnabled, onUpdate, protect }) 
         createElement('p', { className: 'eyebrow' }, org.hasCustomIcon ? 'Custom icon' : 'Generated fallback'),
         org.iconUrl
           ? createElement('img', {
-              src: `${org.iconUrl}?v=${iconVersion}`,
+              src: org.iconUrl,
               alt: `${org.displayName} icon`,
               height: 64,
               className: 'organization-admin-icon',

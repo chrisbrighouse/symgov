@@ -807,6 +807,19 @@ def test_upload_icon_requires_recent_step_up():
     assert client.fake_bridge.objects == {}
 
 
+def test_upload_icon_response_carries_a_versioned_icon_url_that_a_fallback_does_not():
+    client, Session, admin_id, _, _ = _build_client()
+    org_id, _, _ = _add_org_with_members(Session, admin_id)
+    _login_and_select_org(client, "admin@example.test", org_id)
+    _step_up(client)
+
+    response = client.post("/api/v1/org/me/icon", json=_icon_upload_json(_make_png_bytes()))
+
+    assert response.status_code == 200
+    assert response.json()["iconUrl"].startswith("/api/v1/org/me/icon?v=")
+    assert response.json()["hasCustomIcon"] is True
+
+
 def test_upload_icon_rejects_expired_step_up():
     client, Session, admin_id, _, _ = _build_client()
     org_id, _, _ = _add_org_with_members(Session, admin_id)
