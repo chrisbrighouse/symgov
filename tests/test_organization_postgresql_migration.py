@@ -54,11 +54,11 @@ def _stub_record_governance_usage_event():
     doesn't exist at this snapshot, that call is stubbed out file-wide,
     mirroring the `_stub_emit_audit` pattern already used by
     `test_organization_admin_api.py` for the same reason."""
-    # Same reason for the default subscription: `organization_subscriptions` (0068)
+    # Same reason for the subscription calls: `organization_subscriptions` (0068)
     # does not exist at this snapshot.
     with patch("symgov_backend.organization_service.record_governance_usage_event"), patch(
         "symgov_backend.organization_service.set_organization_subscription"
-    ):
+    ), patch("symgov_backend.organization_service.assert_seat_available"):
         yield
 
 

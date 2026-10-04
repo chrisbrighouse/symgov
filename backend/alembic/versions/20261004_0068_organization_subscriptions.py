@@ -7,7 +7,8 @@ Create Date: 2026-10-04 00:00:00.000000
 Every existing non-protected organization is seeded with the default plan (25
 seats, 12 months from the migration date, the values in
 organization_subscriptions.DEFAULT_*). The protected symgov organization gets
-no row and stays unmetered. Seat limits are recorded, not enforced. Constraint names
+no row and stays unmetered. Seat limits are enforced in organization_service
+(add_organization_member, reactivate_membership). Constraint names
 are passed bare: the naming convention adds the ck_<table>_ prefix, and two of
 the longer names would otherwise be truncated at PostgreSQL's 63 characters.
 """

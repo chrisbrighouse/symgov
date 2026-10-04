@@ -62,8 +62,7 @@ def assert_seat_available(
 ) -> None:
     """Raise ValueError unless one more membership may take a seat.
 
-    NOT wired into any membership path yet; seat enforcement is deferred until
-    the subscription, renewal and expiry mechanisms are in place.
+    Called by add_organization_member and reactivate_membership.
 
     Callers hold the organization row lock (FOR UPDATE), which serialises the
     count against concurrent adds. An organization without a subscription row
@@ -97,8 +96,7 @@ def set_organization_subscription(
     """Create or replace an organization's seat limit and expiry.
 
     Give exactly one of `months` (from today, or from `as_of`) or `expires_on`.
-    The seat limit is recorded but not enforced: membership changes do not
-    consult it yet, and it may be set below the seats currently held.
+    The seat limit may not fall below the seats currently held.
     """
     if isinstance(seat_limit, bool) or not isinstance(seat_limit, int) or not 1 <= seat_limit <= MAX_SEAT_LIMIT:
         raise ValueError(f"Seat limit must be a whole number between 1 and {MAX_SEAT_LIMIT}.")
@@ -119,6 +117,12 @@ def set_organization_subscription(
         raise ValueError("Organization not found.")
     if org.is_protected:
         raise ValueError("The protected organization is not metered.")
+
+    used = seats_in_use(session, organization_id)
+    if seat_limit < used:
+        raise ValueError(
+            f"Seat limit {seat_limit} is below the {used} seats in use; deactivate members first."
+        )
 
     now = _timestamp()
     current = get_organization_subscription(session, organization_id, lock=True)

@@ -13,12 +13,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from symgov_backend.models import (  # noqa: E402
     Organization,
     OrganizationMembership,
+    OrganizationRoleAssignment,
     OrganizationSubscription,
     OrganizationSubscriptionEvent,
 )
 from symgov_backend.organization_service import (  # noqa: E402
     add_organization_member,
     create_organization_with_initial_admin,
+    reactivate_membership,
 )
 from symgov_backend.organization_subscriptions import (  # noqa: E402
     DEFAULT_SEAT_LIMIT,
@@ -118,17 +120,6 @@ def test_protected_organization_cannot_be_metered(Session):
             set_organization_subscription(session, org.id, seat_limit=5, months=12, as_of=TODAY)
 
 
-def test_membership_changes_do_not_consult_the_seat_limit_yet(Session):
-    with Session() as session:
-        actor = _seed_user(session, email="actor@example.test")
-        org = _org(session)
-        set_organization_subscription(session, org.id, seat_limit=1, months=12, as_of=TODAY)
-        for index in range(3):
-            _add(session, org, actor, f"u{index}@example.test")
-        assert seats_in_use(session, org.id) == 3
-        # A limit below current usage is recorded, not refused.
-        assert set_organization_subscription(session, org.id, seat_limit=2, months=12, as_of=TODAY).seat_limit == 2
-
 
 def test_seat_helper_counts_active_and_invited_and_flags_expiry(Session):
     with Session() as session:
@@ -164,3 +155,84 @@ def test_new_organization_starts_on_the_default_plan(Session):
         assert subscription.expires_on > subscription.started_on
         event = session.query(OrganizationSubscriptionEvent).one()
         assert (event.action, event.actor_id) == ("created", platform.id)
+
+
+def test_unmetered_organization_has_no_seat_limit(Session):
+    with Session() as session:
+        actor = _seed_user(session, email="actor@example.test")
+        org = _org(session)
+        for index in range(5):
+            _add(session, org, actor, f"u{index}@example.test")
+        assert seats_in_use(session, org.id) == 5
+
+
+def test_add_member_refused_when_seats_are_full(Session):
+    with Session() as session:
+        actor = _seed_user(session, email="actor@example.test")
+        org = _org(session)
+        _add(session, org, actor, "a@example.test")
+        set_organization_subscription(session, org.id, seat_limit=2, months=12)
+        _add(session, org, actor, "b@example.test")
+        with pytest.raises(ValueError, match="No seats available: 2 of 2"):
+            _add(session, org, actor, "c@example.test")
+        assert seats_in_use(session, org.id) == 2
+
+
+def test_invited_membership_holds_a_seat_and_deactivation_frees_it(Session):
+    with Session() as session:
+        actor = _seed_user(session, email="actor@example.test")
+        org = _org(session)
+        set_organization_subscription(session, org.id, seat_limit=1, months=12)
+        invited_user = _seed_user(session, email="invited@example.test")
+        now = datetime.now(timezone.utc)
+        invited = OrganizationMembership(
+            id=uuid.uuid4(), organization_id=org.id, user_id=invited_user.id, status="invited",
+            invited_at=now, created_at=now, updated_at=now,
+        )
+        session.add(invited)
+        session.flush()
+        with pytest.raises(ValueError, match="No seats available"):
+            _add(session, org, actor, "late@example.test")
+        invited.status = "inactive"
+        session.flush()
+        _add(session, org, actor, "later@example.test")
+
+
+def test_lapsed_subscription_blocks_adding_members(Session):
+    with Session() as session:
+        actor = _seed_user(session, email="actor@example.test")
+        org = _org(session)
+        set_organization_subscription(session, org.id, seat_limit=5, months=1, as_of=date(2026, 1, 4))
+        with pytest.raises(ValueError, match="expired"):
+            _add(session, org, actor, "a@example.test")
+
+
+def test_reactivation_respects_seats_and_ignores_its_own_invited_seat(Session):
+    with Session() as session:
+        platform = _seed_platform_admin_actor(session)
+        org = _org(session)
+        actor = _seed_user(session, email="actor@example.test")
+        first = _add(session, org, actor, "a@example.test")
+        second = _add(session, org, actor, "b@example.test")
+        # Deactivation leaves a revoked role row; the SQLite fixture cannot hold a
+        # second row per membership (PostgreSQL's index is partial), so drop it.
+        second.status = "inactive"
+        session.query(OrganizationRoleAssignment).filter_by(membership_id=second.id).delete()
+        session.flush()
+        set_organization_subscription(session, org.id, seat_limit=1, months=12)
+        with pytest.raises(ValueError, match="No seats available"):
+            reactivate_membership(session, membership_id=second.id, actor_user_id=platform.id, reason="returning member")
+        assert first.status == "active"
+        set_organization_subscription(session, org.id, seat_limit=2, months=12)
+        reactivate_membership(session, membership_id=second.id, actor_user_id=platform.id, reason="returning member")
+        assert second.status == "active"
+
+
+def test_seat_limit_cannot_drop_below_seats_in_use(Session):
+    with Session() as session:
+        actor = _seed_user(session, email="actor@example.test")
+        org = _org(session)
+        _add(session, org, actor, "a@example.test")
+        _add(session, org, actor, "b@example.test")
+        with pytest.raises(ValueError, match="below the 2 seats in use"):
+            set_organization_subscription(session, org.id, seat_limit=1, months=12)

@@ -26,6 +26,7 @@ from symgov_backend.organization_icons import (
 from symgov_backend.organization_subscriptions import (
     DEFAULT_SEAT_LIMIT,
     DEFAULT_TERM_MONTHS,
+    assert_seat_available,
     set_organization_subscription,
 )
 from symgov_backend.product_usage_events import record_governance_usage_event
@@ -1780,6 +1781,7 @@ def add_organization_member(
         actor_id=actor_user_id,
         payload=_mutation_audit_payload(
             organization_id=organization_id,
+    assert_seat_available(session, organization_id)
             effective_authority=(
                 "platform_admin" if _bypass_admin_check else "organization_admin"
             ),
@@ -2171,6 +2173,8 @@ def reactivate_membership(
             source=audit_source,
             reason=reason,
             recent_step_up_at=recent_step_up_at,
+    # An invited membership already holds a seat, so it is excluded from the count.
+    assert_seat_available(session, membership.organization_id, excluding_membership_id=membership.id)
             details={"membership_id": str(membership.id)},
         ),
     )

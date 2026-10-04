@@ -4,6 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 import pytest
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
@@ -22,6 +23,14 @@ from symgov_backend.auth import hash_session_token, upsert_user
 
 # Import helpers
 from test_organization_postgresql_migration import organization_database
+
+
+@pytest.fixture(autouse=True)
+def _stub_seat_check():
+    """`organization_database` is pinned to the 20260822_0030 snapshot, which has no
+    `organization_subscriptions` table (see test_organization_postgresql_migration)."""
+    with patch("symgov_backend.organization_service.assert_seat_available"):
+        yield
 
 @pytest.fixture
 def pg_client(organization_database):
