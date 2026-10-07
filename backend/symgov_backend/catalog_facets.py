@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 
 # Bump when any rule below changes. Rows computed under another version are
 # treated as missing and recomputed on the next search (or by the backfill).
-CATALOG_FACET_RULES_VERSION = 3  # 2: canonical S-<n> display ID; 3: word-split search text (P-01)
+CATALOG_FACET_RULES_VERSION = 4  # 2: canonical S-<n> display ID; 3: word-split search text (P-01); 4: governed category/discipline win over keyword rules
 
 CATALOG_DISCIPLINE_ORDER = [
     "Electrical",
@@ -268,6 +268,17 @@ def _text_tokens(*values: Any) -> list[str]:
     return [_js_text(token).lower() for token in tokens]
 
 
+def _governed(symbol: Any, field: str) -> bool:
+    """Whether the row carries a governed `discipline` / `category` assignment.
+
+    A governed value is the value the facets use; the keyword rules below only
+    run for a row without one. Mirrors `symbol.governedTaxonomy?.[field]` in
+    `catalogWorkbench.js`.
+    """
+    governed = _get(symbol, "governedTaxonomy")
+    return isinstance(governed, dict) and _truthy(governed.get(field))
+
+
 def symbol_context_text(symbol: dict) -> str:
     payload = _get(symbol, "payload") or {}
     return " ".join(
@@ -328,10 +339,11 @@ def normalize_catalog_category(value: Any, symbol: dict) -> list[str]:
     raw = _js_text(value).strip()
     context = symbol_context_text(symbol)
     categories: list[str] = []
-    if _FIRE_CONTEXT.search(context):
-        categories.append("Fire Alarm Devices")
-    if _SENSOR_CONTEXT.search(context):
-        categories.append("Sensors / Detectors")
+    if not _governed(symbol, "category"):
+        if _FIRE_CONTEXT.search(context):
+            categories.append("Fire Alarm Devices")
+        if _SENSOR_CONTEXT.search(context):
+            categories.append("Sensors / Detectors")
     mapped = _CATEGORY_MAP.get(_normalized_key(raw))
     categories.extend(mapped if mapped is not None else ([raw] if raw else []))
     return sort_by_preferred_order(categories or ["Miscellaneous / Unclassified"], CATALOG_CATEGORY_ORDER)
@@ -403,7 +415,7 @@ def catalog_taxonomy_for_symbol(symbol: dict) -> dict[str, list[str]]:
     ]
     for value in _list(symbol.get("disciplines")):
         disciplines.extend(normalize_catalog_discipline(value))
-    if _FIRE_CONTEXT.search(context):
+    if not _governed(symbol, "discipline") and _FIRE_CONTEXT.search(context):
         disciplines.append("Fire & Life Safety")
     categories = list(normalize_catalog_category(symbol.get("category"), symbol))
     for value in _list(symbol.get("categories")):
@@ -624,7 +636,7 @@ _STALE_CANDIDATES_SQL = """
       AND f.symbol_revision_id IS NULL
 """
 
-_SOURCE_ROWS_SQL = """
+_SOURCE_ROWS_SQL_TEMPLATE = """
     SELECT
         gs.id AS governed_symbol_id,
         gs.id::text AS symbol_id,
@@ -642,11 +654,22 @@ _SOURCE_ROWS_SQL = """
         sr.created_at AS revision_created_at,
         sr.payload_json,
         sr.rationale,
-        sr.catalog_facet_generation AS revision_generation
+        sr.catalog_facet_generation AS revision_generation,
+        {governed_discipline},
+        {governed_category}
     FROM symbol_revisions sr
     JOIN governed_symbols gs ON gs.id = sr.symbol_id
     WHERE sr.id IN :revision_ids
 """
+
+def _source_rows_sql() -> str:
+    from .published_catalog import GOVERNED_CATEGORY_COLUMN_SQL, GOVERNED_DISCIPLINE_COLUMN_SQL
+
+    return _SOURCE_ROWS_SQL_TEMPLATE.format(
+        governed_discipline=GOVERNED_DISCIPLINE_COLUMN_SQL,
+        governed_category=GOVERNED_CATEGORY_COLUMN_SQL,
+    )
+
 
 _UPSERT_SQL = """
     INSERT INTO catalog_symbol_facets (
@@ -706,6 +729,8 @@ def _served_row(source) -> dict:
             revision_created_at=source.revision_created_at,
             payload_json=source.payload_json,
             rationale=source.rationale,
+            governed_discipline=source.governed_discipline,
+            governed_category=source.governed_category,
             page_id=None,
             page_code=None,
             page_title=None,
@@ -752,7 +777,7 @@ def compute_catalog_facets(session: Session, revision_ids: Iterable[Any]) -> int
         bindparam("formats", type_=JSONB),
         bindparam("use_cases", type_=JSONB),
     )
-    source_query = text(_SOURCE_ROWS_SQL).bindparams(
+    source_query = text(_source_rows_sql()).bindparams(
         bindparam("revision_ids", expanding=True, type_=UUID(as_uuid=True))
     )
     now = datetime.now(timezone.utc)

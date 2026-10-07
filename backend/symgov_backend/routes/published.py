@@ -76,6 +76,7 @@ from ..published_feedback_gate import (
 from ..published_catalog import (
     PUBLISHED_SYMBOLS_SQL,
     choose_published_preview_asset,
+    governed_taxonomy_for_row,
     list_published_preview_assets,
     published_fallback_source_asset,
     published_symbol_display_id,
@@ -183,6 +184,7 @@ def published_symbol_row(
         "payload": payload,
         "links": {"web": f"/#/s/{symbol_display_id}"},
         "source": "public",
+        **({"governedTaxonomy": governed} if (governed := governed_taxonomy_for_row(row)) is not None else {}),
     }
 
 

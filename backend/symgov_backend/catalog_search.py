@@ -11,6 +11,7 @@ from .catalog_taxonomy import FORMAT_ORDER, catalog_taxonomy_for_symbol, use_cas
 from .published_catalog import (
     PUBLISHED_SYMBOLS_SQL,
     choose_published_preview_asset,
+    governed_taxonomy_for_row,
     published_fallback_source_asset,
     published_symbol_display_id,
 )
@@ -40,6 +41,7 @@ def row_taxonomy_input(row) -> dict:
         "keywords": payload.get("keywords") or payload.get("search_terms") or [],
         "downloads": payload.get("downloads") or [],
         "payload": payload,
+        "governedTaxonomy": governed_taxonomy_for_row(row),
     }
 
 

@@ -241,6 +241,16 @@ def symbol_context_text(symbol: Any = None) -> str:
     )
 
 
+def _governed(symbol: Any, field: str) -> bool:
+    """Whether the row carries a governed `discipline` / `category` assignment.
+
+    A governed value is the value the facets use; the keyword rules only run
+    for a row without one (see `catalog_facets._governed`).
+    """
+    governed = _get(symbol, "governedTaxonomy")
+    return isinstance(governed, dict) and bool(governed.get(field))
+
+
 def normalize_catalog_discipline(value: Any) -> list[str]:
     raw = str(value or "").strip()
     normalized = _normalized_key(raw)
@@ -253,10 +263,11 @@ def normalize_catalog_category(value: Any, symbol: Any = None) -> list[str]:
     context = symbol_context_text(symbol)
     categories: list[str] = []
 
-    if re.search(r"fire|smoke|heat|detector|call\s?point|break\s?glass|sounder|beacon|alarm", context):
-        categories.append("Fire Alarm Devices")
-    if re.search(r"detector|sensor|smoke|heat|co\b|carbon", context):
-        categories.append("Sensors / Detectors")
+    if not _governed(symbol, "category"):
+        if re.search(r"fire|smoke|heat|detector|call\s?point|break\s?glass|sounder|beacon|alarm", context):
+            categories.append("Fire Alarm Devices")
+        if re.search(r"detector|sensor|smoke|heat|co\b|carbon", context):
+            categories.append("Sensors / Detectors")
 
     categories.extend(_CATEGORY_MAP.get(normalized, [raw] if raw else []))
     return sort_by_preferred_order(categories or ["Miscellaneous / Unclassified"], CATALOG_CATEGORY_ORDER)
@@ -359,7 +370,9 @@ def catalog_taxonomy_for_symbol(symbol: Any = None) -> dict[str, list[str]]:
     disciplines: list[str] = []
     for value in raw_disciplines:
         disciplines.extend(normalize_catalog_discipline(value))
-    if re.search(r"fire|smoke|heat|detector|call\s?point|break\s?glass|sounder|beacon|alarm", context):
+    if not _governed(symbol, "discipline") and re.search(
+        r"fire|smoke|heat|detector|call\s?point|break\s?glass|sounder|beacon|alarm", context
+    ):
         disciplines.append("Fire & Life Safety")
 
     categories: list[str] = []

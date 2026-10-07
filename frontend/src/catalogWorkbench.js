@@ -75,6 +75,13 @@ function textTokens(...values) {
     .map((value) => String(value || '').toLowerCase());
 }
 
+// Whether the row carries a governed `discipline` / `category` assignment. A
+// governed value is the value the facets use; the keyword rules only run for a
+// row without one. Mirrors `_governed` in backend/symgov_backend/catalog_facets.py.
+function isGoverned(symbol, field) {
+  return Boolean(symbol?.governedTaxonomy?.[field]);
+}
+
 function symbolContextText(symbol = {}) {
   return textTokens(
     symbol.name,
@@ -147,11 +154,13 @@ export function normalizeCatalogCategory(value, symbol = {}) {
   const context = symbolContextText(symbol);
   const categories = [];
 
-  if (/fire|smoke|heat|detector|call\s?point|break\s?glass|sounder|beacon|alarm/.test(context)) {
-    categories.push('Fire Alarm Devices');
-  }
-  if (/detector|sensor|smoke|heat|co\b|carbon/.test(context)) {
-    categories.push('Sensors / Detectors');
+  if (!isGoverned(symbol, 'category')) {
+    if (/fire|smoke|heat|detector|call\s?point|break\s?glass|sounder|beacon|alarm/.test(context)) {
+      categories.push('Fire Alarm Devices');
+    }
+    if (/detector|sensor|smoke|heat|co\b|carbon/.test(context)) {
+      categories.push('Sensors / Detectors');
+    }
   }
 
   const map = {
@@ -261,7 +270,7 @@ export function catalogTaxonomyForSymbol(symbol = {}) {
     ...normalizeCatalogDiscipline(symbol.engineeringDiscipline),
     ...(Array.isArray(symbol.disciplines) ? symbol.disciplines.flatMap(normalizeCatalogDiscipline) : [])
   ];
-  if (/fire|smoke|heat|detector|call\s?point|break\s?glass|sounder|beacon|alarm/.test(context)) {
+  if (!isGoverned(symbol, 'discipline') && /fire|smoke|heat|detector|call\s?point|break\s?glass|sounder|beacon|alarm/.test(context)) {
     disciplines.push('Fire & Life Safety');
   }
   const categories = [
