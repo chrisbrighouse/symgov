@@ -20,6 +20,21 @@ def governed_assignment_exists_sql(scheme_code: str, revision_id_expr: str = "sr
         )"""
 
 
+# The attribution text an imported library asks every share to carry. It lives
+# once, on the source package's approved rights record, so a revision's payload
+# names only where to read it (`dexpi.attribution_source = "rights_record"`)
+# and the response is filled from here when it is built.
+RIGHTS_ATTRIBUTION_COLUMN_SQL = """(
+            SELECT rr.evidence_json ->> 'attribution_text'
+            FROM source_package_entries spe
+            JOIN rights_records rr ON rr.source_package_id = spe.source_package_id
+            WHERE spe.symbol_revision_id = sr.id
+              AND rr.decision_status = 'approved'
+              AND rr.evidence_json ->> 'attribution_text' IS NOT NULL
+            ORDER BY rr.created_at DESC
+            LIMIT 1
+        ) AS rights_attribution_text"""
+
 GOVERNED_DISCIPLINE_COLUMN_SQL = governed_assignment_exists_sql("ENGINEERING-DISCIPLINE") + " AS governed_discipline"
 GOVERNED_CATEGORY_COLUMN_SQL = governed_assignment_exists_sql("SYMBOL-CATEGORY-FAMILY") + " AS governed_category"
 
@@ -33,7 +48,7 @@ def governed_taxonomy_for_row(row) -> dict | None:
     return {"discipline": bool(discipline), "category": bool(category)}
 
 
-PUBLISHED_SYMBOLS_SQL = f"""
+PUBLISHED_SYMBOLS_SQL = """
     SELECT
         gs.id::text AS symbol_id,
         gs.catalog_symbol_id,
@@ -57,9 +72,7 @@ PUBLISHED_SYMBOLS_SQL = f"""
         pk.audience,
         pk.updated_at AS pack_updated_at,
         pe.sort_order,
-        GREATEST(gs.updated_at, sr.created_at, pp.updated_at, pk.updated_at) AS last_updated_at,
-        {GOVERNED_DISCIPLINE_COLUMN_SQL},
-        {GOVERNED_CATEGORY_COLUMN_SQL}
+        GREATEST(gs.updated_at, sr.created_at, pp.updated_at, pk.updated_at) AS last_updated_at
     FROM published_pages pp
     JOIN publication_packs pk ON pk.id = pp.pack_id
     JOIN pack_entries pe ON pe.pack_id = pk.id
@@ -77,6 +90,44 @@ PUBLISHED_SYMBOLS_SQL = f"""
         AND pk.audience = 'public'
         AND sr.lifecycle_state = 'published'
 """
+
+
+# The served rows: the same query with the governed-assignment flags and the
+# rights attribution as extra columns. The routes that build what a user sees
+# read this one. `PUBLISHED_SYMBOLS_SQL` stays exactly as it was, because
+# visibility tests and candidate scans use it directly and several of them run
+# against databases older than the tables the extra columns read.
+PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL = PUBLISHED_SYMBOLS_SQL.replace(
+    "AS last_updated_at\n    FROM published_pages pp",
+    "AS last_updated_at,\n        "
+    + GOVERNED_DISCIPLINE_COLUMN_SQL
+    + ",\n        "
+    + GOVERNED_CATEGORY_COLUMN_SQL
+    + ",\n        "
+    + RIGHTS_ATTRIBUTION_COLUMN_SQL
+    + "\n    FROM published_pages pp",
+    1,
+)
+assert PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL != PUBLISHED_SYMBOLS_SQL
+
+
+def payload_with_rights_attribution(payload: dict | None, attribution_text: str | None) -> dict:
+    """The payload as served: `dexpi.attribution` filled from the rights record.
+
+    Only a payload that says its attribution lives on the record
+    (`attribution_source == "rights_record"`) is touched; a pilot symbol keeps
+    the text it stores, byte for byte. The stored payload is never modified.
+    """
+    payload = payload or {}
+    dexpi = payload.get("dexpi")
+    if (
+        not attribution_text
+        or not isinstance(dexpi, dict)
+        or dexpi.get("attribution_source") != "rights_record"
+        or dexpi.get("attribution")
+    ):
+        return payload
+    return {**payload, "dexpi": {**dexpi, "attribution": attribution_text}}
 
 
 def published_symbol_display_id(row) -> str:

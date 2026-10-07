@@ -236,3 +236,23 @@ def test_developer_openapi_contextual_search_constraints_match_live_clamping_con
     limit = schema["properties"]["limit"]
     assert "minimum" not in limit and "maximum" not in limit
     assert "clamp" in limit["description"].lower()
+
+
+def test_developer_openapi_documents_state_variants_and_the_opt_in_download():
+    _, client = build_client()
+    document = client.get("/api/v1/catalog/developer/openapi.json").json()
+
+    request = document["components"]["schemas"]["DownloadRequest"]
+    assert request["additionalProperties"] is False
+    assert request["required"] == ["symbolIds", "format"]
+    option = request["properties"]["includeStateVariants"]
+    assert option["type"] == "boolean" and option["default"] is False
+    download = document["paths"]["/api/v1/catalog/symbols/download"]["post"]
+    assert "X-Symgov-State-Variants-Count" in download["responses"]["200"]["headers"]
+
+    variant = document["paths"]["/api/v1/catalog/symbols/{symbol_ref}/state-variants/{index}"]["get"]
+    assert variant["x-required-scope"] == "catalog.read"
+    assert {item["name"] for item in variant["parameters"]} == {"symbol_ref", "index"}
+    assert "image/svg+xml" in variant["responses"]["200"]["content"]
+    detail = document["components"]["schemas"]["SymbolDetailResponse"]["properties"]
+    assert {"geometry", "disc", "stateVariants"} <= set(detail)

@@ -1,8 +1,60 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import source from '../../backend/symgov_backend/data/ics-source.json';
 import dexpiSource from '../../backend/symgov_backend/data/dexpi-source.json';
+import { listPublishedDataSources } from './api.js';
+
+// One section per imported library whose rights are approved. Every word of
+// it, the attribution included, comes from the library's own source package and
+// rights record: nothing about a library is written into this file.
+export function ImportedLibrarySources({ sources }) {
+  return (
+    <>
+      {sources.map((source) => {
+        const headingId = `library-source-${String(source.packageCode).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+        return (
+          <section key={source.packageCode} className="glass-panel pane support-panel" aria-labelledby={headingId}>
+            <div className="section-heading">
+              <h3 id={headingId}>{source.title}</h3>
+              <p>
+                Symbol library / Data sources (package {source.packageCode}
+                {source.releaseVersion ? `, ${source.releaseVersion}` : ''})
+              </p>
+            </div>
+            <p className="library-source-attribution">{source.attributionText}</p>
+            {source.attributionIsPlaceholder ? (
+              <p role="note">This attribution wording is provisional until the licensor supplies the final text.</p>
+            ) : null}
+            <ul>
+              {source.licensor ? <li>Licensed by {source.licensor}</li> : null}
+              {source.creator ? <li>Created by {source.creator}</li> : null}
+              <li>{source.publishedSymbols} published symbols</li>
+              {source.sourceUri ? <li><a href={source.sourceUri}>Source repository</a></li> : null}
+              {source.organisationUrl ? <li><a href={source.organisationUrl}>{source.organisationUrl.replace(/^https?:\/\//, '')}</a></li> : null}
+            </ul>
+          </section>
+        );
+      })}
+    </>
+  );
+}
 
 export default function SupportDataSources() {
+  const [librarySources, setLibrarySources] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    listPublishedDataSources()
+      .then((result) => {
+        if (!cancelled) setLibrarySources(result.sources);
+      })
+      .catch(() => {
+        if (!cancelled) setLibrarySources([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   return (
     <>
       <section className="glass-panel pane support-panel" aria-labelledby="classification-data-sources">
@@ -34,6 +86,7 @@ export default function SupportDataSources() {
           <li><a href={dexpiSource.license_url}>Creative Commons Attribution 4.0 International (CC BY 4.0)</a></li>
         </ul>
       </section>
+      <ImportedLibrarySources sources={librarySources} />
     </>
   );
 }

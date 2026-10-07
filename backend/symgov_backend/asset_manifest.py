@@ -140,8 +140,23 @@ def normalize_asset(asset: Any) -> dict[str, Any] | None:
     return _asset_from_mapping(asset)
 
 
+OPTION_ASSET_ROLE = "option"
+
+
+def is_option_asset(asset: Any) -> bool:
+    """Whether this is a state (option) variant of a symbol, never its drawing.
+
+    An option SVG is the same drawing under a stated condition. It must never
+    stand in for the primary, so every selection below skips it explicitly
+    rather than relying on where it happens to be stored.
+    """
+    return isinstance(asset, dict) and _clean(asset.get("role")) == OPTION_ASSET_ROLE
+
+
 def _is_previewable_asset(asset: dict[str, Any] | None) -> bool:
     if not asset:
+        return False
+    if is_option_asset(asset):
         return False
     return is_browser_previewable(
         content_type=asset.get("content_type"),
@@ -196,7 +211,7 @@ def choose_preview_asset(
 
 def _add_download(seen: set[str], downloads: list[dict[str, Any]], asset: Any) -> None:
     normalized = _asset_from_mapping(asset)
-    if not normalized:
+    if not normalized or is_option_asset(normalized):
         return
     object_key = normalized["object_key"]
     if object_key in seen:
@@ -207,7 +222,7 @@ def _add_download(seen: set[str], downloads: list[dict[str, Any]], asset: Any) -
 
 def _add_asset(seen: set[str], assets: list[dict[str, Any]], asset: Any) -> None:
     normalized = _asset_from_mapping(asset)
-    if not normalized:
+    if not normalized or is_option_asset(normalized):
         return
     object_key = normalized["object_key"]
     if object_key in seen:
@@ -332,3 +347,30 @@ def select_preview_asset(
         ),
         None,
     )
+
+
+def list_state_variant_assets(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The option (state) variants a symbol carries, in option order.
+
+    Kept under `visual_assets.state_variants`, apart from `source_assets`, so
+    no format-based selection can reach them. Each carries `role: "option"`,
+    its `option_index` and the `condition` under which it applies.
+    """
+    payload = payload or {}
+    raw_visual_assets = payload.get("visual_assets")
+    visual_assets: dict[str, Any] = raw_visual_assets if isinstance(raw_visual_assets, dict) else {}
+    variants = visual_assets.get("state_variants")
+    if not isinstance(variants, list):
+        return []
+    seen: set[str] = set()
+    assets: list[dict[str, Any]] = []
+    for variant in variants:
+        normalized = _asset_from_mapping(variant)
+        if not normalized or not is_option_asset(normalized):
+            continue
+        if normalized["object_key"] in seen:
+            continue
+        seen.add(normalized["object_key"])
+        assets.append(normalized)
+    assets.sort(key=lambda asset: (asset.get("option_index") is None, asset.get("option_index") or 0))
+    return assets

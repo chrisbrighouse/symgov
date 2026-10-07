@@ -183,6 +183,14 @@ export async function revokeCatalogSelfServiceApiKey(payload, signal) {
   });
 }
 
+// The imported symbol libraries whose rights are approved, with the source and
+// attribution wording read from each one's own record.
+export async function listPublishedDataSources() {
+  const result = await requestJson('/published/data-sources', { cache: 'no-store' });
+  const sources = result.ok && Array.isArray(result.payload?.sources) ? result.payload.sources : [];
+  return { ok: result.ok, sources };
+}
+
 export async function fetchHealth() {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.' };

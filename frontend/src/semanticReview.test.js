@@ -556,7 +556,7 @@ describe('SemanticReviewPage decision controls', () => {
     const schemeOptions = byLabel(renderer, 'Classification scheme').findAllByType('option');
     const offered = schemeOptions.map((option) => option.props.value);
     assert.deepEqual(offered, ['ENGINEERING-DISCIPLINE', 'SYMBOL-CATEGORY-FAMILY']);
-    for (const readOnly of ['USE-CASE', 'DOCUMENT-TYPE', 'REPRESENTATION-TYPE']) {
+    for (const readOnly of ['USE-CASE', 'DOCUMENT-TYPE', 'REPRESENTATION-TYPE', 'DEXPI-CLASS']) {
       assert.equal(offered.includes(readOnly), false, readOnly);
     }
     await act(async () => renderer.unmount());

@@ -10,6 +10,7 @@ from .asset_manifest import list_download_assets
 from .catalog_taxonomy import FORMAT_ORDER, catalog_taxonomy_for_symbol, use_cases_for_formats
 from .published_catalog import (
     PUBLISHED_SYMBOLS_SQL,
+    PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL,
     choose_published_preview_asset,
     governed_taxonomy_for_row,
     published_fallback_source_asset,
@@ -398,7 +399,7 @@ def search_catalog_symbols_for_context(
 
     rows = session.execute(
         text(
-            PUBLISHED_SYMBOLS_SQL
+            PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
             + where_extension
             + """
             ORDER BY pk.effective_date DESC, pk.pack_code, pe.sort_order, gs.canonical_name

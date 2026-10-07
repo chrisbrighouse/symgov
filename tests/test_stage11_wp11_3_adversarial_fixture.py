@@ -72,7 +72,10 @@ from symgov_backend.organization_symbol_drafts import create_draft, submit_for_r
 from symgov_backend.organization_symbol_review import decide_submission  # noqa: E402
 from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E402
 
-NEW_MIGRATION_HEAD = "20260908_0046"
+# Moved to head for the DISC DEXPI import: the served-rows query now reads the
+# classification and rights tables, which 20260908_0046 predates. Three files
+# (11.3, 11.4, 11.5) build their database from this one fixture.
+NEW_MIGRATION_HEAD = "20261007_0070"
 
 
 @pytest.fixture(scope="module")

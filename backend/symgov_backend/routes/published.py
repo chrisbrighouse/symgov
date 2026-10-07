@@ -75,14 +75,17 @@ from ..published_feedback_gate import (
 )
 from ..published_catalog import (
     PUBLISHED_SYMBOLS_SQL,
+    PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL,
     choose_published_preview_asset,
     governed_taxonomy_for_row,
     list_published_preview_assets,
+    payload_with_rights_attribution,
     published_fallback_source_asset,
     published_symbol_display_id,
 )
 from ..published_preview_authorizations import resolve_authorized_preview_attachment
 from ..runtime import download_object_bytes
+from ..symbol_state_variants import read_state_variant, state_variant_summaries
 from ..services.published_feedback import (
     canonical_request_fingerprint,
     DEFAULT_ED_RUNTIME_QUEUE_DIR,
@@ -126,7 +129,9 @@ def published_symbol_row(
     comment_counts_by_symbol: dict[str, int] | None = None,
     favourite_symbol_ids: set[uuid.UUID] | None = None,
 ) -> dict:
-    payload = row.payload_json or {}
+    payload = payload_with_rights_attribution(
+        row.payload_json, getattr(row, "rights_attribution_text", None)
+    )
     keywords = payload.get("keywords") or payload.get("search_terms") or []
     if not isinstance(keywords, list):
         keywords = []
@@ -182,6 +187,7 @@ def published_symbol_row(
         "commentCount": comment_count,
         "isFavourite": symbol_uuid is not None and symbol_uuid in (favourite_symbol_ids or set()),
         "payload": payload,
+        "stateVariants": state_variant_summaries(payload, f"/api/v1/published/symbols/{symbol_display_id}"),
         "links": {"web": f"/#/s/{symbol_display_id}"},
         "source": "public",
         **({"governedTaxonomy": governed} if (governed := governed_taxonomy_for_row(row)) is not None else {}),
@@ -474,7 +480,7 @@ def _load_published_symbol_row(session: Session, symbol_ref: str):
     try:
         rows = session.execute(
             text(
-                PUBLISHED_SYMBOLS_SQL
+                PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
                 + """
                 AND gs.id = :symbol_id
                 ORDER BY pp.effective_date DESC, pk.effective_date DESC
@@ -720,7 +726,7 @@ def list_published_symbols(
     where_extension = (" AND " + " AND ".join(filters)) if filters else ""
     rows = session.execute(
         text(
-            PUBLISHED_SYMBOLS_SQL
+            PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
             + where_extension
             + " ORDER BY pk.effective_date DESC, pk.pack_code, pe.sort_order, gs.canonical_name"
         ),
@@ -1313,6 +1319,81 @@ def get_published_symbol_preview(
     )
 
 
+@router.get("/symbols/{symbol_id}/state-variants/{index}")
+@legacy_router.get("/published/symbols/{symbol_id}/state-variants/{index}", include_in_schema=False)
+def get_published_symbol_state_variant(
+    symbol_id: str,
+    index: int,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
+) -> Response:
+    """One option (state) SVG of a published symbol, by its option number."""
+    source, resolved, _resolved_by = _load_symbol_for_detail(session, symbol_id, current_user, settings)
+    if source != "public":
+        # Option variants belong to imported libraries, which are public.
+        raise HTTPException(status_code=404, detail="Published symbol state variant was not found.")
+    try:
+        revision_id = uuid.UUID(str(resolved.symbol_revision_id))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=404, detail="Published symbol state variant was not found.") from exc
+    content, media_type = read_state_variant(
+        session, revision_id=revision_id, payload=resolved.payload_json, index=index
+    )
+    return Response(content=content, media_type=media_type, headers=safe_image_response_headers())
+
+
+@router.get("/data-sources")
+def list_published_data_sources(session: Session = Depends(get_db_session)) -> dict:
+    """The imported libraries whose rights are approved, for Support's Data sources.
+
+    Everything shown, including the attribution wording, is read from the
+    source package and its approved rights record. A library whose rights are
+    not yet approved is not listed, because nothing of it is public yet.
+    """
+    rows = session.execute(
+        text(
+            """
+            SELECT sp.package_code, sp.title, sp.provider, sp.source_uri, sp.release_version,
+                   sp.metadata_json, rr.rights_status, rr.disposition, rr.evidence_json,
+                   (SELECT count(DISTINCT sr.symbol_id)
+                      FROM source_package_entries spe
+                      JOIN symbol_revisions sr ON sr.id = spe.symbol_revision_id
+                     WHERE spe.source_package_id = sp.id
+                       AND sr.lifecycle_state = 'published') AS published_symbols
+            FROM source_packages sp
+            JOIN rights_records rr ON rr.source_package_id = sp.id
+            WHERE rr.decision_status = 'approved'
+              AND rr.evidence_json ->> 'attribution_text' IS NOT NULL
+            ORDER BY sp.created_at, sp.package_code
+            """
+        )
+    ).all()
+    sources = []
+    for row in rows:
+        evidence = row.evidence_json or {}
+        metadata = row.metadata_json or {}
+        sources.append(
+            {
+                "packageCode": row.package_code,
+                "title": row.title,
+                "provider": row.provider,
+                "sourceUri": row.source_uri,
+                "releaseVersion": row.release_version,
+                "licensor": evidence.get("licensor") or metadata.get("licensor"),
+                "creator": evidence.get("creator") or metadata.get("creator"),
+                "organisationUrl": metadata.get("organisation_url"),
+                "sourceCommit": evidence.get("source_commit") or metadata.get("source_commit"),
+                "rightsStatus": row.rights_status,
+                "disposition": row.disposition,
+                "attributionText": evidence.get("attribution_text"),
+                "attributionIsPlaceholder": bool(evidence.get("attribution_is_placeholder")),
+                "publishedSymbols": int(row.published_symbols or 0),
+            }
+        )
+    return {"sources": sources}
+
+
 @router.get("/symbols/{symbol_id}/supplemental-photos/{photo_id}/preview")
 @legacy_router.get("/published/symbols/{symbol_id}/supplemental-photos/{photo_id}/preview", include_in_schema=False)
 def get_published_symbol_supplemental_photo_preview(
@@ -1386,7 +1467,7 @@ def get_published_page(
     session: Session = Depends(get_db_session),
 ) -> dict:
     rows = session.execute(
-        text(PUBLISHED_SYMBOLS_SQL + " AND pp.page_code = :page_code LIMIT 1"),
+        text(PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL + " AND pp.page_code = :page_code LIMIT 1"),
         {"page_code": page_code},
     ).all()
     if not rows:

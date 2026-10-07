@@ -3626,6 +3626,83 @@ button.catalog-preview-format-badge:focus-visible {
   line-height: 1.25;
 }
 
+.symbol-geometry-details {
+  display: grid;
+  gap: 0.75rem;
+  margin: 0.75rem 0;
+}
+
+.label-template-list {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+}
+
+.label-template-list dt {
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.label-template-list dd {
+  margin: 0;
+}
+
+.label-template-list pre {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  overflow-x: auto;
+  border: 1px solid var(--stroke);
+  border-radius: 0.35rem;
+  background: var(--idox-bg-surface-default);
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+}
+
+.state-variant-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.state-variant-gallery figure {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+}
+
+.state-variant-gallery img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: contain;
+  padding: 0.5rem;
+  border: 1px solid var(--stroke);
+  border-radius: 0.35rem;
+  background: var(--idox-bg-surface-default);
+}
+
+.state-variant-gallery figcaption {
+  display: grid;
+  gap: 0.15rem;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.catalog-download-variants {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+}
+
+.library-source-attribution {
+  overflow-wrap: anywhere;
+}
+
 .compare-stage {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

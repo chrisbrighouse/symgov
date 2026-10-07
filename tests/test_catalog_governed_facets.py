@@ -16,6 +16,8 @@ from symgov_backend.published_catalog import (
     GOVERNED_CATEGORY_COLUMN_SQL,
     GOVERNED_DISCIPLINE_COLUMN_SQL,
     PUBLISHED_SYMBOLS_SQL,
+    PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL,
+    RIGHTS_ATTRIBUTION_COLUMN_SQL,
     governed_taxonomy_for_row,
 )
 
@@ -74,7 +76,18 @@ def test_catalog_api_input_carries_the_flags():
     assert row_taxonomy_input(row)["governedTaxonomy"] == {"discipline": True, "category": True}
 
 
-def test_published_sql_counts_only_proposed_and_verified_assignments():
+def test_the_served_rows_sql_counts_only_proposed_and_verified_assignments():
     for column in (GOVERNED_DISCIPLINE_COLUMN_SQL, GOVERNED_CATEGORY_COLUMN_SQL):
         assert "src.status IN ('proposed', 'verified')" in column
-        assert column in PUBLISHED_SYMBOLS_SQL
+        assert column in PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
+    assert RIGHTS_ATTRIBUTION_COLUMN_SQL in PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
+    # Only an approved rights record supplies attribution.
+    assert "rr.decision_status = 'approved'" in RIGHTS_ATTRIBUTION_COLUMN_SQL
+
+
+def test_the_base_published_sql_is_left_exactly_as_it_was():
+    """Visibility tests and candidate scans use it directly, on databases that
+    may predate the tables the served-rows columns read."""
+    for needle in ("symbol_revision_classifications", "rights_records", "source_package_entries", "governed_discipline", "governed_category"):
+        assert needle not in PUBLISHED_SYMBOLS_SQL
+    assert PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL.startswith(PUBLISHED_SYMBOLS_SQL[: PUBLISHED_SYMBOLS_SQL.index("AS last_updated_at")])

@@ -66,10 +66,11 @@ const SEMANTIC_ASSIGNMENT_METHODS = ['manual', 'source_mapping', 'rule', 'ai_ass
 const EXTERNAL_MAPPING_METHODS = ['manual', 'imported', 'rule', 'ai_assisted'];
 const RIGHTS_DETERMINATION_METHODS = ['manual', 'licence_document', 'ai_assisted'];
 
-// Decision Q6: these three schemes are read-only in v1. Existing assignments
-// are displayed and marked; no control creates one, and the API refuses a
-// proposal into them with the validation envelope, so the two agree.
-const READ_ONLY_SCHEME_CODES = new Set(['USE-CASE', 'DOCUMENT-TYPE', 'REPRESENTATION-TYPE']);
+// Decision Q6: these three schemes are read-only in v1, and DEXPI-CLASS joins
+// them as an imported scheme (the DISC DEXPI import). Existing assignments are
+// displayed and marked; no control creates one, and the API refuses a proposal
+// into them with the validation envelope, so the two agree.
+const READ_ONLY_SCHEME_CODES = new Set(['USE-CASE', 'DOCUMENT-TYPE', 'REPRESENTATION-TYPE', 'DEXPI-CLASS']);
 
 // A reviewer's own rights determination exists to clear section 8.4's bar, so
 // the one method that can never approve is not offered as a thing to propose.

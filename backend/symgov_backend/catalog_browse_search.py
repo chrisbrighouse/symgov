@@ -50,7 +50,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Session
 
 from .catalog_facets import CATALOG_FACET_RULES_VERSION, compute_catalog_facets, search_query_terms
-from .published_catalog import PUBLISHED_SYMBOLS_SQL
+from .published_catalog import PUBLISHED_SYMBOLS_SQL, PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
 
 DEFAULT_PAGE_SIZE = 60
 MAX_PAGE_SIZE = 200
@@ -604,7 +604,7 @@ def load_public_page_rows(session: Session, entries: list[dict]) -> dict[tuple[s
     if not public:
         return {}
     query = text(
-        PUBLISHED_SYMBOLS_SQL + " AND sr.id IN :revision_ids AND pp.id::text IN :page_ids"
+        PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL + " AND sr.id IN :revision_ids AND pp.id::text IN :page_ids"
     ).bindparams(
         bindparam("revision_ids", expanding=True, type_=UUID(as_uuid=True)),
         bindparam("page_ids", expanding=True),

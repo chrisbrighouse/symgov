@@ -19,7 +19,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from ..asset_manifest import canonical_asset_format, content_type_for_format, list_download_assets
+from ..asset_manifest import (
+    canonical_asset_format,
+    content_type_for_format,
+    list_download_assets,
+    list_state_variant_assets,
+)
 from ..auth import AuthenticatedUser, current_user_from_token
 from ..catalog_api_auth import (
     CatalogApiAuthenticationError,
@@ -72,10 +77,13 @@ from ..published_feedback_gate import (
 )
 from ..published_catalog import (
     PUBLISHED_SYMBOLS_SQL,
+    PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL,
     choose_published_preview_asset,
+    payload_with_rights_attribution,
     published_fallback_source_asset,
     published_symbol_display_id,
 )
+from ..symbol_state_variants import disc_extras, read_state_variant, state_variant_summaries
 from ..product_usage_events import record_browse_usage_event_best_effort
 from ..published_preview_authorizations import resolve_authorized_preview_attachment
 from ..runtime import download_object_bytes
@@ -453,6 +461,15 @@ def _catalog_symbol_detail(row) -> dict:
         "submissionKind": payload.get("submission_kind"),
     }
     provenance = {key: value for key, value in provenance.items() if value is not None}
+    # An imported library's attribution lives on its rights record; the stored
+    # payload only says so. Filled here, so every share still carries it.
+    # Only for a payload that says so: a symbol that stores its own attribution
+    # (the TrainingTestCases pilot) answers exactly as it always has.
+    served = payload_with_rights_attribution(payload, getattr(row, "rights_attribution_text", None))
+    dexpi = served.get("dexpi") if isinstance(served.get("dexpi"), dict) else {}
+    if dexpi.get("attribution_source") == "rights_record" and dexpi.get("attribution"):
+        provenance["attribution"] = dexpi["attribution"]
+    state_variants = state_variant_summaries(payload, f"/api/v1/catalog/symbols/{display_id}")
     return {
         "displayId": display_id,
         "catalogSymbolId": display_id,
@@ -489,6 +506,8 @@ def _catalog_symbol_detail(row) -> dict:
         "preview": _preview_response(display_id, preview_asset),
         "curated": bool(payload.get("curated", True)),
         "provenance": provenance,
+        **disc_extras(payload),
+        **({"stateVariants": state_variants} if state_variants else {}),
         "links": _catalog_links(display_id, preview_asset, download_available=download_available),
     }
 
@@ -524,7 +543,7 @@ def _load_catalog_symbol_row(session: Session, symbol_ref: str):
     try:
         rows = session.execute(
             text(
-                PUBLISHED_SYMBOLS_SQL
+                PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
                 + """
                 AND gs.id = :symbol_id
                 ORDER BY pp.effective_date DESC, pk.effective_date DESC
@@ -580,7 +599,7 @@ def _load_catalog_symbol_rows_for_feedback(session: Session, symbol_ref: str):
     try:
         rows = session.execute(
             text(
-                PUBLISHED_SYMBOLS_SQL
+                PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
                 + """
                 AND gs.id = :symbol_id
                 ORDER BY pk.pack_code ASC,
@@ -1221,7 +1240,7 @@ def search_catalog_symbols(
     params.update({"limit": capped_limit + 1, "offset": offset})
     rows = session.execute(
         text(
-            PUBLISHED_SYMBOLS_SQL
+            PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
             + where_extension
             + """
             ORDER BY pk.effective_date DESC, pk.pack_code, pe.sort_order, gs.canonical_name
@@ -1264,8 +1283,14 @@ async def download_catalog_symbols(
 ) -> Response:
     started_at = perf_counter()
     body = await _parse_strict_catalog_json_object(request)
-    if set(body) != {"symbolIds", "format"}:
-        raise HTTPException(status_code=400, detail="Request must contain symbolIds and format only.")
+    if not {"symbolIds", "format"} <= set(body) <= {"symbolIds", "format", "includeStateVariants"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Request must contain symbolIds and format, and may contain includeStateVariants.",
+        )
+    include_state_variants = body.get("includeStateVariants", False)
+    if not isinstance(include_state_variants, bool):
+        raise HTTPException(status_code=400, detail="includeStateVariants must be true or false.")
     symbol_ids = body.get("symbolIds")
     raw_format = body.get("format")
     requested_format = canonical_asset_format(raw_format)
@@ -1294,6 +1319,10 @@ async def download_catalog_symbols(
         resolved_rows.append(row)
 
     selected: list[tuple[str, bytes, str | None]] = []
+    # Option (state) SVGs, only when asked for and only for SVG: each is
+    # (archive name, bytes), and the manifest says which condition each is.
+    variant_files: list[tuple[str, bytes]] = []
+    variant_manifest: list[dict] = []
     skipped: list[str] = []
     for row in resolved_rows:
         display_id = published_symbol_display_id(row)
@@ -1317,6 +1346,24 @@ async def download_catalog_symbols(
         )
         symbol_name = str((row.payload_json or {}).get("name") or row.canonical_name).strip()
         filename = catalog_symbol_download_filename(symbol_name, display_id, requested_format)
+        if include_state_variants and requested_format == "svg":
+            stem = filename.rsplit(".", 1)[0]
+            for variant in list_state_variant_assets(row.payload_json or {}):
+                variant_bytes = download_object_bytes(
+                    object_key=variant["object_key"],
+                    env_file=str(get_settings().storage_env_file),
+                )
+                variant_name = f"{stem}_option{variant['option_index']}.svg"
+                variant_files.append((variant_name, variant_bytes["payload"]))
+                variant_manifest.append(
+                    {
+                        "symbol": display_id,
+                        "primary": filename,
+                        "file": variant_name,
+                        "index": variant["option_index"],
+                        "condition": variant.get("condition"),
+                    }
+                )
         selected.append(
             (
                 filename,
@@ -1351,7 +1398,9 @@ async def download_catalog_symbols(
         "X-Symgov-Downloaded-Count": str(len(selected)),
         "X-Symgov-Skipped-Symbols": ",".join(skipped),
     }
-    if len(symbol_ids) == 1:
+    if variant_files:
+        headers["X-Symgov-State-Variants-Count"] = str(len(variant_files))
+    if len(symbol_ids) == 1 and not variant_files:
         filename, content, media_type = selected[0]
         headers["Content-Disposition"] = catalog_download_content_disposition(filename)
         if isinstance(auth_context, IntegrationAuthContext):
@@ -1370,6 +1419,10 @@ async def download_catalog_symbols(
     with ZipFile(archive, "w", compression=ZIP_DEFLATED) as output:
         for filename, content, _ in selected:
             output.writestr(filename, content)
+        for filename, content in variant_files:
+            output.writestr(filename, content)
+        if variant_manifest:
+            output.writestr("state-variants.json", json.dumps({"stateVariants": variant_manifest}, indent=2))
     timestamp = catalog_download_now().astimezone(timezone.utc).strftime("%Y%m%d-%H%M%S")
     filename = f"symgov-{requested_format}-{timestamp}.zip"
     headers["Content-Disposition"] = catalog_download_content_disposition(filename)
@@ -1431,6 +1484,32 @@ def get_catalog_symbol_thumbnail(
         result_count=1,
     )
     return response
+
+
+@router.get("/symbols/{symbol_ref}/state-variants/{index}")
+def get_catalog_symbol_state_variant(
+    symbol_ref: str,
+    index: int,
+    request: Request,
+    auth_context: IntegrationAuthContext = Depends(require_catalog_scope(CATALOG_READ_SCOPE)),
+    session: Session = Depends(get_db_session),
+) -> Response:
+    """One option (state) SVG of a published symbol, by its option number."""
+    started_at = perf_counter()
+    row = _load_catalog_symbol_row(session, symbol_ref)
+    content, media_type = read_state_variant(
+        session, revision_id=uuid.UUID(str(row.symbol_revision_id)), payload=row.payload_json, index=index
+    )
+    _log_successful_catalog_read(
+        session,
+        auth_context,
+        request=request,
+        route_name="catalog_symbol_state_variant",
+        started_at=started_at,
+        symbol_ref=symbol_ref,
+        result_count=1,
+    )
+    return Response(content=content, media_type=media_type, headers=safe_image_response_headers())
 
 
 @router.get("/symbols/{symbol_ref}/preview")

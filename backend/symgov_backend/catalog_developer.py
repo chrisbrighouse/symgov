@@ -68,6 +68,7 @@ CATALOG_INTEGRATION_ENDPOINTS = (
     {"method": "GET", "path": "/api/v1/catalog/symbols/{symbol_ref}", "scope": "catalog.read", "summary": "Read one published symbol."},
     {"method": "GET", "path": "/api/v1/catalog/symbols/{symbol_ref}/thumbnail", "scope": "catalog.read", "summary": "Render the available thumbnail."},
     {"method": "GET", "path": "/api/v1/catalog/symbols/{symbol_ref}/preview", "scope": "catalog.read", "summary": "Render the available preview."},
+    {"method": "GET", "path": "/api/v1/catalog/symbols/{symbol_ref}/state-variants/{index}", "scope": "catalog.read", "summary": "Render one option (state) variant of a symbol, by its option number."},
     {"method": "POST", "path": "/api/v1/catalog/symbols/download", "scope": "catalog.read", "summary": "Download one symbol or a ZIP of selected symbols in one format."},
     {"method": "POST", "path": "/api/v1/catalog/ed/query", "scope": "catalog.ed.query", "summary": "Ask production Catalog Ed a symbol question."},
     {"method": "POST", "path": "/api/v1/catalog/symbols/{symbol_ref}/feedback", "scope": "catalog.feedback.write", "summary": "Submit integration feedback."},
@@ -149,6 +150,12 @@ def _operation(endpoint: dict) -> dict:
             "name": "symbol_ref", "in": "path", "required": True,
             "schema": {"type": "string", "maxLength": 256}, "example": "0003-12",
         })
+    if "{index}" in path:
+        parameters.append({
+            "name": "index", "in": "path", "required": True,
+            "description": "The option (state) number, from the symbol's stateVariants.",
+            "schema": {"type": "integer", "minimum": 1}, "example": 1,
+        })
     if path == "/api/v1/catalog/symbols" and endpoint["method"] == "GET":
         string_filter_names = (
             "q", "discipline", "category", "useCase", "format", "pack",
@@ -173,7 +180,7 @@ def _operation(endpoint: dict) -> dict:
             },
         ])
         operation["responses"]["422"] = {"$ref": "#/components/responses/QueryValidationError"}
-    if path.endswith(("/thumbnail", "/preview")):
+    if path.endswith(("/thumbnail", "/preview")) or "/state-variants/" in path:
         binary_schema = {"schema": {"type": "string", "format": "binary"}}
         operation["responses"]["200"] = {
             "description": "Authenticated preview bytes in the stored asset media type.",
@@ -193,6 +200,10 @@ def _operation(endpoint: dict) -> dict:
                 "X-Symgov-Selected-Count": {"schema": {"type": "integer"}},
                 "X-Symgov-Downloaded-Count": {"schema": {"type": "integer"}},
                 "X-Symgov-Skipped-Symbols": {"schema": {"type": "string"}},
+                "X-Symgov-State-Variants-Count": {
+                    "schema": {"type": "integer"},
+                    "description": "Present only when includeStateVariants added option SVGs to the ZIP.",
+                },
             },
             "content": {
                 "application/octet-stream": dict(binary_schema),
@@ -304,7 +315,7 @@ def catalog_openapi_document() -> dict:
         },
         "SymbolDetailResponse": {
             "type": "object", "required": ["displayId", "symbolId", "slug", "name", "summary", "taxonomy", "rawAudit", "governance", "availableFormats", "downloadAvailable", "preview", "curated", "provenance", "links"],
-            "properties": {"displayId": {"type": "string"}, "symbolId": {"type": "string", "format": "uuid"}, "slug": {"type": "string"}, "name": {"type": "string"}, "summary": {"type": "string"}, "taxonomy": object_schema, "rawAudit": object_schema, "governance": object_schema, "availableFormats": {"type": "array", "items": {"type": "string"}}, "downloadAvailable": {"type": "boolean"}, "preview": {"anyOf": [object_schema, {"type": "null"}]}, "curated": {"type": "boolean"}, "provenance": object_schema, "links": object_schema},
+            "properties": {"displayId": {"type": "string"}, "symbolId": {"type": "string", "format": "uuid"}, "slug": {"type": "string"}, "name": {"type": "string"}, "summary": {"type": "string"}, "taxonomy": object_schema, "rawAudit": object_schema, "governance": object_schema, "availableFormats": {"type": "array", "items": {"type": "string"}}, "downloadAvailable": {"type": "boolean"}, "preview": {"anyOf": [object_schema, {"type": "null"}]}, "curated": {"type": "boolean"}, "provenance": object_schema, "links": object_schema, "geometry": object_schema, "disc": object_schema, "stateVariants": {"type": "array", "items": object_schema}},
         },
         "EdQueryResponse": {
             "type": "object", "required": ["conversationId", "mode", "answer", "searchQuery", "interpretedFilters", "symbols", "citations", "suggestedFollowups", "warnings", "downloadAvailable", "mutatesRecords"],
@@ -390,6 +401,15 @@ def catalog_openapi_document() -> dict:
                             "items": {"type": "string", "minLength": 1, "maxLength": 256},
                         },
                         "format": {"type": "string", "minLength": 1, "maxLength": 64},
+                        "includeStateVariants": {
+                            "type": "boolean",
+                            "default": False,
+                            "description": (
+                                "SVG only. When true, the response is a ZIP holding each selected symbol's "
+                                "primary SVG, its option (state) variant SVGs, and a state-variants.json that "
+                                "names the condition of each. The default response is the primary SVG alone."
+                            ),
+                        },
                     },
                 },
                 "EdQueryRequest": {

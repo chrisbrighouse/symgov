@@ -40,3 +40,36 @@ test('Support renders official attribution and mounts it through the authenticat
     await vite.close();
   }
 });
+
+
+test('an imported library section is built from its record, attribution included', async () => {
+  const vite = await createServer({ configFile: false, root: process.cwd(), server: { middlewareMode: true, hmr: false }, appType: 'custom' });
+  try {
+    const { ImportedLibrarySources } = await vite.ssrLoadModule('/frontend/src/SupportDataSources.jsx');
+    const record = {
+      packageCode: 'EXAMPLE-LIB-1.0',
+      title: 'Example symbol library (Profile 1.0)',
+      releaseVersion: 'Profile 1.0 @ abc123',
+      attributionText: 'Stand-in attribution text for a test.',
+      attributionIsPlaceholder: true,
+      licensor: 'A. Licensor',
+      creator: 'The Example project',
+      publishedSymbols: 12,
+      sourceUri: 'https://example.test/library',
+      organisationUrl: 'https://example.test'
+    };
+    const markup = renderToStaticMarkup(createElement(ImportedLibrarySources, { sources: [record] }));
+    assert.match(markup, /aria-labelledby="library-source-example-lib-1-0"/);
+    assert.match(markup, /Example symbol library \(Profile 1\.0\)/);
+    assert.ok(markup.includes(record.attributionText));
+    assert.match(markup, /provisional/);
+    assert.match(markup, /Licensed by A\. Licensor/);
+    assert.match(markup, /12 published symbols/);
+    assert.match(markup, /href="https:\/\/example\.test\/library"/);
+    assert.equal(renderToStaticMarkup(createElement(ImportedLibrarySources, { sources: [] })), '');
+    const final = renderToStaticMarkup(createElement(ImportedLibrarySources, { sources: [{ ...record, attributionIsPlaceholder: false }] }));
+    assert.doesNotMatch(final, /provisional/);
+  } finally {
+    await vite.close();
+  }
+});

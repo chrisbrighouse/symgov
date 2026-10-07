@@ -99,3 +99,31 @@ test('download request calls the batch Catalog API and returns blob metadata', a
   assert.deepEqual(result.skippedSymbols, ['00023-5']);
   assert.equal(await result.blob.text(), 'zip-bytes');
 });
+
+
+test('state variants are an explicit opt-in: the default request body is unchanged', async () => {
+  const bodies = [];
+  const respond = async (url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return new Response(new Blob(['svg']), {
+      status: 200,
+      headers: {
+        'Content-Disposition': 'attachment; filename="symbol.svg"',
+        'X-Symgov-Selected-Count': '1',
+        'X-Symgov-Downloaded-Count': '1'
+      }
+    });
+  };
+  await requestCatalogDownload({ apiRoot: '/api/v1', symbolIds: ['S-1'], format: 'SVG', fetchImpl: respond });
+  await requestCatalogDownload({
+    apiRoot: '/api/v1',
+    symbolIds: ['S-1'],
+    format: 'SVG',
+    includeStateVariants: true,
+    fetchImpl: respond
+  });
+  assert.deepEqual(bodies, [
+    { symbolIds: ['S-1'], format: 'SVG' },
+    { symbolIds: ['S-1'], format: 'SVG', includeStateVariants: true }
+  ]);
+});

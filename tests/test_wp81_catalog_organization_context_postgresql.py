@@ -50,7 +50,9 @@ if str(BACKEND) not in sys.path:
 
 from symgov_backend.settings import SymgovAPISettings  # noqa: E402
 
-NEW_MIGRATION_HEAD = "20260904_0039"
+# Moved to head for the DISC DEXPI import: the served-rows query now reads the
+# classification and rights tables, which 20260904_0039 predates.
+NEW_MIGRATION_HEAD = "20261007_0070"
 
 psycopg = pytest.importorskip("psycopg")
 

@@ -62,13 +62,19 @@ export function catalogDownloadResultMessage({ downloadedCount, selectedCount, s
   return `Downloaded ${downloaded} of ${selected} selected symbols. ${normalizedFormat} is not available for: ${skippedSymbols.join(', ')}.`;
 }
 
-export async function requestCatalogDownload({ apiRoot, symbolIds, format, fetchImpl = fetch }) {
+export async function requestCatalogDownload({ apiRoot, symbolIds, format, includeStateVariants = false, fetchImpl = fetch }) {
   if (!apiRoot) throw new Error('API root is not configured.');
   const response = await fetchImpl(`${apiRoot}/catalog/symbols/download`, {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ symbolIds, format: normalizeFormat(format) })
+    // The default request is exactly what it always was; the variants are an
+    // explicit, opt-in addition that turns the download into a zip.
+    body: JSON.stringify({
+      symbolIds,
+      format: normalizeFormat(format),
+      ...(includeStateVariants ? { includeStateVariants: true } : {})
+    })
   });
   if (!response.ok) {
     let detail = 'Symbol download failed.';

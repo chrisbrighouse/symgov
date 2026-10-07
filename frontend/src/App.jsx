@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import SupportDataSources from './SupportDataSources.jsx';
+import SymbolGeometryDetails from './SymbolGeometryDetails.jsx';
+import { stateVariantCount } from './symbolGeometry.js';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   createAdminUser,
@@ -1091,6 +1093,7 @@ function StandardsPage() {
   const [submittingCommand, setSubmittingCommand] = useState(false);
   const publishedCommandAttemptRef = useRef(null);
   const [downloadFormat, setDownloadFormat] = useState('');
+  const [includeStateVariants, setIncludeStateVariants] = useState(false);
   const [downloadStatus, setDownloadStatus] = useState({ mode: '', message: '' });
   const [preparingDownload, setPreparingDownload] = useState(false);
   const [activeDetailTab, setActiveDetailTab] = useState('details');
@@ -1252,6 +1255,10 @@ function StandardsPage() {
     .filter(Boolean);
   const selectionLimitReached = selectedSymbolIds.length >= PUBLISHED_SYMBOL_SELECTION_LIMIT;
   const downloadOptions = buildCatalogDownloadOptions(selectedSymbols);
+  // The opt-in is offered only where it means something: SVG, and a selection
+  // that actually carries option (state) variants.
+  const selectedStateVariantCount = stateVariantCount(selectedSymbols);
+  const canIncludeStateVariants = downloadFormat === 'SVG' && selectedStateVariantCount > 0;
   const downloadAvailability = catalogDownloadAvailability(
     selectedSymbols.length,
     downloadFormat,
@@ -1449,7 +1456,8 @@ function StandardsPage() {
       const result = await requestCatalogDownload({
         apiRoot: appConfig.apiRoot,
         symbolIds: selectedSymbols.map((symbol) => symbol.id),
-        format: downloadFormat
+        format: downloadFormat,
+        includeStateVariants: canIncludeStateVariants && includeStateVariants
       });
       const objectUrl = window.URL.createObjectURL(result.blob);
       const anchor = document.createElement('a');
@@ -2206,6 +2214,17 @@ function StandardsPage() {
                   {downloadOptions.map((format) => <option key={format} value={format}>{format}</option>)}
                 </select>
               </label>
+              {canIncludeStateVariants ? (
+                <label className="catalog-download-variants">
+                  <input
+                    type="checkbox"
+                    checked={includeStateVariants}
+                    disabled={preparingDownload}
+                    onChange={(event) => setIncludeStateVariants(event.target.checked)}
+                  />
+                  <span>Include state variants ({selectedStateVariantCount}) in a zip</span>
+                </label>
+              ) : null}
               <button
                 type="button"
                 className="action-button secondary compact"
@@ -2531,6 +2550,7 @@ function StandardsPage() {
                   <Fact label="Raw discipline" value={activeSymbol.discipline} />
                   <Fact label="Formats" value={getSymbolField(activeSymbol, 'availableFormats') || 'Pending'} />
                 </div>
+                <SymbolGeometryDetails symbol={activeSymbol} />
                 <div className="copy-block">
                   <h4>Governance rationale</h4>
                   <p>{activeSymbol.rationale || 'No rationale has been published for this symbol yet.'}</p>
