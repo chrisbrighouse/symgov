@@ -1014,6 +1014,7 @@ class WorkspaceDaisyReportResponse(BaseModel):
     coordinationSummary: str
     createdAt: str
     currentStage: str | None = None
+    closedAt: str | None = None
     escalationLevel: str | None = None
     decision: str | None = None
     confidence: float | None = None

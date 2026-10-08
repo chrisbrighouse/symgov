@@ -1694,6 +1694,7 @@ def build_daisy_report_item(report_payload: dict, review_case: ReviewCase | None
         coordinationSummary=str(report_payload.get("coordination_summary") or ""),
         createdAt=str(report_payload.get("created_at") or ""),
         currentStage=review_case.current_stage if review_case is not None else None,
+        closedAt=isoformat_utc(review_case.closed_at) if review_case is not None and review_case.closed_at else None,
         escalationLevel=review_case.escalation_level if review_case is not None else None,
         decision=report_json.get("decision"),
         confidence=report_json.get("confidence"),

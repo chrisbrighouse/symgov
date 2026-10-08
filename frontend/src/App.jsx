@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useRef, useState,
 import SupportDataSources from './SupportDataSources.jsx';
 import SymbolGeometryDetails from './SymbolGeometryDetails.jsx';
 import { stateVariantCount } from './symbolGeometry.js';
+import { isDaisyReportOpenForReview } from './reviewQueueItems.js';
 import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   createAdminUser,
@@ -4064,12 +4065,6 @@ function resolveWorkspaceAssetUrl(assetUrl) {
   return new URL(assetUrl, resolveAbsoluteBase()).toString();
 }
 
-function isTerminalReviewStage(stage) {
-  return ['approved', 'closed', 'published', 'rejected', 'superseded_by_raster_split'].includes(
-    String(stage || '').trim().toLowerCase()
-  );
-}
-
 const NON_PREVIEWABLE_SOURCE = /\.(dxf|zip)$/i;
 
 // The published list and detail responses always carry `previewUrl`, and set it
@@ -5008,7 +5003,7 @@ function ReviewsPage() {
       if (!report.reviewCaseId || knownIds.has(report.reviewCaseId)) {
         return;
       }
-      if (isTerminalReviewStage(report.currentStage || report.coordinationStatus)) {
+      if (!isDaisyReportOpenForReview(report)) {
         return;
       }
 
