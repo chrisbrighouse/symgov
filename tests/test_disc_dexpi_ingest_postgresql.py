@@ -298,7 +298,7 @@ class TestApply:
             rights = session.query(RightsRecord).filter_by(source_package_id=package.id).one()
             assert (rights.rights_status, rights.disposition, rights.decision_status) == ("licensed", "distribute", "proposed")
             assert rights.determination_method == "manual"
-            assert rights.licence_reference.startswith("Permission granted by Tonia Pedersen to Chris Brighouse, Oct 2026")
+            assert rights.licence_reference == plan_module.PERMISSION_GRANT
             assert rights.evidence_json["attribution_text"] == ATTRIBUTION
             assert rights.evidence_json["attribution_is_placeholder"] is True
             # Nowhere else stores it: not the package row, not any payload.

@@ -286,8 +286,11 @@ class TestPlanSummary:
         assert (rights["rights_status"], rights["disposition"]) == ("licensed", "distribute")
         assert rights["evidence"]["attribution_text"] == ATTRIBUTION
         assert rights["evidence"]["attribution_is_placeholder"] is True
-        assert rights["licence_reference"].startswith("Permission granted by Tonia Pedersen to Chris Brighouse, Oct 2026")
-        assert "dexpi.org" in rights["licence_reference"]
+        assert rights["licence_reference"] == plan_module.PERMISSION_GRANT == rights["evidence"]["permission"]
+        assert rights["licence_reference"].startswith("Permission granted by Tonia Pedersen to Chris Brighouse, Idox Group,")
+        for company in ("AIBEL ASA", "AKER BP ASA", "AKER SOLUTIONS ASA", "EQUINOR ASA", "dexpi.org"):
+            assert company in rights["licence_reference"]
+        assert len(rights["licence_reference"]) <= 512
         assert ATTRIBUTION not in repr(plan["source_package"])
 
     def test_the_source_package_records_where_the_library_came_from(self, plan):

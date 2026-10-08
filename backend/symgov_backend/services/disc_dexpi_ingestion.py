@@ -108,6 +108,14 @@ OTHER_PACKAGE_NAME = "Other"
 TTC_NODE_SOURCE = "DEXPI TrainingTestCases"
 
 
+# The permission as agreed with the licensor, recorded on the rights record as
+# its licence reference and as evidence. Not the attribution wording, which
+# comes from the package.
+PERMISSION_GRANT = (
+    "Permission granted by Tonia Pedersen to Chris Brighouse, Idox Group, conditional on attribution to AIBEL ASA, AKER BP ASA, AKER SOLUTIONS ASA and EQUINOR ASA, the DISC DEXPI organization (dexpi.org) Oct 2026"
+)
+
+
 class DiscPlanError(ValueError):
     """The package does not support an import. Names data, never a credential."""
 
@@ -827,15 +835,9 @@ def plan_import(package: dict[str, Any]) -> dict[str, Any]:
             "rights_status": "licensed",
             "disposition": "distribute",
             "determination_method": "manual",
-            "licence_reference": (
-                "Permission granted by Tonia Pedersen to Chris Brighouse, Oct 2026, "
-                "conditional on attribution to the DISC DEXPI organisation (dexpi.org)"
-            ),
+            "licence_reference": PERMISSION_GRANT,
             "evidence": {
-                "permission": (
-                    "Permission granted by Tonia Pedersen to Chris Brighouse, Oct 2026, "
-                    "conditional on attribution to the DISC DEXPI organisation (dexpi.org)"
-                ),
+                "permission": PERMISSION_GRANT,
                 "attribution_text": config["attribution_text"],
                 "attribution_is_placeholder": bool(config["attribution_is_placeholder"]),
                 "licensor": config["licensor"],
