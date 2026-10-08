@@ -1,6 +1,35 @@
 from __future__ import annotations
 
+import json
+
 from .asset_manifest import list_preview_assets, select_preview_asset
+
+MAX_DEXPI_CLASS_LENGTH = 128
+
+
+def normalize_dexpi_class(value: object) -> str:
+    """The DEXPI class a caller asked for: trimmed, empty when absent, capped."""
+    return str(value or "").strip()[:MAX_DEXPI_CLASS_LENGTH]
+
+
+def dexpi_class_parameter(value: str) -> str:
+    """The `:dexpi_class_json` bind value `dexpi_class_predicate_sql` compares with."""
+    return json.dumps([value])
+
+
+def dexpi_class_predicate_sql(revision_payload_expr: str) -> str:
+    """Whether a revision's payload lists the class in `dexpi.component_classes`.
+
+    The one definition of "this symbol is in DEXPI class X", shared by the
+    Catalog search filter (`dexpiClass`) and the Details view's same-class
+    count, so the number a link promises is the number the Catalog returns.
+    It is a containment test on the stored payload, not a facet: nothing is
+    precomputed and no facet rule changes.
+    """
+    return (
+        f"({revision_payload_expr} -> 'dexpi' -> 'component_classes')"
+        " @> CAST(:dexpi_class_json AS jsonb)"
+    )
 
 
 # Whether the revision carries a governed discipline / category assignment: a

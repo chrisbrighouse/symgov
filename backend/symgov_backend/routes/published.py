@@ -83,6 +83,7 @@ from ..published_catalog import (
     published_fallback_source_asset,
     published_symbol_display_id,
 )
+from ..published_symbol_details import load_published_symbol_details
 from ..published_preview_authorizations import resolve_authorized_preview_attachment
 from ..runtime import download_object_bytes
 from ..symbol_state_variants import read_state_variant, state_variant_summaries
@@ -302,9 +303,24 @@ def published_symbol_comment_item(comment: ClarificationRecord, *, submitter_nam
     }
 
 
+COMMENT_SUBMITTER_FALLBACK = "Symgov user"
+
+
+def _comment_submitter_label(display_name: str | None, *, has_user: bool) -> str | None:
+    """A comment's submitter as every reader may see it: a display name, never an email.
+
+    A comment with no signed-in submitter (an external one) is left to the
+    item's own "Unknown".
+    """
+    if not has_user:
+        return None
+    name = (display_name or "").strip()
+    return COMMENT_SUBMITTER_FALLBACK if not name or "@" in name else name
+
+
 def load_comment_history(session: Session, symbol_id: uuid.UUID) -> list[dict]:
     rows = (
-        session.query(ClarificationRecord, User.display_name, User.email)
+        session.query(ClarificationRecord, User.display_name)
         .outerjoin(User, ClarificationRecord.submitted_by == User.id)
         .filter(ClarificationRecord.symbol_id == symbol_id)
         .order_by(ClarificationRecord.created_at.desc(), ClarificationRecord.id.desc())
@@ -313,9 +329,9 @@ def load_comment_history(session: Session, symbol_id: uuid.UUID) -> list[dict]:
     return [
         published_symbol_comment_item(
             comment,
-            submitter_name=display_name or email,
+            submitter_name=_comment_submitter_label(display_name, has_user=comment.submitted_by is not None),
         )
-        for comment, display_name, email in rows
+        for comment, display_name in rows
     ]
 
 
@@ -801,6 +817,7 @@ def search_published_symbols(
     set_group: list[str] = Query(default=[], alias="setGroup"),
     palette_source: list[str] = Query(default=[], alias="paletteSource"),
     favourites: bool = Query(default=False),
+    dexpi_class: str = Query(default="", alias="dexpiClass"),
     sort: str | None = Query(default=None),
     direction: Literal["asc", "desc"] = Query(default="asc"),
     preferred_formats: list[str] = Query(default=[], alias="preferredFormats"),
@@ -899,6 +916,7 @@ def search_published_symbols(
         preferred_formats=preferred_formats,
         page=page,
         page_size=page_size,
+        dexpi_class=dexpi_class,
     )
     try:
         result = search_catalog(
@@ -1025,6 +1043,35 @@ def get_published_symbol(
         "item": organization_private_symbol_row(governed_symbol, revision, favourite_ids),
         "resolvedBy": resolved_by,
     }
+
+
+@router.get("/symbols/{symbol_id}/details")
+@legacy_router.get("/published/symbols/{symbol_id}/details", include_in_schema=False)
+def get_published_symbol_details(
+    symbol_id: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
+) -> dict:
+    """The governed facts behind one public symbol, for the Catalog's Details view.
+
+    Classifications, external mappings, the same concept in other packs, the
+    other symbols of its DEXPI class, rights, provenance and history; the shape
+    is documented in `published_symbol_details`. It reads only what is safe for
+    any signed-in reader of a public symbol: no user identities, no storage keys.
+    An organization-private symbol has none of this to show, and answers 404
+    exactly as an unknown reference does, so its existence is not revealed.
+    """
+    source, resolved, _resolved_by = _load_symbol_for_detail(session, symbol_id, current_user, settings)
+    if source != "public":
+        # Answer exactly as the public lookup does for a reference it cannot
+        # resolve, so the owner's response is the one an outsider gets.
+        _load_published_symbol_row(session, symbol_id)
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "catalog_symbol_not_found", "message": "Published symbol was not found."},
+        )
+    return load_published_symbol_details(session, resolved)
 
 
 @router.get("/symbols/{symbol_id}/comments")

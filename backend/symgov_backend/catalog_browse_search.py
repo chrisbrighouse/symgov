@@ -50,7 +50,13 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Session
 
 from .catalog_facets import CATALOG_FACET_RULES_VERSION, compute_catalog_facets, search_query_terms
-from .published_catalog import PUBLISHED_SYMBOLS_SQL, PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
+from .published_catalog import (
+    PUBLISHED_SYMBOLS_SQL,
+    PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL,
+    dexpi_class_parameter,
+    dexpi_class_predicate_sql,
+    normalize_dexpi_class,
+)
 
 DEFAULT_PAGE_SIZE = 60
 MAX_PAGE_SIZE = 200
@@ -150,6 +156,9 @@ class CatalogSearchRequest:
     preferred_formats: list[str] = field(default_factory=list)
     page: int = 1
     page_size: int = DEFAULT_PAGE_SIZE
+    # Only symbols whose revision lists this DEXPI class (a payload test, not a
+    # facet). Empty means no filter.
+    dexpi_class: str = ""
 
     def validate(self, scope: "CatalogSearchScope") -> None:
         unknown_facets = sorted(set(self.facets) - set(scope.facet_fields))
@@ -461,6 +470,14 @@ def _filter_clauses(request: CatalogSearchRequest, scope: CatalogSearchScope, pa
         parameter = f"column_{position}"
         params[parameter] = _like_pattern(wanted)
         clauses.append(f"lower({COLUMN_FIELDS[key][0]}) LIKE :{parameter} ESCAPE '\\'")
+    dexpi_class = normalize_dexpi_class(request.dexpi_class)
+    if dexpi_class:
+        params["dexpi_class_json"] = dexpi_class_parameter(dexpi_class)
+        clauses.append(
+            "EXISTS (SELECT 1 FROM symbol_revisions sr_class"
+            " WHERE sr_class.id = c.symbol_revision_id"
+            f" AND {dexpi_class_predicate_sql('sr_class.payload_json')})"
+        )
     if request.favourites_only:
         params["user_id"] = scope.user_id
         clauses.append(
