@@ -18,7 +18,7 @@ test('a terminal stage is still not listed without closedAt', () => {
   assert.equal(isDaisyReportOpenForReview({ currentStage: 'Published' }), false);
 });
 
-test('a report with no case falls back to its coordination status', () => {
-  assert.equal(isDaisyReportOpenForReview({ currentStage: null, coordinationStatus: 'closed' }), false);
-  assert.equal(isDaisyReportOpenForReview({ currentStage: null, coordinationStatus: 'proposed' }), true);
+test('a report whose case no longer exists is not listed', () => {
+  assert.equal(isDaisyReportOpenForReview({ currentStage: null, coordinationStatus: 'proposed' }), false);
+  assert.equal(isDaisyReportOpenForReview({ coordinationStatus: 'closed' }), false);
 });
