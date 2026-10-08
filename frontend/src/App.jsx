@@ -1375,8 +1375,15 @@ function StandardsPage() {
 
   // A link to one symbol opens its panel, from the loaded pages if it is
   // there and from its own detail request if not.
+  // Acts once per URL value: selectSymbol() sets state before the URL catches
+  // up, and reacting to that stale param would reopen a panel just closed.
+  const handledRequestedSymbolRef = useRef('');
   useEffect(() => {
-    if (!requestedSymbolId || requestedSymbolId === activeId) {
+    if (!requestedSymbolId) {
+      handledRequestedSymbolRef.current = '';
+      return undefined;
+    }
+    if (requestedSymbolId === handledRequestedSymbolRef.current) {
       return undefined;
     }
     const normalizedRequested = requestedSymbolId.trim().toLowerCase();
@@ -1386,6 +1393,7 @@ function StandardsPage() {
         .includes(normalizedRequested)
     );
     if (loaded) {
+      handledRequestedSymbolRef.current = requestedSymbolId;
       setPinnedSymbol(loaded);
       setActiveId(loaded.id);
       return undefined;
@@ -1393,6 +1401,7 @@ function StandardsPage() {
     if (!appConfig.apiRoot || !catalogSearch.loaded) {
       return undefined;
     }
+    handledRequestedSymbolRef.current = requestedSymbolId;
     let cancelled = false;
     setSymbolLoadFailed(false);
     fetchPublishedSymbol(requestedSymbolId)
@@ -1410,8 +1419,11 @@ function StandardsPage() {
       });
     return () => {
       cancelled = true;
+      if (handledRequestedSymbolRef.current === requestedSymbolId) {
+        handledRequestedSymbolRef.current = '';
+      }
     };
-  }, [requestedSymbolId, activeId, loadedSymbols, catalogSearch.loaded]);
+  }, [requestedSymbolId, loadedSymbols, catalogSearch.loaded]);
 
   // A new Project or Symbol Set may not hold the open symbol.
   const lastContextVersionRef = useRef(symbolContext.contextVersion);
