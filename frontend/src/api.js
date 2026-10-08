@@ -1795,6 +1795,15 @@ export async function fetchPublishedSymbol(symbolId) {
   return requireOk(result, 'Symbol could not be loaded.')?.item || null;
 }
 
+// What the Details view shows beyond the published row: classifications,
+// external mappings, related symbols, rights, provenance and history. The
+// error carries the HTTP status, so the view can tell "not available for this
+// symbol" (404) from a failure.
+export async function fetchPublishedSymbolDetails(symbolRef) {
+  const result = await requestJson(`/published/symbols/${encodeURIComponent(symbolRef)}/details`, { cache: 'no-store' });
+  return requireOkWithStatus(result, 'Symbol details could not be loaded.');
+}
+
 export async function updateCatalogFavourite(symbolId, isFavourite) {
   const result = await requestJson(`/published/favourites/${encodeURIComponent(symbolId)}`, {
     method: isFavourite ? 'PUT' : 'DELETE'

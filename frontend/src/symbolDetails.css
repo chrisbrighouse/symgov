@@ -1,0 +1,777 @@
+/*
+ * Full-page symbol Details view (SymbolDetailsView.jsx). Idox tokens only;
+ * focus uses the global :focus-visible treatment in styles.css.
+ */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* While the Details view is open the Catalog stays mounted (so Back finds its
+   filters, selection and scroll) but is not shown. The command dialog is a
+   sibling too and must stay visible. */
+.experience-shell[data-symbol-details-open='true'] > :not(.symbol-details-view):not(.modal-backdrop) {
+  display: none;
+}
+
+.button-icon {
+  margin-right: 0.35rem;
+  vertical-align: -2px;
+}
+
+.detail-heading-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.symbol-details-view {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  min-width: 0;
+}
+
+.symbol-details-notice {
+  display: grid;
+  gap: 0.6rem;
+  justify-items: start;
+}
+
+/* ---- Top bar --------------------------------------------------------- */
+
+.symbol-details-topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.symbol-breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+}
+
+.symbol-breadcrumb li + li::before {
+  content: '›';
+  margin-right: 0.35rem;
+  color: var(--idox-text-tertiary);
+}
+
+.symbol-breadcrumb [aria-current='page'] {
+  color: var(--idox-text-primary);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.symbol-details-stepper {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.symbol-details-position {
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-xs);
+}
+
+/* ---- Header card ----------------------------------------------------- */
+
+.symbol-header-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.symbol-header-card h2 {
+  margin: 0;
+}
+
+.symbol-header-summary {
+  margin: 0;
+  color: var(--idox-text-secondary);
+}
+
+.symbol-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.symbol-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-full);
+  background: var(--idox-bg-surface-subtle);
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-medium);
+}
+
+.symbol-badge.scope-public {
+  border-color: var(--idox-info-border);
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-brand-accent);
+}
+
+.symbol-badge.scope-organization-private {
+  border-color: var(--idox-interactive-default);
+  background: var(--idox-interactive-default);
+  color: var(--idox-text-inverse);
+}
+
+.symbol-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.symbol-header-favourite {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+}
+
+.symbol-identifiers {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--idox-border-subtle);
+}
+
+.symbol-identifier {
+  display: grid;
+  grid-template-columns: minmax(9rem, 12rem) minmax(0, 1fr);
+  gap: 0.25rem 0.75rem;
+  align-items: center;
+}
+
+.symbol-identifier dt {
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-medium);
+}
+
+.symbol-identifier dd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.symbol-identifier-value {
+  display: grid;
+  min-width: 0;
+}
+
+.symbol-identifier-value code {
+  overflow-wrap: anywhere;
+  font-size: var(--idox-font-size-xs);
+}
+
+.symbol-identifier-secondary {
+  color: var(--idox-text-secondary);
+}
+
+/* ---- Viewer + at a glance ------------------------------------------- */
+
+.symbol-details-main {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.symbol-viewer-card,
+.symbol-glance-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.symbol-viewer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.symbol-viewer-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.symbol-format-badge {
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--idox-border-strong);
+  border-radius: var(--idox-radius-sm);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
+  color: var(--idox-text-secondary);
+}
+
+.symbol-viewer-condition {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--idox-font-size-xs);
+  color: var(--idox-text-secondary);
+}
+
+.symbol-viewer-zoom {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.symbol-viewer-zoom-level {
+  min-width: 3rem;
+  text-align: right;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+}
+
+.symbol-viewer-overlays {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.symbol-overlay-toggle {
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-full);
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-xs);
+  cursor: pointer;
+}
+
+.symbol-overlay-toggle.active {
+  border-color: var(--idox-border-selected);
+  background: var(--idox-interactive-subtle-selected);
+  color: var(--idox-text-primary);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.symbol-overlay-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: 0.4rem;
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-left: 0.4rem;
+  border-radius: 50%;
+}
+
+.legend-piping { background: var(--symbol-overlay-piping); }
+.legend-signal { background: var(--symbol-overlay-signal); }
+
+.symbol-viewer-card,
+.symbol-details-view {
+  --symbol-overlay-piping: var(--idox-amber-600);
+  --symbol-overlay-signal: var(--idox-blue-600);
+  --symbol-overlay-other: var(--idox-slate-600);
+}
+
+/* The stage: a light grid, the drawing centred, scrolling when zoomed. A flex
+   box with auto margins centres what fits and still lets an oversized drawing
+   scroll to its start (centred grid overflow cannot). */
+.symbol-viewer-stage {
+  display: flex;
+  height: clamp(18rem, 42vh, 30rem);
+  overflow: auto;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  background-color: var(--idox-white);
+  background-image:
+    linear-gradient(var(--idox-slate-100) 1px, transparent 1px),
+    linear-gradient(90deg, var(--idox-slate-100) 1px, transparent 1px);
+  background-size: 1.5rem 1.5rem;
+}
+
+.symbol-viewer-svg,
+.symbol-viewer-image {
+  flex: none;
+  margin: auto;
+  max-width: none;
+  object-fit: contain;
+}
+
+.symbol-viewer-empty {
+  margin: auto;
+  max-width: 24rem;
+  padding: 1rem;
+  text-align: center;
+  color: var(--idox-text-secondary);
+}
+
+/* Overlay drawing (units are mm; strokes are non-scaling pixels). */
+.symbol-viewer-svg circle,
+.symbol-viewer-svg line,
+.symbol-viewer-svg rect,
+.symbol-viewer-svg polygon {
+  fill: none;
+  stroke-width: 1.6px;
+}
+
+.overlay-point circle,
+.overlay-point line {
+  stroke: var(--symbol-overlay-piping);
+}
+
+.overlay-point polygon {
+  fill: var(--symbol-overlay-piping);
+  stroke: none;
+}
+
+.overlay-point text {
+  fill: var(--symbol-overlay-piping);
+  font-weight: var(--idox-font-weight-bold);
+  /* A white halo keeps the number readable over the drawing's own lines; its
+     width is set on the element, in the drawing's mm units. */
+  paint-order: stroke;
+  stroke: var(--idox-white);
+  stroke-linejoin: round;
+}
+
+.overlay-point-signal circle,
+.overlay-point-signal line { stroke: var(--symbol-overlay-signal); }
+.overlay-point-signal polygon,
+.overlay-point-signal text { fill: var(--symbol-overlay-signal); }
+
+.overlay-point-other circle,
+.overlay-point-other line { stroke: var(--symbol-overlay-other); }
+.overlay-point-other polygon,
+.overlay-point-other text { fill: var(--symbol-overlay-other); }
+
+.overlay-point .overlay-point-halo {
+  stroke-width: 2.4px;
+  stroke-dasharray: 4 3;
+}
+
+.overlay-insertion line,
+.overlay-insertion circle {
+  stroke: var(--idox-green-700);
+}
+
+.overlay-labels rect {
+  stroke: var(--idox-slate-500);
+  stroke-dasharray: 4 3;
+  fill: var(--idox-slate-500);
+  fill-opacity: 0.08;
+}
+
+.overlay-labels text {
+  paint-order: stroke;
+  stroke: var(--idox-white);
+  fill: var(--idox-slate-600);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.overlay-dimensions line {
+  stroke: var(--idox-slate-600);
+  stroke-width: 1px;
+}
+
+.overlay-dimensions text {
+  fill: var(--idox-slate-700);
+}
+
+/* Formats and states strip */
+.symbol-format-strip h4 {
+  margin: 0 0 0.4rem;
+  font-size: var(--idox-font-size-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--idox-text-tertiary);
+}
+
+.symbol-tile-list {
+  display: flex;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0 0 0.25rem;
+  list-style: none;
+  overflow-x: auto;
+}
+
+.symbol-tile {
+  display: grid;
+  gap: 0.2rem;
+  justify-items: start;
+  align-content: start;
+  width: 9rem;
+  padding: 0.5rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-primary);
+  font-size: var(--idox-font-size-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.symbol-tile.selected {
+  border-color: var(--idox-border-selected);
+  background: var(--idox-interactive-subtle-selected);
+}
+
+.symbol-tile.unavailable {
+  border-style: dashed;
+  background: var(--idox-bg-disabled);
+  color: var(--idox-text-disabled);
+  cursor: default;
+}
+
+.symbol-tile-thumb {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 4.5rem;
+  border-radius: var(--idox-radius-sm);
+  background: var(--idox-white);
+  overflow: hidden;
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.symbol-tile-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.symbol-tile-format {
+  font-weight: var(--idox-font-weight-bold);
+}
+
+.symbol-tile-condition {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
+.symbol-tile-note {
+  font-style: italic;
+}
+
+/* ---- At a glance ----------------------------------------------------- */
+
+.symbol-glance-card h3,
+.symbol-glance-card h4 {
+  margin: 0;
+}
+
+.symbol-kv {
+  display: grid;
+  grid-template-columns: minmax(8rem, 11rem) minmax(0, 1fr);
+  gap: 0.35rem 0.75rem;
+  margin: 0;
+}
+
+.symbol-kv dt {
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-medium);
+}
+
+.symbol-kv dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.symbol-kv-mono dd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--idox-font-size-xs);
+}
+
+.symbol-attribution {
+  display: grid;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--idox-border-subtle);
+}
+
+.symbol-attribution p {
+  margin: 0;
+}
+
+.symbol-placeholder-badge {
+  justify-self: start;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--idox-warning-border);
+  border-radius: var(--idox-radius-full);
+  background: var(--idox-warning-bg);
+  color: var(--idox-warning-text-color);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+/* ---- Tabs ------------------------------------------------------------ */
+
+.symbol-details-tabs-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.symbol-details-tablist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  border-bottom: 1px solid var(--idox-border-subtle);
+}
+
+.symbol-details-tab {
+  margin-bottom: -1px;
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-sm);
+  cursor: pointer;
+}
+
+.symbol-details-tab:hover {
+  border-bottom-color: var(--idox-border-subtle);
+  color: var(--idox-text-primary);
+}
+
+.symbol-details-tab.active {
+  border-bottom-color: var(--idox-color-brand-accent);
+  color: var(--idox-text-primary);
+  font-weight: var(--idox-font-weight-semibold);
+}
+
+.symbol-details-tabpanel {
+  min-width: 0;
+}
+
+.symbol-details-empty {
+  margin: 0;
+  color: var(--idox-text-secondary);
+}
+
+.symbol-tab-sections {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.symbol-tab-sections h4,
+.symbol-tab-columns h4 {
+  margin: 0 0 0.5rem;
+}
+
+.symbol-tab-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: 1.5rem;
+}
+
+.symbol-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--idox-font-size-sm);
+}
+
+.symbol-table th,
+.symbol-table td {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--idox-border-subtle);
+  text-align: left;
+  vertical-align: top;
+}
+
+.symbol-table thead th {
+  color: var(--idox-text-tertiary);
+  font-size: var(--idox-font-size-xs);
+  font-weight: var(--idox-font-weight-medium);
+}
+
+.symbol-table-note {
+  color: var(--idox-text-secondary);
+}
+
+.symbol-connections-table tbody tr:hover,
+.symbol-connections-table tbody tr:focus {
+  background: var(--idox-interactive-subtle-hover);
+}
+
+.symbol-template {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--idox-font-size-xs);
+  white-space: pre-wrap;
+}
+
+.symbol-related-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.symbol-related-card {
+  display: grid;
+  gap: 0.15rem;
+  width: 8.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-bg-surface-default);
+  color: var(--idox-text-primary);
+  font-size: var(--idox-font-size-xs);
+  text-decoration: none;
+}
+
+.symbol-related-card:hover {
+  border-color: var(--idox-border-selected);
+}
+
+.symbol-related-thumb {
+  display: grid;
+  place-items: center;
+  height: 4.5rem;
+  border-radius: var(--idox-radius-sm);
+  background: var(--idox-white);
+  overflow: hidden;
+}
+
+.symbol-related-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.symbol-related-pack {
+  color: var(--idox-text-tertiary);
+}
+
+.symbol-state-list {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.symbol-state-list li {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.symbol-state-list img {
+  width: 4.5rem;
+  height: 3rem;
+  object-fit: contain;
+  border: 1px solid var(--idox-border-subtle);
+  border-radius: var(--idox-radius-sm);
+  background: var(--idox-white);
+}
+
+.symbol-state-list div {
+  display: grid;
+}
+
+.symbol-state-list span {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--idox-font-size-xs);
+  color: var(--idox-text-secondary);
+}
+
+.symbol-history-list {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.symbol-history-list li {
+  display: grid;
+  grid-template-columns: minmax(11rem, 14rem) minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+.symbol-history-list time {
+  color: var(--idox-text-secondary);
+  font-size: var(--idox-font-size-xs);
+}
+
+/* ---- Narrow widths: sections stack ---------------------------------- */
+
+@media (max-width: 960px) {
+  .symbol-details-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .symbol-identifier,
+  .symbol-kv,
+  .symbol-history-list li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .symbol-state-list li {
+    grid-template-columns: 4.5rem minmax(0, 1fr);
+  }
+
+  .symbol-state-list li button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+/* The DEXPI class filter, shown beside "Clear filters". */
+.catalog-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  align-self: start;
+  padding: 0.15rem 0.4rem 0.15rem 0.65rem;
+  border: 1px solid var(--idox-border-selected);
+  border-radius: var(--idox-radius-full);
+  background: var(--idox-interactive-subtle-selected);
+  font-size: var(--idox-font-size-xs);
+}

@@ -76,6 +76,7 @@ export function buildCatalogSearchQuery({
   facetFilters = {},
   columnFilters = {},
   showFavourites = false,
+  dexpiClass = '',
   sort = defaultSortForView(view),
   preferredFormats = [],
   page = 1,
@@ -108,6 +109,11 @@ export function buildCatalogSearchQuery({
   }
   if (showFavourites) {
     params.set('favourites', 'true');
+  }
+  // Symbols of one DEXPI class, e.g. from "See all N in the catalog".
+  const cleanedClass = String(dexpiClass || '').trim();
+  if (cleanedClass) {
+    params.set('dexpiClass', cleanedClass);
   }
   const sortKey = view !== SET_VIEW && sort?.key === SET_ORDER_SORT ? 'id' : sort?.key || 'id';
   params.set('sort', sortKey);
@@ -203,9 +209,10 @@ export function preferenceOptionsFor(facetOptions = [], key, { fallback = [], li
   return limit === undefined ? entries : entries.slice(0, limit);
 }
 
-export function hasActiveFilters({ query = '', facetFilters = {}, columnFilters = {}, showFavourites = false } = {}) {
+export function hasActiveFilters({ query = '', facetFilters = {}, columnFilters = {}, showFavourites = false, dexpiClass = '' } = {}) {
   return Boolean(
     String(query || '').trim()
+    || String(dexpiClass || '').trim()
     || showFavourites
     || Object.values(facetFilters).some((values) => (values || []).length)
     || Object.values(columnFilters).some((value) => String(value || '').trim())

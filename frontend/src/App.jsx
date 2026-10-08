@@ -1,9 +1,19 @@
-import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import SupportDataSources from './SupportDataSources.jsx';
 import SymbolGeometryDetails from './SymbolGeometryDetails.jsx';
+import SymbolDetailsView, { ExpandIcon } from './SymbolDetailsView.jsx';
+import { useSymbolDetails } from './useSymbolDetails.js';
+import {
+  catalogSearchParams,
+  detailsReference,
+  detailsSearchParams,
+  parseDetailsState,
+  resultNeighbours,
+  shortLinkTarget
+} from './symbolDetailsRoute.js';
 import { stateVariantCount } from './symbolGeometry.js';
 import { isDaisyReportOpenForReview } from './reviewQueueItems.js';
-import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   createAdminUser,
   adjustAdminUserSubscription,
@@ -606,6 +616,7 @@ function AppContent() {
           {/* Route path="/rights" element={<RightsReviewPage />} protected by reviewer/admin auth. */}
           <Route path="/rights" element={<RequireAnyRole roles={['admin', 'reviewer']}><RightsReviewPage /></RequireAnyRole>} />
           <Route path="/standards" element={<RequireAuth><SessionScopedStandardsPage /></RequireAuth>} />
+          <Route path="/s/:catalogSymbolId" element={<RequireAuth><SymbolShortLink /></RequireAuth>} />
           <Route path="/integrator/catalog" element={<RequireAnyRole roles={['admin', 'integrator']}><CatalogDeveloperHub /></RequireAnyRole>} />
           <Route path="/developers/catalog" element={<RequireAnyRole roles={['admin', 'integrator']}><Navigate to="/integrator/catalog" replace /></RequireAnyRole>} />
           <Route path="/standards/submit" element={<RequireAnyRole roles={['admin', 'submitter']}><SubmissionPage /></RequireAnyRole>} />
@@ -1060,6 +1071,12 @@ function browserLocalStorage() {
   }
 }
 
+// `#/s/<catalogId>` opens that symbol's Details view on the Catalog route.
+function SymbolShortLink() {
+  const { catalogSymbolId } = useParams();
+  return <Navigate to={shortLinkTarget(catalogSymbolId) || '/standards'} replace />;
+}
+
 // The Catalog clipboard belongs to the account within one session scope
 // (personal, or one organization), so a change of account or organization
 // remounts the page and loads that scope's own state.
@@ -1098,6 +1115,11 @@ function StandardsPage() {
   const [downloadStatus, setDownloadStatus] = useState({ mode: '', message: '' });
   const [preparingDownload, setPreparingDownload] = useState(false);
   const [activeDetailTab, setActiveDetailTab] = useState('details');
+  // A command (comment / send for review) from the Details view targets that
+  // one symbol; null means the checkbox selection, as in the command bar.
+  const [commandSymbols, setCommandSymbols] = useState(null);
+  const [symbolLoadFailed, setSymbolLoadFailed] = useState(false);
+  const navigate = useNavigate();
   const [commentHistoryState, setCommentHistoryState] = useState({ symbolId: '', loading: false, mode: '', message: '', items: [] });
   // Preferences and saved views are the signed-in account's, and the clipboard
   // is the account's within this session's organization (X-01). All three are
@@ -1116,6 +1138,13 @@ function StandardsPage() {
   const [edCatalogPrompt, setEdCatalogPrompt] = useState('');
   const [edCatalogInterpretation, setEdCatalogInterpretation] = useState(null);
   const standardsGridRef = useRef(null);
+  // Set when the Details view is opened from the Catalog's own results, so
+  // Previous/Next and Back have results to follow; a link or reload has none.
+  const resultContextRef = useRef(false);
+  const gridScrollRef = useRef(0);
+  const windowScrollRef = useRef(0);
+  const wasDetailsOpenRef = useRef(false);
+  const pendingStepRef = useRef(false);
   const favouriteOperationSequencesRef = useRef(new Map());
   // 'loading' until the account's saved workbench arrives; nothing is saved
   // before then, and nothing at all if it fails, so a partial local copy can
@@ -1137,7 +1166,15 @@ function StandardsPage() {
   // live API: the seeded development data has no Projects.
   const setsAvailable = Boolean(appConfig.apiRoot) && canMountProjectContext(auth);
   const symbolContext = useSymbolContext({ auth: setsAvailable ? auth : null });
-  const requestedView = normalizeCatalogView(searchParams.get('view'));
+  // `view` is the Catalog's Set/Catalog tab and also marks the full-page
+  // Details view. While Details is open the tab is held in a ref and restored
+  // on return, so the Catalog searches the same thing it did.
+  const detailsRoute = parseDetailsState(searchParams);
+  const detailsOpen = detailsRoute.open;
+  const rememberedViewRef = useRef('');
+  const requestedView = detailsOpen ? rememberedViewRef.current : normalizeCatalogView(searchParams.get('view'));
+  if (!detailsOpen) rememberedViewRef.current = requestedView;
+  const dexpiClass = (searchParams.get('dexpiClass') || '').trim();
   const [initialView, setInitialView] = useState('');
   useEffect(() => {
     if (!setsAvailable || initialView) return;
@@ -1162,9 +1199,10 @@ function StandardsPage() {
     facetFilters,
     columnFilters,
     showFavourites,
+    dexpiClass,
     sort: sortState,
     preferredFormats: catalogPreferences.formats
-  }), [view, setProjectId, query, facetFilters, columnFilters, showFavourites, sortState, catalogPreferences.formats]);
+  }), [view, setProjectId, query, facetFilters, columnFilters, showFavourites, dexpiClass, sortState, catalogPreferences.formats]);
   const seededSearch = useMemo(
     () => async (params) => searchSeededCatalog(symbols, params, { getField: getSymbolField }),
     []
@@ -1186,6 +1224,7 @@ function StandardsPage() {
     facetFilters: edRelaxedFilters,
     columnFilters,
     showFavourites,
+    dexpiClass,
     sort: sortState,
     pageSize: 1
   }) : null, {
@@ -1254,6 +1293,7 @@ function StandardsPage() {
   const selectedSymbols = selectedSymbolIds
     .map((symbolId) => symbolsById.get(symbolId) || selectedSymbolCache[symbolId])
     .filter(Boolean);
+  const commandTargets = commandSymbols || selectedSymbols;
   const selectionLimitReached = selectedSymbolIds.length >= PUBLISHED_SYMBOL_SELECTION_LIMIT;
   const downloadOptions = buildCatalogDownloadOptions(selectedSymbols);
   // The opt-in is offered only where it means something: SVG, and a selection
@@ -1341,7 +1381,7 @@ function StandardsPage() {
     }
     const normalizedRequested = requestedSymbolId.trim().toLowerCase();
     const loaded = loadedSymbols.find((symbol) =>
-      [symbol.id, symbol.slug, symbol.symbolId, symbol.pageCode]
+      [symbol.id, symbol.slug, symbol.symbolId, symbol.pageCode, symbol.catalogSymbolId]
         .map((value) => String(value || '').trim().toLowerCase())
         .includes(normalizedRequested)
     );
@@ -1354,13 +1394,20 @@ function StandardsPage() {
       return undefined;
     }
     let cancelled = false;
+    setSymbolLoadFailed(false);
     fetchPublishedSymbol(requestedSymbolId)
       .then((symbol) => {
-        if (cancelled || !symbol) return;
+        if (cancelled) return;
+        if (!symbol) {
+          setSymbolLoadFailed(true);
+          return;
+        }
         setPinnedSymbol(symbol);
         setActiveId(symbol.id);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setSymbolLoadFailed(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -1378,9 +1425,42 @@ function StandardsPage() {
   }, [symbolContext.contextVersion, view]);
 
   const activeSymbol = symbolsById.get(activeId) || (pinnedSymbol && pinnedSymbol.id === activeId ? pinnedSymbol : null);
+  const symbolDetails = useSymbolDetails(detailsOpen ? activeSymbol : null);
+  const neighbours = resultNeighbours(loadedSymbols, activeId);
+  const stepEnabled = resultContextRef.current && neighbours.index >= 0;
 
+  // Next past the last loaded result waits for the next page, then follows.
   useEffect(() => {
-    if (!activeSymbol || activeDetailTab !== 'comments') {
+    if (!pendingStepRef.current) return;
+    if (neighbours.next) {
+      pendingStepRef.current = false;
+      showDetailsFor(neighbours.next);
+    } else if (!catalogSearch.loadingMore && !catalogSearch.hasMore) {
+      pendingStepRef.current = false;
+    }
+  }, [loadedSymbols.length, catalogSearch.loadingMore, catalogSearch.hasMore]);
+
+  // Stepping forward asks for the next page a little before it is needed.
+  useEffect(() => {
+    if (detailsOpen && stepEnabled && neighbours.index >= neighbours.count - 3) {
+      catalogSearch.loadMore();
+    }
+  }, [detailsOpen, stepEnabled, neighbours.index, neighbours.count]);
+
+  // Leaving the Details view puts the Catalog's scroll back where it was.
+  useLayoutEffect(() => {
+    if (wasDetailsOpenRef.current && !detailsOpen) {
+      if (standardsGridRef.current) {
+        standardsGridRef.current.scrollTop = gridScrollRef.current;
+      }
+      window.scrollTo(0, windowScrollRef.current);
+    }
+    wasDetailsOpenRef.current = detailsOpen;
+  }, [detailsOpen]);
+
+  const commentsShown = detailsOpen ? detailsRoute.tab === 'comments' : activeDetailTab === 'comments';
+  useEffect(() => {
+    if (!activeSymbol || !commentsShown) {
       return;
     }
     let cancelled = false;
@@ -1410,7 +1490,7 @@ function StandardsPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeSymbol?.id, activeSymbol?.symbolId, activeSymbol?.commentCount, activeDetailTab]);
+  }, [activeSymbol?.id, activeSymbol?.symbolId, activeSymbol?.commentCount, commentsShown]);
 
   function selectSymbol(symbolId) {
     const symbol = symbolId ? symbolsById.get(symbolId) : null;
@@ -1427,6 +1507,70 @@ function StandardsPage() {
       }
       return next;
     }, { replace: true });
+  }
+
+  function openDetails(symbol) {
+    const reference = detailsReference(symbol);
+    if (!reference) {
+      return;
+    }
+    resultContextRef.current = true;
+    windowScrollRef.current = window.scrollY;
+    setPinnedSymbol(symbol);
+    setActiveId(symbol.id);
+    // A new history entry: Back returns to the Catalog as it was.
+    setSearchParams((current) => detailsSearchParams(current, { symbol: reference }));
+    window.scrollTo(0, 0);
+  }
+
+  function leaveDetails() {
+    if (resultContextRef.current) {
+      navigate(-1);
+      return;
+    }
+    // Opened from a link: there is no Catalog entry behind this one.
+    setSearchParams((current) => catalogSearchParams(current, {
+      symbol: requestedSymbolId,
+      view: rememberedViewRef.current
+    }), { replace: true });
+  }
+
+  function changeDetailsTab(tab) {
+    setSearchParams((current) => detailsSearchParams(current, { symbol: requestedSymbolId, tab }), { replace: true });
+  }
+
+  function showDetailsFor(symbol) {
+    setPinnedSymbol(symbol);
+    setActiveId(symbol.id);
+    setSearchParams((current) => detailsSearchParams(current, {
+      symbol: detailsReference(symbol),
+      tab: detailsRoute.tab
+    }), { replace: true });
+  }
+
+  // "See all N in the catalog": the Catalog tab, filtered to the DEXPI class
+  // and nothing else, so the count matches what is listed.
+  function showAllInClass(className) {
+    resetFilterState();
+    setActiveId('');
+    setSearchParams(() => {
+      const next = new URLSearchParams();
+      next.set('dexpiClass', className);
+      if (setsAvailable) {
+        next.set('view', CATALOG_VIEW);
+      }
+      return next;
+    });
+  }
+
+  function stepResult(direction) {
+    const target = direction > 0 ? neighbours.next : neighbours.previous;
+    if (target) {
+      showDetailsFor(target);
+    } else if (direction > 0 && catalogSearch.hasMore) {
+      pendingStepRef.current = true;
+      catalogSearch.loadMore();
+    }
   }
 
   function toggleSymbolSelection(symbol) {
@@ -1451,14 +1595,24 @@ function StandardsPage() {
       setDownloadStatus({ mode: 'error', message: downloadAvailability.reason });
       return;
     }
+    await runCatalogDownload({
+      symbols: selectedSymbols,
+      format: downloadFormat,
+      withStateVariants: canIncludeStateVariants && includeStateVariants
+    });
+  }
+
+  // The command bar's download (the selection) and the Details view's (the
+  // open symbol) are the same request.
+  async function runCatalogDownload({ symbols: toDownload, format, withStateVariants }) {
     setPreparingDownload(true);
     setDownloadStatus({ mode: 'info', message: 'Preparing symbol download…' });
     try {
       const result = await requestCatalogDownload({
         apiRoot: appConfig.apiRoot,
-        symbolIds: selectedSymbols.map((symbol) => symbol.id),
-        format: downloadFormat,
-        includeStateVariants: canIncludeStateVariants && includeStateVariants
+        symbolIds: toDownload.map((symbol) => symbol.id),
+        format,
+        includeStateVariants: withStateVariants
       });
       const objectUrl = window.URL.createObjectURL(result.blob);
       const anchor = document.createElement('a');
@@ -1470,7 +1624,7 @@ function StandardsPage() {
       window.URL.revokeObjectURL(objectUrl);
       setDownloadStatus({
         mode: result.skippedSymbols.length ? 'info' : 'success',
-        message: catalogDownloadResultMessage({ ...result, format: downloadFormat })
+        message: catalogDownloadResultMessage({ ...result, format })
       });
     } catch (error) {
       setDownloadStatus({
@@ -1535,10 +1689,13 @@ function StandardsPage() {
     }
   }
 
-  function openPublishedCommandDialog(command) {
-    if (!selectedSymbols.length) {
+  // `only` targets one symbol (from the Details view); without it the dialog
+  // acts on the checkbox selection.
+  function openPublishedCommandDialog(command, only = null) {
+    if (!only && !selectedSymbols.length) {
       return;
     }
+    setCommandSymbols(only);
     setCommandDialog(command);
     setCommandComment('');
     setCommandStatus({ mode: '', message: '' });
@@ -1550,6 +1707,7 @@ function StandardsPage() {
       return;
     }
     setCommandDialog(null);
+    setCommandSymbols(null);
     setCommandComment('');
     publishedCommandAttemptRef.current = null;
   }
@@ -1566,7 +1724,7 @@ function StandardsPage() {
     setSubmittingCommand(true);
     setCommandStatus({ mode: 'info', message: commandDialog === 'comment' ? 'Posting comment…' : 'Sending selected symbol(s) for review…' });
     const submittedCommand = commandDialog;
-    const submittedSymbolIds = selectedSymbols.map((symbol) => symbol.symbolId);
+    const submittedSymbolIds = commandTargets.map((symbol) => symbol.symbolId);
     publishedCommandAttemptRef.current = createPublishedFeedbackAttempt(
       publishedCommandAttemptRef.current,
       {
@@ -1593,8 +1751,14 @@ function StandardsPage() {
           ? { ...symbol, hasComments: true, commentCount: Number(symbol.commentCount || 0) + 1 }
           : symbol
       ));
-      setSelectedSymbolIds([]);
+      setPinnedSymbol((current) => (current && submittedSymbolIds.includes(current.symbolId)
+        ? { ...current, hasComments: true, commentCount: Number(current.commentCount || 0) + 1 }
+        : current));
+      if (!commandSymbols) {
+        setSelectedSymbolIds([]);
+      }
       setCommandDialog(null);
+      setCommandSymbols(null);
       setCommandComment('');
       publishedCommandAttemptRef.current = null;
     } catch (error) {
@@ -1605,7 +1769,9 @@ function StandardsPage() {
   }
 
   function handleStandardsGridKeyDown(event) {
-    if (event.defaultPrevented) {
+    // The grid's arrow, Home and End keys belong to the Catalog, which is
+    // hidden while the Details view is open.
+    if (event.defaultPrevented || detailsOpen) {
       return;
     }
 
@@ -1683,14 +1849,14 @@ function StandardsPage() {
   }, []);
 
   useEffect(() => {
-    if (!activeId) {
+    if (!activeId || detailsOpen) {
       return;
     }
     const row = standardsGridRef.current?.querySelector(`tr[data-symbol-id="${activeId}"]`);
     if (row) {
       row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
-  }, [activeId, loadedSymbols]);
+  }, [activeId, loadedSymbols, detailsOpen]);
 
   function updateColumnFilter(key, value) {
     setColumnFilters((current) => ({ ...current, [key]: value }));
@@ -1813,6 +1979,14 @@ function StandardsPage() {
     setWorkbenchStatus({ mode: 'success', message: `${candidates.length} symbol(s) added to the application clipboard.` });
   }
 
+  function addActiveToCatalogClipboard() {
+    if (!activeSymbol) {
+      return;
+    }
+    updateCatalogClipboard((current) => addSymbolsToClipboard(current, [activeSymbol]));
+    setWorkbenchStatus({ mode: 'success', message: '1 symbol(s) added to the application clipboard.' });
+  }
+
   function removeCatalogClipboardItem(symbolId) {
     updateCatalogClipboard((current) => removeSymbolFromClipboard(current, symbolId));
   }
@@ -1839,21 +2013,45 @@ function StandardsPage() {
     }, { replace: true });
   }
 
-  function clearAllFilters() {
+  function resetFilterState() {
     setQuery('');
     setFacetFilters({});
     setColumnFilters({});
     setShowFavourites(false);
   }
 
+  function setDexpiClassParam(className) {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (className) {
+        next.set('dexpiClass', className);
+      } else {
+        next.delete('dexpiClass');
+      }
+      return next;
+    }, { replace: true });
+  }
+
+  function clearAllFilters() {
+    resetFilterState();
+    if (dexpiClass) {
+      setDexpiClassParam('');
+    }
+  }
+
   function handleGridScroll(event) {
     const element = event.currentTarget;
+    // A hidden grid reports a scroll position of 0; keep the last real one.
+    if (detailsOpen) {
+      return;
+    }
+    gridScrollRef.current = element.scrollTop;
     if (element.scrollTop + element.clientHeight >= element.scrollHeight - 160) {
       catalogSearch.loadMore();
     }
   }
 
-  const filtersActive = hasActiveFilters({ query, facetFilters, columnFilters, showFavourites });
+  const filtersActive = hasActiveFilters({ query, facetFilters, columnFilters, showFavourites, dexpiClass });
   // The Catalog tab marks rows in the active set once a set resolves.
   const showSetMarkers = view === CATALOG_VIEW && Boolean(catalogSearch.activeSet);
   const setSummary = setSourceSummary(catalogSearch, catalogSearch.facets);
@@ -1904,8 +2102,52 @@ function StandardsPage() {
     catalogStatusText = `Showing ${loadedSymbols.length} of ${catalogSearch.total} ${view === SET_VIEW ? 'symbols in this set view' : 'records'}.`;
   }
 
+  const detailsStatusMessages = [commandStatus, downloadStatus, favouriteStatus, workbenchStatus].filter((status) => status.message);
+
   return (
-    <section className="experience-shell">
+    <section className="experience-shell" data-symbol-details-open={detailsOpen ? 'true' : undefined}>
+      {detailsOpen ? (
+        <SymbolDetailsView
+          symbol={activeSymbol}
+          symbolState={symbolLoadFailed ? 'error' : 'loading'}
+          details={symbolDetails.details}
+          detailsStatus={symbolDetails.status}
+          tab={detailsRoute.tab}
+          onTabChange={changeDetailsTab}
+          navigation={{
+            enabled: stepEnabled,
+            hasPrevious: stepEnabled && Boolean(neighbours.previous),
+            hasNext: stepEnabled && (Boolean(neighbours.next) || catalogSearch.hasMore),
+            position: neighbours.position,
+            total: catalogSearch.total || neighbours.count
+          }}
+          onBack={leaveDetails}
+          onPrevious={() => stepResult(-1)}
+          onNext={() => stepResult(1)}
+          actions={{
+            preparingDownload,
+            onDownload: (choice) => runCatalogDownload({
+              symbols: [activeSymbol],
+              format: choice.format,
+              withStateVariants: choice.includeStateVariants
+            }),
+            onAddToClipboard: addActiveToCatalogClipboard,
+            favourite: {
+              pressed: Boolean(activeSymbol?.isFavourite),
+              pending: Boolean(activeSymbol) && pendingFavouriteIds.includes(activeSymbol.id),
+              disabled: !favouriteMutationsEnabled,
+              onToggle: () => activeSymbol && toggleCatalogFavourite(activeSymbol.id)
+            },
+            onComment: () => activeSymbol && openPublishedCommandDialog('comment', [activeSymbol]),
+            onSendForReview: () => activeSymbol && openPublishedCommandDialog('send_for_review', [activeSymbol])
+          }}
+          statusMessages={detailsStatusMessages}
+          commentsPanel={<PublishedSymbolCommentHistory state={commentHistoryState} />}
+          resolveUrl={resolveWorkspaceAssetUrl}
+          origin={window.location.origin}
+          onShowAllInClass={showAllInClass}
+        />
+      ) : null}
       <div className="hero-panel glass-panel standards-hero page-title-row">
         <div>
           <p className="eyebrow">Published Catalog</p>
@@ -2170,6 +2412,12 @@ function StandardsPage() {
                 <button type="button" className="action-button secondary compact" onClick={restoreSetOrder}>
                   Back to set order
                 </button>
+              ) : null}
+              {dexpiClass ? (
+                <span className="catalog-filter-chip">
+                  DEXPI class: <strong>{dexpiClass}</strong>
+                  <button type="button" className="icon-button compact" aria-label={`Remove DEXPI class filter ${dexpiClass}`} onClick={() => setDexpiClassParam('')}>×</button>
+                </span>
               ) : null}
               {filtersActive ? (
                 <button type="button" className="action-button secondary compact" onClick={clearAllFilters}>
@@ -2484,9 +2732,15 @@ function StandardsPage() {
                 </h3>
                 <p>{activeSymbol.summary}</p>
               </div>
-              <button type="button" className="action-button secondary compact" onClick={() => selectSymbol('')}>
-                Close
-              </button>
+              <div className="detail-heading-actions">
+                <button type="button" className="action-button compact" onClick={() => openDetails(activeSymbol)}>
+                  <ExpandIcon />
+                  Details
+                </button>
+                <button type="button" className="action-button secondary compact" onClick={() => selectSymbol('')}>
+                  Close
+                </button>
+              </div>
             </div>
             <div className="published-detail-tabs" role="tablist" aria-label="Published symbol detail sections">
               <button
@@ -2584,7 +2838,7 @@ function StandardsPage() {
               </button>
             </div>
             <ul className="selected-symbol-list">
-              {selectedSymbols.map((symbol) => (
+              {commandTargets.map((symbol) => (
                 <li key={symbol.id}>
                   <strong>{displaySymbolId(symbol)}</strong>
                   <span>{displaySymbolName(symbol)}</span>
