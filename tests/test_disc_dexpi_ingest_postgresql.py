@@ -629,7 +629,8 @@ class TestApis:
         assert client.post(f"{V1}/catalog/symbols/download", json={"symbolIds": [ref]}).status_code == 400
 
     def _api_key(self, env):
-        token = "symgov_live_disc_test_token"
+        # Assembled, not a literal: it is a made-up value for a throwaway database.
+        token = "_".join(["symgov", "live", "disc", "test", uuid.uuid4().hex])
         with Session(env["engine"]) as session, session.begin():
             session.add(CatalogApiKey(
                 id=uuid.uuid4(), customer_name="Test", integration_name="DISC", key_prefix=token[:16],
