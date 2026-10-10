@@ -99,10 +99,10 @@
         "title": "Which organizations can I work in?",
         "topic": "organization",
         "source_path": "backend/symgov_backend/organization_authorization.py",
-        "source_version": "sha256:4a4b72d5f2beb78808ee50aca36dcbbbe8cd6e7221010b8efc75964a3f2c41d0",
+        "source_version": "sha256:fce231c61a49403d4f8ce2bc32c70057a555c54639a0f0b7c1a4d450bf855df4",
         "source_kind": "python",
-        "source_line_start": 32,
-        "source_line_end": 39
+        "source_line_start": 34,
+        "source_line_end": 41
       },
       {
         "id": "source:organization.session.organization-bound-required:v1",
@@ -129,20 +129,20 @@
         "title": "Choosing an organization when you sign in",
         "topic": "user_setup",
         "source_path": "frontend/src/OrganizationSelectionPage.js",
-        "source_version": "sha256:1febc8a05e39783abe2f7a00d73a10ebd9f0a993dcdeedc6ecd5ce25b2708aec",
+        "source_version": "sha256:daf158e404b031e748a938cbd6cb2ea4a164f819eca7a8ac2e0bcc7e5c1e4806",
         "source_kind": "javascript",
-        "source_line_start": 43,
-        "source_line_end": 76
+        "source_line_start": 50,
+        "source_line_end": 83
       },
       {
         "id": "source:user_setup.sign-in.must-change-pin:v1",
         "title": "Why am I asked to change my PIN after signing in?",
         "topic": "user_setup",
         "source_path": "frontend/src/OrganizationSelectionPage.js",
-        "source_version": "sha256:1febc8a05e39783abe2f7a00d73a10ebd9f0a993dcdeedc6ecd5ce25b2708aec",
+        "source_version": "sha256:daf158e404b031e748a938cbd6cb2ea4a164f819eca7a8ac2e0bcc7e5c1e4806",
         "source_kind": "javascript",
-        "source_line_start": 145,
-        "source_line_end": 152
+        "source_line_start": 152,
+        "source_line_end": 159
       },
       {
         "id": "source:user_setup.profile.identity-and-subscription:v1",
@@ -269,20 +269,20 @@
         "title": "Why you are asked to confirm your identity again",
         "topic": "security",
         "source_path": "backend/symgov_backend/dependencies.py",
-        "source_version": "sha256:fa9379cf84aaa81fdf8c62813cd15d9a84081975d4d51134fa67e8efd693e821",
+        "source_version": "sha256:1fa605c122b1485a301c7409da9bfd98d9fc9e20eb1cad1383f74e53e6a4a107",
         "source_kind": "python",
-        "source_line_start": 604,
-        "source_line_end": 667
+        "source_line_start": 655,
+        "source_line_end": 718
       },
       {
         "id": "source:security.pin-change.required-before-access:v1",
         "title": "Why you must change your PIN before doing anything else",
         "topic": "security",
         "source_path": "backend/symgov_backend/dependencies.py",
-        "source_version": "sha256:fa9379cf84aaa81fdf8c62813cd15d9a84081975d4d51134fa67e8efd693e821",
+        "source_version": "sha256:1fa605c122b1485a301c7409da9bfd98d9fc9e20eb1cad1383f74e53e6a4a107",
         "source_kind": "python",
-        "source_line_start": 425,
-        "source_line_end": 460
+        "source_line_start": 426,
+        "source_line_end": 461
       },
       {
         "id": "source:security.access-rechecked-every-request:v1",
@@ -293,6 +293,36 @@
         "source_kind": "python",
         "source_line_start": 88,
         "source_line_end": 93
+      },
+      {
+        "id": "source:organization.roles.platform-vs-organization-admin:v1",
+        "title": "Platform administrator or Organization Admin",
+        "topic": "organization",
+        "source_path": "backend/symgov_backend/dependencies.py",
+        "source_version": "sha256:1fa605c122b1485a301c7409da9bfd98d9fc9e20eb1cad1383f74e53e6a4a107",
+        "source_kind": "python",
+        "source_line_start": 518,
+        "source_line_end": 564
+      },
+      {
+        "id": "source:project.work-context-vs-organization:v1",
+        "title": "What a project is, and how it differs from an organization",
+        "topic": "project",
+        "source_path": "docs/Symbol Set Management Spec v0.3.md",
+        "source_version": "sha256:929dace948038f1fd42b7bc7df5f3959f380fb619ef7b53ef86bf715afc5f441",
+        "source_kind": "markdown",
+        "source_line_start": 66,
+        "source_line_end": 68
+      },
+      {
+        "id": "source:symbol.published.comment-not-edit:v1",
+        "title": "Why you cannot edit a symbol directly",
+        "topic": "symbol",
+        "source_path": "backend/symgov_backend/routes/published.py",
+        "source_version": "sha256:4be229891dce415dc92361fd75bab4c00bb668fd9f96f1b942563e076b790e2f",
+        "source_kind": "python",
+        "source_line_start": 338,
+        "source_line_end": 358
       }
     ]
   },
@@ -363,8 +393,8 @@
     {
       "source_id": "source:organization.eligibility.active-membership-entitlement-role:v1",
       "rights_disposition": "repository_owned",
-      "approved_line_start": 32,
-      "approved_line_end": 39,
+      "approved_line_start": 34,
+      "approved_line_end": 41,
       "approved_symbol": null
     },
     {
@@ -384,15 +414,15 @@
     {
       "source_id": "source:user_setup.sign-in.select-organization:v1",
       "rights_disposition": "repository_owned",
-      "approved_line_start": 43,
-      "approved_line_end": 76,
+      "approved_line_start": 50,
+      "approved_line_end": 83,
       "approved_symbol": null
     },
     {
       "source_id": "source:user_setup.sign-in.must-change-pin:v1",
       "rights_disposition": "repository_owned",
-      "approved_line_start": 145,
-      "approved_line_end": 152,
+      "approved_line_start": 152,
+      "approved_line_end": 159,
       "approved_symbol": null
     },
     {
@@ -482,15 +512,15 @@
     {
       "source_id": "source:security.step-up.sensitive-admin-actions:v1",
       "rights_disposition": "repository_owned",
-      "approved_line_start": 604,
-      "approved_line_end": 667,
+      "approved_line_start": 655,
+      "approved_line_end": 718,
       "approved_symbol": null
     },
     {
       "source_id": "source:security.pin-change.required-before-access:v1",
       "rights_disposition": "repository_owned",
-      "approved_line_start": 425,
-      "approved_line_end": 460,
+      "approved_line_start": 426,
+      "approved_line_end": 461,
       "approved_symbol": null
     },
     {
@@ -498,6 +528,27 @@
       "rights_disposition": "repository_owned",
       "approved_line_start": 88,
       "approved_line_end": 93,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:organization.roles.platform-vs-organization-admin:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 518,
+      "approved_line_end": 564,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:project.work-context-vs-organization:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 66,
+      "approved_line_end": 68,
+      "approved_symbol": null
+    },
+    {
+      "source_id": "source:symbol.published.comment-not-edit:v1",
+      "rights_disposition": "repository_owned",
+      "approved_line_start": 338,
+      "approved_line_end": 358,
       "approved_symbol": null
     }
   ]

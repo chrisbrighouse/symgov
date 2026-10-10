@@ -9,6 +9,7 @@ the pilot.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -59,3 +60,21 @@ def test_a_realistic_question_retrieves_its_approved_claim(bundle, case):
 @pytest.mark.parametrize("question", EVALUATION["noAnswer"])
 def test_an_off_topic_question_retrieves_nothing(bundle, question):
     assert _ask(bundle, question).status == "cannot_answer"
+
+
+def _suggested_questions():
+    source = (ROOT / "frontend/src/edChat.js").read_text(encoding="utf-8")
+    block = re.search(r"ED_SUGGESTED_QUESTIONS = \[(.*?)\];", source, re.S).group(1)
+    return [
+        match.group(2).replace("\\'", "'")
+        for match in re.finditer(r"(['\"])((?:\\.|(?!\1).)*)\1", block)
+    ]
+
+
+def test_every_suggested_question_retrieves_a_passage(bundle):
+    """The questions Ed offers must be ones its approved knowledge can reach."""
+    questions = _suggested_questions()
+    assert len(questions) >= 6
+    for question in questions:
+        result = _ask(bundle, question)
+        assert result.status == "answered" and result.items, question

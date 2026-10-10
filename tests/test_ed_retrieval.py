@@ -552,3 +552,16 @@ def test_no_match_and_no_terms_say_why(tmp_path: Path):
 
     assert _query(tmp_path, [chunk], "absentword").reason == "no_match"
     assert _query(tmp_path, [chunk], "the and of").reason == "no_terms"
+
+
+def test_a_rare_word_outranks_a_word_found_in_every_claim(tmp_path: Path):
+    """Raw frequency let long claims full of a common word beat a short specific one."""
+    common = [
+        _chunk(tmp_path, identifier=f"claim:common{n}:v1", text="widget widget gadget")
+        for n in range(4)
+    ]
+    specific = _chunk(tmp_path, identifier="claim:specific:v1", text="widget rareword")
+
+    result = _query(tmp_path, [*common, specific], "widget rareword")
+
+    assert result.items[0].chunk_id == "claim:specific:v1"
