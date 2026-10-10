@@ -1019,7 +1019,7 @@ def test_ed_guru_attribution_redaction_and_pseudonym_are_server_owned(monkeypatc
     assert kwargs["feature"] == "ed_guru"
     assert kwargs["use_case"] == "ed_guru"
     assert kwargs["service_name"] == "symgov-api"
-    assert kwargs["prompt_version"] == "ed-guru-2026-10-10-v7"
+    assert kwargs["prompt_version"] == "ed-guru-2026-10-10-v8"
     assert kwargs["timeout"] == 30
     assert kwargs["max_tokens"] == 800
     assert kwargs["response_format"] == {"type": "json_object"}
@@ -1736,6 +1736,7 @@ def test_the_catalog_tool_is_described_to_the_model(monkeypatch):
     assert "search_catalog (query, discipline, category, use_case, format, limit)" in system
     assert "never a sentence" in system
     assert 'match "similar"' in system and "never as an exact one" in system
+    assert "copied exactly from inside the passage's square brackets" in system and 'starting with "knowledge:"' in system
     assert provider.call_args.kwargs["prompt_version"].startswith("ed-guru-2026-10-10")
 
 
@@ -1766,3 +1767,52 @@ def test_off_topic_questions_are_still_refused_before_the_model(monkeypatch, pro
 
     assert response.json()["status"] == "refused"
     provider.assert_not_called()
+
+
+# --- Loosely written citations of passages that were offered ---
+
+
+@pytest.mark.parametrize(
+    "cited",
+    [
+        STUB_REF,
+        f"[{STUB_REF}",  # opening bracket only, seen live 2026-10-10
+        f"{STUB_REF}]",
+        f"[{STUB_REF}]",
+        f'"{STUB_REF}"',
+        f"{STUB_REF}.",
+        "0123456789ab:claim:stub:v1",  # `knowledge:` dropped, seen live 2026-10-10
+        "claim:stub:v1",
+        "stub:v1",
+        "knowledge:ffffffffffff:claim:stub:v1",  # wrong bundle digest, still the one offered claim
+    ],
+)
+def test_a_loosely_written_citation_of_an_offered_passage_is_accepted(monkeypatch, cited):
+    provider = MagicMock(return_value=_provider_result(knowledge_refs=[cited]))
+
+    body = _answer(monkeypatch, provider).json()
+
+    assert body["status"] == "answered"
+    assert [item["reference"] for item in body["citations"]] == [STUB_REF]
+
+
+@pytest.mark.parametrize(
+    "cited",
+    [
+        "knowledge:0123456789ab:claim:somethingelse:v1",
+        "claim:stub:v2",
+        "stub",
+        "[]",
+        "claim:",
+        ":claim:",
+        "live:user:7c8c3128-4022-58e5-8d2f-13ab86fd8f6b",
+    ],
+)
+def test_a_citation_that_names_nothing_offered_is_still_refused(monkeypatch, cited):
+    provider = MagicMock(return_value=_provider_result(answer="An unsupported claim.", knowledge_refs=[cited]))
+
+    response = _answer(monkeypatch, provider)
+
+    body = response.json()
+    assert body["status"] == "unavailable" and "unsupported claim" not in response.text
+    assert body["citations"] == []

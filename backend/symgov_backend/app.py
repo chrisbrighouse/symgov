@@ -50,6 +50,7 @@ from .dependencies import (
     require_workspace_access,
     validate_request_security_settings,
 )
+from .logging_setup import configure_application_logging
 from .catalog_embedding_worker import run_catalog_embedding_worker
 from .catalog_embedding_worker import worker_enabled as catalog_embedding_worker_enabled
 from .email_worker import configured_email_sender, run_email_outbox_worker
@@ -71,6 +72,7 @@ def load_app_version() -> str:
 
 
 def create_app() -> FastAPI:
+    configure_application_logging()
     settings = get_settings()
     login_throttle_policy(settings)
     validate_request_security_settings(settings)
