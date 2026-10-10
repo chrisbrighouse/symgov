@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import unicodedata
 from collections import Counter
@@ -452,6 +453,10 @@ def retrieve(
     scores: Counter[str] = Counter()
     scanned = 0
     for term in terms:
+        # A word found in nearly every claim ("symbol") says little about which
+        # one answers; a rare one ("comment") says a lot. Raw frequency let long
+        # claims full of common words outrank short, specific ones.
+        rarity = math.log(1 + len(chunks) / max(1, len(postings.get(term, ()))))
         for chunk_id, frequency in postings.get(term, ()):
             scanned += 1
             if scanned > MAX_POSTINGS_SCAN:
@@ -463,7 +468,7 @@ def retrieve(
                 title_frequency = Counter(
                     _tokens(chunk.title, maximum=MAX_TOKENS_PER_CHUNK)
                 )[term]
-                scores[chunk_id] += frequency + (title_frequency * 3)
+                scores[chunk_id] += (frequency + (title_frequency * 3)) * rarity
 
     candidates = [by_id[chunk_id] for chunk_id in scores]
     root = Path(repository_root).resolve()

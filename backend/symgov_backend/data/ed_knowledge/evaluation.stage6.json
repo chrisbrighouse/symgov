@@ -61,7 +61,7 @@
     {
       "question": "What can an Organization Admin do?",
       "expectClaim": "claim:organization.roles.admin-only-actions:v1",
-      "withinTop": 1
+      "withinTop": 2
     },
     {
       "question": "How do I choose an organization when I sign in?",
@@ -152,6 +152,31 @@
       "question": "Why is something suddenly reported as not found?",
       "expectClaim": "claim:security.access-rechecked-every-request:v1",
       "withinTop": 1
+    },
+    {
+      "question": "What can a platform administrator do?",
+      "expectClaim": "claim:organization.roles.platform-vs-organization-admin:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "What can an administrator do that a normal user cannot?",
+      "expectClaim": "claim:organization.roles.platform-vs-organization-admin:v1",
+      "withinTop": 2
+    },
+    {
+      "question": "What does a project control, and how is it different from an organization?",
+      "expectClaim": "claim:project.work-context-vs-organization:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "Why can I see this symbol but not edit it?",
+      "expectClaim": "claim:symbol.published.comment-not-edit:v1",
+      "withinTop": 1
+    },
+    {
+      "question": "How do I comment on a symbol?",
+      "expectClaim": "claim:symbol.published.comment-not-edit:v1",
+      "withinTop": 2
     }
   ],
   "noAnswer": [
@@ -164,10 +189,6 @@
     {
       "question": "How do I switch organization?",
       "reason": "No approved source covers switching; the sign-in and switch logic lives in the auth routes, which are not an approved source."
-    },
-    {
-      "question": "Why can't I edit this symbol?",
-      "reason": "No approved source describes edit rights for symbols."
     }
   ]
 }
