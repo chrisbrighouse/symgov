@@ -30,7 +30,9 @@ from symgov_backend import ed_catalog_tool  # noqa: E402
 pytest.importorskip("psycopg")
 
 USER_ID = uuid.uuid4()
-SETTINGS = SimpleNamespace(organizations_enabled=True, organization_symbols_enabled=True)
+SETTINGS = SimpleNamespace(
+    organizations_enabled=True, organization_symbols_enabled=True, ed_semantic_search_enabled=False,
+)
 
 
 def _run(engine, monkeypatch, *, organization_id=None, **arguments):

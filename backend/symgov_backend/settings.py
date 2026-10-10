@@ -221,6 +221,32 @@ class SymgovAPISettings:
     ed_allowed_signers: str = field(
         default_factory=lambda: os.environ.get("SYMGOV_ED_ALLOWED_SIGNERS", "").strip()
     )
+    # Ed's meaning-based Catalog search (Stage B). Off by default: with the
+    # flag off, or before the index has been built, Ed's Catalog search is the
+    # keyword search alone. The model must be an embedding model, so it is not
+    # taken from the chat model settings. The minimum similarity is the
+    # cosine below which a match is not reported. bge-m3 scores compress high
+    # (a true match about 0.70, unrelated text 0.3 to 0.45), so the default is
+    # 0.50; calibrate it against the indexed catalog with
+    # `manage_symgov.py catalog-embeddings probe`.
+    ed_semantic_search_enabled: bool = field(
+        default_factory=lambda: os.environ.get("SYMGOV_ED_SEMANTIC_SEARCH_ENABLED", "").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
+    catalog_embedding_model: str = field(
+        default_factory=lambda: os.environ.get("SYMGOV_CATALOG_EMBEDDING_MODEL", "").strip() or "baai/bge-m3"
+    )
+    ed_semantic_min_similarity: float = field(
+        default_factory=lambda: _float_env("SYMGOV_ED_SEMANTIC_MIN_SIMILARITY", 0.50)
+    )
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        value = float(os.environ.get(name, "").strip())
+    except ValueError:
+        return default
+    return value if 0.0 <= value <= 1.0 else default
 
 
 def get_settings() -> SymgovAPISettings:

@@ -42,7 +42,7 @@ from test_wp81_catalog_organization_context_postgresql import (  # noqa: E402
     _make_organization_wide_symbol,
 )
 
-MIGRATION_HEAD = "20261007_0070"
+MIGRATION_HEAD = "20261010_0071"
 SEARCH = "/api/v1/published/symbols/search"
 
 psycopg = pytest.importorskip("psycopg")

@@ -65,7 +65,9 @@ def _entry(row, source="public"):
 
 
 def _settings(**overrides):
-    values = {"organizations_enabled": True, "organization_symbols_enabled": True}
+    values = {
+        "organizations_enabled": True, "organization_symbols_enabled": True, "ed_semantic_search_enabled": False,
+    }
     values.update(overrides)
     return SimpleNamespace(**values)
 
@@ -284,3 +286,83 @@ def test_summary_text_and_keywords_are_bounded(stub):
 
     assert len(found.summary) <= 200
     assert len(found.keywords) == 6
+
+
+# --- Meaning-based matches ---
+
+
+def _similar(name="Check valve", similarity=0.62):
+    symbol = _symbol(name=name, catalog_id="S-000007")
+    return _module().EdCatalogSymbolRead(
+        id=str(symbol.id), display_id="S-000007", name=name, category="Valves", discipline="Piping",
+        source="public", match="similar", similarity=similarity,
+    )
+
+
+def test_similar_matches_follow_the_keyword_ones_and_are_labelled(stub, monkeypatch):
+    module = _module()
+    row = _row(_symbol())
+    seen = {}
+
+    def fake_similar(session, settings, **kwargs):
+        seen.update(kwargs)
+        return [_similar()]
+
+    monkeypatch.setattr(module, "_similar_symbols", fake_similar)
+    session = stub(entries=[_entry(row)], rows=[row])
+
+    result = _run(session, settings=_settings(ed_semantic_search_enabled=True), call=_call(query="valve", limit=5))
+
+    summary, keyword, similar = result
+    assert (keyword.match, similar.match) == ("keyword", "similar")
+    assert similar.model_dump(mode="json")["similarity"] == 0.62
+    assert summary.shown == 2 and summary.similar_shown == 1 and summary.semantic_search == "used"
+    assert seen["wanted"] == 4 and seen["text_query"] == "valve" and seen["skip_symbol_ids"] == {row[0].id}
+
+
+def test_the_semantic_search_does_not_run_when_it_is_off_or_the_page_is_full(stub, monkeypatch):
+    module = _module()
+    calls = []
+    monkeypatch.setattr(module, "_similar_symbols", lambda *args, **kwargs: calls.append(kwargs) or [])
+    row = _row(_symbol())
+
+    _run(stub(entries=[_entry(row)], rows=[row]), settings=_settings(ed_semantic_search_enabled=False))
+    full = stub(entries=[_entry(row)], rows=[row])
+    result = _run(full, settings=_settings(ed_semantic_search_enabled=True), call=_call(query="valve", limit=1))
+
+    assert calls == [] and result[0].semantic_search == "not_used"
+
+
+def test_a_query_with_no_content_words_is_not_embedded(stub, monkeypatch):
+    module = _module()
+    calls = []
+    monkeypatch.setattr(module, "_similar_symbols", lambda *args, **kwargs: calls.append(kwargs) or [])
+
+    result = _run(stub(), settings=_settings(ed_semantic_search_enabled=True), call=_call(query="show me the symbols"))
+
+    assert calls == [] and result[0].semantic_search == "not_used"
+
+
+def test_a_failed_semantic_search_leaves_the_keyword_result_and_says_so(stub, monkeypatch):
+    module = _module()
+
+    def broken(*args, **kwargs):
+        raise module.EmbeddingError("The embedding request failed.")
+
+    monkeypatch.setattr(module, "_similar_symbols", broken)
+    row = _row(_symbol())
+
+    result = _run(
+        stub(entries=[_entry(row)], rows=[row]), settings=_settings(ed_semantic_search_enabled=True),
+    )
+
+    assert result[0].semantic_search == "unavailable" and result[0].similar_shown == 0
+    assert [item.match for item in result[1:]] == ["keyword"]
+
+
+def test_a_symbol_carries_no_similarity_unless_it_is_a_similar_match(stub):
+    row = _row(_symbol())
+
+    found = _run(stub(entries=[_entry(row)], rows=[row]))[1].model_dump(mode="json")
+
+    assert found["match"] == "keyword" and found["similarity"] is None

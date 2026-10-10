@@ -1019,7 +1019,7 @@ def test_ed_guru_attribution_redaction_and_pseudonym_are_server_owned(monkeypatc
     assert kwargs["feature"] == "ed_guru"
     assert kwargs["use_case"] == "ed_guru"
     assert kwargs["service_name"] == "symgov-api"
-    assert kwargs["prompt_version"] == "ed-guru-2026-10-10-v6"
+    assert kwargs["prompt_version"] == "ed-guru-2026-10-10-v7"
     assert kwargs["timeout"] == 30
     assert kwargs["max_tokens"] == 800
     assert kwargs["response_format"] == {"type": "json_object"}
@@ -1735,6 +1735,7 @@ def test_the_catalog_tool_is_described_to_the_model(monkeypatch):
     system = provider.call_args.kwargs["messages"][0]["content"]
     assert "search_catalog (query, discipline, category, use_case, format, limit)" in system
     assert "never a sentence" in system
+    assert 'match "similar"' in system and "never as an exact one" in system
     assert provider.call_args.kwargs["prompt_version"].startswith("ed-guru-2026-10-10")
 
 

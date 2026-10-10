@@ -32,7 +32,7 @@ from ..settings import SymgovAPISettings
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "ed-guru-2026-10-10-v6"
+PROMPT_VERSION = "ed-guru-2026-10-10-v7"
 _MAX_TOOL_CALLS = 3
 # The whole request, across every provider round, ends well inside the
 # proxy's 60-second read timeout (Stage 6 contract review).
@@ -741,7 +741,10 @@ _TOOL_CATALOGUE = (
     "\"pump\" or \"ball valve\", never a sentence; every word must match. The first result is a summary with "
     "total_matches and the counts for each filter value, so a broad search can be narrowed by passing one of "
     "those exact values as discipline, category, use_case or format. Cite the summary for totals and for "
-    "\"no matching symbols\"; cite a symbol by its own citation record_ref.\n"
+    "\"no matching symbols\"; cite a symbol by its own citation record_ref. A symbol with match \"similar\" "
+    "was found by meaning, not by the words searched for: it is one of the closest candidates, ranked by "
+    "similarity, so present it as a likely match and never as an exact one. similar_shown and semantic_search "
+    "in the summary say whether that search ran.\n"
     "- list_classification_schemes (limit): active classification schemes and their scheme_code values.\n"
     "- get_classification_nodes (scheme_code, parent_code, limit): a scheme's top-level nodes, or the "
     "children of parent_code. The ICS scheme_code is ISO-ICS-7."

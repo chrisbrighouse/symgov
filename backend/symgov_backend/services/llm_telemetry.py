@@ -66,11 +66,14 @@ _LINEAGE_FIELDS = {
 }
 _CATEGORIES = {
     "environment": {"development", "test", "staging", "production"},
-    "use_case": {"workspace_chat", "admin_llm_test", "symbol_property_vision", "vlad_graphic_edit", "ed_guru"},
+    "use_case": {
+        "workspace_chat", "admin_llm_test", "symbol_property_vision", "vlad_graphic_edit", "ed_guru",
+        "catalog_embedding",
+    },
     "service_name": {"symgov-api", "libby", "vlad"},
     "agent_slug": {None, "libby", "vlad", "ed"},
     "provider": {"openrouter", "google", "ollama"},
-    "request_kind": {"text", "vision", "image_generation"},
+    "request_kind": {"text", "vision", "image_generation", "embedding"},
     "status": {"succeeded", "failed", "timed_out", "cancelled"},
     "cost_basis": {"provider_reported", "price_snapshot", "local_policy", "estimated", "unknown"},
     "initiator_kind": {"user", "api_key", "admin", "scheduled_worker", "system"},

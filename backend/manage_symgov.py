@@ -226,6 +226,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--apply", action="store_true", help="Apply the backfill. Omit for dry-run."
     )
 
+    embeddings_parser = subparsers.add_parser(
+        "catalog-embeddings",
+        help=(
+            "Ed's meaning-based Catalog search index. 'status' reports it, 'index' embeds the published "
+            "public symbols that are new or changed (dry run unless --apply), 'probe' shows the nearest "
+            "symbols and their scores for a query, to calibrate the similarity floor."
+        ),
+    )
+    embeddings_parser.add_argument("action", choices=["status", "index", "probe"])
+    embeddings_parser.add_argument("query", nargs="?", help="Text to probe (probe only).")
+    embeddings_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    embeddings_parser.add_argument("--model", help="Embedding model; defaults to the configured one.")
+    embeddings_parser.add_argument("--apply", action="store_true", help="Embed and write (index only).")
+    embeddings_parser.add_argument("--limit", type=int, help="Embed at most this many (index only).")
+    embeddings_parser.add_argument("--batch-size", type=int, default=32)
+    embeddings_parser.add_argument("--top", type=int, default=10, help="How many to show (probe only).")
+
     gate_parser = subparsers.add_parser(
         "evaluate-automation-gates",
         help="Evaluate conservative publication automation gates without creating publication work.",
@@ -596,6 +613,48 @@ def main(argv: Sequence[str] | None = None):
                 print(f"Catalog facet backfill failed: {exc}", file=sys.stderr)
                 return 1
         print(json.dumps(result, indent=2))
+        return 0
+
+    if args.command == "catalog-embeddings":
+        from symgov_backend.catalog_embeddings import index_public_symbols, index_status, probe_nearest
+        from symgov_backend.services.llm_embeddings import request_llm_embeddings
+        from symgov_backend.settings import get_settings
+
+        model = (args.model or get_settings().catalog_embedding_model).strip()
+        session_factory = create_session_factory(env_file=args.db_env_file, nopool=True)
+
+        def embed(texts):
+            return request_llm_embeddings(
+                texts=texts,
+                model=model,
+                feature="catalog_embedding_index",
+                initiator_kind="system",
+                session_factory_provider=lambda: session_factory,
+            )
+
+        with session_factory() as session:
+            try:
+                if args.action == "status":
+                    result = index_status(session, model=model)
+                elif args.action == "index":
+                    report = index_public_symbols(
+                        session, model=model, embed=embed, apply=args.apply,
+                        batch_size=args.batch_size, limit=args.limit,
+                    )
+                    result = {**report.__dict__, "applied": bool(args.apply)}
+                else:
+                    if not args.query or not args.query.strip():
+                        raise SystemExit("probe needs a query.")
+                    vector = embed([args.query.strip()])["vectors"][0]
+                    result = {"query": args.query.strip(), "model": model,
+                              "nearest": probe_nearest(session, vector, model=model, top=args.top)}
+            except SystemExit:
+                raise
+            except Exception as exc:
+                session.rollback()
+                print(f"Catalog embeddings {args.action} failed: {type(exc).__name__}", file=sys.stderr)
+                return 1
+        print(json.dumps(result, indent=2, default=str))
         return 0
 
     if args.command == "evaluate-automation-gates":

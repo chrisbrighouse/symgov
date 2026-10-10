@@ -18,6 +18,8 @@ not invalidate the steward's bundle.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
@@ -32,10 +34,17 @@ from .catalog_browse_search import (
     CatalogSearchScope,
     search_catalog,
 )
+from .catalog_embeddings import (
+    public_visible_revision_ids,
+    revisions_matching_facets,
+    semantic_candidates,
+)
+from .db import create_session_factory
 from .ed_read_tools import _resolve_ed_read_authority
 from .ed_retrieval import _STOP_WORDS
 from .models import GovernedSymbol, SymbolRevision
 from .settings import SymgovAPISettings
+from .services.llm_embeddings import EmbeddingError, request_llm_embeddings
 from .symbol_identity import governed_symbol_human_readable_id
 
 
@@ -113,6 +122,10 @@ class EdCatalogSymbolRead(_CatalogRead):
     source: Literal["public", "organization_private"]
     summary: str | None = None
     keywords: tuple[str, ...] = ()
+    # "keyword" matched the words searched for. "similar" matched by meaning
+    # and is ranked by similarity (1.0 is identical, higher is closer).
+    match: Literal["keyword", "similar"] = "keyword"
+    similarity: float | None = None
 
     @computed_field
     @property
@@ -129,6 +142,10 @@ class EdCatalogSearchSummary(_CatalogRead):
     total_matches: int
     shown: int
     facets: dict[str, tuple[EdCatalogFacetValue, ...]]
+    # How many of `shown` are meaning-based ("similar") matches, and whether
+    # that search ran. total_matches counts keyword matches only.
+    similar_shown: int = 0
+    semantic_search: Literal["not_used", "used", "unavailable"] = "not_used"
 
     @computed_field
     @property
@@ -163,6 +180,121 @@ def _keywords(payload: dict) -> tuple[str, ...]:
     )
 
 
+def _symbols_for_entries(
+    session: Session, entries: list[dict], organization_id: uuid.UUID | None
+) -> list[EdCatalogSymbolRead]:
+    """The symbols behind Catalog entries, each re-checked against its owner."""
+    symbols: list[EdCatalogSymbolRead] = []
+    if not entries:
+        return symbols
+    revision_ids = [entry["symbol_revision_id"] for entry in entries]
+    by_revision = {
+        revision.id: (symbol, revision)
+        for symbol, revision in session.query(GovernedSymbol, SymbolRevision)
+        .join(SymbolRevision, SymbolRevision.symbol_id == GovernedSymbol.id)
+        .filter(SymbolRevision.id.in_(revision_ids))
+        .all()
+    }
+    for entry in entries:
+        pair = by_revision.get(entry["symbol_revision_id"])
+        if pair is None:
+            continue
+        symbol, revision = pair
+        if entry["source"] == "public":
+            if symbol.visibility != "public":
+                continue
+            display_id = symbol.catalog_symbol_id or symbol.slug
+            source = "public"
+        else:
+            # Mirrors the Catalog tab: only this organization's
+            # organization-wide private symbols, never another tenant's.
+            if (
+                organization_id is None
+                or symbol.owner_organization_id != organization_id
+                or symbol.visibility != "organization_private"
+                or symbol.organization_wide is not True
+            ):
+                continue
+            display_id = governed_symbol_human_readable_id(session, symbol) or symbol.slug
+            source = "organization_private"
+        payload = revision.payload_json if isinstance(revision.payload_json, dict) else {}
+        symbols.append(
+            EdCatalogSymbolRead(
+                id=str(symbol.id),
+                display_id=str(display_id),
+                name=str(payload.get("name") or payload.get("canonical_name") or symbol.canonical_name),
+                category=str(symbol.category),
+                discipline=str(symbol.discipline),
+                source=source,
+                summary=_trimmed(payload.get("summary") or payload.get("description"), _MAX_SUMMARY_CHARS),
+                keywords=_keywords(payload),
+            )
+        )
+    return symbols
+
+
+def _initiator_pseudonym(user_id: Any, settings: SymgovAPISettings) -> str:
+    # The same recipe as `services.ed_orchestration._initiator_pseudonym`, so
+    # one person's chat and embedding calls share a pseudonym in the ledger.
+    secret = settings.auth_login_hash_secret.encode("utf-8")
+    return hmac.new(secret, f"ed-guru:{user_id}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def _similar_symbols(
+    session: Session,
+    settings: SymgovAPISettings,
+    *,
+    user_id: Any,
+    text_query: str,
+    facets: dict[str, list[str]],
+    skip_symbol_ids: set[uuid.UUID],
+    wanted: int,
+) -> list[EdCatalogSymbolRead]:
+    """Public symbols whose meaning is close to the query, best first.
+
+    The index is public-only and only ranks: every candidate is re-checked
+    against the live public-Catalog rule and the caller's own filters before
+    it is loaded, and loaded through the same ownership checks as a keyword
+    match. Raises `EmbeddingError` if the query cannot be embedded.
+    """
+    model = settings.catalog_embedding_model
+    embedded = request_llm_embeddings(
+        texts=[text_query],
+        model=model,
+        feature="ed_catalog_search",
+        initiator_kind="user",
+        initiator_pseudonym=_initiator_pseudonym(user_id, settings),
+        timeout=10.0,
+        session_factory_provider=lambda: create_session_factory(env_file=settings.db_env_file, nopool=True),
+    )
+    hits = semantic_candidates(
+        session,
+        embedded["vectors"][0],
+        model=model,
+        min_similarity=settings.ed_semantic_min_similarity,
+        top_k=max(40, wanted * 4),
+    )
+    hits = [hit for hit in hits if hit.governed_symbol_id not in skip_symbol_ids]
+    if not hits:
+        return []
+    visible = public_visible_revision_ids(session, [hit.symbol_revision_id for hit in hits])
+    hits = [hit for hit in hits if hit.symbol_revision_id in visible]
+    if facets and hits:
+        allowed = revisions_matching_facets(session, [hit.symbol_revision_id for hit in hits], facets)
+        hits = [hit for hit in hits if hit.symbol_revision_id in allowed]
+    hits = hits[:wanted]
+    loaded = _symbols_for_entries(
+        session,
+        [{"source": "public", "symbol_revision_id": hit.symbol_revision_id} for hit in hits],
+        None,
+    )
+    scores = {str(hit.governed_symbol_id): hit.similarity for hit in hits}
+    return [
+        symbol.model_copy(update={"match": "similar", "similarity": scores.get(symbol.id)})
+        for symbol in loaded
+    ]
+
+
 def search_catalog_for_ed(
     session: Session,
     request: Request,
@@ -195,52 +327,29 @@ def search_catalog_for_ed(
     except CatalogSearchInputError:
         page = None
 
-    symbols: list[EdCatalogSymbolRead] = []
     entries = page.entries if page is not None else []
-    if entries:
-        revision_ids = [entry["symbol_revision_id"] for entry in entries]
-        by_revision = {
-            revision.id: (symbol, revision)
-            for symbol, revision in session.query(GovernedSymbol, SymbolRevision)
-            .join(SymbolRevision, SymbolRevision.symbol_id == GovernedSymbol.id)
-            .filter(SymbolRevision.id.in_(revision_ids))
-            .all()
-        }
-        for entry in entries:
-            pair = by_revision.get(entry["symbol_revision_id"])
-            if pair is None:
-                continue
-            symbol, revision = pair
-            if entry["source"] == "public":
-                if symbol.visibility != "public":
-                    continue
-                display_id = symbol.catalog_symbol_id or symbol.slug
-                source = "public"
-            else:
-                # Mirrors the Catalog tab: only this organization's
-                # organization-wide private symbols, never another tenant's.
-                if (
-                    organization_id is None
-                    or symbol.owner_organization_id != organization_id
-                    or symbol.visibility != "organization_private"
-                    or symbol.organization_wide is not True
-                ):
-                    continue
-                display_id = governed_symbol_human_readable_id(session, symbol) or symbol.slug
-                source = "organization_private"
-            payload = revision.payload_json if isinstance(revision.payload_json, dict) else {}
-            symbols.append(
-                EdCatalogSymbolRead(
-                    id=str(symbol.id),
-                    display_id=str(display_id),
-                    name=str(payload.get("name") or payload.get("canonical_name") or symbol.canonical_name),
-                    category=str(symbol.category),
-                    discipline=str(symbol.discipline),
-                    source=source,
-                    summary=_trimmed(payload.get("summary") or payload.get("description"), _MAX_SUMMARY_CHARS),
-                    keywords=_keywords(payload),
-                )
+    symbols = _symbols_for_entries(session, entries, organization_id)
+
+    semantic_state: Literal["not_used", "used", "unavailable"] = "not_used"
+    similar: list[EdCatalogSymbolRead] = []
+    query_text = " ".join((call.query or "").split())
+    if settings.ed_semantic_search_enabled and keywords and query_text and len(symbols) < call.limit:
+        try:
+            similar = _similar_symbols(
+                session,
+                settings,
+                user_id=authority.user.id,
+                text_query=query_text,
+                facets=facets,
+                skip_symbol_ids={uuid.UUID(symbol.id) for symbol in symbols},
+                wanted=call.limit - len(symbols),
             )
+            semantic_state = "used"
+        except Exception:
+            # Meaning-based search is an extra: if it cannot run, the keyword
+            # result stands and the model is told so.
+            semantic_state = "unavailable"
+    symbols = [*symbols, *similar]
 
     reported_facets = {
         name: tuple(
@@ -264,5 +373,7 @@ def search_catalog_for_ed(
         total_matches=page.total if page is not None else 0,
         shown=len(symbols),
         facets=reported_facets,
+        similar_shown=len(similar),
+        semantic_search=semantic_state,
     )
     return [summary, *symbols]
