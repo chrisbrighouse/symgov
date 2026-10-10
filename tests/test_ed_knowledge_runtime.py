@@ -176,3 +176,20 @@ def test_a_loaded_bundle_is_verified_again_after_its_ttl(tmp_path: Path, monkeyp
     monkeypatch.setattr(runtime, "_SUCCESS_REVERIFY_SECONDS", 0.0)
 
     assert runtime.load_approved_knowledge(settings, repository_root=repository) is None
+
+
+@requires_ssh_keygen
+def test_a_source_already_changed_at_load_withholds_its_claim_but_still_loads(tmp_path: Path):
+    """A stale cited file must not take the whole signed bundle down with it."""
+    runtime = _runtime()
+    repository, settings, _home, index = _signed_release(tmp_path)
+    (repository / "docs/guide.md").write_text("# Guide\nEd is read-write.\n", encoding="utf-8")
+
+    knowledge = runtime.load_approved_knowledge(settings, repository_root=repository)
+
+    assert knowledge is not None
+    assert knowledge.index_digest == index
+    result = runtime.retrieve_approved(knowledge, "What is the first phase?")
+    assert result.status == "unavailable"
+    assert result.reason == "source_drift"
+    assert result.items == ()

@@ -111,6 +111,7 @@ class ApprovalResult:
     principal: str
     index_digest: str
     manifest_digest: str
+    drifted_sources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,7 @@ class VerificationResult:
     status: Literal["draft"]
     manifest_digest: str
     index_digest: str
+    drifted_sources: tuple[str, ...] = ()
 
 
 class BundleError(ValueError):
@@ -497,8 +499,17 @@ def build_bundle(
 
 
 def verify_bundle(
-    *, bundle: str | Path, repository: str | Path
+    *, bundle: str | Path, repository: str | Path, tolerate_source_drift: bool = False
 ) -> VerificationResult:
+    """Check a bundle against its own bytes and the repository snapshot.
+
+    `tolerate_source_drift` is for the serving path only. A cited file whose
+    bytes changed after approval is then reported in `drifted_sources` rather
+    than refusing the whole bundle, because retrieval re-checks every chunk's
+    source on each query and never serves a drifted one. Every other issue,
+    such as a malformed manifest or an unsafe path, still refuses the bundle,
+    and the build and sign-off paths never set this.
+    """
     root = _repository_root(repository)
     bundle_path = Path(bundle).absolute()
     _reject_symlink_chain(bundle_path, code="invalid_bundle", label="bundle")
@@ -640,6 +651,12 @@ def verify_bundle(
         raise BundleError("invalid_bundle", "build report does not match exact bundle bytes")
 
     source_issues = _source_identity_issues(manifest, chunks_bytes, root)
+    drifted: tuple[str, ...] = ()
+    if source_issues and tolerate_source_drift and all(
+        issue.startswith("source:") for issue in source_issues
+    ):
+        drifted = tuple(issue.removeprefix("source:") for issue in source_issues)
+        source_issues = ()
     if source_issues:
         raise BundleError(
             "source_drift",
@@ -651,6 +668,7 @@ def verify_bundle(
         status="draft",
         manifest_digest=_digest(manifest_bytes),
         index_digest=calculated_index,
+        drifted_sources=drifted,
     )
 
 
@@ -758,6 +776,7 @@ def verify_approval(
     receipt: str | Path,
     signature: str | Path,
     allowed_signers: str | Path,
+    tolerate_source_drift: bool = False,
 ) -> ApprovalResult:
     """Read-only: prove a listed steward signed a receipt for exactly this bundle.
 
@@ -766,7 +785,9 @@ def verify_approval(
     approve its own work. Where the file does live, and who may change it, is
     server configuration, and that is where the real control sits.
     """
-    result = verify_bundle(bundle=bundle, repository=repository)
+    result = verify_bundle(
+        bundle=bundle, repository=repository, tolerate_source_drift=tolerate_source_drift
+    )
     root = _repository_root(repository)
     bundle_path = Path(bundle).absolute().resolve()
     signers_path = Path(allowed_signers).absolute()
@@ -804,6 +825,7 @@ def verify_approval(
         principal=principal,
         index_digest=result.index_digest,
         manifest_digest=result.manifest_digest,
+        drifted_sources=result.drifted_sources,
     )
 
 

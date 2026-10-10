@@ -141,8 +141,10 @@ _IMPERATIVE_OPERATION = re.compile(
 _QUESTION_SENTENCE = re.compile(r"[^.!?;]*\?")
 # A question put to Ed that asks it to act ("Can you delete the set?") is a
 # request even though it ends with "?", unlike a question about who may act.
+# "Can Ed change my data?" talks about Ed rather than to it, so it is not one:
+# Ed has no mutation tool, and the model's answer is still checked.
 _REQUEST_TO_ED = re.compile(
-    rf"\b(?:can|could|would|will)\s+(?:you|ed)\s+(?:please\s+|kindly\s+|just\s+)?"
+    rf"\b(?:can|could|would|will)\s+you\s+(?:please\s+|kindly\s+|just\s+)?"
     rf"(?:[\w'’-]+\s+){{0,2}}?(?P<operation>{_ALL_OPERATION_FORMS})\b",
     re.IGNORECASE,
 )
@@ -361,6 +363,23 @@ def _unavailable(
         mode="cannot_answer",
         warnings=(warning,),
     )
+
+
+# What the person is told when Ed has no answer, by what was missing. The
+# reason code goes to the log; these never name internals.
+_NO_KNOWLEDGE_WARNING = (
+    "Ed's approved knowledge is not available right now, so it could only use your live records."
+)
+_NO_TOPIC_WARNING = (
+    "Ed's approved knowledge has nothing on that topic yet. Try rephrasing with the Symgov "
+    "terms you see on screen, or ask about a record you can open."
+)
+
+
+def _no_evidence_warning(retrieval_status: str | None) -> str:
+    if retrieval_status == "unavailable":
+        return _NO_KNOWLEDGE_WARNING
+    return _NO_TOPIC_WARNING
 
 
 # Security review M1: a model-written refusal was shown verbatim, so text
@@ -741,9 +760,13 @@ def orchestrate_ed_chat(
     # Security review L5. Outcome, tools, evidence and version; never the
     # question, the answer or any identifier beyond the pseudonymous count.
     logger.info(
-        "ed_chat status=%s mode=%s tools=%s knowledge_refs=%d live_refs=%d version=%s",
+        "ed_chat status=%s mode=%s reason=%s retrieval=%s dropped=%s tools=%s "
+        "knowledge_refs=%d live_refs=%d version=%s",
         response.status,
         response.mode,
+        trace.get("reason", "answered" if response.status == "answered" else "-"),
+        trace.get("retrieval", "-"),
+        ",".join(trace.get("dropped", ())) or "-",
         ",".join(trace["tools"]) or "-",
         sum(1 for item in response.citations if item.sourceType == "approved_knowledge"),
         sum(1 for item in response.citations if item.sourceType == "live_record"),
@@ -767,11 +790,13 @@ def _orchestrate(
     _check_rate_limits(user_id, organization_id)
 
     if _is_operation_request(payload.prompt):
+        trace["reason"] = "gate_change_request"
         return _refusal(
             user_context,
             "Ed is read-only and cannot change Symgov data. Use the relevant application workflow instead.",
         )
     if not _ALLOWED_TOPIC.search(payload.prompt):
+        trace["reason"] = "gate_off_topic"
         return _refusal(
             user_context,
             "Ed can only help with the Symgov application, governed engineering information, and related access questions.",
@@ -779,6 +804,7 @@ def _orchestrate(
     roles = {str(role).lower() for role in user_context.get("roles", ())}
     organization_role = str(user_context.get("organization_base_role") or "").lower()
     if _ROLE_SENSITIVE.search(payload.prompt) and "admin" not in roles and organization_role != "admin":
+        trace["reason"] = "gate_role_sensitive"
         return _refusal(
             user_context,
             "Ed cannot disclose private account, credential, or audit information for other people.",
@@ -787,9 +813,14 @@ def _orchestrate(
     # Slice D: approved product knowledge, only from a steward-signed bundle.
     passages = ()
     knowledge_context = ""
+    retrieval_status: str | None = "unavailable"
+    trace["retrieval"] = "bundle_not_loaded"
     knowledge = load_approved_knowledge(settings)
     if knowledge is not None:
         retrieved = retrieve_approved(knowledge, payload.prompt)
+        trace["retrieval"] = retrieved.reason or retrieved.status
+        trace["dropped"] = retrieved.dropped
+        retrieval_status = retrieved.status
         if retrieved.status == "answered":
             passages = retrieved.items
             knowledge_context = retrieved.model_context
@@ -808,6 +839,7 @@ def _orchestrate(
     for _round in range(_MAX_PROVIDER_ROUNDS):
         remaining = _REQUEST_DEADLINE_SECONDS - (time.monotonic() - started)
         if remaining < _MIN_PROVIDER_SECONDS:
+            trace["reason"] = "deadline"
             return _unavailable(user_context, warning="Ed ran out of time before it could answer.")
         try:
             output = _provider_call(
@@ -817,28 +849,38 @@ def _orchestrate(
                 timeout=int(min(_PROVIDER_TIMEOUT_SECONDS, remaining)),
             )
         except Exception:
+            trace["reason"] = "provider_error"
             return _unavailable(
                 user_context,
                 warning="Ed is temporarily unavailable. No private service details were exposed.",
             )
         if output is None:
+            trace["reason"] = "provider_invalid_output"
             return _unavailable(
                 user_context,
                 warning="Ed returned an invalid structured response; no unvalidated content was shown.",
             )
         if _claims_operation(output.answer):
+            trace["reason"] = "answer_claims_change"
             return _refusal(
                 user_context,
                 "Ed is read-only and cannot change Symgov data. Use the relevant application workflow instead.",
             )
         if output.status == "refusal":
+            trace["reason"] = "model_refusal"
             return _response(user_context, answer=_DECLINED, status="refused", mode="blocked", project=project)
         if output.status == "cannot_answer":
-            return _unavailable(user_context)
+            trace["reason"] = "model_cannot_answer"
+            return _unavailable(
+                user_context,
+                warning=_no_evidence_warning(retrieval_status) if not offered and not offered_live
+                else "Ed looked at the information it has and could not answer that from it.",
+            )
         if not output.tool_calls:
             knowledge_refs = [_offered_reference(ref, offered) for ref in output.knowledge_refs]
             live_refs = [_offered_reference(ref, offered_live) for ref in output.live_refs]
             if None in knowledge_refs or None in live_refs:
+                trace["reason"] = "citation_not_offered"
                 return _unavailable(
                     user_context,
                     warning="Ed cited evidence it was not given; no unvalidated content was shown.",
@@ -855,9 +897,10 @@ def _orchestrate(
             if not live_citations and not knowledge_citations:
                 # No uncited prose (Slice D), and a live record counts only
                 # when the answer names it (security review M1).
+                trace["reason"] = "answer_uncited"
                 return _unavailable(
                     user_context,
-                    warning="Ed has no approved information or permitted live record for that question yet.",
+                    warning=_no_evidence_warning(retrieval_status),
                 )
             ics = ics or any(
                 _ICS_MENTION.search(offered[reference].text) for reference in dict.fromkeys(knowledge_refs)
@@ -882,6 +925,7 @@ def _orchestrate(
                 ics=ics,
             )
         if remaining_tools <= 0:
+            trace["reason"] = "tool_limit"
             return _unavailable(user_context, warning="Ed reached the read-tool limit before it had enough evidence.")
 
         requested_calls = output.tool_calls
@@ -893,8 +937,10 @@ def _orchestrate(
             try:
                 tool_result = execute_ed_read_tool(session, request, settings, tool_call)
             except HTTPException:
+                trace["reason"] = "tool_denied"
                 return _unavailable(user_context)
             except Exception:
+                trace["reason"] = "tool_error"
                 return _unavailable(
                     user_context,
                     warning="The requested read-only context could not be retrieved safely.",
@@ -909,6 +955,7 @@ def _orchestrate(
                     pass
             remaining_tools -= 1
             if not _has_evidence(tool_result):
+                trace["reason"] = "tool_empty"
                 return _unavailable(user_context)
             round_citations.extend(_citations(tool_result))
             project = project or _project_name(tool_result)
@@ -922,6 +969,7 @@ def _orchestrate(
             )
 
         if len(requested_calls) > len(calls_to_run):
+            trace["reason"] = "tool_limit"
             return _unavailable(user_context, warning="Ed reached the read-tool limit before it had enough evidence.")
         tool_message, fitted = _bounded_tool_message(tool_results)
         if fitted:
