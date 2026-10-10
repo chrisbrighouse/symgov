@@ -1581,3 +1581,63 @@ def test_eds_use_case_is_one_the_usage_ledger_accepts(monkeypatch):
         if constraint.__class__.__name__ == "CheckConstraint"
     )
     assert f"'{use_case}'" in checks
+
+
+# --- Why Ed had no answer ---
+
+
+@pytest.mark.parametrize(
+    ("state", "reason", "fragment"),
+    [
+        ("not_loaded", "answer_uncited", "not available right now"),
+        ("unavailable", "answer_uncited", "not available right now"),
+        ("no_match", "answer_uncited", "nothing on that topic"),
+    ],
+)
+def test_an_unanswered_question_says_why_in_the_warning_and_the_log(monkeypatch, caplog, state, reason, fragment):
+    from symgov_backend.ed_retrieval import KnowledgeRetrievalResult
+    from symgov_backend.services import ed_orchestration
+
+    if state == "not_loaded":
+        monkeypatch.setattr(ed_orchestration, "load_approved_knowledge", lambda settings: None)
+    else:
+        status = "unavailable" if state == "unavailable" else "cannot_answer"
+        monkeypatch.setattr(
+            ed_orchestration, "retrieve_approved",
+            lambda knowledge, question: KnowledgeRetrievalResult(
+                status=status, reason="source_drift" if state == "unavailable" else "no_match",
+                dropped=("claim:stale:v1",) if state == "unavailable" else (),
+            ),
+        )
+    provider = MagicMock(return_value=_provider_result(answer="Unsupported.", knowledge_refs=[]))
+
+    with caplog.at_level("INFO", logger=ed_orchestration.logger.name):
+        body = _answer(monkeypatch, provider).json()
+
+    assert body["status"] == "unavailable"
+    assert fragment in body["warnings"][0]
+    line = next(record.getMessage() for record in caplog.records if record.getMessage().startswith("ed_chat"))
+    assert f"reason={reason}" in line
+    if state == "unavailable":
+        assert "retrieval=source_drift" in line
+        assert "dropped=claim:stale:v1" in line
+
+
+def test_a_gate_refusal_logs_its_reason(monkeypatch, caplog):
+    from symgov_backend.services import ed_orchestration
+
+    provider = MagicMock()
+    with caplog.at_level("INFO", logger=ed_orchestration.logger.name):
+        _answer(monkeypatch, provider, prompt="What is the weather in Paris?")
+
+    provider.assert_not_called()
+    assert any("reason=gate_off_topic" in record.getMessage() for record in caplog.records)
+
+
+def test_a_question_about_what_ed_can_change_reaches_the_model(monkeypatch):
+    provider = MagicMock(return_value=_provider_result(answer="Ed is read-only."))
+
+    response = _answer(monkeypatch, provider, prompt="Can Ed change my data?")
+
+    assert response.json()["status"] == "answered"
+    provider.assert_called_once()

@@ -473,3 +473,82 @@ def test_digits_still_count_on_their_own(tmp_path: Path):
     chunks = [_chunk(tmp_path, text="Edition 7 of the taxonomy.")]
 
     assert _query(tmp_path, chunks, "Which edition, 7?").status == "answered"
+
+
+def _terms(module, *values: str):
+    postings = {value: ((("claim:x:v1", 1),)) for value in values}
+    return postings
+
+
+@pytest.mark.parametrize(
+    ("question_term", "indexed", "expected"),
+    [
+        ("organisations", "organization", "organization"),
+        ("organizations", "organization", "organization"),
+        ("projects", "project", "project"),
+        ("administrator", "admin", "admin"),
+        ("administrators", "admin", "admin"),
+        ("catalogue", "catalog", "catalog"),
+        ("classifying", "classify", "classify"),
+        ("approved", "approve", "approve"),
+        ("symbol", "symbols", "symbols"),
+        ("policies", "policy", "policy"),
+    ],
+)
+def test_a_term_the_index_lacks_finds_its_other_spellings(question_term, indexed, expected):
+    module = _module()
+
+    expanded = module._expand_terms((question_term,), _terms(module, indexed))
+
+    assert expected in expanded
+
+
+def test_a_term_the_index_has_is_not_expanded():
+    module = _module()
+
+    assert module._expand_terms(("symbols",), _terms(module, "symbols", "symbol")) == ("symbols",)
+
+
+def test_unrelated_terms_do_not_expand_to_indexed_terms():
+    module = _module()
+
+    assert module._expand_terms(("banana",), _terms(module, "project")) == ("banana",)
+
+
+def test_spelling_variants_reach_a_passage_through_the_whole_query(tmp_path: Path):
+    chunk = _chunk(tmp_path, title="Organization roles", text="organization admin roles")
+
+    result = _query(tmp_path, [chunk], "What can an administrator do in my organisation?")
+
+    assert result.status == "answered"
+    assert [item.chunk_id for item in result.items] == ["claim:synthetic:v1"]
+
+
+def test_one_drifted_source_drops_only_its_own_passage(tmp_path: Path):
+    stale = _chunk(tmp_path, identifier="claim:stale:v1", text="sharedneedle stale")
+    fresh = _chunk(tmp_path, identifier="claim:fresh:v1", text="sharedneedle fresh")
+    (tmp_path / str(stale["sourcePath"])).write_text("changed\n", encoding="utf-8")
+
+    result = _query(tmp_path, [stale, fresh], "sharedneedle")
+
+    assert result.status == "answered"
+    assert [item.chunk_id for item in result.items] == ["claim:fresh:v1"]
+    assert result.dropped == ("claim:stale:v1",)
+
+
+def test_every_matching_source_drifting_reports_the_reason(tmp_path: Path):
+    chunk = _chunk(tmp_path, text="loneneedle")
+    (tmp_path / str(chunk["sourcePath"])).write_text("changed\n", encoding="utf-8")
+
+    result = _query(tmp_path, [chunk], "loneneedle")
+
+    assert result.status == "unavailable"
+    assert result.reason == "source_drift"
+    assert result.dropped == ("claim:synthetic:v1",)
+
+
+def test_no_match_and_no_terms_say_why(tmp_path: Path):
+    chunk = _chunk(tmp_path, text="presentneedle")
+
+    assert _query(tmp_path, [chunk], "absentword").reason == "no_match"
+    assert _query(tmp_path, [chunk], "the and of").reason == "no_terms"

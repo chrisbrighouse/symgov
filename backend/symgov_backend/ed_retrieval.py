@@ -111,6 +111,11 @@ class KnowledgeRetrievalResult(_StrictModel):
     status: Literal["answered", "cannot_answer", "unavailable"]
     items: tuple[RetrievalItem, ...] = ()
     model_context: str = ""
+    # Why nothing (or less) was served, for the operator log. Never shown as
+    # model input; the user sees a plain-language warning chosen from it.
+    reason: str | None = None
+    # Chunks left out because their cited source changed after approval.
+    dropped: tuple[str, ...] = ()
 
 
 class OfflineFixtureRetrievalResult(KnowledgeRetrievalResult):
@@ -316,6 +321,67 @@ def _query_terms(question: str) -> tuple[str, ...]:
     return tuple(terms)[:MAX_QUERY_TERMS]
 
 
+_ALIASES = {
+    "administrator": ("admin",),
+    "administrators": ("admin",),
+    "administrative": ("admin",),
+    "admins": ("admin",),
+    "catalogue": ("catalog",),
+    "catalogues": ("catalog",),
+}
+_BRITISH_SUFFIXES = (
+    ("isations", "izations"),
+    ("isation", "ization"),
+    ("ising", "izing"),
+    ("ised", "ized"),
+    ("ises", "izes"),
+    ("ise", "ize"),
+)
+
+
+def _variants(term: str) -> tuple[str, ...]:
+    """Other spellings of a term: plural, verb ending, British -ise, admin forms."""
+    found: dict[str, None] = dict.fromkeys(_ALIASES.get(term, ()))
+    for british, american in _BRITISH_SUFFIXES:
+        if term.endswith(british) and len(term) > len(british) + 2:
+            found[term[: -len(british)] + american] = None
+    stems = [term]
+    stems.extend(found)
+    for stem in stems:
+        for ending, replacement in (
+            ("ies", "y"), ("es", ""), ("s", ""), ("ing", ""), ("ing", "e"), ("ed", ""), ("ed", "e"),
+        ):
+            if stem.endswith(ending) and len(stem) > len(ending) + 2:
+                found[stem[: -len(ending)] + replacement] = None
+        for ending in ("s", "es"):
+            found[stem + ending] = None
+        if stem.endswith("y"):
+            found[stem[:-1] + "ies"] = None
+    found.pop(term, None)
+    return tuple(found)
+
+
+def _expand_terms(
+    terms: tuple[str, ...], postings: dict[str, tuple[tuple[str, int], ...]]
+) -> tuple[str, ...]:
+    """Terms the index lacks are replaced by their spellings it does have.
+
+    Done at query time only, so the approved postings bytes (and therefore the
+    steward's signature) are untouched. A term the index already holds is kept
+    as it is.
+    """
+    expanded: dict[str, None] = {}
+    for term in terms:
+        if term in postings:
+            expanded[term] = None
+            continue
+        expanded[term] = None
+        for variant in _variants(term):
+            if variant in postings:
+                expanded[variant] = None
+    return tuple(expanded)
+
+
 def _passage(item: RetrievalItem) -> str:
     return f"[{item.citation.reference}] {item.citation.label}\n{item.text}"
 
@@ -369,7 +435,7 @@ def retrieve(
     if approved_index_digest is None or approved_index_digest != index_digest(
         chunks_bytes, postings_bytes
     ):
-        return result_type(status="unavailable")
+        return result_type(status="unavailable", reason="index_not_approved")
     try:
         terms = _query_terms(question)
         postings = _load_postings(postings_bytes)
@@ -377,9 +443,10 @@ def retrieve(
         if build_postings(chunks_bytes) != postings_bytes:
             raise RetrievalIndexError("postings index does not match chunks")
     except RetrievalIndexError:
-        return result_type(status="unavailable")
+        return result_type(status="unavailable", reason="index_invalid")
     if not terms:
-        return result_type(status="cannot_answer")
+        return result_type(status="cannot_answer", reason="no_terms")
+    terms = _expand_terms(terms, postings)
 
     by_id = {chunk.chunk_id: chunk for chunk in chunks}
     scores: Counter[str] = Counter()
@@ -388,10 +455,10 @@ def retrieve(
         for chunk_id, frequency in postings.get(term, ()):
             scanned += 1
             if scanned > MAX_POSTINGS_SCAN:
-                return result_type(status="unavailable")
+                return result_type(status="unavailable", reason="scan_limit")
             chunk = by_id.get(chunk_id)
             if chunk is None:
-                return result_type(status="unavailable")
+                return result_type(status="unavailable", reason="index_invalid")
             if _eligible(chunk):
                 title_frequency = Counter(
                     _tokens(chunk.title, maximum=MAX_TOKENS_PER_CHUNK)
@@ -400,11 +467,18 @@ def retrieve(
 
     candidates = [by_id[chunk_id] for chunk_id in scores]
     root = Path(repository_root).resolve()
-    if any(
-        not _model_facing_safe(chunk) or not _source_matches(chunk, root)
-        for chunk in candidates
-    ):
-        return result_type(status="unavailable")
+    if any(not _model_facing_safe(chunk) for chunk in candidates):
+        return result_type(status="unavailable", reason="unsafe_content")
+    # A cited source edited after approval costs only the claims that cite it,
+    # not every question that shares a word with them. The drifted chunk is
+    # never served; the rest are still backed by the bytes the steward signed.
+    dropped = tuple(
+        sorted(chunk.chunk_id for chunk in candidates if not _source_matches(chunk, root))
+    )
+    if dropped:
+        candidates = [chunk for chunk in candidates if chunk.chunk_id not in dropped]
+        if not candidates:
+            return result_type(status="unavailable", reason="source_drift", dropped=dropped)
     ranked = sorted(
         candidates,
         key=lambda chunk: (-scores[chunk.chunk_id], chunk.chunk_id),
@@ -431,11 +505,12 @@ def retrieve(
         passages.append(passage)
         context_size += separator + len(passage)
     if not items:
-        return result_type(status="cannot_answer")
+        return result_type(status="cannot_answer", reason="no_match", dropped=dropped)
     # Each passage is labelled with its reference so the model can say which
     # one supports a claim, and the server can check that it did.
     return result_type(
         status="answered",
         items=tuple(items),
         model_context="\n\n".join(passages),
+        dropped=dropped,
     )

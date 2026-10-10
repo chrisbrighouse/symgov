@@ -114,3 +114,35 @@ def test_redaction_removes_credentials_but_not_ordinary_words(text, kept):
     if not kept:
         assert "[REDACTED]" in redacted
         assert not any(secret in redacted for secret in ("4590", "hunter2x", "abc123def456"))
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Can Ed change my data?",
+        "Could Ed delete a symbol set?",
+        "Will Ed update my profile?",
+    ],
+)
+def test_a_question_about_what_ed_can_do_is_not_a_request_to_do_it(question):
+    assert _in_scope(question)
+
+
+@pytest.mark.parametrize("request_text", ["Can you delete the set?", "Could you close project P-01?"])
+def test_a_polite_request_addressed_to_ed_is_still_refused(request_text):
+    assert orchestration._is_operation_request(request_text)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "What does a project control, and how is it different from an organization?",
+        "Which symbol sets are available in my current project?",
+        "How do classification schemes relate to a symbol's discipline?",
+        "Where did the ICS taxonomy come from?",
+        "Why can I see this symbol but not edit it?",
+        "What can an administrator do that a normal user cannot?",
+    ],
+)
+def test_every_suggested_question_passes_the_gates(question):
+    assert _in_scope(question)

@@ -71,6 +71,7 @@ def _load(name: str, signers: str, root: Path) -> ApprovedKnowledge | None:
             receipt=home / "approval.json",
             signature=home / "approval.json.sig",
             allowed_signers=signers,
+            tolerate_source_drift=True,
         )
         chunks = (home / "bundle" / "chunks.jsonl").read_bytes()
         postings = (home / "bundle" / "postings.json").read_bytes()
@@ -81,6 +82,14 @@ def _load(name: str, signers: str, root: Path) -> ApprovedKnowledge | None:
     if approval.principal is None or name != approval.index_digest.removeprefix("sha256:")[:12]:
         logger.warning("Ed knowledge bundle %s not loaded: name does not match its digest", name)
         return None
+    if approval.drifted_sources:
+        # Not fatal: retrieval drops each chunk whose source changed, so the
+        # claims citing these files are withheld until the steward re-signs.
+        logger.warning(
+            "Ed knowledge bundle %s loaded with stale sources: %s",
+            name,
+            ",".join(approval.drifted_sources),
+        )
     return ApprovedKnowledge(
         bundle_name=name,
         index_digest=approval.index_digest,

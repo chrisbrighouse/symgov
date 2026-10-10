@@ -847,3 +847,30 @@ def test_a_signer_list_others_can_write_is_refused(tmp_path: Path):
         )
 
     assert exc.value.code == "unsafe_signers"
+
+
+def test_the_serving_path_can_tolerate_a_changed_source_but_nothing_else(tmp_path: Path):
+    module = _module()
+    repository = tmp_path / "repository"
+    external = tmp_path / "external"
+    repository.mkdir()
+    external.mkdir()
+    bundle = _build(repository, external)
+    (repository / "docs/guide.md").write_text("changed\n", encoding="utf-8")
+
+    with pytest.raises(module.BundleError) as strict:
+        module.verify_bundle(bundle=bundle, repository=repository)
+    tolerant = module.verify_bundle(
+        bundle=bundle, repository=repository, tolerate_source_drift=True
+    )
+
+    assert strict.value.code == "source_drift"
+    assert tolerant.drifted_sources == ("docs/guide.md",)
+
+    # A missing source is still a source issue the retrieval check handles,
+    # but a path outside the repository is a malformed bundle and stays fatal.
+    manifest = json.loads((bundle / "manifest.json").read_bytes())
+    manifest["sources"][0]["path"] = "../outside.md"
+    (bundle / "manifest.json").write_bytes(_canonical(manifest))
+    with pytest.raises(module.BundleError):
+        module.verify_bundle(bundle=bundle, repository=repository, tolerate_source_drift=True)
