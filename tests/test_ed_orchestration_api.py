@@ -1019,7 +1019,7 @@ def test_ed_guru_attribution_redaction_and_pseudonym_are_server_owned(monkeypatc
     assert kwargs["feature"] == "ed_guru"
     assert kwargs["use_case"] == "ed_guru"
     assert kwargs["service_name"] == "symgov-api"
-    assert kwargs["prompt_version"] == "ed-guru-2026-09-30-v5"
+    assert kwargs["prompt_version"] == "ed-guru-2026-10-10-v6"
     assert kwargs["timeout"] == 30
     assert kwargs["max_tokens"] == 800
     assert kwargs["response_format"] == {"type": "json_object"}
@@ -1641,3 +1641,127 @@ def test_a_question_about_what_ed_can_change_reaches_the_model(monkeypatch):
 
     assert response.json()["status"] == "answered"
     provider.assert_called_once()
+
+
+# --- Catalog search tool ---
+
+
+def _catalog_result(*, matches=1):
+    from symgov_backend.ed_catalog_tool import EdCatalogSearchSummary, EdCatalogSymbolRead
+
+    summary = EdCatalogSearchSummary(
+        key="test-search", searched_for="pump", filters={}, total_matches=matches,
+        shown=matches, facets={},
+    )
+    symbols = [
+        EdCatalogSymbolRead(
+            id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", display_id="S-000042", name="Centrifugal pump",
+            category="Pumps", discipline="Piping", source="public", summary="A centrifugal pump.",
+        )
+    ][:matches]
+    return [summary, *symbols]
+
+
+def test_a_catalog_question_runs_the_catalog_tool_and_cites_what_it_returned(monkeypatch):
+    from symgov_backend.services import ed_orchestration
+
+    result = _catalog_result()
+    symbol_ref = result[1].citation["record_ref"]
+    summary_ref = result[0].citation["record_ref"]
+    tool = MagicMock(return_value=result)
+    monkeypatch.setattr(ed_orchestration, "search_catalog_for_ed", tool)
+    monkeypatch.setattr(ed_orchestration, "execute_ed_read_tool", MagicMock(side_effect=AssertionError))
+    provider = MagicMock(side_effect=[
+        _provider_result(tool_calls=[{"tool": "search_catalog", "query": "pump"}], knowledge_refs=[]),
+        _provider_result(
+            answer="The Catalog has one pump symbol, S-000042 (Centrifugal pump).",
+            knowledge_refs=[], live_refs=[summary_ref, symbol_ref],
+        ),
+    ])
+
+    response = _answer(monkeypatch, provider, prompt="Which pump symbols are in the Catalog?")
+
+    body = response.json()
+    assert body["status"] == "answered" and body["mode"] == "live_data"
+    assert {item["reference"] for item in body["citations"]} == {summary_ref, symbol_ref}
+    call = tool.call_args.args[3]
+    assert call.tool == "search_catalog" and call.query == "pump"
+    second_round = provider.call_args_list[1].kwargs["messages"][-1]["content"]
+    assert "S-000042" in second_round and "aaaaaaaa-aaaa" not in second_round
+
+
+def test_no_matching_symbols_is_a_cited_answer_not_a_refusal(monkeypatch):
+    from symgov_backend.services import ed_orchestration
+
+    result = _catalog_result(matches=0)
+    monkeypatch.setattr(ed_orchestration, "search_catalog_for_ed", MagicMock(return_value=result))
+    provider = MagicMock(side_effect=[
+        _provider_result(tool_calls=[{"tool": "search_catalog", "query": "teleporter"}], knowledge_refs=[]),
+        _provider_result(
+            answer="The Catalog has no symbols matching teleporter.",
+            knowledge_refs=[], live_refs=[result[0].citation["record_ref"]],
+        ),
+    ])
+
+    body = _answer(monkeypatch, provider, prompt="Do you have a teleporter symbol?").json()
+
+    assert body["status"] == "answered"
+    assert "no symbols matching" in body["answer"]
+
+
+@pytest.mark.parametrize(
+    "extra", [{"organization_id": "11111111-1111-1111-1111-111111111111"}, {"user_id": "x"}, {"scope": "all"}]
+)
+def test_the_model_cannot_pass_scope_to_the_catalog_tool(monkeypatch, extra):
+    from symgov_backend.services import ed_orchestration
+
+    tool = MagicMock()
+    monkeypatch.setattr(ed_orchestration, "search_catalog_for_ed", tool)
+    provider = MagicMock(return_value=_provider_result(
+        tool_calls=[{"tool": "search_catalog", "query": "pump", **extra}], knowledge_refs=[],
+    ))
+
+    body = _answer(monkeypatch, provider, prompt="Which pump symbols are in the Catalog?").json()
+
+    assert body["status"] == "unavailable"
+    tool.assert_not_called()
+
+
+def test_the_catalog_tool_is_described_to_the_model(monkeypatch):
+    provider = MagicMock(return_value=_provider_result())
+
+    _answer(monkeypatch, provider, prompt="Which pump symbols are in the Catalog?")
+
+    system = provider.call_args.kwargs["messages"][0]["content"]
+    assert "search_catalog (query, discipline, category, use_case, format, limit)" in system
+    assert "never a sentence" in system
+    assert provider.call_args.kwargs["prompt_version"].startswith("ed-guru-2026-10-10")
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "Do you have a gate valve?",
+        "Show me DEXPI pump symbols",
+        "Is there a P&ID symbol for a reducer?",
+        "What heat exchanger symbols are there?",
+        "How many symbols are in each discipline?",
+    ],
+)
+def test_catalog_questions_reach_the_model(monkeypatch, prompt):
+    provider = MagicMock(return_value=_provider_result())
+
+    response = _answer(monkeypatch, provider, prompt=prompt)
+
+    assert response.json()["status"] == "answered"
+    provider.assert_called_once()
+
+
+@pytest.mark.parametrize("prompt", ["What's the weather in Paris?", "Tell me a joke", "Who won the football?"])
+def test_off_topic_questions_are_still_refused_before_the_model(monkeypatch, prompt):
+    provider = MagicMock()
+
+    response = _answer(monkeypatch, provider, prompt=prompt)
+
+    assert response.json()["status"] == "refused"
+    provider.assert_not_called()

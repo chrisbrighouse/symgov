@@ -146,3 +146,23 @@ def test_a_polite_request_addressed_to_ed_is_still_refused(request_text):
 )
 def test_every_suggested_question_passes_the_gates(question):
     assert _in_scope(question)
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Do you have a gate valve?",
+        "Show me DEXPI pump symbols",
+        "Is there a P&ID symbol for a reducer?",
+        "What heat exchanger symbols are there?",
+        "How many symbols are in each discipline?",
+        "Which instrumentation symbols come in SVG?",
+    ],
+)
+def test_catalog_questions_are_in_scope(question):
+    assert _in_scope(question)
+
+
+@pytest.mark.parametrize("question", ["What's the weather in Paris?", "Tell me a joke", "Who won the football?"])
+def test_unrelated_questions_stay_out_of_scope(question):
+    assert not _in_scope(question)

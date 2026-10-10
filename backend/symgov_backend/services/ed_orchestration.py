@@ -13,7 +13,7 @@ import time
 from collections.abc import Mapping, Sequence
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from ..db import create_session_factory
 from ..ed_knowledge_runtime import load_approved_knowledge, retrieve_approved
+from ..ed_catalog_tool import EdCatalogSearchCall, search_catalog_for_ed
 from ..ed_read_tools import EdReadToolCall, execute_ed_read_tool
 from ..ed_retrieval import looks_like_prompt_injection
 from ..schemas import EdAttribution, EdChatRequest, EdChatResponse, EdCitation, EdContext
@@ -31,7 +32,7 @@ from ..settings import SymgovAPISettings
 
 logger = logging.getLogger(__name__)
 
-PROMPT_VERSION = "ed-guru-2026-09-30-v5"
+PROMPT_VERSION = "ed-guru-2026-10-10-v6"
 _MAX_TOOL_CALLS = 3
 # The whole request, across every provider round, ends well inside the
 # proxy's 60-second read timeout (Stage 6 contract review).
@@ -213,7 +214,18 @@ _ALLOWED_TOPIC = re.compile(
     r"schemes?|ics|taxonom(?:y|ies)|disciplines?|revisions?|submissions?|reviews?|reviewers?|"
     r"admins?|administrators?|members?|memberships?|workspaces?|organi[sz]ations?|projects?|profiles?|"
     r"subscriptions?|roles?|permissions?|security|user setup|pin|sign(?:ing)?[- ]?in|log(?:ging)?[- ]?(?:in|out)|"
-    r"sessions?|identity|entitlements?|access|approv\w*|publish\w*|not found)\b",
+    r"sessions?|identity|entitlements?|access|approv\w*|publish\w*|not found)\b"
+    # Catalog questions use the vocabulary of the symbols themselves ("do you
+    # have a gate valve?"), so the engineering terms below also count. The gate
+    # is only a pre-filter: an answer still needs an approved passage or a live
+    # record, so a wrong guess here costs a polite no-answer, not a wrong answer.
+    r"|\b(?:valves?|pumps?|tanks?|vessels?|pipes?|piping|pipelines?|fittings?|flanges?|reducers?|"
+    r"compressors?|turbines?|motors?|drives?|actuators?|sensors?|transmitters?|instruments?|instrumentation|"
+    r"controllers?|filters?|exchangers?|heat|boilers?|furnaces?|columns?|reactors?|separators?|"
+    r"equipment|process|mechanical|electrical|civil|structural|hvac|control|signals?|"
+    r"p&ids?|pids?|pfds?|dexpi|iso|isa|iec|ansi|asme|din|diagrams?|drawings?|"
+    r"svg|dxf|dwg|pdf|png|formats?|downloads?|categor(?:y|ies)|keywords?|disciplines?|"
+    r"library|libraries|packs?|how many|available|exist(?:s|ing)?)\b",
     re.IGNORECASE,
 )
 _ROLE_SENSITIVE = re.compile(
@@ -258,7 +270,9 @@ class _ProviderOutput(BaseModel):
 
     status: Literal["answered", "refusal", "cannot_answer"]
     answer: str = Field(min_length=1, max_length=4000)
-    tool_calls: list[EdReadToolCall] = Field(default_factory=list, max_length=8)
+    tool_calls: list[Annotated[EdReadToolCall | EdCatalogSearchCall, Field(discriminator="tool")]] = Field(
+        default_factory=list, max_length=8
+    )
     # The approved passages and live records the answer relies on. The server
     # accepts only references it offered, and shows only what is named.
     knowledge_refs: list[str] = Field(default_factory=list, max_length=4)
@@ -718,12 +732,26 @@ _TOOL_CATALOGUE = (
     "- get_project_context: the selected project and the active symbol set.\n"
     "- list_accessible_symbol_sets (limit): symbol sets linked to the selected project.\n"
     "- get_symbol_set (symbol_set_id): one set and its items; take the id from an earlier result.\n"
-    "- search_accessible_symbols (query, symbol_set_id, limit): symbols you may see.\n"
+    "- search_accessible_symbols (query, symbol_set_id, limit): symbols in the active symbol sets of the "
+    "selected project only. For the wider Catalog use search_catalog.\n"
     "- get_symbol (symbol_id): one symbol and its current revision.\n"
+    "- search_catalog (query, discipline, category, use_case, format, limit): search the whole symbol Catalog "
+    "you can see: every published public symbol, and your organization's organization-wide private symbols. "
+    "Use it for any question about which symbols exist. query is one to three plain keywords such as "
+    "\"pump\" or \"ball valve\", never a sentence; every word must match. The first result is a summary with "
+    "total_matches and the counts for each filter value, so a broad search can be narrowed by passing one of "
+    "those exact values as discipline, category, use_case or format. Cite the summary for totals and for "
+    "\"no matching symbols\"; cite a symbol by its own citation record_ref.\n"
     "- list_classification_schemes (limit): active classification schemes and their scheme_code values.\n"
     "- get_classification_nodes (scheme_code, parent_code, limit): a scheme's top-level nodes, or the "
     "children of parent_code. The ICS scheme_code is ISO-ICS-7."
 )
+
+
+def _run_read_tool(session: Session, request: Request, settings: SymgovAPISettings, call: Any) -> Any:
+    if isinstance(call, EdCatalogSearchCall):
+        return search_catalog_for_ed(session, request, settings, call)
+    return execute_ed_read_tool(session, request, settings, call)
 
 
 def _system_prompt(knowledge_context: str) -> str:
@@ -799,7 +827,8 @@ def _orchestrate(
         trace["reason"] = "gate_off_topic"
         return _refusal(
             user_context,
-            "Ed can only help with the Symgov application, governed engineering information, and related access questions.",
+            "Ed can only help with the Symgov application, its symbol Catalog, governed engineering information, and related access questions. "
+            "Try asking, for example, which pump symbols the Catalog has.",
         )
     roles = {str(role).lower() for role in user_context.get("roles", ())}
     organization_role = str(user_context.get("organization_base_role") or "").lower()
@@ -935,7 +964,7 @@ def _orchestrate(
         for tool_call in calls_to_run:
             trace["tools"].append(tool_call.tool)
             try:
-                tool_result = execute_ed_read_tool(session, request, settings, tool_call)
+                tool_result = _run_read_tool(session, request, settings, tool_call)
             except HTTPException:
                 trace["reason"] = "tool_denied"
                 return _unavailable(user_context)
