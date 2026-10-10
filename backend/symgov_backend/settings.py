@@ -236,6 +236,13 @@ class SymgovAPISettings:
     catalog_embedding_model: str = field(
         default_factory=lambda: os.environ.get("SYMGOV_CATALOG_EMBEDDING_MODEL", "").strip() or "baai/bge-m3"
     )
+    # How often the background worker reconciles the embedding index with what
+    # is published, so new symbols become searchable by meaning without anyone
+    # running the command. Runs only while semantic search is enabled; 0 turns
+    # the worker off (the `catalog-embeddings index` command still works).
+    catalog_embedding_sync_seconds: float = field(
+        default_factory=lambda: _nonnegative_float_env("SYMGOV_CATALOG_EMBEDDING_SYNC_SECONDS", 300.0)
+    )
     ed_semantic_min_similarity: float = field(
         default_factory=lambda: _float_env("SYMGOV_ED_SEMANTIC_MIN_SIMILARITY", 0.50)
     )
@@ -247,6 +254,14 @@ def _float_env(name: str, default: float) -> float:
     except ValueError:
         return default
     return value if 0.0 <= value <= 1.0 else default
+
+
+def _nonnegative_float_env(name: str, default: float) -> float:
+    try:
+        value = float(os.environ.get(name, "").strip())
+    except ValueError:
+        return default
+    return value if value >= 0.0 else default
 
 
 def get_settings() -> SymgovAPISettings:

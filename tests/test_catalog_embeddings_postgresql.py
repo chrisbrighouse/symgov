@@ -297,3 +297,145 @@ def test_a_private_symbol_is_never_indexed_and_never_a_similar_match(search_data
     similar = [item for item in mixed[1:] if item.match == "similar"]
     assert {item.name for item in similar} == {"Gate valve", "Globe valve 100%"}
     assert all(item.source == "public" for item in similar)
+
+
+# --- The background sync -------------------------------------------------------
+
+from symgov_backend import catalog_embedding_worker as worker  # noqa: E402
+
+
+def _sync(engine, **kwargs):
+    embeddings.clear_index_cache()
+    return worker.sync_once(
+        SimpleNamespace(catalog_embedding_model=MODEL, db_env_file=None),
+        embed=kwargs.pop("embed", fake_embed), engine=engine, **kwargs,
+    )
+
+
+def _clear(engine):
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM catalog_symbol_embeddings WHERE model = :m"), {"m": MODEL})
+
+
+def _lock_free(engine) -> bool:
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        got = connection.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": worker._ADVISORY_LOCK_KEY}).scalar()
+        if got:
+            connection.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": worker._ADVISORY_LOCK_KEY})
+        return bool(got)
+
+
+def test_sync_fills_an_empty_index_then_has_nothing_to_do(search_database):
+    engine, seeded = search_database
+    _clear(engine)
+
+    first = _sync(engine)
+    second = _sync(engine)
+
+    assert (first.status, first.embedded, first.pending, first.failed_batches) == ("ran", len(seeded), 0, 0)
+    assert (second.status, second.embedded, second.pending, second.pruned) == ("ran", 0, 0, 0)
+    assert _stored(engine) == len(seeded) and _lock_free(engine)
+
+
+def test_a_per_cycle_limit_spreads_a_backlog_over_cycles(search_database):
+    engine, seeded = search_database
+    _clear(engine)
+
+    first = _sync(engine, limit=2)
+    second = _sync(engine, limit=2)
+    third = _sync(engine, limit=2)
+
+    assert (first.embedded, first.pending) == (2, len(seeded) - 2)
+    assert (second.embedded, second.pending) == (2, len(seeded) - 4)
+    assert (third.embedded, third.pending) == (len(seeded) - 4, 0)
+    assert _stored(engine) == len(seeded)
+
+
+def test_a_symbol_published_later_is_embedded_on_the_next_cycle(search_database):
+    engine, seeded = search_database
+    _sync(engine)
+    newcomer = seeded["Tag bubble"]["revision_id"]
+    with engine.begin() as connection:
+        # As if this revision had only just been published: it has no vector yet.
+        connection.execute(
+            text("DELETE FROM catalog_symbol_embeddings WHERE symbol_revision_id = :r AND model = :m"),
+            {"r": newcomer, "m": MODEL},
+        )
+
+    result = _sync(engine)
+
+    assert (result.embedded, result.pending) == (1, 0) and _stored(engine) == len(seeded)
+
+
+def test_a_symbol_withdrawn_from_the_catalog_loses_its_vector(search_database):
+    engine, seeded = search_database
+    _sync(engine)
+    entry = seeded["Tag bubble"]
+    with engine.begin() as connection:
+        row = connection.execute(text("SELECT * FROM pack_entries WHERE id = :id"), {"id": entry["entry_id"]}).mappings().one()
+        connection.execute(text("DELETE FROM pack_entries WHERE id = :id"), {"id": entry["entry_id"]})
+    try:
+        result = _sync(engine)
+        assert result.pruned == 1 and _stored(engine) == len(seeded) - 1
+    finally:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO pack_entries (id,pack_id,symbol_revision_id,published_page_id,sort_order,created_at) "
+                    "VALUES (:id,:pack_id,:symbol_revision_id,:published_page_id,:sort_order,:created_at)"
+                ),
+                dict(row),
+            )
+        _sync(engine)
+    assert _stored(engine) == len(seeded)
+
+
+def test_an_overlapping_run_skips_instead_of_embedding_twice(search_database):
+    engine, seeded = search_database
+    _clear(engine)
+    calls = []
+
+    def counting(texts):
+        calls.append(len(texts))
+        return fake_embed(texts)
+
+    with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as holder:
+        holder.execute(text("SELECT pg_advisory_lock(:k)"), {"k": worker._ADVISORY_LOCK_KEY})
+        try:
+            blocked = _sync(engine, embed=counting)
+        finally:
+            holder.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": worker._ADVISORY_LOCK_KEY})
+
+    assert blocked.status == "skipped_locked" and blocked.embedded == 0 and calls == []
+    assert _stored(engine) == 0
+
+    after = _sync(engine, embed=counting)
+    assert after.embedded == len(seeded) and calls
+
+
+def test_a_provider_failure_is_a_counted_failure_not_an_exception(search_database):
+    engine, seeded = search_database
+    _clear(engine)
+
+    def broken(texts):
+        raise EmbeddingError("The embedding request failed.")
+
+    result = _sync(engine, embed=broken)
+
+    assert result.status == "ran" and result.failed_batches > 0 and result.embedded == 0
+    assert result.pending == len(seeded) and _stored(engine) == 0 and _lock_free(engine)
+
+    assert _sync(engine).embedded == len(seeded)
+
+
+def test_the_index_report_counts_what_is_still_pending(search_database, session):
+    engine, seeded = search_database
+    _clear(engine)
+
+    dry = _index(session)
+    partial = _index(session, apply=True, limit=2)
+    rest = _index(session, apply=True)
+
+    assert (dry.to_embed, dry.pending) == (len(seeded), len(seeded))
+    assert (partial.to_embed, partial.embedded, partial.pending) == (2, 2, len(seeded) - 2)
+    assert (rest.embedded, rest.pending) == (len(seeded) - 2, 0)

@@ -50,6 +50,8 @@ from .dependencies import (
     require_workspace_access,
     validate_request_security_settings,
 )
+from .catalog_embedding_worker import run_catalog_embedding_worker
+from .catalog_embedding_worker import worker_enabled as catalog_embedding_worker_enabled
 from .email_worker import configured_email_sender, run_email_outbox_worker
 from .auth_security import login_throttle_policy
 from .settings import get_settings
@@ -219,6 +221,12 @@ def create_app() -> FastAPI:
             email_stop_event = asyncio.Event()
             app.state.email_worker_stop_event = email_stop_event
             app.state.email_worker_task = asyncio.create_task(run_email_outbox_worker(settings, email_stop_event))
+        if catalog_embedding_worker_enabled(settings):
+            embedding_stop_event = asyncio.Event()
+            app.state.catalog_embedding_stop_event = embedding_stop_event
+            app.state.catalog_embedding_task = asyncio.create_task(
+                run_catalog_embedding_worker(settings, embedding_stop_event)
+            )
         agents = settings.agent_workers if settings.enable_agent_workers else (("libby",) if settings.enable_libby_worker else ())
         app.state.agent_worker_state = AgentQueueWorkerState(configured_agents=agents)
         if not agents:
@@ -254,6 +262,14 @@ def create_app() -> FastAPI:
             email_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await email_task
+        embedding_task = getattr(app.state, "catalog_embedding_task", None)
+        embedding_stop_event = getattr(app.state, "catalog_embedding_stop_event", None)
+        if embedding_stop_event is not None:
+            embedding_stop_event.set()
+        if embedding_task is not None:
+            embedding_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await embedding_task
         task = getattr(app.state, "agent_worker_task", None)
         stop_event = getattr(app.state, "agent_worker_stop_event", None)
         if stop_event is not None:

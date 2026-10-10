@@ -120,6 +120,9 @@ class IndexReport:
     published: int = 0
     already_current: int = 0
     to_embed: int = 0
+    # Still waiting after this pass: everything that needs embedding, less
+    # what this pass embedded. Above zero after a `limit` or a failed batch.
+    pending: int = 0
     embedded: int = 0
     pruned: int = 0
     dimensions: int | None = None
@@ -194,6 +197,7 @@ def index_public_symbols(
             report.already_current += 1
         else:
             wanted.append((row, body, digest))
+    report.pending = len(wanted)
     if limit is not None:
         wanted = wanted[:limit]
     report.to_embed = len(wanted)
@@ -240,8 +244,11 @@ def index_public_symbols(
             )
         session.commit()
         report.embedded += len(batch)
+        report.pending -= len(batch)
 
-    if prune and report.failed_batches == 0 and limit is None:
+    # Pruning depends only on what is published now, not on what is still
+    # waiting to be embedded, so it runs on every applied pass.
+    if prune:
         current = [str(value) for value in revision_ids]
         statement = text(
             "DELETE FROM catalog_symbol_embeddings WHERE model = :model "

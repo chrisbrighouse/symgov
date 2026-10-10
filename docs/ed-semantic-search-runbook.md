@@ -36,6 +36,7 @@ flag is turned on.
 | `SYMGOV_ED_SEMANTIC_SEARCH_ENABLED` | off | Turns the meaning-based pass on. Read at start, so changing it means a restart. |
 | `SYMGOV_CATALOG_EMBEDDING_MODEL` | `baai/bge-m3` | An OpenRouter embedding model. Not taken from the chat model settings. |
 | `SYMGOV_ED_SEMANTIC_MIN_SIMILARITY` | `0.50` | Cosine below which a match is not reported. bge-m3 scores compress high: in a first live probe a true match scored 0.70, a related symbol 0.58 and unrelated text 0.31 to 0.44, so 0.50 is a starting point. **Calibrate it** (below). |
+| `SYMGOV_CATALOG_EMBEDDING_SYNC_SECONDS` | `300` | How often the background worker reconciles the index with what is published. `0` turns the worker off. Runs only while the flag above is on. |
 
 The provider key is the one the chat calls already use
 (`SYMGOV_OPENROUTER_API_KEY` or the Hermes profile `.env`).
@@ -67,9 +68,29 @@ Run the commands in the API container from the release's `backend` directory:
 
 ## Keeping it current
 
-After new symbols are published (or a description changes), re-run
-`index --apply`. Until then a new symbol is found by keyword only. Changing the
-model is a new index: run `index --apply --model <new>` after setting
+A worker inside the API process (started with the app, like the email outbox
+worker) reconciles the index every `SYMGOV_CATALOG_EMBEDDING_SYNC_SECONDS`
+(default 300) while the semantic-search flag is on. Nothing hooks publication,
+because symbols are published by several routes and an embedding call must not
+sit inside a publication transaction. Each cycle runs the same indexer as the
+command, so:
+
+- a symbol published by any route is searchable by meaning within one interval;
+- a changed description is re-embedded, and a withdrawn symbol's vector is
+  removed;
+- a cycle embeds at most 256 symbols, and a larger backlog (a bulk import) is
+  worked off at 30-second intervals until it is clear;
+- overlapping runs (a second process, or the command line) are prevented by a
+  PostgreSQL advisory lock and skip rather than double-embed;
+- a provider fault is logged by error type only; after consecutive failures the
+  wait doubles, up to an hour, and resets on success.
+
+It logs one line when it did something (`Catalog embedding sync: embedded=N
+pending=N pruned=N`) and a warning when a batch fails or no provider key is
+configured. The `catalog-embeddings status` command shows published versus
+indexed counts at any time, and `index --apply` still works by hand.
+
+Changing the model is a new index: run `index --apply --model <new>` after setting
 `SYMGOV_CATALOG_EMBEDDING_MODEL`; the old model's rows can be deleted with
 `DELETE FROM catalog_symbol_embeddings WHERE model = '<old>'`.
 
