@@ -316,7 +316,7 @@ describe('the tabs', () => {
 
   it('renders the Details tab sections', () => {
     const html = markup(props(discValve, discDetails, { tab: 'details' }));
-    ['Identity', 'Geometry', 'Source register'].forEach((title) => assert.match(html, new RegExp(`>${title}<`)));
+    ['Identity', 'Geometry', 'Source'].forEach((title) => assert.match(html, new RegExp(`>${title}<`)));
     assert.match(html, /<dt>Drawing extent<\/dt><dd>18\.35 × 11\.35 mm<\/dd>/);
     assert.match(html, /<dt>Source ID<\/dt><dd>ND0004<\/dd>/);
   });

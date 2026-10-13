@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from .asset_manifest import list_state_variant_assets
 from .image_content import UnsafeImageContentError, validate_stored_image
+from .published_catalog import served_disc
 from .runtime import download_object_bytes
 from .settings import get_settings
 
@@ -36,7 +37,8 @@ def state_variant_summaries(payload: dict | None, url_prefix: str) -> list[dict[
 def disc_extras(payload: dict | None) -> dict[str, Any]:
     """The geometry, register extras and option list an imported library stores, as served.
 
-    Absent keys stay absent: a symbol without them says nothing about them.
+    Absent keys stay absent: a symbol without them says nothing about them. The
+    register's operator-only keys are left out (`published_catalog.served_disc`).
     """
     payload = payload or {}
     extras: dict[str, Any] = {}
@@ -45,7 +47,7 @@ def disc_extras(payload: dict | None) -> dict[str, Any]:
         extras["geometry"] = geometry
     disc = payload.get("disc")
     if isinstance(disc, dict):
-        extras["disc"] = disc
+        extras["disc"] = served_disc(disc)
     return extras
 
 

@@ -36,6 +36,9 @@ export const discValve = {
     assets: [{ role: 'primary', format: 'svg', sha256: '4dcaf5439e3c7cbad485c8f993beec74dc9f3424c896c39c2a5bb9eee9ead8eb' }],
     dexpi: {
       dexpi_elements: ['PipingComponent'],
+      dexpi_package: 'Piping',
+      vendors: ['DISC'],
+      specification_versions: ['1.3'],
       component_classes: ['CustomOperatedValve'],
       custom_type: { label: 'DOUBLE BLOCK AND BLEED VALVE', rdl_uri: 'http://data.posccaesar.org/rdl/RDS552689' },
       semantic_concept: { concept_key: 'DoubleBlockAndBleedValve', rdl_uri: 'http://data.posccaesar.org/rdl/RDS552689' },
@@ -52,7 +55,6 @@ export const discValve = {
       legacy_id: null,
       grouping: 'Valve',
       register_last_update: '2026-05-15',
-      register_status: { origo: 'OK', sizing: 'OK', label: 'OK', connections: 'OK', mapping: 'OK' },
       size_mm: { h: 11, w: 18 },
       transform: { rotation: 'Yes', mirroring: 'Yes', resize_x: 'No', resize_y: 'No' },
       references: { TR1970: 'STPV035', NORSOK_Z004: null, ISA_5_1: null, label_symbol_ref: null },
@@ -150,6 +152,9 @@ export const pilotSymbol = {
     dexpi: {
       component_classes: ['GateValve'],
       dexpi_elements: ['PipingComponent'],
+      vendors: ['VER'],
+      specification_versions: ['1.2', '1.3'],
+      version_note: 'Converted from the DEXPI TrainingTestCases example corpus, which publishes DEXPI 1.2 and 1.3 only.',
       semantic_concept: { concept_key: 'GateValve', concept_code: 'GateValve' }
     }
   }

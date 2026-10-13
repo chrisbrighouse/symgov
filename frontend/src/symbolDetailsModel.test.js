@@ -82,9 +82,9 @@ test('a custom type with its own URI is listed, a concept without a URI is key-o
   assert.deepEqual(identifierList({ id: 'x', payload: {} }, 'https://symgov.example'), []);
 });
 
-test('the Details tab has identity, geometry and register sections for S-273', () => {
+test('the Details tab has identity, geometry and source sections for S-273', () => {
   const sections = detailsSections(discValve);
-  assert.deepEqual(sections.map((section) => section.title), ['Identity', 'Geometry', 'Source register']);
+  assert.deepEqual(sections.map((section) => section.title), ['Identity', 'Geometry', 'Source']);
   const identity = sections[0].rows;
   assert.equal(byLabel(identity, 'Catalog ID'), 'S-273');
   assert.equal(byLabel(identity, 'Source ID'), 'ND0004');
@@ -98,10 +98,46 @@ test('the Details tab has identity, geometry and register sections for S-273', (
   assert.equal(byLabel(geometry, 'Insertion point'), '0, 0 mm');
   assert.equal(byLabel(geometry, 'Rotation'), 'Allowed');
   assert.equal(byLabel(geometry, 'Resize X'), 'Not allowed');
-  const register = sections[2].rows;
-  assert.equal(byLabel(register, 'Register update'), '15 May 2026');
-  assert.equal(byLabel(register, 'Mapping status'), 'OK');
-  assert.equal(byLabel(register, 'Profile'), 'DISC Profile 0.6.3 (DEXPI 1.3)');
+  const source = sections[2].rows;
+  assert.deepEqual(labels(source), ['Grouping', 'Contributor code', 'DEXPI package', 'DEXPI version', 'Profile', 'Register update']);
+  assert.equal(byLabel(source, 'DEXPI package'), 'Piping');
+  assert.equal(byLabel(source, 'DEXPI version'), '1.3');
+  assert.equal(byLabel(source, 'Contributor code'), 'DISC');
+  assert.equal(byLabel(source, 'Register update'), '15 May 2026');
+  assert.equal(byLabel(source, 'Profile'), 'DISC Profile 0.6.3 (DEXPI 1.3)');
+});
+
+test('the register status flags are operator data and never shown, even if a payload still carries them', () => {
+  const stale = {
+    ...discValve,
+    payload: {
+      ...discValve.payload,
+      disc: { ...discValve.payload.disc, register_status: { origo: 'OK', sizing: 'NOK', mapping: 'OK' } }
+    }
+  };
+  const shown = detailsSections(stale).flatMap((section) => labels(section.rows));
+  assert.ok(!shown.some((label) => /status/i.test(label)), shown.join(' | '));
+});
+
+test('a label symbol reference is listed with the other references when the register has one', () => {
+  const withRef = {
+    ...discValve,
+    payload: {
+      ...discValve.payload,
+      disc: { ...discValve.payload.disc, references: { ...discValve.payload.disc.references, label_symbol_ref: 'ND0137' } }
+    }
+  };
+  assert.equal(byLabel(detailsSections(withRef)[0].rows, 'Label symbol reference'), 'ND0137');
+  assert.equal(byLabel(detailsSections(discValve)[0].rows, 'Label symbol reference'), undefined);
+});
+
+test('a TrainingTestCases symbol shows its DEXPI versions, contributor and version note', () => {
+  const sections = detailsSections(pilotSymbol);
+  const source = sections.find((section) => section.id === 'source').rows;
+  assert.equal(byLabel(source, 'DEXPI versions'), '1.2, 1.3');
+  assert.equal(byLabel(source, 'Contributor code'), 'VER (DEXPI reference solution)');
+  assert.match(byLabel(source, 'Version note'), /TrainingTestCases/);
+  assert.equal(byLabel(source, 'DEXPI package'), undefined);
 });
 
 test('a legacy symbol has only the identity it has', () => {

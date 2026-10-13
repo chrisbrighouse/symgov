@@ -140,14 +140,33 @@ PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL = PUBLISHED_SYMBOLS_SQL.replace(
 assert PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL != PUBLISHED_SYMBOLS_SQL
 
 
+# Register fields kept for operators: the source register's own data-quality
+# flags (origo, sizing, label, connections, mapping). They stay on the stored
+# revision and are never served to Catalog readers or API callers
+# (decision 2026-10-13).
+OPERATOR_ONLY_DISC_KEYS = frozenset({"register_status"})
+
+
+def served_disc(disc):
+    """The register block as served: a copy without the operator-only keys."""
+    if not isinstance(disc, dict):
+        return disc
+    return {key: value for key, value in disc.items() if key not in OPERATOR_ONLY_DISC_KEYS}
+
+
 def payload_with_rights_attribution(payload: dict | None, attribution_text: str | None) -> dict:
-    """The payload as served: `dexpi.attribution` filled from the rights record.
+    """The payload as served: `dexpi.attribution` filled from the rights record,
+    and the register's operator-only keys left out.
 
     Only a payload that says its attribution lives on the record
-    (`attribution_source == "rights_record"`) is touched; a pilot symbol keeps
-    the text it stores, byte for byte. The stored payload is never modified.
+    (`attribution_source == "rights_record"`) has its attribution touched; a
+    pilot symbol keeps the text it stores, byte for byte. The stored payload is
+    never modified: a copy is made only when something changes.
     """
     payload = payload or {}
+    disc = payload.get("disc")
+    if isinstance(disc, dict) and OPERATOR_ONLY_DISC_KEYS & disc.keys():
+        payload = {**payload, "disc": served_disc(disc)}
     dexpi = payload.get("dexpi")
     if (
         not attribution_text

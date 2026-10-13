@@ -218,13 +218,24 @@ export function primaryAssetSha(symbol) {
   return primary ? String(primary.sha256) : '';
 }
 
-const REGISTER_STATUSES = [
-  ['origo', 'Origo'],
-  ['sizing', 'Sizing'],
-  ['label', 'Label'],
-  ['connections', 'Connections'],
-  ['mapping', 'Mapping']
-];
+// The contributor codes the DEXPI corpus puts in its file names. Only VER is
+// documented (DEXPI's own reference solutions); the others are shown as the
+// corpus writes them rather than guessed at.
+const CONTRIBUTOR_NOTES = { VER: 'DEXPI reference solution' };
+
+function contributorText(vendors) {
+  const codes = Array.isArray(vendors) ? vendors : [vendors];
+  return text(codes.map((code) => {
+    const value = text(code);
+    return value && CONTRIBUTOR_NOTES[value] ? `${value} (${CONTRIBUTOR_NOTES[value]})` : value;
+  }));
+}
+
+function dexpiVersionLabel(versions) {
+  return Array.isArray(versions) && versions.filter((version) => text(version)).length > 1
+    ? 'DEXPI versions'
+    : 'DEXPI version';
+}
 
 function allowance(value) {
   const flag = yesNo(value);
@@ -233,6 +244,8 @@ function allowance(value) {
 }
 
 // The Details tab: three sections of label/value rows, empty ones dropped.
+// The source register's own status flags (origo, sizing, ...) are operator
+// data and are not served to readers (decision 2026-10-13).
 export function detailsSections(symbol) {
   const disc = discOf(symbol);
   const dexpi = dexpiOf(symbol);
@@ -240,7 +253,6 @@ export function detailsSections(symbol) {
   const frame = drawingFrame(symbol);
   const hasGeometry = Boolean(frame);
   const transform = disc.transform || {};
-  const registerStatus = disc.register_status || {};
   const aliases = Array.isArray(symbol?.payload?.aliases) ? symbol.payload.aliases : [];
   const sections = [
     {
@@ -253,6 +265,7 @@ export function detailsSections(symbol) {
         row('TR1970', text(references.TR1970)),
         row('NORSOK Z-004', text(references.NORSOK_Z004)),
         row('ISA-5.1', text(references.ISA_5_1)),
+        row('Label symbol reference', text(references.label_symbol_ref)),
         row('Aliases', text(aliases))
       ])
     },
@@ -270,13 +283,16 @@ export function detailsSections(symbol) {
       ])
     },
     {
-      id: 'register',
-      title: 'Source register',
+      id: 'source',
+      title: 'Source',
       rows: rows([
         row('Grouping', text(disc.grouping)),
+        row('Contributor code', contributorText(dexpi.vendors)),
+        row('DEXPI package', text(dexpi.dexpi_package)),
+        row(dexpiVersionLabel(dexpi.specification_versions), text(dexpi.specification_versions)),
+        row('Profile', text(dexpi.standard_assertion?.version_label)),
         row('Register update', formatDate(disc.register_last_update)),
-        ...REGISTER_STATUSES.map(([key, label]) => row(`${label} status`, text(registerStatus[key]))),
-        row('Profile', text(dexpi.standard_assertion?.version_label))
+        row('Version note', text(dexpi.version_note))
       ])
     }
   ];

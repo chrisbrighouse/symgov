@@ -1,5 +1,10 @@
 # Catalog API changelog
 
+## 2026-10-13 — Source register status no longer served
+
+- The `disc` block in symbol detail responses no longer carries `register_status`, the source register's own data-quality flags (origo, sizing, label, connections, mapping). These flags are kept for Symgov operators only.
+- Every other `disc` field is unchanged.
+
 ## 2026-09-26 — Catalog symbol IDs without leading zeros
 
 - Every canonical Catalog symbol ID is now `S-<n>` with no zero padding: `S-000001` is `S-1`, and new IDs grow without a width limit.
