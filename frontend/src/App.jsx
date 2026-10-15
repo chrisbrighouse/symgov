@@ -2545,7 +2545,7 @@ function StandardsPage() {
             aria-label={catalogResultView === 'cards' ? 'Published symbols compact cards' : 'Published symbols table'}
           >
             {catalogResultView === 'cards' ? (
-              <div className="catalog-card-grid" role="list" aria-label="Published symbol compact cards">
+              <div className="catalog-card-grid" role="group" aria-label="Published symbol compact cards">
                 {cardEntries.map((entry) => {
                   if (entry.heading) {
                     return (
@@ -2562,19 +2562,7 @@ function StandardsPage() {
                       key={symbol.id}
                       data-symbol-id={symbol.id}
                       className={`catalog-symbol-card ${symbol.id === activeId ? 'active' : ''}`}
-                      tabIndex={0}
-                      role="button"
-                      aria-pressed={symbol.id === activeId}
                       onClick={() => selectSymbol(symbol.id)}
-                      onKeyDown={(event) => {
-                        if (event.target !== event.currentTarget) {
-                          return;
-                        }
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          selectSymbol(symbol.id);
-                        }
-                      }}
                     >
                       <div className="catalog-card-select" onClick={(event) => event.stopPropagation()}>
                         <input
@@ -2603,7 +2591,23 @@ function StandardsPage() {
                             <span title={card.commentCount ? `${card.commentCount} comment(s)` : 'No comments yet'}>{card.commentCount ? '💬' : '—'}</span>
                           </span>
                         </div>
-                        <h4>{card.name || 'Unnamed symbol'}</h4>
+                        {/* The card's keyboard control: a real button, so the card can
+                            hold its checkbox and Favourite button without nesting
+                            interactive controls. A click anywhere on the card still
+                            selects it. */}
+                        <h4>
+                          <button
+                            type="button"
+                            className="catalog-card-open"
+                            aria-pressed={symbol.id === activeId}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              selectSymbol(symbol.id);
+                            }}
+                          >
+                            {card.name || 'Unnamed symbol'}
+                          </button>
+                        </h4>
                         {symbol.paletteEntry?.displayLabel ? (
                           <p className="catalog-card-set-label">{symbol.paletteEntry.displayLabel}</p>
                         ) : null}

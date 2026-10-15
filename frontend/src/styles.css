@@ -25,6 +25,9 @@
 
   --text-main: var(--idox-text-primary);
   --text-soft: var(--idox-text-tertiary);
+  /* Tertiary text measures 4.48:1 on slate-100 and fails WCAG AA; slate-600 is
+     the next Idox shade. Use this wherever soft text sits on a subtle surface. */
+  --text-soft-on-subtle: var(--idox-slate-600);
 
   --stroke: var(--idox-border-default);
   --stroke-strong: var(--idox-border-strong);
@@ -2655,12 +2658,36 @@ a:not([class]):active {
 }
 
 .catalog-symbol-card:hover,
-.catalog-symbol-card:focus-visible,
+.catalog-symbol-card:has(.catalog-card-open:focus-visible),
 .catalog-symbol-card.active {
   border-color: var(--idox-border-focus);
   background: var(--idox-interactive-subtle);
   outline: none;
   transform: translateY(-1px);
+}
+
+/* Fills its heading and carries the heading's ellipsis: a button is laid out as
+   an atomic box, so the h4's own text-overflow cannot reach its text. */
+.catalog-card-open {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Inset, because the heading clips anything drawn outside it. */
+.catalog-card-open:focus-visible {
+  outline: var(--focus-outline);
+  outline-offset: -2px;
 }
 
 .catalog-card-select input {
@@ -2770,7 +2797,7 @@ a:not([class]):active {
   border: 1px solid var(--idox-border-subtle);
   border-radius: 999px;
   background: var(--idox-bg-surface-subtle);
-  color: var(--text-soft);
+  color: var(--text-soft-on-subtle);
   font-size: 0.68rem;
   font-weight: var(--idox-font-weight-bold);
   overflow: hidden;
@@ -3138,7 +3165,7 @@ a:not([class]):active {
   padding: 0.32rem 0.6rem;
   border-radius: 999px;
   background: var(--idox-bg-surface-subtle);
-  color: var(--text-soft);
+  color: var(--text-soft-on-subtle);
   font-size: 0.78rem;
   font-weight: var(--idox-font-weight-bold);
 }
@@ -3182,7 +3209,7 @@ a:not([class]):active {
 
 .subscription-tier-pill.free {
   background: var(--idox-bg-surface-subtle);
-  color: var(--text-soft);
+  color: var(--text-soft-on-subtle);
 }
 
 .subscription-tier-pill.plus {
@@ -3371,7 +3398,7 @@ a:not([class]):active {
 .symbol-set-builder-badge.unavailable {
   border-color: var(--idox-border-subtle);
   background: var(--idox-bg-surface-subtle);
-  color: var(--text-soft);
+  color: var(--text-soft-on-subtle);
 }
 
 .catalog-badge-row {
@@ -3583,7 +3610,7 @@ button.catalog-preview-format-badge:focus-visible {
 .catalog-preview-format-badge.unavailable {
   border-color: var(--idox-border-subtle);
   background: var(--idox-bg-surface-subtle);
-  color: var(--text-soft);
+  color: var(--text-soft-on-subtle);
   opacity: 0.72;
 }
 
