@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   addSymbolsToClipboard,
@@ -12,6 +13,7 @@ import {
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
   canonicalDiscipline,
+  CATALOG_DISCIPLINE_ORDER,
   symbolIdLabel,
   symbolIdLabelOrState,
   catalogScopeBadge,
@@ -349,4 +351,22 @@ test('a symbol ID is shown as S-<n> once published, and never as a slug or UUID 
   assert.equal(symbolIdLabel({ slug: 'org-draft-5d2c7a1e-8f3b-4a61-9c0e-1b2d3e4f5a6b' }), '');
   assert.equal(symbolIdLabelOrState({ slug: 'org-draft-5d2c7a1e' }), 'Draft');
   assert.equal(symbolIdLabelOrState({ visibility: 'organization_private', slug: 'x' }), 'Private');
+});
+
+// The Catalog's discipline names live in three places: here, the backend facet
+// store (catalog_facets.py) and the /catalog API (catalog_taxonomy.py). An
+// importer that writes a discipline the browser does not list (the Commons
+// import writes HVAC) would file symbols under a facet nobody can pick.
+function pythonDisciplineOrder(relativePath) {
+  const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
+  const match = source.match(/^CATALOG_DISCIPLINE_ORDER = \[([\s\S]*?)\]/m);
+  assert.ok(match, `CATALOG_DISCIPLINE_ORDER not found in ${relativePath}`);
+  return [...match[1].matchAll(/"([^"]*)"/g)].map((item) => item[1]);
+}
+
+test('the discipline list matches catalog_facets.py and catalog_taxonomy.py exactly', () => {
+  assert.deepEqual(pythonDisciplineOrder('../../backend/symgov_backend/catalog_facets.py'), CATALOG_DISCIPLINE_ORDER);
+  assert.deepEqual(pythonDisciplineOrder('../../backend/symgov_backend/catalog_taxonomy.py'), CATALOG_DISCIPLINE_ORDER);
+  assert.ok(CATALOG_DISCIPLINE_ORDER.includes('HVAC'));
+  assert.equal(canonicalDiscipline('hvac'), 'HVAC');
 });
