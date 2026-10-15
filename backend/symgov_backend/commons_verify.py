@@ -46,8 +46,11 @@ from .published_symbol_details import load_published_symbol_details
 from .services import commons_ingestion as plan_module
 
 WORKBENCH_JS = Path(__file__).resolve().parents[2] / "frontend" / "src" / "catalogWorkbench.js"
-DHASH_DISTANCE_THRESHOLD = 4  # publication_handoff.detect_graphical_duplicates' defaults
-PIXEL_DIFFERENCE_THRESHOLD = 0.08
+DHASH_DISTANCE_THRESHOLD = 4  # publication_handoff.detect_graphical_duplicates' default
+# publication_handoff's second test, mean pixel difference <= 0.08, passes almost any
+# two thin-line drawings (both are mostly white), so the second test here is the
+# overlap of the two inked areas instead.
+INK_OVERLAP_THRESHOLD = 0.8
 CELL = 128
 
 
@@ -157,10 +160,19 @@ def _dhash(image) -> int:
     return value
 
 
-def _pixel_difference(left, right) -> float:
-    a = list(left.resize((CELL, CELL)).getdata())
-    b = list(right.resize((CELL, CELL)).getdata())
-    return sum(abs(x - y) for x, y in zip(a, b)) / (255.0 * len(a))
+def _ink(image, size: int = 64) -> frozenset[int]:
+    """The inked pixels of the normalised image at `size`, thickened by one pixel."""
+    from PIL import ImageFilter
+
+    mask = image.resize((size, size)).point(lambda value: 255 if value < 200 else 0).filter(ImageFilter.MaxFilter(3))
+    return frozenset(index for index, value in enumerate(mask.tobytes()) if value)
+
+
+def _ink_overlap(left, right) -> float:
+    """Intersection over union of the two inked areas: 1.0 is the same drawing."""
+    a, b = (left if isinstance(left, frozenset) else _ink(left)), (right if isinstance(right, frozenset) else _ink(right))
+    union = a | b
+    return len(a & b) / len(union) if union else 1.0
 
 
 def near_duplicates(
@@ -170,8 +182,9 @@ def near_duplicates(
 
     Each item carries `id`, `name` and `data` (image bytes). The thresholds are
     `publication_handoff.detect_graphical_duplicates`' own (distance <= 4,
-    pixel difference <= 0.08); unlike it, each image is first cropped to its
-    ink, because line symbols are mostly white space.
+    then an inked-area overlap of at least 0.8 in place of its pixel
+    difference); each image is first cropped to its ink, because line symbols
+    are mostly white space.
     """
     every = candidates + existing
     rendered = rasterize([item["data"] for item in every], chromium)
@@ -182,7 +195,7 @@ def near_duplicates(
         if square is None:
             blank.append(item["id"])
             continue
-        prepared.append({**{k: v for k, v in item.items() if k != "data"}, "image": square, "hash": _dhash(square)})
+        prepared.append({**{k: v for k, v in item.items() if k != "data"}, "ink": _ink(square), "hash": _dhash(square)})
     new = [item for item in prepared if item.get("candidate")]
     old = [item for item in prepared if not item.get("candidate")]
 
@@ -195,17 +208,17 @@ def near_duplicates(
                 distance = (left["hash"] ^ right["hash"]).bit_count()
                 if distance > DHASH_DISTANCE_THRESHOLD:
                     continue
-                difference = _pixel_difference(left["image"], right["image"])
-                if difference <= PIXEL_DIFFERENCE_THRESHOLD:
+                overlap = _ink_overlap(left["ink"], right["ink"])
+                if overlap >= INK_OVERLAP_THRESHOLD:
                     matches.append({
                         "symbol": left["id"], "name": left["name"],
                         "matches": right["id"], "matches_name": right["name"],
-                        "hamming_distance": distance, "pixel_difference": round(difference, 4),
+                        "hamming_distance": distance, "ink_overlap": round(overlap, 3),
                     })
         return matches
 
     return {
-        "method": "headless Chromium raster, ink-cropped; dHash 8x8, distance <= 4 and pixel difference <= 0.08",
+        "method": "headless Chromium raster, cropped to its ink; dHash 8x8 distance <= 4, then inked-area overlap >= 0.8",
         "candidates": len(candidates),
         "existing_compared": len(existing),
         "blank_renders": blank,
@@ -612,12 +625,12 @@ def render_report(
         dup = next((c for c in verify_report["checks"] if c["id"] == "near-duplicates" and isinstance(c["detail"], dict)), None)
         if dup:
             out += ["## Near duplicates (information only)", "",
-                    _table(["Commons symbol", "Name", "Looks like", "Name", "dHash distance", "Pixel difference"],
-                           [[m["symbol"], m["name"], m["matches"], m["matches_name"], m["hamming_distance"], m["pixel_difference"]]
+                    _table(["Commons symbol", "Name", "Looks like", "Name", "dHash distance", "Ink overlap"],
+                           [[m["symbol"], m["name"], m["matches"], m["matches_name"], m["hamming_distance"], m["ink_overlap"]]
                             for m in dup["detail"]["against_existing"]]), ""]
             within = dup["detail"]["within_import"]
             if within:
                 out += ["Within the import:", "",
-                        _table(["Symbol", "Name", "Looks like", "Name", "dHash distance", "Pixel difference"],
-                               [[m["symbol"], m["name"], m["matches"], m["matches_name"], m["hamming_distance"], m["pixel_difference"]] for m in within]), ""]
+                        _table(["Symbol", "Name", "Looks like", "Name", "dHash distance", "Ink overlap"],
+                               [[m["symbol"], m["name"], m["matches"], m["matches_name"], m["hamming_distance"], m["ink_overlap"]] for m in within]), ""]
     return "\n".join(out) + "\n"

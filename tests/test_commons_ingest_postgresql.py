@@ -363,4 +363,5 @@ def test_the_near_duplicate_maths_finds_a_copy_and_not_a_different_drawing():
 
     circle, cross = drawing("circle"), drawing("cross")
     assert (commons_verify._dhash(circle) ^ commons_verify._dhash(drawing("circle"))).bit_count() == 0
-    assert commons_verify._pixel_difference(circle, cross) > 0
+    assert commons_verify._ink_overlap(circle, drawing("circle")) == 1.0
+    assert commons_verify._ink_overlap(circle, cross) < commons_verify.INK_OVERLAP_THRESHOLD
