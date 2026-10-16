@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { MyApiKeysCard } from './organizationApiKeys.js';
 import { downgradeCurrentSubscription, fetchMyContributions, fetchProfile, upgradeCurrentSubscription } from './api.js';
 
 function formatDate(value) {
@@ -194,6 +195,7 @@ export default function ProfilePage({ auth }) {
         </article>
 
         <ContributionStatsCard />
+        {user.capabilities?.organizationApiKeysEnabled ? <MyApiKeysCard /> : null}
       </div>
     </section>
   );

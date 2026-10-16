@@ -10,6 +10,8 @@ import { PromotionSubmissionPanel } from './PromotionSubmissionPanel.js';
 import { OrgUsageDashboardSection } from './UsageDashboardSection.js';
 import { OrgContributionSection } from './ContributionSection.js';
 import { OrgAgentFindingsDashboardSection } from './AgentFindingsDashboardSection.js';
+import { OrganizationApiKeysPanel } from './organizationApiKeys.js';
+import { OrganizationAuditPanel, OrganizationUsagePanel } from './organizationUsage.js';
 
 function resultValue(result) {
   if (!result.ok) {
@@ -901,11 +903,16 @@ export function OrganizationAdminPage({ auth }) {
   }
 
   const libraryTabEnabled = symbolSetsUiEnabled || symbolPromotionUiEnabled;
+  const usageUiEnabled = isAdmin && auth?.user?.capabilities?.symbolUsageAnalyticsEnabled === true;
+  const apiKeysUiEnabled = isAdmin && auth?.user?.capabilities?.organizationApiKeysEnabled === true;
   const tabs = [
     { key: 'members', label: 'Members' },
     { key: 'organization', label: 'Organization' },
     libraryTabEnabled ? { key: 'library', label: 'Projects & Symbol Sets' } : null,
+    apiKeysUiEnabled ? { key: 'integrations', label: 'Integrations' } : null,
     { key: 'activity', label: 'Activity' },
+    usageUiEnabled ? { key: 'usage', label: 'Usage' } : null,
+    usageUiEnabled ? { key: 'audit', label: 'Audit' } : null,
   ].filter(Boolean);
   const currentTab = tabs.some((tab) => tab.key === activeTab) ? activeTab : tabs[0].key;
 
@@ -1061,6 +1068,11 @@ export function OrganizationAdminPage({ auth }) {
               ? createElement(PromotionSubmissionPanel, { isAdmin })
               : null
           )
+        : null,
+      currentTab === 'usage' ? createElement(OrganizationUsagePanel, {}) : null,
+      currentTab === 'audit' ? createElement(OrganizationAuditPanel, {}) : null,
+      currentTab === 'integrations'
+        ? createElement(OrganizationApiKeysPanel, { isAdmin, protect })
         : null,
       currentTab === 'activity'
         ? createElement(

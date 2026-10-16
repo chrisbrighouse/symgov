@@ -20,6 +20,7 @@ from ..catalog_developer import catalog_openapi_document, developer_manifest
 from ..catalog_integration_ed import answer_integration_question, read_integration_ed_body
 from ..catalog_sandbox import read_sandbox_body, run_sandbox
 from ..dependencies import get_db_session, require_user
+from ..settings import SymgovAPISettings, get_settings
 from ..schemas import (
     CatalogSelfServiceApiKeyCreateEnvelope,
     CatalogSelfServiceApiKeyCreateRequest,
@@ -49,6 +50,9 @@ def _key_payload(key: CatalogApiKeyDTO) -> dict[str, object]:
         "lastUsedAt": key.last_used_at.isoformat() if key.last_used_at else None,
         "createdAt": key.created_at.isoformat(),
         "revokedAt": key.revoked_at.isoformat() if key.revoked_at else None,
+        "keyKind": "personal",
+        "rateLimitPerMinute": key.rate_limit_per_minute,
+        "allowedOrigins": list(key.allowed_origins),
     }
 
 
@@ -56,12 +60,17 @@ def _key_payload(key: CatalogApiKeyDTO) -> dict[str, object]:
 def get_self_service_api_key_status(
     current_user: AuthenticatedUser = Depends(require_user),
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> dict:
     key = get_active_self_service_catalog_api_key(session, current_user.id)
     return {
         "activeKey": _key_payload(key) if key else None,
         "availableScopes": sorted(PLANNED_CATALOG_API_SCOPES),
         "access": {"mode": "free", "subscriptionRequired": False},
+        "limits": {
+            "defaultRateLimitPerMinute": settings.catalog_api_personal_rate_limit_per_minute,
+            "maxRateLimitPerMinute": settings.catalog_api_max_rate_limit_per_minute,
+        },
     }
 
 
@@ -70,6 +79,7 @@ async def create_self_service_api_key(
     http_request: Request,
     current_user: AuthenticatedUser = Depends(require_user),
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> dict:
     try:
         body = await http_request.json()
@@ -80,6 +90,11 @@ async def create_self_service_api_key(
         )
     except (ValueError, ValidationError, AttributeError):
         raise HTTPException(status_code=422, detail="Catalog API key request was invalid.") from None
+    if payload.rateLimitPerMinute is not None and payload.rateLimitPerMinute > settings.catalog_api_max_rate_limit_per_minute:
+        raise HTTPException(
+            status_code=422,
+            detail=f"The rate limit cannot exceed {settings.catalog_api_max_rate_limit_per_minute} requests per minute.",
+        )
     try:
         created = create_self_service_catalog_api_key(
             session,
@@ -88,6 +103,8 @@ async def create_self_service_api_key(
             integration_name=payload.integrationName,
             scopes=payload.scopes,
             expires_at=payload.expiresAt,
+            rate_limit_per_minute=payload.rateLimitPerMinute,
+            allowed_origins=payload.allowedOrigins,
         )
         session.commit()
     except CatalogApiKeyAlreadyActiveError:

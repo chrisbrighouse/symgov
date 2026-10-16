@@ -14,6 +14,7 @@ import { PlatformOrganizationUsageDashboardSection } from './UsageDashboardSecti
 import { PlatformOrganizationContributionSection } from './ContributionSection.js';
 import { PlatformAgentFindingsDashboardSection } from './AgentFindingsDashboardSection.js';
 import { AgentConfigurationSection } from './AgentConfigurationSection.js';
+import { PlatformAuditPanel, PlatformUsagePanel } from './organizationUsage.js';
 import { OrganizationSubscriptionPanel } from './OrganizationSubscriptionPanel.js';
 
 function resultValue(result) {
@@ -1488,6 +1489,7 @@ export function PlatformAdminPage({ auth }) {
   const orgTotalPages = Math.ceil(orgTotal / ORG_PAGE_SIZE);
   const symbolPromotionUiEnabled = canMountOrganizationSymbolDrafts(auth) && auth?.user?.capabilities?.platformAdminEnabled === true;
   const agentOversightUiEnabled = auth?.user?.capabilities?.organizationAgentsEnabled === true;
+  const usageUiEnabled = auth?.user?.capabilities?.symbolUsageAnalyticsEnabled === true;
 
   const tabs = [
     { key: 'organizations', label: 'Organizations' },
@@ -1495,6 +1497,8 @@ export function PlatformAdminPage({ auth }) {
     { key: 'symgov', label: 'Symgov members' },
     symbolPromotionUiEnabled ? { key: 'symbols', label: 'Symbol governance' } : null,
     agentOversightUiEnabled ? { key: 'agents', label: 'Agents' } : null,
+    usageUiEnabled ? { key: 'usage', label: 'Usage' } : null,
+    usageUiEnabled ? { key: 'audit', label: 'Audit' } : null,
   ].filter(Boolean);
   const currentTab = tabs.some((tab) => tab.key === activeTab) ? activeTab : tabs[0].key;
 
@@ -1713,6 +1717,8 @@ export function PlatformAdminPage({ auth }) {
             createElement(PromotionReviewPanel, null)
           )
         : null,
+      currentTab === 'usage' ? createElement(PlatformUsagePanel, {}) : null,
+      currentTab === 'audit' ? createElement(PlatformAuditPanel, {}) : null,
       currentTab === 'agents'
         ? createElement(
             Fragment,

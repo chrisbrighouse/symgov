@@ -720,6 +720,51 @@ class CatalogApiKey(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class CatalogApiKeyHolder(Base):
+    """Who a Catalog API key belongs to, and of what kind it is.
+
+    A `personal` key belongs to one user outside any organization and reads
+    only the public Catalog. An `organization` key is issued by an organization
+    admin to one member of that organization (the holder); it reads what that
+    organization may read, and it stops working, permanently, when the holder
+    or the organization stops being eligible.
+
+    `claimed_at` is null until the holder has taken delivery of an
+    organization key: the raw key is shown once, at the claim, never at issue.
+    """
+
+    __tablename__ = "catalog_api_key_holders"
+    __table_args__ = (
+        CheckConstraint("key_kind in ('personal', 'organization')", name="key_kind"),
+        CheckConstraint("(key_kind = 'personal') = (organization_id is null)", name="kind_matches_organization"),
+        Index("ix_catalog_api_key_holders_organization_kind", "organization_id", "key_kind"),
+        Index("ix_catalog_api_key_holders_holder", "holder_user_id"),
+    )
+
+    api_key_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("catalog_api_keys.id", ondelete="CASCADE"), primary_key=True
+    )
+    key_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    holder_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True)
+    issued_by_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    claimed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoke_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class CatalogApiRateWindow(Base):
+    """Requests a key made in one minute, for the per-minute limit."""
+
+    __tablename__ = "catalog_api_rate_windows"
+    __table_args__ = (CheckConstraint("request_count >= 0", name="request_count"),)
+
+    api_key_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("catalog_api_keys.id", ondelete="CASCADE"), primary_key=True
+    )
+    window_start: Mapped[object] = mapped_column(DateTime(timezone=True), primary_key=True)
+    request_count: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class CatalogApiUsageEvent(Base):
     __tablename__ = "catalog_api_usage_events"
     __table_args__ = (
@@ -987,6 +1032,10 @@ class PublishedPreviewAuthorization(Base):
 
 class AuditEvent(Base):
     __tablename__ = "audit_events"
+    __table_args__ = (
+        Index("ix_audit_events_created_at", "created_at"),
+        Index("ix_audit_events_entity", "entity_type", "entity_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     entity_type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1081,6 +1130,98 @@ class ProductUsageEvent(Base):
     format: Mapped[str | None] = mapped_column(Text, nullable=True)
     favourite_action: Mapped[str | None] = mapped_column(Text, nullable=True)
     context_resolution_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class SymbolUsageEvent(Base):
+    """What was done with a symbol, by whom, and through which door (WP-B).
+
+    One row per view, download, add to a Set or Clipboard, API fetch, or
+    search, from the signed-in web app (`channel='web'`) or an API key
+    (`channel='api'`). `scope_kind` says whose activity it is: `organization`
+    rows are an organization's own (an organization-bound session, or one of
+    that organization's keys) and feed that organization's usage page, with
+    named users; `personal` rows belong to no organization and are visible only
+    in platform totals. The CHECKs make that structural: a personal row cannot
+    carry an organization, and a personal key's row can never be an
+    organization's. Search text is kept for organization rows only.
+
+    Raw rows are deleted after 60 days by `usage_maintenance_worker`, after
+    their counts have been rolled into `symbol_usage_daily_rollups`.
+    """
+
+    __tablename__ = "symbol_usage_events"
+    __table_args__ = (
+        CheckConstraint(
+            "event_type in ('symbol_viewed', 'symbol_downloaded', 'symbol_added_to_set', "
+            "'symbol_added_to_clipboard', 'symbol_api_fetched', 'catalog_searched')",
+            name="event_type",
+        ),
+        CheckConstraint("channel in ('web', 'api')", name="channel"),
+        CheckConstraint("scope_kind in ('personal', 'organization')", name="scope_kind"),
+        CheckConstraint("(scope_kind = 'personal') = (organization_id is null)", name="scope_matches_organization"),
+        CheckConstraint("key_kind is null or key_kind in ('personal', 'organization')", name="key_kind"),
+        CheckConstraint("key_kind is distinct from 'personal' or organization_id is null", name="personal_key_has_no_organization"),
+        CheckConstraint("channel = 'api' or api_key_id is null", name="key_only_on_api_rows"),
+        CheckConstraint("query_text is null or (scope_kind = 'organization' and char_length(query_text) <= 200)", name="query_text"),
+        CheckConstraint("result_count is null or result_count >= 0", name="result_count"),
+        Index("ix_symbol_usage_events_organization_occurred", "organization_id", "occurred_at"),
+        Index("ix_symbol_usage_events_symbol_occurred", "governed_symbol_id", "occurred_at"),
+        Index("ix_symbol_usage_events_occurred", "occurred_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    occurred_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    scope_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True)
+    api_key_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("catalog_api_keys.id", ondelete="SET NULL"), nullable=True
+    )
+    key_kind: Mapped[str | None] = mapped_column(Text, nullable=True)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=True)
+    symbol_set_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_sets.id"), nullable=True)
+    governed_symbol_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("governed_symbols.id"), nullable=True)
+    symbol_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_revisions.id"), nullable=True)
+    pack_code: Mapped[str | None] = mapped_column(Text, nullable=True)
+    format: Mapped[str | None] = mapped_column(Text, nullable=True)
+    query_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    result_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class SymbolUsageDailyRollup(Base):
+    """Daily counts of `SymbolUsageEvent`, kept after the raw rows are purged.
+
+    One row per day, event type, channel, scope, organization (null for
+    personal activity) and pack (empty when the event has none). Totals only:
+    no user identity, which is why a platform administrator may read it.
+    """
+
+    __tablename__ = "symbol_usage_daily_rollups"
+    __table_args__ = (
+        CheckConstraint("(scope_kind = 'personal') = (organization_id is null)", name="scope_matches_organization"),
+        CheckConstraint("event_count >= 0", name="event_count"),
+        Index(
+            "uq_symbol_usage_daily_rollups_organization_cell", "occurred_on", "event_type", "channel", "organization_id", "pack_code",
+            unique=True, postgresql_where=text("organization_id is not null"),
+        ),
+        Index(
+            "uq_symbol_usage_daily_rollups_personal_cell", "occurred_on", "event_type", "channel", "pack_code",
+            unique=True, postgresql_where=text("organization_id is null"),
+        ),
+        Index("ix_symbol_usage_daily_rollups_organization_day", "organization_id", "occurred_on"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    occurred_on: Mapped[object] = mapped_column(Date, nullable=False)
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    scope_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True)
+    pack_code: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
+    event_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class ProductUsageDailyRollup(Base):

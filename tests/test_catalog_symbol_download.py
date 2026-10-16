@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from types import SimpleNamespace
@@ -8,12 +10,18 @@ from zipfile import ZipFile
 
 from fastapi.testclient import TestClient
 
+from catalog_key_fakes import eligible_get, switch_off_key_policies
 from symgov_backend.app import create_app
 from symgov_backend.auth import AuthenticatedUser
 from symgov_backend.catalog_api_auth import hash_api_key
 from symgov_backend.dependencies import get_db_session
 from symgov_backend.models import CatalogApiKey, CatalogApiUsageEvent
 from symgov_backend.routes import catalog as catalog_routes
+
+
+@pytest.fixture(autouse=True)
+def _no_key_policies(monkeypatch):
+    switch_off_key_policies(monkeypatch)
 
 
 class _CatalogApiKeyQuery:
@@ -45,6 +53,9 @@ class _DownloadSession:
         self.commits = 0
         self.rollbacks = 0
         self.added = []
+
+    def get(self, model, ident):
+        return eligible_get(model, ident)
 
     def query(self, model):
         assert model is CatalogApiKey

@@ -381,6 +381,9 @@ def delete_user(
     user.deleted_at = now
     user.updated_at = now
     revoke_all_user_sessions(session, user.id, now=now)
+    from ..catalog_org_api_keys import revoke_organization_keys_for
+
+    revoke_organization_keys_for(session, reason="user_deactivated", user_id=user.id, actor_id=uuid.UUID(current.id), now=now)
     session.commit()
     return AdminUserMutationResponse(user=_admin_user_response(session, user, subscription=subscription))
 

@@ -33,7 +33,12 @@ class FakeQuery:
         self.criteria.extend(criteria)
         return self
 
-    def with_for_update(self):
+    def join(self, *args, **kwargs):
+        # Keys are joined to their holder row; in this fake the holder of a key
+        # is its `created_by`, and every key here is a personal one.
+        return self
+
+    def with_for_update(self, **kwargs):
         self.events.append(f"lock:{self.label}")
         return self
 
@@ -42,6 +47,10 @@ class FakeQuery:
         for criterion in self.criteria:
             field = getattr(criterion.left, "name", None)
             expected = getattr(criterion.right, "value", None)
+            if field == "key_kind":
+                continue
+            if field == "holder_user_id":
+                field = "created_by"
             rows = [row for row in rows if getattr(row, field) == expected]
         return rows
 

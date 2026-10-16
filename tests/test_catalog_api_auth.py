@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.requests import Request
 
+from catalog_key_fakes import HOLDER_ID, eligible_get, switch_off_key_policies
 from symgov_backend.catalog_api_auth import (
     PLANNED_CATALOG_API_SCOPES,
     IntegrationAuthContext,
@@ -43,11 +44,19 @@ class CapturingSession:
         self.model = model
         return self.query_obj
 
+    def get(self, model, ident):
+        return eligible_get(model, ident)
+
     def commit(self):
         self.committed = True
 
     def rollback(self):
         self.rolled_back = True
+
+
+@pytest.fixture(autouse=True)
+def _no_key_policies(monkeypatch):
+    switch_off_key_policies(monkeypatch)
 
 
 def request_with_headers(headers: dict[str, str]) -> Request:
@@ -90,6 +99,7 @@ def test_authenticate_catalog_api_key_hashes_presented_token_before_lookup():
         integration_name="AutoCAD pilot",
         scopes=("catalog.read", "catalog.preview"),
         key_prefix="symgov_live_abc123",
+        holder_user_id=str(HOLDER_ID),
     )
     compiled_criteria = "\n".join(str(criterion.compile(compile_kwargs={"literal_binds": True})) for criterion in session.query_obj.criteria)
     assert hash_api_key("secret-token") in compiled_criteria

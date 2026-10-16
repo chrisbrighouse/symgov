@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import IntegrityError, MultipleResultsFound
 
+from catalog_key_fakes import eligible_get, switch_off_key_policies
 from symgov_backend.app import create_app
 from symgov_backend.catalog_api_auth import hash_api_key
 from symgov_backend.dependencies import get_db_session
@@ -36,6 +37,11 @@ ED_USER_ID = UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
 ED_AGENT_ID = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
 TOKEN = "valid-token"
 IDEMPOTENCY_KEY = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+
+@pytest.fixture(autouse=True)
+def _no_key_policies(monkeypatch):
+    switch_off_key_policies(monkeypatch)
 
 
 def published_row():
@@ -135,6 +141,9 @@ class FakeSession:
         return SimpleNamespace(all=lambda: [] if self.row is None else [self.row])
 
     def get(self, model, key, *, with_for_update=False):
+        eligible = eligible_get(model, key)
+        if eligible is not None:
+            return eligible
         if model is AuditEvent:
             return next((item for item in self.added if isinstance(item, AuditEvent) and item.id == key), None)
         if model is CatalogApiKey and self.key_row is not None and key == self.key_row.id:

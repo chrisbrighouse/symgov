@@ -42,7 +42,10 @@ from symgov_backend.settings import SymgovAPISettings, get_settings
 def _stub_emit_audit():
     """AuditEvent uses JSONB (PostgreSQL-only). Stub _emit_audit in all tests by default.
     Audit-specific tests override this by patching explicitly and capturing calls."""
-    with patch("symgov_backend.organization_service._emit_audit"):
+    # The catalog-key tables are not in these SQLite fixtures; the revocation hook has its own tests.
+    with patch("symgov_backend.organization_service._emit_audit"), patch(
+        "symgov_backend.organization_service._revoke_catalog_keys"
+    ):
         yield
 
 

@@ -46,7 +46,10 @@ from symgov_backend.models import (
 def _stub_emit_audit():
     """AuditEvent uses JSONB (PostgreSQL-only); the sqlite fixtures here don't create
     that table. Stub _emit_audit by default, matching the API-level test convention."""
-    with patch("symgov_backend.organization_service._emit_audit"):
+    # The catalog-key tables are not in these SQLite fixtures; the revocation hook has its own tests.
+    with patch("symgov_backend.organization_service._emit_audit"), patch(
+        "symgov_backend.organization_service._revoke_catalog_keys"
+    ):
         yield
 
 
@@ -737,3 +740,55 @@ def test_protected_membership_audit_receives_bounded_reason():
             if call.kwargs.get("action") == "membership.added"
         )
         assert membership_audit.kwargs["payload"]["reason"] == "Approved by platform operations"
+
+
+def test_suspending_an_organization_revokes_its_catalog_api_keys():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        org = _seed_commercial_org(session, code="KEYS")
+        session.commit()
+        with patch("symgov_backend.organization_service._revoke_catalog_keys") as revoke:
+            suspend_organization(session, org.id, actor_user_id=actor.id)
+            revoke.assert_called_once_with(
+                session, reason="organization_suspended", organization_id=org.id, actor_id=actor.id,
+            )
+            # Suspending again changes nothing, so nothing more is revoked.
+            suspend_organization(session, org.id, actor_user_id=actor.id)
+            assert revoke.call_count == 1
+
+
+def test_deactivating_a_membership_revokes_that_members_catalog_api_keys():
+    Session = _session_factory()
+    with Session() as session:
+        actor = _seed_platform_admin_actor(session)
+        org = _seed_commercial_org(session, code="MEMB")
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        people = {}
+        for name, role in (("boss", "admin"), ("member", "user")):
+            user = _seed_user(session, email=f"{name}@memb.test")
+            membership = OrganizationMembership(
+                id=uuid.uuid4(), organization_id=org.id, user_id=user.id, status="active",
+                activated_at=now, created_at=now, updated_at=now,
+            )
+            session.add(membership)
+            session.flush()
+            session.add(OrganizationRoleAssignment(
+                id=uuid.uuid4(), membership_id=membership.id, base_role=role, is_active=True, assigned_at=now,
+            ))
+            people[name] = (user, membership)
+        session.commit()
+
+        with patch("symgov_backend.organization_service._revoke_catalog_keys") as revoke:
+            deactivate_membership(
+                session, membership_id=people["member"][1].id, actor_user_id=people["boss"][0].id,
+            )
+            revoke.assert_called_once_with(
+                session, reason="membership_deactivated", user_id=people["member"][0].id,
+                organization_id=org.id, actor_id=people["boss"][0].id,
+            )
+            # Already inactive: nothing more to revoke.
+            deactivate_membership(
+                session, membership_id=people["member"][1].id, actor_user_id=people["boss"][0].id,
+            )
+            assert revoke.call_count == 1

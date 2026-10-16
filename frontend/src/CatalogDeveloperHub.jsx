@@ -37,7 +37,9 @@ const DEFAULT_KEY_FORM = {
   customerName: '',
   integrationName: '',
   scopes: ['catalog.read', 'catalog.preview'],
-  expiresAt: ''
+  expiresAt: '',
+  rateLimitPerMinute: '',
+  allowedOrigins: ''
 };
 
 const FALLBACK_ENDPOINTS = [
@@ -232,7 +234,11 @@ export default function CatalogDeveloperHub() {
         customerName: keyForm.customerName.trim(),
         integrationName: keyForm.integrationName.trim(),
         scopes: keyForm.scopes,
-        expiresAt: keyForm.expiresAt ? new Date(keyForm.expiresAt).toISOString() : null
+        expiresAt: keyForm.expiresAt ? new Date(keyForm.expiresAt).toISOString() : null,
+        ...(keyForm.rateLimitPerMinute ? { rateLimitPerMinute: Number(keyForm.rateLimitPerMinute) } : {}),
+        ...(keyForm.allowedOrigins.trim()
+          ? { allowedOrigins: keyForm.allowedOrigins.split(/[\s,]+/).map((origin) => origin.trim()).filter(Boolean) }
+          : {})
       }, controller.signal);
       if (!requestIsActive(controller)) return;
       if (!result.ok) {
@@ -401,6 +407,9 @@ export default function CatalogDeveloperHub() {
                   <div><dt>Integration</dt><dd>{keyState.activeKey.integrationName}</dd></div>
                   <div><dt>Scopes</dt><dd>{keyState.activeKey.scopes.join(', ')}</dd></div>
                   <div><dt>Expires</dt><dd>{keyState.activeKey.expiresAt ? new Date(keyState.activeKey.expiresAt).toLocaleString() : 'No expiry'}</dd></div>
+                  <div><dt>Kind</dt><dd>{keyState.activeKey.keyKind === 'organization' ? 'Organization key' : 'Personal key'}</dd></div>
+                  <div><dt>Rate limit</dt><dd>{keyState.activeKey.rateLimitPerMinute ? `${keyState.activeKey.rateLimitPerMinute} requests a minute` : 'Default for personal keys (60 a minute)'}</dd></div>
+                  <div><dt>Browser origins</dt><dd>{keyState.activeKey.allowedOrigins?.length ? keyState.activeKey.allowedOrigins.join(', ') : 'Symgov only'}</dd></div>
                 </dl>
               </div>
               <button type="button" className="action-button catalog-danger-button" onClick={clearSelfServiceKey} disabled={keyState.busy}>
@@ -437,6 +446,27 @@ export default function CatalogDeveloperHub() {
                     type="datetime-local"
                     value={keyForm.expiresAt}
                     onChange={(event) => setKeyForm((current) => ({ ...current, expiresAt: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Requests a minute <span className="catalog-optional-label">Optional, default 60, up to 600</span>
+                  <input
+                    name="rateLimitPerMinute"
+                    type="number"
+                    min="1"
+                    max="600"
+                    value={keyForm.rateLimitPerMinute}
+                    onChange={(event) => setKeyForm((current) => ({ ...current, rateLimitPerMinute: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  Browser origins <span className="catalog-optional-label">Optional, one per line</span>
+                  <textarea
+                    name="allowedOrigins"
+                    rows="2"
+                    placeholder="https://tools.example.com"
+                    value={keyForm.allowedOrigins}
+                    onChange={(event) => setKeyForm((current) => ({ ...current, allowedOrigins: event.target.value }))}
                   />
                 </label>
               </div>

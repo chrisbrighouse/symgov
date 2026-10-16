@@ -130,6 +130,8 @@ def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | No
             "organizationSymbolsEnabled": effective.organizations_enabled and effective.organization_symbols_enabled,
             "organizationAgentsEnabled": effective.organizations_enabled and effective.organization_agents_enabled,
             "organizationIconUploadEnabled": organization_icon_upload_enabled,
+            "organizationApiKeysEnabled": effective.organizations_enabled and effective.organization_api_keys_enabled,
+            "symbolUsageAnalyticsEnabled": effective.organizations_enabled and effective.symbol_usage_analytics_enabled,
             # Not gated on organizations: semantic review is platform
             # governance (section 17), and its own router guard is the
             # authority on reachability. This only tells the frontend

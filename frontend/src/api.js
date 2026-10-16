@@ -2214,3 +2214,85 @@ export async function proposeSemanticReviewClassification(symbolRevisionId, {
     'Classification proposal failed.',
   );
 }
+
+// Organization Catalog API keys (WP-A). The admin issues a key to a member; the
+// holder collects the secret once from their profile.
+
+export async function listOrganizationApiKeys() {
+  const result = await requestJson('/org/me/api-keys', { cache: 'no-store' });
+  const payload = requireOk(result, 'API keys load failed.');
+  return { items: Array.isArray(payload?.items) ? payload.items : [], defaults: payload?.defaults || {} };
+}
+
+export async function listOrganizationMembersForKeys() {
+  const result = await requestJson('/org/me/members?page=1&pageSize=200', { cache: 'no-store' });
+  const payload = requireOk(result, 'Members load failed.');
+  return Array.isArray(payload?.items) ? payload.items : [];
+}
+
+export async function issueOrganizationApiKey(request) {
+  const result = await requestJson('/org/me/api-keys', { method: 'POST', body: JSON.stringify(request) });
+  return requireOk(result, 'The API key could not be issued.');
+}
+
+export async function revokeOrganizationApiKey(keyId) {
+  const result = await requestJson(`/org/me/api-keys/${encodeURIComponent(keyId)}`, { method: 'DELETE' });
+  return requireOk(result, 'The API key could not be revoked.');
+}
+
+export async function listMyOrganizationApiKeys() {
+  const result = await requestJson('/profile/api-keys', { cache: 'no-store' });
+  // The feature is off (or the account has none): nothing to show, and not an error.
+  if (result.status === 404) return { items: [] };
+  const payload = requireOk(result, 'Your API keys could not be loaded.');
+  return { items: Array.isArray(payload?.items) ? payload.items : [] };
+}
+
+export async function claimMyOrganizationApiKey(keyId) {
+  const result = await requestJson(`/profile/api-keys/${encodeURIComponent(keyId)}/claim`, { method: 'POST', body: JSON.stringify({}) });
+  return requireOk(result, 'The API key could not be claimed.');
+}
+
+// Tells the server the Details view opened, so usage can be counted. Fire and
+// forget: it never throws and its answer is not used.
+export async function recordSymbolView(symbolRef) {
+  try {
+    await requestJson(`/published/symbols/${encodeURIComponent(symbolRef)}/view-events`, { method: 'POST', body: JSON.stringify({}) });
+  } catch {
+    // Counting a view must never get in the way of showing it.
+  }
+}
+
+// Usage and audit reading (WP-B). The organization routes show one organization;
+// the platform routes show totals only and the platform audit trail.
+
+export async function fetchOrganizationSymbolUsage({ days = 30 } = {}) {
+  const result = await requestJson(withQuery('/org/me/usage', { days }), { cache: 'no-store' });
+  return requireOk(result, 'Usage could not be loaded.');
+}
+
+export async function fetchOrganizationAudit(filters = {}) {
+  const result = await requestJson(withQuery('/org/me/audit', filters), { cache: 'no-store' });
+  return requireOk(result, 'The audit trail could not be loaded.');
+}
+
+export async function fetchPlatformSymbolUsage({ days = 30 } = {}) {
+  const [organizations, packs] = await Promise.all([
+    requestJson(withQuery('/platform/usage/organizations', { days }), { cache: 'no-store' }),
+    requestJson(withQuery('/platform/usage/packs', { days }), { cache: 'no-store' }),
+  ]);
+  return {
+    organizations: requireOk(organizations, 'Organization usage could not be loaded.'),
+    packs: requireOk(packs, 'Pack usage could not be loaded.'),
+  };
+}
+
+export async function fetchPlatformAudit(filters = {}) {
+  const result = await requestJson(withQuery('/platform/audit', filters), { cache: 'no-store' });
+  return requireOk(result, 'The audit trail could not be loaded.');
+}
+
+// A plain link: the browser downloads it with the session cookie.
+export function auditCsvUrl(scope, filters = {}) {
+  return `${appConfig.apiRoot}${withQuery(scope === 'platform' ? '/platform/audit.csv' : '/org/me/audit.csv', filters)}`;
+}

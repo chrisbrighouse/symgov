@@ -36,7 +36,7 @@ The Developer Hub keeps a submitted key in page memory only. It does not save it
 | GET | `/api/v1/catalog/symbols/{symbolRef}/preview` | `catalog.read` | Retrieve its preview. |
 | POST | `/api/v1/catalog/symbols/download` | `catalog.read` | Download one asset or a ZIP of up to ten symbols in one available format. |
 | POST | `/api/v1/catalog/search` | `catalog.read` | Search using drawing/application context. |
-| POST | `/api/v1/catalog/ed/query` | `catalog.ed.query` | Ask for Catalog guidance or symbol discovery. |
+| POST | `/api/v1/catalog/ed/query` | `catalog.ed.query` | Catalog query interpreter (rule-based): turns a symbol question into a Catalog search. The response says `"engine": "rule_based"`. |
 | POST | `/api/v1/catalog/symbols/{symbolRef}/feedback` | `catalog.feedback.write` | Submit feedback or an explicit review request; requires a caller-stable UUID `Idempotency-Key`. |
 
 Use human-readable IDs such as `S-1` as the primary label in integrator interfaces.

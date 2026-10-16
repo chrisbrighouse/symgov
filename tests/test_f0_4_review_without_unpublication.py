@@ -23,11 +23,13 @@ from symgov_backend.auth import AuthenticatedUser
 from symgov_backend.catalog_api_auth import authenticate_catalog_api_key, hash_api_key
 from symgov_backend.catalog_developer import catalog_openapi_document
 from symgov_backend.dependencies import get_current_user, get_db_session
+from catalog_key_fakes import eligible_get, switch_off_key_policies
 from symgov_backend.models import (
     AgentDefinition,
     AgentQueueItem,
     AuditEvent,
     CatalogApiKey,
+    CatalogApiKeyHolder,
     CatalogApiUsageEvent,
     ClarificationRecord,
     GovernedSymbol,
@@ -55,6 +57,11 @@ USER_ID = UUID("11111111-1111-4111-8111-111111111111")
 SYMBOL_ID = UUID("22222222-2222-4222-8222-222222222222")
 REAL_KEY_ID = UUID("99999999-9999-4999-8999-999999999999")
 REAL_KEY_TOKEN = "f04-real-transaction-token"
+
+
+@pytest.fixture(autouse=True)
+def _no_key_policies(monkeypatch):
+    switch_off_key_policies(monkeypatch)
 
 
 @pytest.fixture
@@ -106,6 +113,7 @@ def real_postgres_session_factory():
                           key_prefix="symgov_test", key_hash=hash_api_key(REAL_KEY_TOKEN),
                           scopes_json=["catalog.feedback.write"], status="active", allowed_origins_json=[],
                           expires_at=now + timedelta(days=1), last_used_at=None, created_at=now, updated_at=now),
+            CatalogApiKeyHolder(api_key_id=REAL_KEY_ID, key_kind="personal", holder_user_id=USER_ID, claimed_at=now),
         ])
         session.flush()
         session.add(PublishedPage(id=page_id, page_code="0001-7", title="Pump", pack_id=pack_id,
@@ -360,6 +368,9 @@ def test_catalog_authentication_can_be_read_only_for_feedback_transaction() -> N
         def query(self, _model):
             return Query()
 
+        def get(self, model, ident):
+            return eligible_get(model, ident)
+
     context = authenticate_catalog_api_key(Session(), "token", update_last_used=False)
 
     assert context is not None
@@ -404,6 +415,9 @@ class BrowserBoundarySession:
         return SimpleNamespace(all=lambda: [])
 
     def get(self, model, key, **_kwargs):
+        eligible = eligible_get(model, key)
+        if eligible is not None:
+            return eligible
         if model is AuditEvent:
             return self.anchors.get(key) or next(
                 (item for item in self.added if isinstance(item, AuditEvent) and item.id == key), None

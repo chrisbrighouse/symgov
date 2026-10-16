@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 import uuid
@@ -29,6 +31,14 @@ class KeyQuery:
         return next((row for row in self.rows if row.key_hash in compiled), None)
 
 
+from catalog_key_fakes import eligible_get, switch_off_key_policies
+
+
+@pytest.fixture(autouse=True)
+def _no_key_policies(monkeypatch):
+    switch_off_key_policies(monkeypatch)
+
+
 class DeveloperSession:
     def __init__(self, rows):
         self.rows = rows
@@ -37,6 +47,9 @@ class DeveloperSession:
     def query(self, model):
         assert model is CatalogApiKey
         return KeyQuery(self.rows)
+
+    def get(self, model, ident):
+        return eligible_get(model, ident)
 
     def commit(self):
         self.commits += 1

@@ -186,6 +186,24 @@ class SymgovAPISettings:
         "yes",
         "on",
     }
+    # Organization API keys (WP-A): issued by an organization admin to a member.
+    organization_api_keys_enabled: bool = os.environ.get("SYMGOV_ORGANIZATION_API_KEYS_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    # Requests per minute when a key sets no limit of its own; a key's own
+    # limit is capped at the maximum.
+    catalog_api_personal_rate_limit_per_minute: int = int(
+        os.environ.get("SYMGOV_CATALOG_API_PERSONAL_RATE_LIMIT_PER_MINUTE", "60")
+    )
+    catalog_api_organization_rate_limit_per_minute: int = int(
+        os.environ.get("SYMGOV_CATALOG_API_ORGANIZATION_RATE_LIMIT_PER_MINUTE", "120")
+    )
+    catalog_api_max_rate_limit_per_minute: int = int(
+        os.environ.get("SYMGOV_CATALOG_API_MAX_RATE_LIMIT_PER_MINUTE", "600")
+    )
     organization_agents_enabled: bool = os.environ.get("SYMGOV_ORGANIZATION_AGENTS_ENABLED", "").strip().lower() in {
         "1",
         "true",
@@ -243,6 +261,18 @@ class SymgovAPISettings:
     catalog_embedding_sync_seconds: float = field(
         default_factory=lambda: _nonnegative_float_env("SYMGOV_CATALOG_EMBEDDING_SYNC_SECONDS", 300.0)
     )
+    # How often the background worker rolls usage counts up, drops raw events
+    # past retention and clears old rate windows. 0 turns it off.
+    usage_maintenance_seconds: float = field(
+        default_factory=lambda: _nonnegative_float_env("SYMGOV_USAGE_MAINTENANCE_SECONDS", 3600.0)
+    )
+    # The organization usage page and the audit reader (WP-B). Off, their routes are absent.
+    symbol_usage_analytics_enabled: bool = os.environ.get("SYMGOV_SYMBOL_USAGE_ANALYTICS_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
     ed_semantic_min_similarity: float = field(
         default_factory=lambda: _float_env("SYMGOV_ED_SEMANTIC_MIN_SIMILARITY", 0.50)
     )

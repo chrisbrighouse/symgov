@@ -44,6 +44,7 @@ from symgov_backend.models import (  # noqa: E402
     AssetTransformation,
     Attachment,
     CatalogApiKey,
+    CatalogApiKeyHolder,
     ClassificationNode,
     ClassificationScheme,
     ConceptClassificationAssignment,
@@ -59,6 +60,7 @@ from symgov_backend.models import (  # noqa: E402
     SymbolRevisionClassificationAssignment,
     SymbolSemanticAssignment,
     SymbolStandardLink,
+    User,
 )
 from symgov_backend.rights_provenance import transition_rights_record  # noqa: E402
 from symgov_backend.semantic_concepts import (  # noqa: E402
@@ -632,11 +634,18 @@ class TestApis:
         # Assembled, not a literal: it is a made-up value for a throwaway database.
         token = "_".join(["symgov", "live", "disc", "test", uuid.uuid4().hex])
         with Session(env["engine"]) as session, session.begin():
-            session.add(CatalogApiKey(
+            holder = User(
+                id=uuid.uuid4(), email=f"{token[-8:]}@disc.test", display_name=f"DISC holder {token[-6:]}", pin_hash="x",
+                pin_set_at=NOW, created_at=NOW, updated_at=NOW,
+            )
+            key = CatalogApiKey(
                 id=uuid.uuid4(), customer_name="Test", integration_name="DISC", key_prefix=token[:16],
                 key_hash=hash_api_key(token), scopes_json=["catalog.read"], status="active",
                 expires_at=datetime.now(timezone.utc) + timedelta(days=1), created_at=NOW, updated_at=NOW,
-            ))
+            )
+            session.add_all([holder, key])
+            session.flush()
+            session.add(CatalogApiKeyHolder(api_key_id=key.id, key_kind="personal", holder_user_id=holder.id, claimed_at=NOW))
         return {"Authorization": f"Bearer {token}"}
 
     def test_the_catalog_api_exposes_geometry_options_attribution_and_state_variant_bytes(self, env):

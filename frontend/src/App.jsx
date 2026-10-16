@@ -3,6 +3,7 @@ import SupportDataSources from './SupportDataSources.jsx';
 import SymbolGeometryDetails from './SymbolGeometryDetails.jsx';
 import SymbolDetailsView, { ExpandIcon } from './SymbolDetailsView.jsx';
 import { useSymbolDetails } from './useSymbolDetails.js';
+import { useSymbolViewBeacon } from './useSymbolViewBeacon.js';
 import {
   catalogSearchParams,
   detailsReference,
@@ -1438,6 +1439,7 @@ function StandardsPage() {
 
   const activeSymbol = symbolsById.get(activeId) || (pinnedSymbol && pinnedSymbol.id === activeId ? pinnedSymbol : null);
   const symbolDetails = useSymbolDetails(detailsOpen ? activeSymbol : null);
+  useSymbolViewBeacon(detailsOpen ? activeSymbol : null);
   const neighbours = resultNeighbours(loadedSymbols, activeId);
   const stepEnabled = resultContextRef.current && neighbours.index >= 0;
 

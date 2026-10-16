@@ -133,6 +133,8 @@ def test_self_service_create_commits_before_returning_one_time_secret(monkeypatc
         "integration_name": "CAD portal",
         "scopes": ["catalog.read", "catalog.preview"],
         "expires_at": datetime(2027, 7, 17, 12, 0, tzinfo=timezone.utc),
+        "rate_limit_per_minute": None,
+        "allowed_origins": [],
     }]
 
 
@@ -326,3 +328,21 @@ def test_wrapped_create_and_revoke_reject_unknown_outer_fields_without_service_e
     assert RAW_KEY not in revoke_response.text
     assert create_calls == revoke_calls == []
     assert session.commits == session.rollbacks == 0
+
+
+def test_self_service_create_passes_the_optional_limit_and_origins_and_caps_the_limit(monkeypatch):
+    calls = []
+    created = CatalogApiKeyCreateDTO(key=key_dto(), raw_key=RAW_KEY)
+    monkeypatch.setattr(
+        developer_routes, "create_self_service_catalog_api_key", lambda session, **kwargs: calls.append(kwargs) or created
+    )
+    client, _ = build_client()
+    body = {"customerName": "Acme", "integrationName": "CAD portal", "scopes": ["catalog.read"]}
+
+    ok = client.post("/api/v1/catalog/developer/api-key", json={**body, "rateLimitPerMinute": 250, "allowedOrigins": ["https://partner.example"]})
+    assert ok.status_code == 201
+    assert calls[0]["rate_limit_per_minute"] == 250 and calls[0]["allowed_origins"] == ["https://partner.example"]
+    assert ok.json()["activeKey"]["keyKind"] == "personal"
+
+    too_high = client.post("/api/v1/catalog/developer/api-key", json={**body, "rateLimitPerMinute": 601})
+    assert too_high.status_code == 422 and len(calls) == 1

@@ -938,6 +938,14 @@ def replace_membership_base_role(
     return replacement
 
 
+def _revoke_catalog_keys(session: Session, **kwargs) -> None:
+    """Organization Catalog API keys end with the membership or organization they were issued under."""
+    # Imported here: the key modules import the authentication stack, which this module must not.
+    from .catalog_org_api_keys import revoke_organization_keys_for
+
+    revoke_organization_keys_for(session, **kwargs)
+
+
 def deactivate_membership(
     session: Session,
     *,
@@ -980,6 +988,10 @@ def deactivate_membership(
     membership.status = "inactive"
     membership.deactivated_at = now
     membership.updated_at = now
+    _revoke_catalog_keys(
+        session, reason="membership_deactivated", user_id=membership.user_id,
+        organization_id=membership.organization_id, actor_id=actor_user_id,
+    )
     session.query(UserSession).filter(
         UserSession.auth_user_id == membership.user_id,
         UserSession.active_organization_id == membership.organization_id,
@@ -1298,6 +1310,9 @@ def suspend_organization(
     now = _utc_now()
     org.entitlement_status = "suspended"
     org.updated_at = now
+    _revoke_catalog_keys(
+        session, reason="organization_suspended", organization_id=organization_id, actor_id=actor_user_id,
+    )
     session.query(UserSession).filter(
         UserSession.active_organization_id == organization_id,
         UserSession.revoked_at.is_(None),

@@ -9,12 +9,18 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+from catalog_key_fakes import eligible_get, switch_off_key_policies
 from symgov_backend.app import create_app
 from symgov_backend.catalog_api_auth import hash_api_key
 from symgov_backend.catalog_usage import sanitize_usage_text
 from symgov_backend.dependencies import get_db_session
 from symgov_backend.models import CatalogApiKey, CatalogApiUsageEvent
 from symgov_backend.routes.catalog import _read_bounded_catalog_ed_body
+
+
+@pytest.fixture(autouse=True)
+def _no_key_policies(monkeypatch):
+    switch_off_key_policies(monkeypatch)
 
 
 class CatalogApiKeyQuery:
@@ -55,6 +61,9 @@ class CatalogEdSession:
     def query(self, model):
         assert model is CatalogApiKey
         return CatalogApiKeyQuery(self.key_rows)
+
+    def get(self, model, ident):
+        return eligible_get(model, ident)
 
     def execute(self, statement, params=None):
         self.executed.append((str(statement), dict(params or {})))
@@ -421,10 +430,12 @@ def test_catalog_ed_query_returns_public_found_symbol_contract_without_mutation(
         "warnings",
         "downloadAvailable",
         "mutatesRecords",
+        "engine",
     }
     assert payload["conversationId"] == "customer-conversation-7"
     assert payload["mode"] == "find_symbols"
     assert payload["downloadAvailable"] is False
+    assert payload["engine"] == "rule_based"
     assert "downloads are not available" in payload["answer"].lower()
     assert payload["mutatesRecords"] is False
     assert payload["symbols"][0]["displayId"] == "0003-12"

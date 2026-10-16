@@ -20,6 +20,7 @@ from ..catalog_favourites import (
     remove_catalog_favourite,
 )
 from ..catalog_workbench import (
+    load_catalog_clipboard,
     CatalogClipboardRequest,
     CatalogSavedViewsRequest,
     CatalogWorkbenchPreferences,
@@ -69,6 +70,7 @@ from ..models import (
     User,
 )
 from ..product_usage_events import record_browse_usage_event_best_effort
+from ..symbol_usage_events import record_symbol_usage_best_effort, resolve_symbol_refs, user_activity
 from ..published_feedback_gate import (
     published_feedback_claims_paused,
     published_feedback_paused_response_body,
@@ -218,7 +220,8 @@ def organization_private_symbol_row(
     are likewise left empty; per the Stage 8 plan §1.10 these are proposed
     (pending Chris's confirmation) to stay public-symbol-only.
     """
-    payload = (revision.payload_json if revision is not None else None) or {}
+    # Served without the source register's operator-only keys, like a public row.
+    payload = payload_with_rights_attribution((revision.payload_json if revision is not None else None) or {}, None)
     keywords = payload.get("keywords") or payload.get("search_terms") or []
     if not isinstance(keywords, list):
         keywords = []
@@ -703,9 +706,23 @@ def save_catalog_workbench_clipboard_items(
     session: Session = Depends(get_db_session),
 ) -> dict:
     organization_id = clipboard_organization_id(current_user)
+    already_on_clipboard = {str(item.get("id")) for item in load_catalog_clipboard(session, current_user.id, organization_id)}
     save_catalog_workbench_clipboard(
         session, current_user.id, organization_id, [item.model_dump() for item in payload.items]
     )
+    # Only symbols newly put on the clipboard count; saving the same list again does not.
+    added = [item.id for item in payload.items if item.id not in already_on_clipboard][:50]
+    if added:
+        try:
+            symbol_ids = resolve_symbol_refs(session, added)
+            for ref in added:
+                if ref in symbol_ids:
+                    record_symbol_usage_best_effort(
+                        session, event_type="symbol_added_to_clipboard", governed_symbol_id=symbol_ids[ref], **user_activity(current_user),
+                    )
+        except Exception:
+            # Counting must never fail a save that has already been committed.
+            session.rollback()
     return load_catalog_workbench(session, current_user.id, organization_id)
 
 
@@ -1003,6 +1020,12 @@ def search_published_symbols(
                 "reason": reason,
             }
 
+    if page == 1 and q.strip():
+        record_symbol_usage_best_effort(
+            session, event_type="catalog_searched", dedupe_seconds=30, query_text=q, result_count=result.total,
+            project_id=project_id, **user_activity(current_user),
+        )
+
     return {
         "scope": scope,
         **(palette_context or {}),
@@ -1043,6 +1066,31 @@ def get_published_symbol(
         "item": organization_private_symbol_row(governed_symbol, revision, favourite_ids),
         "resolvedBy": resolved_by,
     }
+
+
+@router.post("/symbols/{symbol_id}/view-events", status_code=204)
+def record_published_symbol_view(
+    symbol_id: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
+) -> Response:
+    """The Details view opened: one `symbol_viewed` event, repeats within 5 minutes dropped.
+
+    A beacon rather than part of the details read, so the read stays a read
+    and the same page loading twice is one view, not two.
+    """
+    source, resolved, _resolved_by = _load_symbol_for_detail(session, symbol_id, current_user, settings)
+    if source == "public":
+        symbol_uuid, revision_id, pack_code = uuid.UUID(str(resolved.symbol_id)), uuid.UUID(str(resolved.symbol_revision_id)), resolved.pack_code
+    else:
+        governed_symbol, revision = resolved
+        symbol_uuid, revision_id, pack_code = governed_symbol.id, (revision.id if revision is not None else None), None
+    record_symbol_usage_best_effort(
+        session, event_type="symbol_viewed", dedupe_seconds=300, governed_symbol_id=symbol_uuid,
+        symbol_revision_id=revision_id, pack_code=pack_code, **user_activity(current_user),
+    )
+    return Response(status_code=204)
 
 
 @router.get("/symbols/{symbol_id}/details")

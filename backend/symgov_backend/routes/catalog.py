@@ -29,6 +29,7 @@ from ..auth import AuthenticatedUser, current_user_from_token
 from ..catalog_api_auth import (
     CatalogApiAuthenticationError,
     IntegrationAuthContext,
+    apply_key_policies,
     authenticate_catalog_api_key,
     require_catalog_feedback_scope,
     require_catalog_scope,
@@ -102,7 +103,8 @@ from ..services.published_feedback import (
     submit_published_feedback,
     validate_published_feedback_review_case,
 )
-from ..settings import get_settings
+from ..settings import SymgovAPISettings, get_settings
+from ..symbol_usage_events import key_activity, record_symbol_usage_best_effort, user_activity
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -207,6 +209,7 @@ def catalog_download_content_disposition(filename: str) -> str:
 def require_catalog_download_access(
     request: Request,
     session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> AuthenticatedUser | IntegrationAuthContext:
     session_token = request.cookies.get(SESSION_COOKIE_NAME, "")
     current_user = current_user_from_token(
@@ -241,6 +244,7 @@ def require_catalog_download_access(
         raise HTTPException(status_code=401, detail="Authentication required.")
     if CATALOG_READ_SCOPE not in context.scopes:
         raise HTTPException(status_code=403, detail="Insufficient scope for this operation.")
+    apply_key_policies(session, request, context, settings)
     session.commit()
     return context
 
@@ -259,7 +263,9 @@ def _log_successful_catalog_read(
     query_text: object = None,
     result_count: int | None = None,
     symbol_ref: str | None = None,
+    governed_symbol_id: object = None,
 ) -> None:
+    """Log a successful read; `governed_symbol_id` also counts it as a fetch of that one symbol."""
     log_catalog_usage_event_best_effort(
         session,
         auth_context,
@@ -271,6 +277,16 @@ def _log_successful_catalog_read(
         query_text=query_text,
         symbol_ref=symbol_ref,
         result_count=result_count,
+    )
+    if governed_symbol_id is not None:
+        record_symbol_usage_best_effort(
+            session, event_type="symbol_api_fetched", dedupe_seconds=30, governed_symbol_id=governed_symbol_id, **key_activity(auth_context),
+        )
+
+
+def _record_catalog_search(session: Session, auth_context: IntegrationAuthContext, query: object, result_count: int) -> None:
+    record_symbol_usage_best_effort(
+        session, event_type="catalog_searched", dedupe_seconds=30, query_text=query, result_count=result_count, **key_activity(auth_context),
     )
 
 
@@ -835,6 +851,8 @@ async def catalog_ed_query(
     response = {
         "conversationId": conversation_id,
         "mode": interpretation.selected_mode,
+        # This endpoint interprets the question with fixed rules, not a model.
+        "engine": "rule_based",
         "answer": answer,
         "searchQuery": interpretation.search_query,
         "interpretedFilters": interpretation.interpreted_filters,
@@ -1193,6 +1211,7 @@ async def contextual_catalog_search(
         query_text=query,
         result_count=len(items),
     )
+    _record_catalog_search(session, auth_context, query, len(items))
     return response
 
 
@@ -1272,6 +1291,8 @@ def search_catalog_symbols(
         query_text=q,
         result_count=len(page_rows),
     )
+    if offset == 0 and q:
+        _record_catalog_search(session, auth_context, q, len(page_rows))
     return response
 
 
@@ -1389,6 +1410,15 @@ async def download_catalog_symbols(
                 symbol_source="public",
                 format=requested_format,
             )
+        record_symbol_usage_best_effort(
+            session,
+            event_type="symbol_downloaded",
+            **(user_activity(auth_context) if isinstance(auth_context, AuthenticatedUser) else key_activity(auth_context)),
+            governed_symbol_id=row.symbol_id,
+            symbol_revision_id=row.symbol_revision_id,
+            pack_code=getattr(row, "pack_code", None),
+            format=requested_format,
+        )
 
     if not selected:
         raise HTTPException(status_code=422, detail="The selected format is not available for any selected symbol.")
@@ -1461,6 +1491,7 @@ def get_catalog_symbol_detail(
         started_at=started_at,
         symbol_ref=symbol_ref,
         result_count=1,
+        governed_symbol_id=row.symbol_id,
     )
     return response
 

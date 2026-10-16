@@ -221,6 +221,8 @@ def test_zero_eligible_organizations_issues_personal_session_when_feature_is_off
         "organizationSymbolsEnabled": False,
         "organizationAgentsEnabled": False,
         "organizationIconUploadEnabled": False,
+        "organizationApiKeysEnabled": False,
+        "symbolUsageAnalyticsEnabled": False,
         "semanticReviewEnabled": False,
         "edEnabled": False,
     }
@@ -282,6 +284,8 @@ def test_one_eligible_organization_issues_bound_session_and_effective_context():
         "organizationSymbolsEnabled": True,
         "organizationAgentsEnabled": True,
         "organizationIconUploadEnabled": False,
+        "organizationApiKeysEnabled": False,
+        "symbolUsageAnalyticsEnabled": False,
         "semanticReviewEnabled": False,
         "edEnabled": False,
     }
@@ -495,6 +499,8 @@ def test_auth_me_aliases_return_only_bounded_current_context_without_private_mem
         "organizationSymbolsEnabled": True,
         "organizationAgentsEnabled": True,
         "organizationIconUploadEnabled": False,
+        "organizationApiKeysEnabled": False,
+        "symbolUsageAnalyticsEnabled": False,
         "semanticReviewEnabled": False,
         "edEnabled": False,
     }
@@ -644,6 +650,8 @@ def test_login_aliases_have_exact_response_and_cookie_parity(path, outcome):
         "organizationSymbolsEnabled": True,
         "organizationAgentsEnabled": True,
         "organizationIconUploadEnabled": False,
+        "organizationApiKeysEnabled": False,
+        "symbolUsageAnalyticsEnabled": False,
         "semanticReviewEnabled": False,
         "edEnabled": False,
     }
@@ -705,8 +713,12 @@ def test_successful_mandatory_pin_change_with_no_eligible_organization_issues_pe
             "organizationSymbolsEnabled": True,
             "organizationAgentsEnabled": True,
             "organizationIconUploadEnabled": False,
+            "organizationApiKeysEnabled": False,
+            "symbolUsageAnalyticsEnabled": False,
             "semanticReviewEnabled": False,
             "edEnabled": False,
+        "organizationApiKeysEnabled": False,
+        "symbolUsageAnalyticsEnabled": False,
         "semanticReviewEnabled": False,
         "edEnabled": False,
         },

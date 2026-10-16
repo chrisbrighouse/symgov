@@ -5,12 +5,21 @@
 Use `Authorization: Bearer YOUR_CATALOG_API_KEY`.
 
 - `401` means the key is missing, unknown, expired, revoked, or otherwise inactive.
-- `403` means the key is valid but lacks the required scope.
+- `403` means the key is valid but lacks the required scope, or the request's `Origin` is not allowed for this key.
+- `429` means the key has used its per-minute budget; wait `Retry-After` seconds.
 - `404` means the public Catalog resource was not found.
 - `400` or `422` means the request shape or value was rejected; read `detail` and, where present, `issues`.
 - `5xx` means the service could not complete the request.
 
 The Integrator Hub requires a Symgov login with the `integrator` role (administrators are also allowed), but its documentation does not require a Catalog API key. Sandbox, Catalog Ed, and protected Catalog API operations still require an active key with the relevant scope. The customer name entered during self-service generation is a key label; it does not establish or imply a separate customer-membership relationship.
+
+## Key kinds, limits and origins
+
+- A **personal key** belongs to one user and reads the public Catalog. Its default budget is 60 requests a minute.
+- An **organization key** is issued by an organization admin to one member of the organization, who collects it once from their profile. Its default budget is 120 requests a minute. It stops working, permanently, when its holder is deactivated or leaves the organization, or when the organization is suspended; a new key must then be issued.
+- A key may set its own limit, up to 600 requests a minute.
+- A request with an `Origin` header (a browser) is allowed only from Symgov's own origin or an origin the key lists. A request without one (a server) is not origin-checked.
+- Over the budget the response is `429` with `Retry-After`, `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`.
 
 ## Key handling
 

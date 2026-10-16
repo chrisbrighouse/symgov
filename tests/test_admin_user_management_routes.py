@@ -119,12 +119,19 @@ def test_upgrade_adjust_cancel_removes_roles_permanently():
     assert cancelled.json()["user"]["roles"] == []
 
 
-def test_admin_can_soft_delete_user_and_revokes_login():
+def test_admin_can_soft_delete_user_and_revokes_login(monkeypatch):
+    revoked = []
+    # The catalog-key tables are not in this fixture; the revocation itself is tested with them.
+    monkeypatch.setattr(
+        "symgov_backend.catalog_org_api_keys.revoke_organization_keys_for",
+        lambda session, **kwargs: revoked.append(kwargs) or 0,
+    )
     client, Session = build_client_with_users()
     login_admin(client)
     user = create_free_user(client, email="delete@example.com", display_name="Delete Me")
     removed = client.delete(f"/api/v1/admin/users/{user['id']}")
     assert removed.status_code == 200
+    assert [(item["reason"], str(item["user_id"])) for item in revoked] == [("user_deactivated", user["id"])]
     assert removed.json()["user"]["isDeleted"] is True
     assert removed.json()["user"]["subscription"]["tier"] == "free"
     with Session() as session:

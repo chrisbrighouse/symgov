@@ -32,6 +32,9 @@ from .routes.published import router as published_router
 from .routes.profile import router as profile_router
 from .routes.llm import legacy_router as legacy_llm_router
 from .routes.llm import router as llm_router
+from .routes.catalog_organization import organization_api_keys_route_guard as catalog_organization_route_guard, router as catalog_organization_router
+from .routes.organization_api_keys import holder_router as organization_api_keys_holder_router, organization_api_keys_route_guard, router as organization_api_keys_router
+from .routes.usage_reports import router as usage_reports_router, usage_reports_route_guard
 from .routes.projects import router as projects_router, stage4_route_guard
 from .routes.symbol_sets import default_router as symbol_sets_default_router, router as symbol_sets_router
 from .routes.symbol_context import router as symbol_context_router
@@ -53,6 +56,8 @@ from .dependencies import (
 from .logging_setup import configure_application_logging
 from .catalog_embedding_worker import run_catalog_embedding_worker
 from .catalog_embedding_worker import worker_enabled as catalog_embedding_worker_enabled
+from .usage_maintenance_worker import run_usage_maintenance_worker
+from .usage_maintenance_worker import worker_enabled as usage_maintenance_worker_enabled
 from .email_worker import configured_email_sender, run_email_outbox_worker
 from .auth_security import login_throttle_policy
 from .settings import get_settings
@@ -146,6 +151,11 @@ def create_app() -> FastAPI:
     app.include_router(agents_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
     app.include_router(catalog_router, prefix=settings.api_prefix, dependencies=[csrf])
     app.include_router(
+        catalog_organization_router,
+        prefix=settings.api_prefix,
+        dependencies=[Depends(catalog_organization_route_guard), csrf],
+    )
+    app.include_router(
         catalog_developer_router,
         prefix=settings.api_prefix,
         dependencies=[csrf, session_access, Depends(require_any_role({"admin", "integrator"}))],
@@ -164,6 +174,21 @@ def create_app() -> FastAPI:
     )
     app.include_router(llm_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
     app.include_router(ed_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
+    app.include_router(
+        usage_reports_router,
+        prefix=settings.api_prefix,
+        dependencies=[Depends(usage_reports_route_guard), csrf, session_access],
+    )
+    app.include_router(
+        organization_api_keys_router,
+        prefix=settings.api_prefix,
+        dependencies=[csrf, Depends(organization_api_keys_route_guard), session_access],
+    )
+    app.include_router(
+        organization_api_keys_holder_router,
+        prefix=settings.api_prefix,
+        dependencies=[csrf, Depends(organization_api_keys_route_guard), session_access],
+    )
     app.include_router(
         projects_router,
         prefix=settings.api_prefix,
@@ -229,6 +254,12 @@ def create_app() -> FastAPI:
             app.state.catalog_embedding_task = asyncio.create_task(
                 run_catalog_embedding_worker(settings, embedding_stop_event)
             )
+        if usage_maintenance_worker_enabled(settings):
+            usage_stop_event = asyncio.Event()
+            app.state.usage_maintenance_stop_event = usage_stop_event
+            app.state.usage_maintenance_task = asyncio.create_task(
+                run_usage_maintenance_worker(settings, usage_stop_event)
+            )
         agents = settings.agent_workers if settings.enable_agent_workers else (("libby",) if settings.enable_libby_worker else ())
         app.state.agent_worker_state = AgentQueueWorkerState(configured_agents=agents)
         if not agents:
@@ -272,6 +303,14 @@ def create_app() -> FastAPI:
             embedding_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await embedding_task
+        usage_task = getattr(app.state, "usage_maintenance_task", None)
+        usage_stop_event = getattr(app.state, "usage_maintenance_stop_event", None)
+        if usage_stop_event is not None:
+            usage_stop_event.set()
+        if usage_task is not None:
+            usage_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await usage_task
         task = getattr(app.state, "agent_worker_task", None)
         stop_event = getattr(app.state, "agent_worker_stop_event", None)
         if stop_event is not None:

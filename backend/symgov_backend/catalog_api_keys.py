@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from .catalog_api_auth import PLANNED_CATALOG_API_SCOPES, hash_api_key
 from .catalog_developer import contains_catalog_credentials, redact_catalog_credential_label
-from .models import AuditEvent, CatalogApiKey, User
+from .models import AuditEvent, CatalogApiKey, CatalogApiKeyHolder, User
 
 
 _RAW_KEY_PREFIX = "symgov_live_"
@@ -49,6 +49,8 @@ class CatalogApiKeyDTO:
     created_at: datetime
     updated_at: datetime
     revoked_at: datetime | None
+    rate_limit_per_minute: int | None = None
+    allowed_origins: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, object]:
         """Return JSON-safe metadata that cannot contain a key secret or hash."""
@@ -64,6 +66,8 @@ class CatalogApiKeyDTO:
             "created_at": _serialize_datetime(self.created_at),
             "updated_at": _serialize_datetime(self.updated_at),
             "revoked_at": _serialize_datetime(self.revoked_at),
+            "rate_limit_per_minute": self.rate_limit_per_minute,
+            "allowed_origins": list(self.allowed_origins),
         }
 
 
@@ -152,6 +156,30 @@ def _normalized_scopes(scopes: object) -> tuple[str, ...]:
     return tuple(normalized)
 
 
+def _normalized_origins(origins: object) -> list[str]:
+    if origins is None:
+        return []
+    if not isinstance(origins, (list, tuple)):
+        raise CatalogApiKeyError("allowed origins must be a list")
+    from urllib.parse import urlsplit
+
+    from .dependencies import _canonical_source_origin
+
+    normalized: list[str] = []
+    for value in origins:
+        if not isinstance(value, str) or _canonical_source_origin(value.strip()) is None:
+            raise CatalogApiKeyError("allowed origins must be http(s) origins without a path")
+        parts = urlsplit(value.strip())
+        if parts.path not in {"", "/"} or parts.query or parts.fragment:
+            raise CatalogApiKeyError("allowed origins must be http(s) origins without a path")
+        origin = value.strip().rstrip("/")
+        if origin not in normalized:
+            normalized.append(origin)
+    if len(normalized) > 20:
+        raise CatalogApiKeyError("at most 20 allowed origins")
+    return normalized
+
+
 def _safe_dto(row: CatalogApiKey) -> CatalogApiKeyDTO:
     return CatalogApiKeyDTO(
         id=row.id,
@@ -165,6 +193,8 @@ def _safe_dto(row: CatalogApiKey) -> CatalogApiKeyDTO:
         created_at=row.created_at,
         updated_at=row.updated_at,
         revoked_at=row.revoked_at,
+        rate_limit_per_minute=getattr(row, "rate_limit_per_minute", None),
+        allowed_origins=tuple(str(origin) for origin in (getattr(row, "allowed_origins_json", None) or [])),
     )
 
 
@@ -201,6 +231,8 @@ def create_catalog_api_key(
     now: datetime | None = None,
     created_by: uuid.UUID | None = None,
     actor_type: str = "operator_cli",
+    rate_limit_per_minute: int | None = None,
+    allowed_origins: object = None,
 ) -> CatalogApiKeyCreateDTO:
     """Create a key and audit row without taking ownership of the transaction."""
     customer = _normalized_required_name(customer_name, field_name="customer_name")
@@ -225,8 +257,8 @@ def create_catalog_api_key(
         status="active",
         contact_name=None,
         contact_email=None,
-        allowed_origins_json=[],
-        rate_limit_per_minute=None,
+        allowed_origins_json=_normalized_origins(allowed_origins),
+        rate_limit_per_minute=rate_limit_per_minute,
         expires_at=resolved_expiry,
         last_used_at=None,
         created_by=created_by,
@@ -236,6 +268,20 @@ def create_catalog_api_key(
         notes=None,
     )
     session.add(key_row)
+    if created_by is not None:
+        # A key with an owner is that owner's personal key. A key made with no
+        # owner (the operator CLI) gets no holder row and so cannot authenticate.
+        session.flush()
+        session.add(
+            CatalogApiKeyHolder(
+                api_key_id=key_row.id,
+                key_kind="personal",
+                holder_user_id=created_by,
+                organization_id=None,
+                issued_by_user_id=None,
+                claimed_at=resolved_now,
+            )
+        )
     session.add(
         AuditEvent(
             id=uuid.uuid4(),
@@ -343,7 +389,12 @@ def _user_uuid(user_id: uuid.UUID | str) -> uuid.UUID:
 def _self_service_key_rows(session: Session, user_id: uuid.UUID) -> list[CatalogApiKey]:
     return (
         session.query(CatalogApiKey)
-        .filter(CatalogApiKey.created_by == user_id, CatalogApiKey.status == "active")
+        .join(CatalogApiKeyHolder, CatalogApiKeyHolder.api_key_id == CatalogApiKey.id)
+        .filter(
+            CatalogApiKeyHolder.holder_user_id == user_id,
+            CatalogApiKeyHolder.key_kind == "personal",
+            CatalogApiKey.status == "active",
+        )
         .all()
     )
 
@@ -375,6 +426,8 @@ def create_self_service_catalog_api_key(
     scopes: object,
     expires_at: datetime | None = None,
     now: datetime | None = None,
+    rate_limit_per_minute: int | None = None,
+    allowed_origins: object = None,
 ) -> CatalogApiKeyCreateDTO:
     """Create at most one current key for a user under a stable user-row lock."""
     owner_id = _user_uuid(user_id)
@@ -412,6 +465,8 @@ def create_self_service_catalog_api_key(
         now=resolved_now,
         created_by=owner_id,
         actor_type="integrator_self_service",
+        rate_limit_per_minute=rate_limit_per_minute,
+        allowed_origins=allowed_origins,
     )
 
 
@@ -431,8 +486,13 @@ def revoke_self_service_catalog_api_key(
         raise CatalogApiKeyNotFoundError("Catalog API key not found") from None
     owned = (
         session.query(CatalogApiKey)
-        .filter(CatalogApiKey.id == resolved_key_id, CatalogApiKey.created_by == owner_id)
-        .with_for_update()
+        .join(CatalogApiKeyHolder, CatalogApiKeyHolder.api_key_id == CatalogApiKey.id)
+        .filter(
+            CatalogApiKey.id == resolved_key_id,
+            CatalogApiKeyHolder.holder_user_id == owner_id,
+            CatalogApiKeyHolder.key_kind == "personal",
+        )
+        .with_for_update(of=CatalogApiKey)
         .one_or_none()
     )
     if owned is None:

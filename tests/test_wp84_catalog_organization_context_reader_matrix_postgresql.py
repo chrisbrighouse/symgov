@@ -55,7 +55,7 @@ from symgov_backend.models import CatalogApiKey  # noqa: E402
 
 # Moved to head for the DISC DEXPI import: the served-rows query now reads the
 # classification and rights tables, which 20260904_0039 predates.
-NEW_MIGRATION_HEAD = "20261010_0071"
+NEW_MIGRATION_HEAD = "20261015_0073"
 
 psycopg = pytest.importorskip("psycopg")
 
@@ -74,6 +74,10 @@ def wp84_database():
                 "GRANT SELECT, INSERT ON audit_events TO symgov_app",
                 "GRANT SELECT, INSERT, DELETE ON catalog_favourites TO symgov_app",
                 "GRANT SELECT, UPDATE ON catalog_api_keys TO symgov_app",
+                # Created by the migrator in production, which grants these by default; here the superuser made them.
+                "GRANT SELECT ON catalog_api_key_holders TO symgov_app",
+                "GRANT SELECT, INSERT, UPDATE, DELETE ON catalog_api_rate_windows TO symgov_app",
+                "GRANT SELECT, INSERT ON symbol_usage_events TO symgov_app",
             ):
                 connection.execute(statement)
         yield engine, url, raw_url
@@ -92,6 +96,22 @@ def _make_catalog_api_key(engine, *, token="wp84-catalog-key"):
                 " '[\"catalog.read\"]'::jsonb, 'active', '[]'::jsonb, now(), now())"
             ),
             {"id": key_id, "key_hash": hash_api_key(token)},
+        )
+        # A key belongs to a person: a plain active user holds this one.
+        holder_id = uuid.uuid4()
+        connection.execute(
+            sa_text(
+                "INSERT INTO users (id, email, display_name, pin_hash, pin_set_at, created_at, updated_at) "
+                "VALUES (:id, :email, :name, 'x', now(), now(), now())"
+            ),
+            {"id": holder_id, "email": f"{holder_id.hex[:8]}@wp84.test", "name": f"WP84 holder {holder_id.hex[:6]}"},
+        )
+        connection.execute(
+            sa_text(
+                "INSERT INTO catalog_api_key_holders (api_key_id, key_kind, holder_user_id, claimed_at) "
+                "VALUES (:key, 'personal', :holder, now())"
+            ),
+            {"key": key_id, "holder": holder_id},
         )
     return token
 

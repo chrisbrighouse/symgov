@@ -70,8 +70,15 @@ CATALOG_INTEGRATION_ENDPOINTS = (
     {"method": "GET", "path": "/api/v1/catalog/symbols/{symbol_ref}/preview", "scope": "catalog.read", "summary": "Render the available preview."},
     {"method": "GET", "path": "/api/v1/catalog/symbols/{symbol_ref}/state-variants/{index}", "scope": "catalog.read", "summary": "Render one option (state) variant of a symbol, by its option number."},
     {"method": "POST", "path": "/api/v1/catalog/symbols/download", "scope": "catalog.read", "summary": "Download one symbol or a ZIP of selected symbols in one format."},
-    {"method": "POST", "path": "/api/v1/catalog/ed/query", "scope": "catalog.ed.query", "summary": "Ask production Catalog Ed a symbol question."},
+    {"method": "POST", "path": "/api/v1/catalog/ed/query", "scope": "catalog.ed.query", "summary": "Catalog query interpreter (rule-based): turn a symbol question into a Catalog search."},
     {"method": "POST", "path": "/api/v1/catalog/symbols/{symbol_ref}/feedback", "scope": "catalog.feedback.write", "summary": "Submit integration feedback."},
+    {"method": "GET", "path": "/api/v1/catalog/organization/symbols", "scope": "catalog.read", "summary": "List the organization's own private symbols (organization keys only; 404 for a personal key)."},
+    {"method": "GET", "path": "/api/v1/catalog/organization/symbols/{symbol_id}", "scope": "catalog.read", "summary": "Read one of the organization's private symbols (organization keys only)."},
+    {"method": "GET", "path": "/api/v1/catalog/organization/symbols/{symbol_id}/preview", "scope": "catalog.read", "summary": "Render a private symbol's preview (organization keys only)."},
+    {"method": "GET", "path": "/api/v1/catalog/organization/symbol-sets", "scope": "catalog.read", "summary": "List the organization's active Symbol Sets (organization keys only)."},
+    {"method": "GET", "path": "/api/v1/catalog/organization/symbol-sets/{code}/items", "scope": "catalog.read", "summary": "List a Symbol Set's eligible symbols (organization keys only)."},
+    {"method": "GET", "path": "/api/v1/catalog/organization/projects", "scope": "catalog.read", "summary": "List the organization's active Projects (organization keys only)."},
+    {"method": "GET", "path": "/api/v1/catalog/organization/projects/{project_id}/palette", "scope": "catalog.read", "summary": "A Project's effective palette: its set plus organization-wide symbols (organization keys only)."},
 )
 
 GUIDES = (
@@ -101,6 +108,12 @@ _RESPONSE_SCHEMA_BY_ENDPOINT = {
     ("GET", "/api/v1/catalog/symbols/{symbol_ref}"): "SymbolDetailResponse",
     ("POST", "/api/v1/catalog/ed/query"): "EdQueryResponse",
     ("POST", "/api/v1/catalog/symbols/{symbol_ref}/feedback"): "FeedbackResponse",
+    ("GET", "/api/v1/catalog/organization/symbols"): "OrganizationSymbolListResponse",
+    ("GET", "/api/v1/catalog/organization/symbols/{symbol_id}"): "OrganizationSymbolResponse",
+    ("GET", "/api/v1/catalog/organization/symbol-sets"): "OrganizationSymbolSetListResponse",
+    ("GET", "/api/v1/catalog/organization/symbol-sets/{code}/items"): "OrganizationSymbolSetItemsResponse",
+    ("GET", "/api/v1/catalog/organization/projects"): "OrganizationProjectListResponse",
+    ("GET", "/api/v1/catalog/organization/projects/{project_id}/palette"): "OrganizationProjectPaletteResponse",
 }
 
 
@@ -150,6 +163,18 @@ def _operation(endpoint: dict) -> dict:
             "name": "symbol_ref", "in": "path", "required": True,
             "schema": {"type": "string", "maxLength": 256}, "example": "0003-12",
         })
+    for name, example in (("symbol_id", "3f2b8c1e-0000-4000-8000-000000000000"), ("code", "PLANT-A"), ("project_id", "9d1c4a7e-0000-4000-8000-000000000000")):
+        if "{" + name + "}" in path:
+            parameters.append({"name": name, "in": "path", "required": True, "schema": {"type": "string", "maxLength": 256}, "example": example})
+    if path in {"/api/v1/catalog/organization/symbols", "/api/v1/catalog/organization/symbol-sets", "/api/v1/catalog/organization/projects"}:
+        parameters.extend([
+            {"name": "limit", "in": "query", "description": "Values above 100 are capped at 100.", "schema": {"type": "integer", "minimum": 1, "default": 25}},
+            {"name": "cursor", "in": "query", "schema": {"type": "string"}},
+        ])
+        if path.endswith("/symbols"):
+            parameters.append({"name": "q", "in": "query", "schema": {"type": "string", "maxLength": 200}})
+    if path.endswith("/palette"):
+        parameters.append({"name": "setCode", "in": "query", "description": "Use this Symbol Set instead of the Project's default.", "schema": {"type": "string"}})
     if "{index}" in path:
         parameters.append({
             "name": "index", "in": "path", "required": True,
@@ -320,6 +345,30 @@ def catalog_openapi_document() -> dict:
         "EdQueryResponse": {
             "type": "object", "required": ["conversationId", "mode", "answer", "searchQuery", "interpretedFilters", "symbols", "citations", "suggestedFollowups", "warnings", "downloadAvailable", "mutatesRecords"],
             "properties": {"conversationId": {"type": ["string", "null"]}, "mode": {"type": "string"}, "answer": {"type": "string"}, "searchQuery": {"type": "string"}, "interpretedFilters": object_schema, "symbols": {"type": "array", "items": object_schema}, "citations": {"type": "array", "items": object_schema}, "suggestedFollowups": {"type": "array", "items": {"type": "string"}}, "warnings": {"type": "array", "items": {"type": "string"}}, "downloadAvailable": {"type": "boolean", "const": False}, "mutatesRecords": {"type": "boolean", "const": False}},
+        },
+        "OrganizationSymbolListResponse": {
+            "type": "object", "required": ["items", "nextCursor", "total"],
+            "properties": {"items": {"type": "array", "items": object_schema}, "nextCursor": {"type": ["string", "null"]}, "total": {"type": "integer"}},
+        },
+        "OrganizationSymbolResponse": {
+            "type": "object", "required": ["id", "slug", "name", "source"],
+            "properties": {"id": {"type": "string", "format": "uuid"}, "slug": {"type": "string"}, "name": {"type": "string"}, "category": {"type": "string"}, "discipline": {"type": "string"}, "summary": {"type": "string"}, "keywords": {"type": "array", "items": {"type": "string"}}, "revision": {"type": ["string", "null"]}, "status": {"type": ["string", "null"]}, "updatedAt": {"type": ["string", "null"]}, "source": {"type": "string", "const": "organization_private"}, "previewAvailable": {"type": "boolean"}, "links": object_schema},
+        },
+        "OrganizationSymbolSetListResponse": {
+            "type": "object", "required": ["items", "nextCursor", "total"],
+            "properties": {"items": {"type": "array", "items": object_schema}, "nextCursor": {"type": ["string", "null"]}, "total": {"type": "integer"}},
+        },
+        "OrganizationSymbolSetItemsResponse": {
+            "type": "object", "required": ["symbolSet", "items", "total"],
+            "properties": {"symbolSet": object_schema, "items": {"type": "array", "items": object_schema}, "total": {"type": "integer"}},
+        },
+        "OrganizationProjectListResponse": {
+            "type": "object", "required": ["items", "nextCursor", "total"],
+            "properties": {"items": {"type": "array", "items": object_schema}, "nextCursor": {"type": ["string", "null"]}, "total": {"type": "integer"}},
+        },
+        "OrganizationProjectPaletteResponse": {
+            "type": "object", "required": ["project", "activeSet", "reason", "items", "total"],
+            "properties": {"project": object_schema, "activeSet": {"anyOf": [object_schema, {"type": "null"}]}, "reason": {"type": "string"}, "items": {"type": "array", "items": object_schema}, "total": {"type": "integer"}, "organizationWideGroup": {"type": "string"}},
         },
         "FeedbackResponse": {
             "type": "object",

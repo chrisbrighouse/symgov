@@ -13,6 +13,7 @@ from .models import AuditEvent, GovernedSymbol, Organization, Project, ProjectSy
 from .product_usage_events import record_governance_usage_event
 from .project_service import audit, get_principal, json_values_equal, normalize_code, normalize_optional_text, normalize_text, project_dict, validate_json
 from .public_symbol_eligibility import current_public_symbols
+from .symbol_usage_events import record_symbol_usage
 from .symbol_eligibility import current_symbol_revisions
 from .symbol_identity import governed_symbol_human_readable_id
 
@@ -394,6 +395,13 @@ def replace_items(session, request, settings, set_id, data):
         if symbol_id not in supplied:
             session.delete(old)
     session.flush()
+    # Symbols this save newly put in the set (a re-save of the same members adds none).
+    # Recorded under a savepoint inside this transaction, so it can never fail the save.
+    for symbol_id in sorted(set(ids) - set(existing), key=str):
+        record_symbol_usage(
+            session, event_type="symbol_added_to_set", channel="web", user_id=principal.user.id,
+            organization_id=principal.organization.id, symbol_set_id=row.id, governed_symbol_id=symbol_id,
+        )
     replacement_sequence = session.query(AuditEvent).filter(
         AuditEvent.entity_type == "symbol_set",
         AuditEvent.entity_id == row.id,

@@ -67,7 +67,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from symgov_backend.app import create_app  # noqa: E402
 from symgov_backend.catalog_api_auth import hash_api_key  # noqa: E402
 from symgov_backend.dependencies import get_db_session  # noqa: E402
-from symgov_backend.models import CatalogApiKey, Organization, OrganizationMembership, OrganizationRoleAssignment  # noqa: E402
+from symgov_backend.models import CatalogApiKey, CatalogApiKeyHolder, Organization, User, OrganizationMembership, OrganizationRoleAssignment  # noqa: E402
 from symgov_backend.organization_symbol_drafts import create_draft, submit_for_review  # noqa: E402
 from symgov_backend.organization_symbol_review import decide_submission  # noqa: E402
 from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E402
@@ -75,7 +75,7 @@ from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E40
 # Moved to head for the DISC DEXPI import: the served-rows query now reads the
 # classification and rights tables, which 20260908_0046 predates. Three files
 # (11.3, 11.4, 11.5) build their database from this one fixture.
-NEW_MIGRATION_HEAD = "20261010_0071"
+NEW_MIGRATION_HEAD = "20261015_0073"
 
 
 @pytest.fixture(scope="module")
@@ -159,11 +159,19 @@ def _api_key(Session) -> str:
     now = datetime.now(timezone.utc).replace(microsecond=0)
     token = f"wp113-{uuid.uuid4().hex}"
     with Session() as session:
-        session.add(CatalogApiKey(
+        # A key belongs to a person: its holder is a plain active user with no organization.
+        holder = User(
+            id=uuid.uuid4(), email=f"{token}@example.test", display_name=f"Holder {token[-8:]}", pin_hash="x",
+            pin_set_at=now, is_active=True, created_at=now, updated_at=now,
+        )
+        key = CatalogApiKey(
             id=uuid.uuid4(), customer_name="Stage11 WP11.3", integration_name="adversarial-fixture",
             key_prefix=token[:12], key_hash=hash_api_key(token), scopes_json=["catalog.read"],
             status="active", created_at=now, updated_at=now,
-        ))
+        )
+        session.add_all([holder, key])
+        session.flush()
+        session.add(CatalogApiKeyHolder(api_key_id=key.id, key_kind="personal", holder_user_id=holder.id, claimed_at=now))
         session.commit()
     return token
 
