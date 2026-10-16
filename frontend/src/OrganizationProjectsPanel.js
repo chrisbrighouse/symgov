@@ -1,5 +1,7 @@
 import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
 
+import { LegendButton } from './legendSheet.js';
+
 import {
   codePointCount,
   projectMutationPayload as normalizeProjectMutationPayload,
@@ -152,6 +154,7 @@ export function OrganizationProjectsPanel({ isAdmin, api = DEFAULT_API, onContex
           createElement('strong', null, `${project.code} · ${project.name}`),
           createElement('p', { className: 'project-admin-muted' }, project.shortDescription || 'No description.'),
           createElement('p', { className: 'project-admin-muted' }, `Status: ${project.status}`),
+          createElement(LegendButton, { kind: 'project', id: project.id, code: project.code, title: `${project.code} · ${project.name}` }),
         ),
         isAdmin
           ? createElement('div', { className: 'project-admin-actions' },

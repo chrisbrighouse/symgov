@@ -3,12 +3,15 @@ from __future__ import annotations
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db_session
 from ..schemas import (APIErrorResponse, APIValidationErrorResponse, OrganizationDefaultSymbolSetRequest, OrganizationDefaultSymbolSetResponse, PagedSymbolSetResponse,
                        SymbolSetBuilderClipboardResponse, SymbolSetBuilderSearchResponse, SymbolSetCopyRequest, SymbolSetCreateRequest, SymbolSetItemsRequest, SymbolSetItemsResponse,
                        SymbolSetPatchRequest, SymbolSetProjectsRequest, SymbolSetProjectsResponse, SymbolSetResponse)
+from ..image_content import safe_image_response_headers
+from ..legend_sheet import build_legend_svg, set_legend
 from ..settings import SymgovAPISettings, get_settings
 from ..symbol_set_builder import search_symbol_set_builder, symbol_set_builder_clipboard
 from ..symbol_set_service import (clear_organization_default, copy_set, create_set, get_set, list_items, list_projects_for_set,
@@ -85,6 +88,12 @@ def replace_set_items(setId: uuid.UUID, data: SymbolSetItemsRequest, request: Re
     try:
         result = replace_items(session, request, settings, setId, data); session.commit(); return result
     except ValueError as exc: raise RequestValidationError([{"loc": ("body",), "msg": str(exc), "type": "value_error"}]) from exc
+
+
+@router.get("/{setId}/legend.svg", response_class=Response, responses={200: {"content": {"image/svg+xml": {}}}, 401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}})
+def legend(setId: uuid.UUID, request: Request, session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
+    sheet, _ = set_legend(session, request, settings, setId)
+    return Response(build_legend_svg(sheet), media_type="image/svg+xml", headers={**safe_image_response_headers(), "Content-Disposition": 'inline; filename="legend.svg"'})
 
 
 @router.get("/{setId}/projects", response_model=SymbolSetProjectsResponse, responses={401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}})

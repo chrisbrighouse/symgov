@@ -3,10 +3,13 @@ from __future__ import annotations
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from ..dependencies import get_db_session
 from ..effective_palette import effective_palette
+from ..image_content import safe_image_response_headers
+from ..legend_sheet import build_legend_svg, project_legend
 from ..project_service import create_project, get_project, list_projects, patch_project, project_dict
 from ..schemas import APIErrorResponse, APIValidationErrorResponse, EffectivePaletteResponse, PagedProjectResponse, ProjectCreateRequest, ProjectPatchRequest, ProjectResponse
 from ..settings import SymgovAPISettings, get_settings
@@ -56,3 +59,10 @@ def palette(projectId: uuid.UUID, request: Request, page_data=Depends(page_args)
     _, result = effective_palette(session, request, settings, projectId, set_code=set_code, page=page, page_size=page_size)
     session.commit()
     return result
+
+
+@router.get("/{projectId}/legend.svg", response_class=Response, responses={200: {"content": {"image/svg+xml": {}}}, 401: {"model": APIErrorResponse}, 403: {"model": APIErrorResponse}, 404: {"model": APIErrorResponse}, 422: {"model": APIValidationErrorResponse}})
+def legend(projectId: uuid.UUID, request: Request, set_code: str | None = Query(None, alias="setCode"), session: Session = Depends(get_db_session), settings: SymgovAPISettings = Depends(get_settings)):
+    sheet, _ = project_legend(session, request, settings, projectId, set_code=set_code)
+    session.commit()
+    return Response(build_legend_svg(sheet), media_type="image/svg+xml", headers={**safe_image_response_headers(), "Content-Disposition": 'inline; filename="legend.svg"'})

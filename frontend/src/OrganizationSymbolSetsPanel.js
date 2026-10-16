@@ -4,6 +4,7 @@ import {
   normalizeFacetValues,
   symbolSetMutationPayload as normalizeSymbolSetMutationPayload,
 } from './projectContext.js';
+import { LegendButton } from './legendSheet.js';
 import {
   clearOrganizationDefaultSymbolSet,
   copyOrganizationSymbolSet,
@@ -301,6 +302,9 @@ export function OrganizationSymbolSetsPanel({ isAdmin, api = DEFAULT_API, onCont
           createElement('p', { className: 'set-admin-muted' }, `Disciplines: ${(setRow.disciplines || []).join(', ') || 'none'}`),
           createElement('p', { className: 'set-admin-muted' }, `Use cases: ${(setRow.useCases || []).join(', ') || 'none'}`),
           createElement('p', { className: 'set-admin-muted' }, `Status: ${setRow.status}`),
+          setRow.status === 'active'
+            ? createElement(LegendButton, { kind: 'set', id: setRow.id, code: setRow.code, title: `${setRow.code} · ${setRow.name}` })
+            : null,
         ),
         isAdmin
           ? createElement('div', { className: 'set-admin-actions' },
