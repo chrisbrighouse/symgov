@@ -1136,6 +1136,78 @@ def find_connected_components(mask, width, height):
     return components
 
 
+def merge_nearby_components(components, gap):
+    """Join components whose boxes are within `gap` pixels into one region.
+
+    A symbol is often several separate pieces (a body and its arrow, the strokes
+    of a letter), and a word is several letters. Joining pieces that nearly
+    touch keeps a symbol whole and turns a word into one region, which
+    `region_looks_like_text` can then recognise, instead of one "symbol" per
+    letter. Boxes are compared grown by `gap`; the result is the union box and
+    the total ink of its parts.
+    """
+    parent = list(range(len(components)))
+
+    def find(index):
+        while parent[index] != index:
+            parent[index] = parent[parent[index]]
+            index = parent[index]
+        return index
+
+    def near(a, b):
+        return not (
+            a["x"] + a["width"] + gap < b["x"]
+            or b["x"] + b["width"] + gap < a["x"]
+            or a["y"] + a["height"] + gap < b["y"]
+            or b["y"] + b["height"] + gap < a["y"]
+        )
+
+    for i in range(len(components)):
+        for j in range(i + 1, len(components)):
+            if near(components[i], components[j]):
+                parent[find(j)] = find(i)
+
+    groups = {}
+    for index, component in enumerate(components):
+        groups.setdefault(find(index), []).append(component)
+    merged = []
+    for parts in groups.values():
+        min_x = min(part["x"] for part in parts)
+        min_y = min(part["y"] for part in parts)
+        max_x = max(part["x"] + part["width"] for part in parts)
+        max_y = max(part["y"] + part["height"] for part in parts)
+        merged.append({
+            "x": min_x,
+            "y": min_y,
+            "width": max_x - min_x,
+            "height": max_y - min_y,
+            "pixel_area": sum(part["pixel_area"] for part in parts),
+            "parts": len(parts),
+        })
+    return merged
+
+
+def region_looks_like_text(region, image_width, image_height):
+    """Whether a region is a word or title rather than a drawing.
+
+    Lettering is wide and short and densely inked; line art is sparse inside its
+    box, and a solid symbol is not wide and short. The thresholds are deliberately
+    narrow: a missed word becomes a proposed symbol a reviewer can delete, but a
+    dropped symbol is silently lost.
+    """
+    width, height = region["width"], region["height"]
+    if height <= 0:
+        return False
+    aspect = width / height
+    fill = region["pixel_area"] / max(1, width * height)
+    return (
+        aspect >= 2.0
+        and fill >= 0.3
+        and height <= max(24, image_height * 0.15)
+        and width <= image_width * 0.9
+    )
+
+
 def analyze_raster_sheet(asset_path):
     decoded_png = decode_png_rows(asset_path)
     width = decoded_png["width"]
@@ -1157,20 +1229,30 @@ def analyze_raster_sheet(asset_path):
     min_component_pixels = max(24, (width * height) // 2000)
     min_component_dimension = max(4, min(width, height) // 50)
 
+    strong_components = [
+        component
+        for component in components
+        if component["pixel_area"] >= min_component_pixels
+        and component["width"] >= min_component_dimension
+        and component["height"] >= min_component_dimension
+    ]
+    merged_regions = merge_nearby_components(strong_components, max(6, min(width, height) // 40))
+
     candidate_regions = []
-    for component in components:
-        if component["pixel_area"] < min_component_pixels:
-            continue
-        if component["width"] < min_component_dimension or component["height"] < min_component_dimension:
-            continue
-        candidate_regions.append({
-            "x": component["x"],
-            "y": component["y"],
-            "width": component["width"],
-            "height": component["height"],
-            "pixel_area": component["pixel_area"],
+    text_regions = []
+    for region in merged_regions:
+        entry = {
+            "x": region["x"],
+            "y": region["y"],
+            "width": region["width"],
+            "height": region["height"],
+            "pixel_area": region["pixel_area"],
             "confidence": 0.78,
-        })
+        }
+        if region_looks_like_text(region, width, height):
+            text_regions.append(entry)
+        else:
+            candidate_regions.append(entry)
 
     candidate_regions.sort(key=lambda item: (item["y"], item["x"]))
     estimated_count = len(candidate_regions)
@@ -1198,6 +1280,7 @@ def analyze_raster_sheet(asset_path):
         "foreground_pixel_ratio": foreground_ratio,
         "raw_component_count": len(components),
         "candidate_regions": candidate_regions,
+        "text_regions": text_regions,
         "estimated_symbol_count": estimated_count,
         "sheet_type": sheet_type,
         "split_recommended": split_recommended,
