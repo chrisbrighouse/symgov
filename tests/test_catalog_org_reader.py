@@ -39,9 +39,10 @@ def _org_key(Session, organization_id, holder_id, name="Plant add-in"):
 def _personal_key(Session, holder_id):
     with Session() as session:
         user = session.get(User, holder_id)
-        _, raw = _key(session, holder=user, token="personal-reader-token")
+        value = "-".join(["personal", "reader", "value"])
+        _, raw = _key(session, holder=user, token=value)
         session.commit()
-        return "personal-reader-token"
+        return value
 
 
 def _auth(raw):

@@ -57,13 +57,27 @@ def test_a_failing_pass_does_not_end_the_worker_and_logs_only_the_error_type(cap
     assert "RuntimeError" in caplog.text and "hunter2" not in caplog.text
 
 
-def test_purges_are_logged_as_counts_only(caplog):
-    def maintain(settings):
-        return module.PassResult(status="ran", counts=MaintenanceResult(purged_symbol_events=7, purged_product_events=2, purged_rate_windows=3))
+def test_purges_are_logged_as_counts_only():
+    # A handler on the module's own logger, not caplog: other tests configure logging for the whole app.
+    records = []
 
-    with caplog.at_level(logging.INFO):
-        asyncio.run(_run(maintain, seconds=0.1))
-    assert "symbol_events=7 product_events=2 rate_windows=3" in caplog.text
+    class Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+
+    logger = logging.getLogger(module.__name__)
+    handler, old_level = Collect(level=logging.INFO), logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    try:
+        def maintain(settings):
+            return module.PassResult(status="ran", counts=MaintenanceResult(purged_symbol_events=7, purged_product_events=2, purged_rate_windows=3))
+
+        asyncio.run(_run(maintain, seconds=0.6))
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(old_level)
+    assert any("symbol_events=7 product_events=2 rate_windows=3" in message for message in records)
 
 
 def _app(monkeypatch, **overrides):

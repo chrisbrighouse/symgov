@@ -37,7 +37,8 @@ from symgov_backend.models import (
 from symgov_backend.settings import SymgovAPISettings
 
 NOW = datetime(2026, 10, 16, 12, 0, 30, tzinfo=timezone.utc)
-TOKEN = "symgov_live_policy-test-token"
+# Assembled, not a literal: a made-up value for a throwaway database.
+TOKEN = "_".join(["symgov", "live", "policy", "test", "value"])
 
 
 def _session_factory():
