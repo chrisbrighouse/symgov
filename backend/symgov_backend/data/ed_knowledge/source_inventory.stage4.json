@@ -149,10 +149,10 @@
         "title": "What is on my profile page?",
         "topic": "user_setup",
         "source_path": "frontend/src/ProfilePage.jsx",
-        "source_version": "sha256:ad6b1b22ef18b2a493bc8ac9b3aae73c5112bfb288a43ab386618f871d1d73c8",
+        "source_version": "sha256:88dc4c90f187a3cba5348daaf54fae376a114d819ca9e8f560166922cfb6276b",
         "source_kind": "javascript",
-        "source_line_start": 118,
-        "source_line_end": 129
+        "source_line_start": 119,
+        "source_line_end": 130
       },
       {
         "id": "source:project.organization-visibility:v1",
@@ -319,10 +319,10 @@
         "title": "Why you cannot edit a symbol directly",
         "topic": "symbol",
         "source_path": "backend/symgov_backend/routes/published.py",
-        "source_version": "sha256:4be229891dce415dc92361fd75bab4c00bb668fd9f96f1b942563e076b790e2f",
+        "source_version": "sha256:323b3ecc1e6f84c0e30a1149343d12ff86eaa13a63c044d9f6ce0969c8832186",
         "source_kind": "python",
-        "source_line_start": 338,
-        "source_line_end": 358
+        "source_line_start": 341,
+        "source_line_end": 361
       }
     ]
   },
@@ -428,8 +428,8 @@
     {
       "source_id": "source:user_setup.profile.identity-and-subscription:v1",
       "rights_disposition": "repository_owned",
-      "approved_line_start": 118,
-      "approved_line_end": 129,
+      "approved_line_start": 119,
+      "approved_line_end": 130,
       "approved_symbol": null
     },
     {
@@ -547,8 +547,8 @@
     {
       "source_id": "source:symbol.published.comment-not-edit:v1",
       "rights_disposition": "repository_owned",
-      "approved_line_start": 338,
-      "approved_line_end": 358,
+      "approved_line_start": 341,
+      "approved_line_end": 361,
       "approved_symbol": null
     }
   ]
