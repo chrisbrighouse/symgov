@@ -1,10 +1,10 @@
 """What the Catalog's Details view reads about one published symbol.
 
 `GET /published/symbols/{ref}/details` returns the governed facts the published
-row does not carry: its classifications, its external mappings, the same
-concept drawn in other packs, the other symbols of its DEXPI class, the rights
-that let it be shared, where it came from, and its revision and approval
-history. Everything is read for a symbol that is already public, so nothing
+row does not carry: its classifications, its external mappings, the other
+drawings of the same concept (in any pack, its own included), the other
+symbols of its DEXPI class, the rights that let it be shared, where it came
+from, and its revision and approval history. Everything is read for a symbol that is already public, so nothing
 here decides visibility.
 
 What is deliberately left out, because this is served to every signed-in
@@ -234,7 +234,6 @@ def _same_concept(session: Session, row, concept_ids: list[uuid.UUID]) -> list[d
         PUBLISHED_SYMBOLS_SQL
         + """
         AND gs.id <> :symbol_id
-        AND pk.id::text <> :pack_id
         AND EXISTS (
             SELECT 1 FROM symbol_semantic_assignments ssa
             WHERE ssa.symbol_revision_id = sr.id
@@ -247,7 +246,6 @@ def _same_concept(session: Session, row, concept_ids: list[uuid.UUID]) -> list[d
         query,
         {
             "symbol_id": uuid.UUID(str(row.symbol_id)),
-            "pack_id": str(row.pack_id),
             "concept_ids": sorted(concept_ids, key=str),
         },
     ).all()

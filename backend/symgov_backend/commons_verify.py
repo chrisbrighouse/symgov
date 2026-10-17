@@ -42,7 +42,7 @@ from .models import (
     SymbolStandardLink,
 )
 from .published_catalog import PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL, choose_published_preview_asset
-from .published_symbol_details import load_published_symbol_details
+from .published_symbol_details import SAME_CONCEPT_LIMIT, load_published_symbol_details
 from .services import commons_ingestion as plan_module
 
 WORKBENCH_JS = Path(__file__).resolve().parents[2] / "frontend" / "src" / "catalogWorkbench.js"
@@ -365,37 +365,42 @@ def verify(
         if slug in concept_of:
             by_key[symbol["concept_key"]].add(concept_of[slug][0])
     split_keys = sorted(key for key, ids in by_key.items() if len(ids) > 1)
-    # Which published drawings in other packs carry each concept, read independently of Details.
-    other_packs: dict[Any, set[str]] = defaultdict(set)
-    other_revisions = {str(row.symbol_revision_id): row for row in rows if row.pack_code != plan["publication"]["pack_code"]}
-    if other_revisions:
-        for assignment in session.execute(
-            select(SymbolSemanticAssignment.symbol_revision_id, SymbolSemanticAssignment.semantic_concept_id).where(
-                SymbolSemanticAssignment.status == "verified",
-                SymbolSemanticAssignment.symbol_revision_id.in_([_uuid(value) for value in other_revisions]),
-            )
-        ).all():
-            other_packs[assignment.semantic_concept_id].add(other_revisions[str(assignment.symbol_revision_id)].slug)
-    unresolved, resolved, no_other_drawing = [], 0, []
+    # Which published drawings, in any pack, carry each concept, read independently of Details.
+    drawings: dict[Any, set[str]] = defaultdict(set)
+    revisions = {str(row.symbol_revision_id): row for row in rows}
+    for assignment in session.execute(
+        select(SymbolSemanticAssignment.symbol_revision_id, SymbolSemanticAssignment.semantic_concept_id).where(
+            SymbolSemanticAssignment.status == "verified",
+            SymbolSemanticAssignment.symbol_revision_id.in_([_uuid(value) for value in revisions]),
+        )
+    ).all():
+        drawings[assignment.semantic_concept_id].add(revisions[str(assignment.symbol_revision_id)].slug)
+    unresolved, no_other_drawing = [], []
+    resolved = {"reused": 0, "new": 0}
     for slug, row in commons_rows.items():
         symbol = by_slug[slug]
-        if plan_module.is_new_concept(symbol["concept_key"]) or slug not in concept_of:
+        if slug not in concept_of:
             continue
-        expected = other_packs.get(concept_of[slug][0], set())
-        shown = {item["slug"] for item in load_published_symbol_details(session, row)["sameConcept"]}
+        is_new = plan_module.is_new_concept(symbol["concept_key"])
+        expected = drawings.get(concept_of[slug][0], set()) - {slug}
         if not expected:
-            no_other_drawing.append(f"{slug} ({symbol['concept_key']})")
-        elif shown and shown <= expected:
-            resolved += 1
+            # A NEW: concept drawn once has nothing else to list.
+            if not is_new:
+                no_other_drawing.append(f"{slug} ({symbol['concept_key']})")
+            continue
+        shown = {item["slug"] for item in load_published_symbol_details(session, row)["sameConcept"]}
+        if shown <= expected and len(shown) == min(len(expected), SAME_CONCEPT_LIMIT):
+            resolved["new" if is_new else "reused"] += 1
         else:
             unresolved.append(f"{slug} ({symbol['concept_key']})")
     checks.append(_check(
         "concept-alternatives",
-        "A reused concept's other published drawings appear in Details; each shared NEW: key is one concept",
+        "Every other published drawing of a symbol's concept, in this pack or another, appears in Details; "
+        "each shared NEW: key is one concept",
         not split_keys and not unresolved,
-        {"reused_and_resolved": resolved, "unresolved": unresolved[:20], "new_keys_split_over_concepts": split_keys,
-         "reused_concept_with_no_other_published_drawing": no_other_drawing,
-         "note": "Details lists other drawings from other packs only, so symbols sharing a NEW: concept within this pack do not list each other."},
+        {"reused_and_resolved": resolved["reused"], "new_shared_and_resolved": resolved["new"],
+         "unresolved": unresolved[:20], "new_keys_split_over_concepts": split_keys,
+         "reused_concept_with_no_other_published_drawing": no_other_drawing},
     ))
 
     # 7. HVAC facet.

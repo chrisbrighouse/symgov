@@ -309,11 +309,44 @@ class TestSharedClassAndConcept:
         assert set(item) == {"catalogSymbolId", "name", "slug", "packCode", "pack", "previewUrl"}
         assert item["slug"] == PILOT_SLUG and item["packCode"] == "dexpi-ttc-1-2-1-3"
         assert [row["catalogSymbolId"] for row in details["sameConcept"]] == ["TST-1"]
-        assert details["sameConcept"][0]["packCode"] != "disc-dexpi"
+        assert details["sameConcept"][0]["packCode"] == "dexpi-ttc-1-2-1-3"
         # And the other way round: the pilot sees the DISC drawing.
         pilot_details = _details(client, "TST-1")
         assert [row["catalogSymbolId"] for row in pilot_details["sameConcept"]] == [published["nd0136"]]
         assert pilot_details["sameClass"]["total"] == 2
+
+    def test_drawings_of_one_concept_in_the_same_pack_list_each_other(self, env, reader, published):
+        # As the Commons duplicates do: two symbols of one pack whose verified
+        # primary assignments name the same concept.
+        client, _ = reader
+        nd0114_primary = (
+            "symbol_revision_id=(SELECT current_revision_id FROM governed_symbols WHERE slug='disc-dexpi-nd0114') "
+            "AND assignment_role='primary' AND status='verified'"
+        )
+        pump = (
+            "(SELECT semantic_concept_id FROM symbol_semantic_assignments WHERE assignment_role='primary' AND status='verified' "
+            "AND symbol_revision_id=(SELECT current_revision_id FROM governed_symbols WHERE slug='disc-dexpi-nd0136'))"
+        )
+        with env["engine"].begin() as connection:
+            original = connection.execute(text(
+                "SELECT id, semantic_concept_id FROM symbol_semantic_assignments WHERE " + nd0114_primary
+            )).one()
+            connection.execute(text(
+                "UPDATE symbol_semantic_assignments SET semantic_concept_id=" + pump + " WHERE id=:id"
+            ), {"id": original.id})
+        try:
+            details = _details(client, published["nd0136"])
+            listed = {row["catalogSymbolId"]: row["packCode"] for row in details["sameConcept"]}
+            assert listed == {"TST-1": "dexpi-ttc-1-2-1-3", published["nd0114"]: "disc-dexpi"}
+            peer = {row["catalogSymbolId"] for row in _details(client, published["nd0114"])["sameConcept"]}
+            assert peer == {"TST-1", published["nd0136"]}
+            pilot = {row["catalogSymbolId"] for row in _details(client, "TST-1")["sameConcept"]}
+            assert pilot == {published["nd0136"], published["nd0114"]}
+        finally:
+            with env["engine"].begin() as connection:
+                connection.execute(text(
+                    "UPDATE symbol_semantic_assignments SET semantic_concept_id=:concept WHERE id=:id"
+                ), {"concept": original.semantic_concept_id, "id": original.id})
 
     def test_same_class_total_is_what_the_catalog_returns_for_that_class(self, reader, published):
         client, _ = reader

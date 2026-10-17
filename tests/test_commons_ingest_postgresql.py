@@ -328,6 +328,9 @@ class TestPublication:
         # The verified secondary discipline reaches the served row and the facet.
         assert checks["fire-classification"]["detail"]["catalog_fire_facet"] == ["commons-1002"]
         assert checks["concept-alternatives"]["detail"]["reused_and_resolved"] == 1
+        # 1003 and 1004 share NEW:AnchorAgitator in the same pack and list each other.
+        assert checks["concept-alternatives"]["detail"]["new_shared_and_resolved"] == 2
+        assert checks["concept-alternatives"]["detail"]["unresolved"] == []
         assert checks["near-duplicates"]["status"] == "skipped"
         env["state"]["verify"] = output
 

@@ -55,7 +55,7 @@ function RelatedThumbnails({ items, label, resolveUrl }) {
 }
 
 // Classification & mappings: governed classifications, external mappings,
-// the same concept in other packs, and the DEXPI class's other symbols.
+// the other drawings of the same concept, and the DEXPI class's other symbols.
 export function ClassificationPanel({ details, status, resolveUrl, onShowAllInClass }) {
   const hasAny = details.classifications.length || details.externalMappings.length
     || details.sameConcept.length || details.sameClass;
