@@ -67,14 +67,34 @@ RIGHTS_ATTRIBUTION_COLUMN_SQL = """(
 GOVERNED_DISCIPLINE_COLUMN_SQL = governed_assignment_exists_sql("ENGINEERING-DISCIPLINE") + " AS governed_discipline"
 GOVERNED_CATEGORY_COLUMN_SQL = governed_assignment_exists_sql("SYMBOL-CATEGORY-FAMILY") + " AS governed_category"
 
+# The extra disciplines a symbol is governed into: the labels of its `verified`
+# secondary ENGINEERING-DISCIPLINE assignments (a fire damper is HVAC first and
+# Fire & Life Safety second). The facets list the symbol under these as well as
+# under its one discipline column. A `proposed` secondary does not count.
+GOVERNED_SECONDARY_DISCIPLINES_COLUMN_SQL = """ARRAY(
+            SELECT cn.preferred_label
+            FROM symbol_revision_classifications src
+            JOIN classification_schemes cs ON cs.id = src.classification_scheme_id
+            JOIN classification_nodes cn ON cn.id = src.classification_node_id
+            WHERE src.symbol_revision_id = sr.id
+              AND src.assignment_role = 'secondary'
+              AND src.status = 'verified'
+              AND cs.scheme_code = 'ENGINEERING-DISCIPLINE'
+            ORDER BY cn.preferred_label
+        ) AS governed_secondary_disciplines"""
+
 
 def governed_taxonomy_for_row(row) -> dict | None:
-    """`{"discipline": bool, "category": bool}`, or None when the row carries no flags."""
+    """`{"discipline": bool, "category": bool, "secondaryDisciplines": [..]}`, or None when the row carries no flags."""
     discipline = getattr(row, "governed_discipline", None)
     category = getattr(row, "governed_category", None)
     if discipline is None and category is None:
         return None
-    return {"discipline": bool(discipline), "category": bool(category)}
+    governed = {"discipline": bool(discipline), "category": bool(category)}
+    secondary = getattr(row, "governed_secondary_disciplines", None)
+    if secondary:
+        governed["secondaryDisciplines"] = list(secondary)
+    return governed
 
 
 PUBLISHED_SYMBOLS_SQL = """
@@ -132,6 +152,8 @@ PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL = PUBLISHED_SYMBOLS_SQL.replace(
     + GOVERNED_DISCIPLINE_COLUMN_SQL
     + ",\n        "
     + GOVERNED_CATEGORY_COLUMN_SQL
+    + ",\n        "
+    + GOVERNED_SECONDARY_DISCIPLINES_COLUMN_SQL
     + ",\n        "
     + RIGHTS_ATTRIBUTION_COLUMN_SQL
     + "\n    FROM published_pages pp",

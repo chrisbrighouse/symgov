@@ -374,6 +374,10 @@ def catalog_taxonomy_for_symbol(symbol: Any = None) -> dict[str, list[str]]:
         r"fire|smoke|heat|detector|call\s?point|break\s?glass|sounder|beacon|alarm", context
     ):
         disciplines.append("Fire & Life Safety")
+    governed = _get(symbol, "governedTaxonomy")
+    secondary = governed.get("secondaryDisciplines") if isinstance(governed, dict) else None
+    for value in secondary or []:
+        disciplines.extend(normalize_catalog_discipline(value))
 
     categories: list[str] = []
     if raw_categories:

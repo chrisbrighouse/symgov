@@ -37,8 +37,10 @@ concepts are final; the importer refuses a value it cannot honour and never corr
   reported in the dry run and not merged. A `NEW:` key that exactly names an existing concept stops the import.
 * **Classification**, all `rule`, verified: the curated discipline and category, the vector-drawing representation
   type, and for the fire, smoke and fire-and-smoke dampers a **secondary** ENGINEERING-DISCIPLINE assignment to
-  Fire & Life Safety. The symbol's own discipline stays HVAC, so the Catalog's discipline facet lists the dampers under
-  HVAC only: the facet reads one discipline per symbol.
+  Fire & Life Safety. The symbol's own discipline stays HVAC. The Catalog's discipline facet lists the dampers under
+  HVAC and under Fire & Life Safety: from facet rules version 5 the facet also reads a symbol's **verified secondary**
+  discipline assignments (a `proposed` secondary does not count). Existing rows need the facet backfill to pick this up;
+  the deploy script runs it.
 
 ## What blocks, and what is held back
 

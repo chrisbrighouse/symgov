@@ -370,3 +370,15 @@ test('the discipline list matches catalog_facets.py and catalog_taxonomy.py exac
   assert.ok(CATALOG_DISCIPLINE_ORDER.includes('HVAC'));
   assert.equal(canonicalDiscipline('hvac'), 'HVAC');
 });
+
+test('a verified secondary discipline is listed beside the governed primary one', () => {
+  const damper = {
+    name: 'Fire Damper',
+    category: 'Equipment',
+    discipline: 'HVAC',
+    governedTaxonomy: { discipline: true, category: true, secondaryDisciplines: ['Fire & Life Safety'] }
+  };
+  assert.deepEqual([...catalogTaxonomyForSymbol(damper).disciplines].sort(), ['Fire & Life Safety', 'HVAC']);
+  const plain = { ...damper, governedTaxonomy: { discipline: true, category: true } };
+  assert.deepEqual(catalogTaxonomyForSymbol(plain).disciplines, ['HVAC']);
+});

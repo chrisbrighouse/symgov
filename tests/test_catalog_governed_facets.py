@@ -15,6 +15,7 @@ from symgov_backend.catalog_taxonomy import catalog_taxonomy_for_symbol as api_t
 from symgov_backend.published_catalog import (
     GOVERNED_CATEGORY_COLUMN_SQL,
     GOVERNED_DISCIPLINE_COLUMN_SQL,
+    GOVERNED_SECONDARY_DISCIPLINES_COLUMN_SQL,
     PUBLISHED_SYMBOLS_SQL,
     PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL,
     RIGHTS_ATTRIBUTION_COLUMN_SQL,
@@ -91,3 +92,53 @@ def test_the_base_published_sql_is_left_exactly_as_it_was():
     for needle in ("symbol_revision_classifications", "rights_records", "source_package_entries", "governed_discipline", "governed_category"):
         assert needle not in PUBLISHED_SYMBOLS_SQL
     assert PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL.startswith(PUBLISHED_SYMBOLS_SQL[: PUBLISHED_SYMBOLS_SQL.index("AS last_updated_at")])
+
+
+def _fire_damper(governed):
+    return {
+        "name": "Fire Damper",
+        "displayName": "S-150",
+        "category": "Equipment",
+        "discipline": "HVAC",
+        "summary": "Fire damper, from the Wikimedia Commons import.",
+        "governedTaxonomy": governed,
+    }
+
+
+@pytest.mark.parametrize("taxonomy", [browser_taxonomy, api_taxonomy])
+def test_verified_secondary_discipline_is_listed_beside_the_primary(taxonomy):
+    governed = {"discipline": True, "category": True, "secondaryDisciplines": ["Fire & Life Safety"]}
+    result = taxonomy(_fire_damper(governed))
+    assert set(result["disciplines"]) == {"HVAC", "Fire & Life Safety"}
+
+
+@pytest.mark.parametrize("taxonomy", [browser_taxonomy, api_taxonomy])
+def test_no_secondary_discipline_leaves_the_primary_alone(taxonomy):
+    result = taxonomy(_fire_damper({"discipline": True, "category": True}))
+    assert result["disciplines"] == ["HVAC"]
+
+
+@pytest.mark.parametrize("taxonomy", [browser_taxonomy, api_taxonomy])
+def test_a_secondary_equal_to_the_primary_is_not_duplicated(taxonomy):
+    governed = {"discipline": True, "category": True, "secondaryDisciplines": ["HVAC"]}
+    assert taxonomy(_fire_damper(governed))["disciplines"] == ["HVAC"]
+
+
+def test_secondary_disciplines_come_from_the_published_row_column():
+    row = SimpleNamespace(
+        governed_discipline=True,
+        governed_category=True,
+        governed_secondary_disciplines=["Fire & Life Safety"],
+    )
+    assert governed_taxonomy_for_row(row)["secondaryDisciplines"] == ["Fire & Life Safety"]
+    row.governed_secondary_disciplines = []
+    assert "secondaryDisciplines" not in governed_taxonomy_for_row(row)
+
+
+def test_the_secondary_column_reads_verified_secondary_discipline_assignments_only():
+    sql = " ".join(GOVERNED_SECONDARY_DISCIPLINES_COLUMN_SQL.split())
+    assert "assignment_role = 'secondary'" in sql
+    assert "src.status = 'verified'" in sql
+    assert "scheme_code = 'ENGINEERING-DISCIPLINE'" in sql
+    assert GOVERNED_SECONDARY_DISCIPLINES_COLUMN_SQL in PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
+    assert GOVERNED_SECONDARY_DISCIPLINES_COLUMN_SQL not in PUBLISHED_SYMBOLS_SQL

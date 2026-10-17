@@ -325,6 +325,8 @@ class TestPublication:
         assert checks["all-published"]["detail"]["unpublished_slugs"] == ["commons-1007"]
         assert checks["hvac-facet"]["detail"] == {"hvac_facet": 1, "expected": 1, "stored_facet_rows_with_hvac": 1}
         assert checks["fire-classification"]["detail"]["fire_dampers"] == ["commons-1002"]
+        # The verified secondary discipline reaches the served row and the facet.
+        assert checks["fire-classification"]["detail"]["catalog_fire_facet"] == ["commons-1002"]
         assert checks["concept-alternatives"]["detail"]["reused_and_resolved"] == 1
         assert checks["near-duplicates"]["status"] == "skipped"
         env["state"]["verify"] = output

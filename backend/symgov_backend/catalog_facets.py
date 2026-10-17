@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 
 # Bump when any rule below changes. Rows computed under another version are
 # treated as missing and recomputed on the next search (or by the backfill).
-CATALOG_FACET_RULES_VERSION = 4  # 2: canonical S-<n> display ID; 3: word-split search text (P-01); 4: governed category/discipline win over keyword rules
+CATALOG_FACET_RULES_VERSION = 5  # 2: canonical S-<n> display ID; 3: word-split search text (P-01); 4: governed category/discipline win over keyword rules; 5: verified secondary disciplines are listed too
 
 CATALOG_DISCIPLINE_ORDER = [
     "Electrical",
@@ -279,6 +279,13 @@ def _governed(symbol: Any, field: str) -> bool:
     return isinstance(governed, dict) and _truthy(governed.get(field))
 
 
+def _secondary_disciplines(symbol: Any) -> list[str]:
+    """The governed secondary disciplines, as Catalog discipline labels."""
+    governed = _get(symbol, "governedTaxonomy")
+    values = governed.get("secondaryDisciplines") if isinstance(governed, dict) else None
+    return [label for value in _list(values) for label in normalize_catalog_discipline(value)]
+
+
 def symbol_context_text(symbol: dict) -> str:
     payload = _get(symbol, "payload") or {}
     return " ".join(
@@ -417,6 +424,7 @@ def catalog_taxonomy_for_symbol(symbol: dict) -> dict[str, list[str]]:
         disciplines.extend(normalize_catalog_discipline(value))
     if not _governed(symbol, "discipline") and _FIRE_CONTEXT.search(context):
         disciplines.append("Fire & Life Safety")
+    disciplines.extend(_secondary_disciplines(symbol))
     categories = list(normalize_catalog_category(symbol.get("category"), symbol))
     for value in _list(symbol.get("categories")):
         categories.extend(normalize_catalog_category(value, symbol))
@@ -656,18 +664,24 @@ _SOURCE_ROWS_SQL_TEMPLATE = """
         sr.rationale,
         sr.catalog_facet_generation AS revision_generation,
         {governed_discipline},
-        {governed_category}
+        {governed_category},
+        {governed_secondary_disciplines}
     FROM symbol_revisions sr
     JOIN governed_symbols gs ON gs.id = sr.symbol_id
     WHERE sr.id IN :revision_ids
 """
 
 def _source_rows_sql() -> str:
-    from .published_catalog import GOVERNED_CATEGORY_COLUMN_SQL, GOVERNED_DISCIPLINE_COLUMN_SQL
+    from .published_catalog import (
+        GOVERNED_CATEGORY_COLUMN_SQL,
+        GOVERNED_DISCIPLINE_COLUMN_SQL,
+        GOVERNED_SECONDARY_DISCIPLINES_COLUMN_SQL,
+    )
 
     return _SOURCE_ROWS_SQL_TEMPLATE.format(
         governed_discipline=GOVERNED_DISCIPLINE_COLUMN_SQL,
         governed_category=GOVERNED_CATEGORY_COLUMN_SQL,
+        governed_secondary_disciplines=GOVERNED_SECONDARY_DISCIPLINES_COLUMN_SQL,
     )
 
 
@@ -731,6 +745,7 @@ def _served_row(source) -> dict:
             rationale=source.rationale,
             governed_discipline=source.governed_discipline,
             governed_category=source.governed_category,
+            governed_secondary_disciplines=source.governed_secondary_disciplines,
             page_id=None,
             page_code=None,
             page_title=None,

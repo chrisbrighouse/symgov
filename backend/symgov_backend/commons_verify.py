@@ -446,7 +446,7 @@ def verify(
         "The fire, smoke and fire-and-smoke dampers carry a verified secondary Fire & Life Safety discipline",
         bool(fire_slugs) and not fire_missing,
         {"fire_dampers": fire_slugs, "missing": fire_missing, "catalog_fire_facet": fire_facet,
-         "note": "The Catalog facet reads the symbol's one discipline column (HVAC); the secondary assignment is the governed record."},
+         "note": "The symbol's own discipline column stays HVAC; the verified secondary assignment is the governed record, and the Catalog facet lists it too (facet rules version 5)."},
     ))
 
     # 10. Drops and exclusions are absent.

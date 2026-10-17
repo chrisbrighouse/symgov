@@ -273,6 +273,12 @@ export function catalogTaxonomyForSymbol(symbol = {}) {
   if (!isGoverned(symbol, 'discipline') && /fire|smoke|heat|detector|call\s?point|break\s?glass|sounder|beacon|alarm/.test(context)) {
     disciplines.push('Fire & Life Safety');
   }
+  // Verified secondary disciplines (a fire damper is HVAC first, Fire & Life
+  // Safety second). Mirrors `_secondary_disciplines` in catalog_facets.py.
+  const secondary = symbol?.governedTaxonomy?.secondaryDisciplines;
+  if (Array.isArray(secondary)) {
+    disciplines.push(...secondary.flatMap(normalizeCatalogDiscipline));
+  }
   const categories = [
     ...normalizeCatalogCategory(symbol.category, symbol),
     ...(Array.isArray(symbol.categories) ? symbol.categories.flatMap((category) => normalizeCatalogCategory(category, symbol)) : [])
