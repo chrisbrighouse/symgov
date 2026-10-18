@@ -1,4 +1,4 @@
-"""Import the curated Wikimedia Commons P&ID symbols: `fix-svgs`, `apply`, `upload`, `gate`, `publish`.
+"""Import the curated Wikimedia Commons P&ID symbols: `fix-svgs`, `apply`, `upload`, `gate`, `publish`, `assert-standard`.
 
 `services/commons_ingestion` decides what is recorded; this writes it, the way
 `disc_dexpi_ingest` writes the DISC DEXPI library. It reuses that importer's
@@ -19,6 +19,12 @@ is the gate working.
 
 Order: `fix-svgs`, `apply --dry-run`, `apply`, `upload`, approve the rights
 record, `gate`, `publish`, `verify`, `report`.
+
+**Symbols held without a standard.** `publish --permitted-only` leaves behind
+the symbols whose file cites no standard. `assert-standard` records the
+product owner's comparison of each one (`curation/comparisons.csv`, see
+`plan_comparisons`) as a verified `comparison_only` link; a second
+`publish --permitted-only` then publishes them. `--dry-run` writes nothing.
 """
 from __future__ import annotations
 
@@ -57,6 +63,7 @@ from .models import (
     SourcePackage,
     StandardVersion,
     SymbolRevision,
+    SymbolStandardLink,
 )
 from .publication_gate import describe_refusal, enforce_publication_gate
 from .rights_provenance import propose_rights_record, record_asset_transformation
@@ -65,11 +72,16 @@ from .semantic_concepts import create_semantic_concept, transition_semantic_conc
 from .services import commons_ingestion as plan_module
 from .services.commons_ingestion import (
     CATEGORY_SCHEME_CODE,
+    COMPARISON_RELATIONSHIP_TYPE,
+    COMPARISON_VERIFICATION_METHOD,
+    COMPARISONS_FILE,
     CLASSIFICATION_RULE_METHOD,
     DISCIPLINE_SCHEME_CODE,
     FIRE_DISCIPLINE,
     FIX_TOOL_NAME,
     FIX_TOOL_VERSION,
+    ISO_10628_CODE,
+    ISO_10628_EDITION,
     LINK_VERIFICATION_METHOD,
     PACKAGE_CODE,
     PUBLICATION_PACK_CODE,
@@ -132,12 +144,18 @@ def load_package(directory: str | Path) -> dict[str, Any]:
     with worksheet_path.open(encoding="utf-8", newline="") as handle:
         worksheet = list(csv.DictReader(handle))
     fixed_dir = root / FIXED_DIRECTORY
+    comparisons_path = root / "curation" / COMPARISONS_FILE
+    comparisons = []
+    if comparisons_path.exists():
+        with comparisons_path.open(encoding="utf-8", newline="") as handle:
+            comparisons = list(csv.DictReader(handle))
     return {
         "root": str(root),
         "manifest": json.loads(manifest_path.read_text(encoding="utf-8")),
         "worksheet": worksheet,
         "svg": {f"svg/{path.name}": path.read_bytes() for path in sorted(svg_dir.glob("*.svg"))},
         "fixed": {path.name: path.read_bytes() for path in sorted(fixed_dir.glob("*.svg"))} if fixed_dir.is_dir() else {},
+        "comparisons": comparisons,
     }
 
 
@@ -1016,6 +1034,121 @@ def publish(
 
 
 # --------------------------------------------------------------------------
+# Comparison links for the symbols held without a standard.
+# --------------------------------------------------------------------------
+
+
+def _iso_10628_edition(session: Session) -> StandardVersion | None:
+    standard = get_standard(session, ISO_10628_CODE)
+    if standard is None:
+        return None
+    return session.execute(
+        select(StandardVersion).where(
+            StandardVersion.standard_id == standard.id, StandardVersion.version_label == ISO_10628_EDITION
+        )
+    ).scalar_one_or_none()
+
+
+def assert_comparisons(
+    session: Session, *, plan: dict[str, Any], comparisons: list[dict[str, Any]], actor_id: uuid.UUID,
+    occurred_at: datetime, dry_run: bool,
+) -> dict[str, Any]:
+    """Record each `compared` row as a verified `comparison_only` link, or refuse and write nothing.
+
+    The link goes on the symbol's held revision, which must still be approved
+    and unpublished. Every reference must already be published, because the
+    comparison was made against what the Catalog shows. A revision that
+    already carries the link is left alone, so a re-run changes nothing.
+    """
+    _require_actor(session, actor_id)
+    decided = plan_module.plan_comparisons(plan, comparisons)
+    problems = list(decided["problems"])
+    edition = _iso_10628_edition(session)
+    if edition is None:
+        problems.append(f"{ISO_10628_CODE}:{ISO_10628_EDITION} is not in this database")
+
+    reference_slugs = sorted({ref["slug"] for row in decided["compared"] for ref in row["references"]})
+    published_references = {
+        row.slug: row.catalog_symbol_id
+        for row in session.execute(
+            select(GovernedSymbol.slug, GovernedSymbol.catalog_symbol_id)
+            .join(SymbolRevision, SymbolRevision.id == GovernedSymbol.current_revision_id)
+            .where(GovernedSymbol.slug.in_(reference_slugs), SymbolRevision.lifecycle_state == "published")
+        )
+    }
+    latest = {symbol.slug: revision for symbol, revision in _latest_revisions(session, plan)}
+    to_assert, unchanged = [], []
+    for row in decided["compared"]:
+        revision = latest.get(row["slug"])
+        if revision is None:
+            problems.append(f"{row['slug']}: not recorded; run apply first")
+            continue
+        missing = [ref["slug"] for ref in row["references"] if not published_references.get(ref["slug"])]
+        if missing:
+            problems.append(f"{row['slug']}: reference not published: {', '.join(missing)}")
+            continue
+        existing = edition is not None and session.execute(
+            select(SymbolStandardLink.id).where(
+                SymbolStandardLink.symbol_revision_id == revision.id,
+                SymbolStandardLink.standard_version_id == edition.id,
+                SymbolStandardLink.relationship_type == COMPARISON_RELATIONSHIP_TYPE,
+                SymbolStandardLink.assertion_status.in_(("proposed", "verified")),
+            )
+        ).first()
+        if existing:
+            unchanged.append(row["slug"])
+            continue
+        if revision.lifecycle_state != REVISION_LIFECYCLE_STATE:
+            problems.append(f"{row['slug']}: latest revision is {revision.lifecycle_state}, not {REVISION_LIFECYCLE_STATE}")
+            continue
+        to_assert.append((row, revision))
+    if problems:
+        raise Blocked(problems)
+
+    asserted = []
+    for row, revision in to_assert:
+        compared_with = [
+            {"slug": ref["slug"], "catalog_symbol_id": published_references[ref["slug"]], "name": ref["name"]}
+            for ref in row["references"]
+        ]
+        identifiers = ", ".join(f"{item['catalog_symbol_id']} ({item['name']})" for item in compared_with)
+        if not dry_run:
+            link = assert_symbol_standard_link(
+                session,
+                symbol_revision_id=revision.id,
+                standard_version_id=edition.id,
+                relationship_type=COMPARISON_RELATIONSHIP_TYPE,
+                asserted_at=occurred_at,
+                source_uri=row["page_url"],
+                notes=(
+                    f"Compared with the ISO 10628-2 drawings in the Catalog: {identifiers}. "
+                    "Records that comparison only; the Commons file does not claim the standard."
+                )[:2000],
+                evidence={
+                    "basis": "product_owner_comparison",
+                    "source": f"curation/{COMPARISONS_FILE}",
+                    "finding": row["finding"],
+                    "compared_with": compared_with,
+                    "commons_pageid": row["pageid"],
+                },
+            )
+            session.flush()
+            transition_symbol_standard_link(
+                session, link.id, target_status="verified", occurred_at=occurred_at,
+                verification_method=COMPARISON_VERIFICATION_METHOD, verified_by_user_id=actor_id,
+            )
+        asserted.append({"slug": row["slug"], "compared_with": [item["catalog_symbol_id"] for item in compared_with]})
+    session.flush()
+    return {
+        "mode": "assert-standard-dry-run" if dry_run else "assert-standard",
+        "asserted_count": len(asserted),
+        "asserted": asserted,
+        "unchanged": unchanged,
+        "held_by_decision": decided["held_by_decision"],
+    }
+
+
+# --------------------------------------------------------------------------
 # The command.
 # --------------------------------------------------------------------------
 
@@ -1049,6 +1182,14 @@ def _parser() -> argparse.ArgumentParser:
                 "--permitted-only", action="store_true",
                 help="Leave symbols the gate refuses only for want of a standard link unpublished, and publish the rest",
             )
+    compare = commands.add_parser(
+        "assert-standard",
+        help=f"Record curation/{COMPARISONS_FILE} as verified comparison_only links to ISO 10628 (held symbols only)",
+    )
+    compare.add_argument("--package", required=True)
+    compare.add_argument("--actor-id", type=uuid.UUID, required=True, help="The product owner who made the comparison")
+    compare.add_argument("--dry-run", action="store_true", help="Read and decide; write nothing")
+    compare.add_argument("--output")
     verify = commands.add_parser("verify", help="Run the acceptance checks against the database (reads only)")
     verify.add_argument("--package", required=True)
     verify.add_argument("--output")
@@ -1082,7 +1223,7 @@ def _write_output(report: dict[str, Any], path: str | None) -> None:
 
 def _printable(report: dict[str, Any]) -> dict[str, Any]:
     printable = dict(report)
-    for key in ("symbols_created", "symbols_revised", "published", "concepts_created", "concepts_reused", "files", "reused"):
+    for key in ("symbols_created", "symbols_revised", "published", "concepts_created", "concepts_reused", "files", "reused", "asserted"):
         if isinstance(printable.get(key), list):
             printable[key] = len(printable[key])
     if isinstance(printable.get("concepts"), dict) and isinstance(printable["concepts"].get("reused"), list):
@@ -1159,6 +1300,14 @@ def main(argv=None) -> int:
                 with Session(engine) as session:
                     report = upload_assets(session, plan, package_data, storage_env_file=_storage_env_file(args), dry_run=args.dry_run)
                     session.rollback()
+            elif args.command == "assert-standard":
+                with Session(engine) as session, session.begin():
+                    report = assert_comparisons(
+                        session, plan=plan, comparisons=package_data["comparisons"], actor_id=args.actor_id,
+                        occurred_at=now, dry_run=args.dry_run,
+                    )
+                    if args.dry_run:
+                        session.rollback()
             elif args.command == "gate":
                 with Session(engine) as session, session.begin():
                     report = evaluate_gate(session, plan=plan, occurred_at=now, actor_id=args.actor_id)

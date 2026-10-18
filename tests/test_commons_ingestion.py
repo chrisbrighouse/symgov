@@ -268,3 +268,48 @@ class TestDisciplineParity:
         drifted = tmp_path / "catalogWorkbench.js"
         drifted.write_text("export const CATALOG_DISCIPLINE_ORDER = [\n  'Electrical',\n  'HVAC'\n];\n")
         assert commons_verify.discipline_parity(drifted)["agree"] is False
+
+
+class TestComparisons:
+    """`curation/comparisons.csv`: the product owner's decision on each symbol held without a standard."""
+
+    def test_a_compared_row_names_its_iso_references(self, plan):
+        decided = plan_module.plan_comparisons(
+            plan, [{"pageid": "1007", "decision": "compared", "reference_pageids": "1001; 1003", "finding": " Same form. "}]
+        )
+        assert decided["problems"] == [] and decided["held_by_decision"] == {}
+        (row,) = decided["compared"]
+        assert row["slug"] == "commons-1007" and row["finding"] == "Same form."
+        assert [ref["slug"] for ref in row["references"]] == ["commons-1001", "commons-1003"]
+
+    def test_hold_and_drop_are_recorded_and_need_no_reference(self, plan):
+        decided = plan_module.plan_comparisons(plan, [{"pageid": "1007", "decision": "drop"}])
+        assert decided == {"compared": [], "held_by_decision": {"commons-1007": "drop"}, "problems": []}
+
+    @pytest.mark.parametrize(
+        ("row", "problem"),
+        [
+            ({"pageid": "1001", "decision": "compared", "reference_pageids": "1003", "finding": "x"}, "already cites a standard"),
+            ({"pageid": "9999", "decision": "hold"}, "not a planned symbol"),
+            ({"pageid": "1007", "decision": "publish"}, "decision must be one of"),
+            ({"pageid": "1007", "decision": "compared", "reference_pageids": "", "finding": "x"}, "at least one reference"),
+            ({"pageid": "1007", "decision": "compared", "reference_pageids": "1001", "finding": ""}, "needs a finding"),
+            # 1002 cites DIN EN 12792, not ISO 10628-2.
+            ({"pageid": "1007", "decision": "compared", "reference_pageids": "1002", "finding": "x"}, "not a planned ISO 10628-2 drawing"),
+        ],
+    )
+    def test_a_row_it_cannot_honour_is_a_problem(self, plan, row, problem):
+        decided = plan_module.plan_comparisons(plan, [row])
+        assert len(decided["problems"]) >= 1 and problem in decided["problems"][0]
+
+    def test_a_pageid_listed_twice_is_a_problem(self, plan):
+        rows = [{"pageid": "1007", "decision": "hold"}, {"pageid": "1007", "decision": "drop"}]
+        assert "more than once" in plan_module.plan_comparisons(plan, rows)["problems"][0]
+
+    def test_the_package_reads_the_file_when_present(self, package, tmp_path):
+        directory = write_package(package, tmp_path / "package")
+        assert ingest.load_package(directory)["comparisons"] == []
+        (directory / "curation" / "comparisons.csv").write_text("pageid,decision,reference_pageids,finding\n1007,hold,,\n")
+        assert ingest.load_package(directory)["comparisons"] == [
+            {"pageid": "1007", "decision": "hold", "reference_pageids": "", "finding": ""}
+        ]

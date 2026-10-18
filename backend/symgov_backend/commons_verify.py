@@ -272,17 +272,22 @@ def verify(
     rows = _published_rows(session)
     commons_rows = {row.slug: row for row in rows if row.pack_code == plan["publication"]["pack_code"]}
 
-    # 1. Every planned symbol is published, minus the excluded files.
+    # 1. Every planned symbol is published, minus the excluded files and the
+    #    ones the product owner decided to hold or drop (comparisons.csv).
+    comparisons = plan_module.plan_comparisons(plan, package_data.get("comparisons") or [])
+    held_by_decision = comparisons["held_by_decision"]
     unpublished = sorted(set(by_slug) - set(commons_rows))
-    reasons = _latest_gate_reasons(session, unpublished)
+    undecided = [slug for slug in unpublished if slug not in held_by_decision]
+    reasons = _latest_gate_reasons(session, undecided)
     checks.append(_check(
         "all-published",
         f"All {len(symbols)} planned symbols are published in \"{plan['publication']['pack_title']}\" "
-        f"({len(plan['excluded'])} excluded by the fix step)",
-        not unpublished,
-        {"published": len(commons_rows), "expected": len(symbols), "unpublished": len(unpublished),
-         "unpublished_by_gate_reason": dict(Counter(",".join(reasons.get(slug) or ["no gate evaluation"]) for slug in unpublished)),
-         "unpublished_slugs": unpublished[:80]},
+        f"({len(plan['excluded'])} excluded by the fix step), except those held or dropped by decision",
+        not undecided,
+        {"published": len(commons_rows), "expected": len(symbols), "unpublished": len(undecided),
+         "held_by_decision": dict(Counter(held_by_decision[slug] for slug in unpublished if slug in held_by_decision)),
+         "unpublished_by_gate_reason": dict(Counter(",".join(reasons.get(slug) or ["no gate evaluation"]) for slug in undecided)),
+         "unpublished_slugs": undecided[:80]},
     ))
 
     # 2. Stored as planned, with the Commons provenance block.
@@ -319,7 +324,8 @@ def verify(
          "decided": bool(getattr(record, "decided_by_user_id", None)), "evidence_files": len(files), "complete": complete},
     ))
 
-    # 4. Standard links: vendor_implementation only, verified.
+    # 4. Standard links: vendor_implementation for a cited standard, verified;
+    #    comparison_only to ISO 10628 for a symbol the product owner compared.
     link_rows = session.execute(
         select(GovernedSymbol.slug, SymbolStandardLink.relationship_type, SymbolStandardLink.assertion_status,
                Standard.standard_code, StandardVersion.version_label)
@@ -331,18 +337,25 @@ def verify(
     links_by_slug: dict[str, list[Any]] = defaultdict(list)
     for item in link_rows:
         links_by_slug[item.slug].append(item)
+    compared = {row["slug"] for row in comparisons["compared"]}
     link_problems = []
     for slug, symbol in by_slug.items():
         expected = sorted((a["standard_code"], a["version_label"]) for a in symbol["standards"])
+        if slug in compared:
+            expected = [(plan_module.ISO_10628_CODE, plan_module.ISO_10628_EDITION)]
         found = sorted((l.standard_code, l.version_label) for l in links_by_slug.get(slug, []) if l.assertion_status == "verified")
         if expected != found:
             link_problems.append(f"{slug}: expected {expected}, found {found}")
-    normative = [l.slug for l in link_rows if l.relationship_type != "vendor_implementation"]
+    wrong_type = [
+        l.slug for l in link_rows
+        if l.relationship_type != ("comparison_only" if l.slug in compared else "vendor_implementation")
+    ]
     iso = sum(1 for l in link_rows if l.standard_code == plan_module.ISO_10628_CODE and l.assertion_status == "verified")
-    checks.append(_check("standard-links", "Each cited standard is a verified vendor_implementation link; none is normative_definition",
-                         not link_problems and not normative,
-                         {"iso_10628": iso, "by_standard": dict(Counter(l.standard_code for l in link_rows)),
-                          "problems": link_problems[:10], "not_vendor_implementation": normative[:10]}))
+    checks.append(_check("standard-links", "Each cited standard is a verified vendor_implementation link, each compared symbol "
+                         "a verified comparison_only link; none is normative_definition",
+                         not link_problems and not wrong_type,
+                         {"iso_10628": iso, "comparison_only": sum(1 for l in link_rows if l.relationship_type == "comparison_only"), "by_standard": dict(Counter(l.standard_code for l in link_rows)),
+                          "problems": link_problems[:10], "wrong_relationship_type": wrong_type[:10]}))
 
     # 5. Concepts.
     concept_rows = session.execute(

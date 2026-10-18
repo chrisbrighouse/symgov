@@ -181,6 +181,15 @@ def _plan(env):
     return plan_module.plan_import(ingest.load_package(env["directory"]))
 
 
+def _write_comparisons(env, rows):
+    """Write `curation/comparisons.csv` with these data rows, or remove it for None."""
+    path = Path(env["directory"]) / "curation" / plan_module.COMPARISONS_FILE
+    if rows is None:
+        path.unlink(missing_ok=True)
+        return
+    path.write_text("pageid,decision,reference_pageids,finding\n" + rows, encoding="utf-8")
+
+
 class TestImport:
     def test_fix_svgs_then_a_dry_run_writes_nothing(self, env, existing, capsys, tmp_path):
         code, _out, err = _run(["fix-svgs", "--package", str(env["directory"])], capsys)
@@ -341,6 +350,62 @@ class TestPublication:
         assert code == 0, err
         text_ = out.read_text()
         assert text_.startswith("> **REHEARSAL**") and "Acceptance checks" in text_
+
+    def test_a_hold_decision_lets_verify_pass(self, env, capsys, tmp_path):
+        _write_comparisons(env, "1007,hold,,\n")
+        output = tmp_path / "verify.json"
+        code, _out, err = _run(["verify", "--package", str(env["directory"]), "--storage-env-file", "unused", "--output", str(output)], capsys)
+        report = json.loads(output.read_text())
+        assert code == 0 and report["failed"] == [], report
+        detail = {check["id"]: check for check in report["checks"]}["all-published"]["detail"]
+        assert detail["held_by_decision"] == {"hold": 1} and detail["unpublished_slugs"] == []
+
+    def test_assert_standard_refuses_a_reference_that_is_not_iso_and_writes_nothing(self, env, actor_id, capsys):
+        _write_comparisons(env, "1007,compared,1002,Same form.\n")
+        before = _counts(env["engine"])
+        code, _out, err = _run(["assert-standard", "--package", str(env["directory"]), "--actor-id", str(actor_id)], capsys)
+        assert code == ingest.EXIT_BLOCKED and "not a planned ISO 10628-2 drawing" in err
+        assert _counts(env["engine"]) == before
+
+    def test_assert_standard_records_a_verified_comparison_once(self, env, actor_id, capsys, tmp_path):
+        _write_comparisons(env, "1007,compared,1001,Same bow-tie form as the ISO valve.\n")
+        base = ["assert-standard", "--package", str(env["directory"]), "--actor-id", str(actor_id)]
+        before = _counts(env["engine"])
+        code, _out, err = _run(base + ["--dry-run"], capsys)
+        assert code == 0, err
+        assert _counts(env["engine"]) == before
+        output = tmp_path / "assert.json"
+        code, _out, err = _run(base + ["--output", str(output)], capsys)
+        assert code == 0, err
+        report = json.loads(output.read_text())
+        reference_id = _count(env["engine"], "SELECT catalog_symbol_id FROM governed_symbols WHERE slug = 'commons-1001'")
+        assert report["asserted"] == [{"slug": "commons-1007", "compared_with": [reference_id]}]
+        with Session(env["engine"]) as session:
+            link = session.query(SymbolStandardLink).filter_by(relationship_type="comparison_only").one()
+            assert (link.assertion_status, link.verification_method, link.verified_by_user_id) == ("verified", "manual", actor_id)
+            assert link.evidence_json["basis"] == "product_owner_comparison"
+            assert [item["slug"] for item in link.evidence_json["compared_with"]] == ["commons-1001"]
+            assert "does not claim the standard" in link.notes
+        code, _out, err = _run(base + ["--output", str(output)], capsys)
+        assert code == 0, err
+        rerun = json.loads(output.read_text())
+        assert rerun["asserted_count"] == 0 and rerun["unchanged"] == ["commons-1007"]
+
+    def test_the_compared_symbol_then_publishes_and_verify_passes(self, env, actor_id, capsys, tmp_path):
+        base = ["publish", "--package", str(env["directory"]), "--actor-id", str(actor_id), "--storage-env-file", "unused"]
+        output = tmp_path / "publish.json"
+        code, _out, err = _run(base + ["--permitted-only", "--output", str(output)], capsys)
+        assert code == 0, err
+        report = json.loads(output.read_text())
+        assert [item["slug"] for item in report["published"]] == ["commons-1007"] and report["held_at_gate"] == []
+        verify_output = tmp_path / "verify.json"
+        code, _out, err = _run(["verify", "--package", str(env["directory"]), "--storage-env-file", "unused",
+                                "--output", str(verify_output)], capsys)
+        verified = json.loads(verify_output.read_text())
+        assert code == 0 and verified["failed"] == [], verified
+        links = {check["id"]: check for check in verified["checks"]}["standard-links"]["detail"]
+        assert links["comparison_only"] == 1 and links["problems"] == [] and links["wrong_relationship_type"] == []
+        _write_comparisons(env, None)
 
     def test_a_renamed_row_becomes_a_new_revision(self, env, actor_id):
         package = ingest.load_package(env["directory"])

@@ -53,7 +53,7 @@ not exist, or a `NEW:` key that already exists.
 **70 symbols cite no standard**, so the gate refuses them with `graphical_authority_unasserted` even after the rights
 approval. `publish` publishes all or nothing; `publish --permitted-only` publishes the rest and leaves those 70
 approved but unpublished, listed in its report. It never skips a rights refusal. Publishing them needs a decision about
-their graphical authority.
+their graphical authority; see "The held symbols" below.
 
 ## Live run (production, by the product owner)
 
@@ -120,6 +120,38 @@ cig() { docker exec -w /data/symgov-releases/$REL/backend symgov-hermes-api sh -
    check should pass. The dHash near-duplicate check is `skipped` in the container (no headless Chromium there);
    the rehearsal report carries its result. Run it on the dev box with `--chromium <path>` against a database and
    bucket that hold the published SVGs.
+
+## The held symbols (`assert-standard`)
+
+The product owner compared each held drawing with the ISO 10628-2 drawings this package already published, and
+recorded one row per symbol in `curation/comparisons.csv`:
+
+```
+pageid,decision,reference_pageids,finding
+2783009,compared,<pageid of "Valve, globe type">,Same bow-tie with filled centre dot.
+32618336,hold,,Differs from the ISO kneader.
+```
+
+`decision` is `compared`, `hold` or `drop`. `reference_pageids` (`;`-separated) must be ISO 10628-2 symbols of this
+package that are already published. A `compared` row becomes a verified **`comparison_only`** link to ISO 10628:2012
+(method `manual`, verifier the actor), with the references' Catalog IDs and the finding in its evidence. It records a
+comparison, never that the drawing implements the standard: the Commons files do not claim that, so
+`vendor_implementation` would be invented provenance. Nothing about the link is shown to Catalog users.
+
+A rename in the worksheet goes first: `apply` makes the new revision, then the link is recorded on it.
+
+```
+docker cp /docker/openclaw-hz0t/data/symgov-commons-harvest-20261013/curation/comparisons.csv symgov-hermes-api:/tmp/commons-pid/curation/
+cig assert-standard --package /tmp/commons-pid --actor-id $ACTOR --dry-run
+cig assert-standard --package /tmp/commons-pid --actor-id $ACTOR --output /tmp/commons-assert.json
+cig publish --package /tmp/commons-pid --actor-id $ACTOR --permitted-only --dry-run
+cig publish --package /tmp/commons-pid --actor-id $ACTOR --permitted-only --output /tmp/commons-publish-2.json
+cig verify --package /tmp/commons-pid --output /tmp/commons-verify-2.json
+```
+
+`assert-standard` writes nothing if any row is wrong (exit 2) and is safe to re-run. Afterwards `verify` counts
+`hold` and `drop` rows as decided, so `all-published` passes once every held symbol has a row, and `standard-links`
+expects exactly the `comparison_only` link on each compared symbol.
 
 ## Re-running
 

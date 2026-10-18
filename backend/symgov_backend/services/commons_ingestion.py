@@ -30,6 +30,10 @@ never corrects one.
   from it). See `STATED_STANDARDS` for the other standards a file's own
   Commons description cites.
 * The rights record (`open`, `distribute`) with per-file licence evidence.
+* What the product owner decided, in `curation/comparisons.csv`, for a symbol
+  whose file cites no standard and which the gate therefore holds: compared
+  with the ISO 10628-2 drawings already published (a `comparison_only` link),
+  kept on hold, or dropped. See `plan_comparisons`.
 """
 from __future__ import annotations
 
@@ -932,6 +936,80 @@ def plan_import(package: dict[str, Any]) -> dict[str, Any]:
             "licence_families": dict(Counter(symbol["commons"]["licence_family"] for symbol in symbols)),
         },
     }
+
+
+# --------------------------------------------------------------------------
+# Comparisons for the symbols held without a standard.
+# --------------------------------------------------------------------------
+
+COMPARISONS_FILE = "comparisons.csv"
+COMPARISON_RELATIONSHIP_TYPE = "comparison_only"
+COMPARISON_VERIFICATION_METHOD = "manual"
+COMPARED = "compared"
+COMPARISON_DECISIONS = frozenset({COMPARED, "hold", "drop"})
+
+
+def plan_comparisons(plan: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Read `curation/comparisons.csv` against the plan. Pure.
+
+    A symbol whose Commons file cites no standard has no verified standard
+    link, so the gate holds it (`graphical_authority_unasserted`). For each
+    such symbol the product owner compared the drawing with the ISO 10628-2
+    drawings this package already publishes and decided one of:
+
+    * `compared` -- record a `comparison_only` link to ISO 10628:2012. It says
+      the drawing was compared with the standard's published drawings, never
+      that it implements the standard; the file does not claim that.
+    * `hold` -- leave it unpublished for now.
+    * `drop` -- never publish it. The worksheet row stays, because the symbol
+      is already recorded and `apply` refuses a recorded symbol it no longer plans.
+
+    The references must be planned symbols that cite ISO 10628-2.
+    """
+    by_pageid = {str(symbol["pageid"]): symbol for symbol in plan["symbols"]}
+    problems: list[str] = []
+    compared: list[dict[str, Any]] = []
+    held_by_decision: dict[str, str] = {}
+    seen: set[str] = set()
+    for number, row in enumerate(rows, start=2):
+        pageid = str(row.get("pageid") or "").strip()
+        decision = str(row.get("decision") or "").strip()
+        where = f"{COMPARISONS_FILE} line {number}"
+        symbol = by_pageid.get(pageid)
+        if symbol is None:
+            problems.append(f"{where}: pageid {pageid or '(blank)'} is not a planned symbol")
+            continue
+        if pageid in seen:
+            problems.append(f"{where}: pageid {pageid} appears more than once")
+            continue
+        seen.add(pageid)
+        if symbol["standards"]:
+            problems.append(f"{where}: {symbol['slug']} already cites a standard and needs no comparison")
+            continue
+        if decision not in COMPARISON_DECISIONS:
+            problems.append(f"{where}: decision must be one of {', '.join(sorted(COMPARISON_DECISIONS))}")
+            continue
+        if decision != COMPARED:
+            held_by_decision[symbol["slug"]] = decision
+            continue
+        finding = clean_text(row.get("finding"))
+        if not finding:
+            problems.append(f"{where}: a compared symbol needs a finding")
+        reference_ids = [part.strip() for part in str(row.get("reference_pageids") or "").split(";") if part.strip()]
+        if not reference_ids:
+            problems.append(f"{where}: a compared symbol needs at least one reference pageid")
+        references = []
+        for reference_id in reference_ids:
+            reference = by_pageid.get(reference_id)
+            if reference is None or not any(item["standard_code"] == ISO_10628_CODE for item in reference["standards"]):
+                problems.append(f"{where}: reference {reference_id} is not a planned ISO 10628-2 drawing")
+                continue
+            references.append({"pageid": reference["pageid"], "slug": reference["slug"], "name": reference["canonical_name"]})
+        compared.append(
+            {"pageid": symbol["pageid"], "slug": symbol["slug"], "name": symbol["canonical_name"],
+             "page_url": symbol["commons"]["page_url"], "finding": finding, "references": references}
+        )
+    return {"compared": compared, "held_by_decision": held_by_decision, "problems": problems}
 
 
 def _plan_symbols_tolerant(package: dict[str, Any], excluded: set[str]) -> list[dict[str, Any]]:
