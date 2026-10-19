@@ -257,6 +257,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--apply", action="store_true", help="Apply the purge. Omit for dry-run."
     )
 
+    hannah_targets_parser = subparsers.add_parser(
+        "hannah-build-targets",
+        help=(
+            "Decide which semantic concepts on public symbols Hannah can photograph, write their search terms "
+            "and link them to Wikidata. Dry run unless --apply; the model and Wikidata are still called."
+        ),
+    )
+    hannah_targets_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    hannah_targets_parser.add_argument("--apply", action="store_true", help="Write the targets. Omit for dry-run.")
+    hannah_targets_parser.add_argument("--limit", type=int, help="Work on at most this many concepts.")
+    hannah_targets_parser.add_argument("--no-llm", action="store_true", help="Concept kinds and fallback terms only; no model, no links.")
+    hannah_targets_parser.add_argument("--no-wikidata", action="store_true", help="Skip the Wikidata links.")
+    hannah_targets_parser.add_argument("--reclassify", action="store_true", help="Decide again where the model or concept kind decided.")
+    hannah_targets_parser.add_argument("--relink", action="store_true", help="Look up Wikidata again for concepts already checked.")
+    hannah_targets_parser.add_argument("--summary-only", action="store_true", help="Print counts without the per-concept rows.")
+    hannah_targets_parser.add_argument("--kind", help="Only concepts of this concept_kind, e.g. other.")
+    hannah_targets_parser.add_argument(
+        "--model", help="OpenRouter model for this run; defaults to the hannah_targets feature model in the LLM settings."
+    )
+
     gate_parser = subparsers.add_parser(
         "evaluate-automation-gates",
         help="Evaluate conservative publication automation gates without creating publication work.",
@@ -687,6 +707,53 @@ def main(argv: Sequence[str] | None = None):
                 return 1
         print(json.dumps(result, indent=2))
         return 1 if result.get("object_delete_failures") else 0
+
+    if args.command == "hannah-build-targets":
+        from symgov_backend.hannah_targets import build_targets, default_http_get_json
+        from symgov_backend.services.llm import resolve_model_for_feature
+        from symgov_backend.services.llm_router import request_llm_completion
+
+        session_factory = create_session_factory(env_file=args.db_env_file, nopool=True)
+        model = (args.model or resolve_model_for_feature("hannah_targets")).strip()
+
+        def complete(messages):
+            return request_llm_completion(
+                model=model,
+                provider="openrouter",
+                messages=messages,
+                response_format={"type": "json_object"},
+                temperature=0,
+                max_tokens=2000,
+                timeout=90,
+                use_case="hannah_targets",
+                service_name="symgov-api",
+                agent_slug="hannah",
+                feature="hannah_targets",
+                initiator_kind="admin",
+                session_factory_provider=lambda: session_factory,
+            )["outputText"]
+
+        with session_factory() as session:
+            try:
+                result = build_targets(
+                    session,
+                    apply=args.apply,
+                    complete=None if args.no_llm else complete,
+                    http_get_json=None if args.no_llm or args.no_wikidata else default_http_get_json,
+                    limit=args.limit,
+                    reclassify=args.reclassify,
+                    relink=args.relink,
+                    kind=args.kind,
+                )
+            except Exception as exc:
+                session.rollback()
+                print(f"Hannah target build failed: {exc}", file=sys.stderr)
+                return 1
+        result["model"] = None if args.no_llm else model
+        if args.summary_only:
+            result.pop("concepts", None)
+        print(json.dumps(result, indent=2))
+        return 0
 
     if args.command == "evaluate-automation-gates":
         if args.review_split_metadata:
