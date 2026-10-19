@@ -31,6 +31,7 @@ from symgov_backend.catalog_api_keys import (
     revoke_catalog_api_key,
 )
 from symgov_backend.catalog_facets import backfill_catalog_facets
+from symgov_backend.hannah_photo_purge import purge_hannah_photos
 from symgov_backend.classification_backfill import run_legacy_classification_backfill
 from symgov_backend.db import create_session_factory
 from symgov_backend.published_preview_authorizations import backfill_published_preview_authorizations
@@ -242,6 +243,19 @@ def build_parser() -> argparse.ArgumentParser:
     embeddings_parser.add_argument("--limit", type=int, help="Embed at most this many (index only).")
     embeddings_parser.add_argument("--batch-size", type=int, default=32)
     embeddings_parser.add_argument("--top", type=int, default=10, help="How many to show (probe only).")
+
+    hannah_purge_parser = subparsers.add_parser(
+        "purge-hannah-photos",
+        help=(
+            "Remove every Hannah supplemental photo, candidate and curation state, and cancel "
+            "unfinished Hannah queue cards. Dry run unless --apply."
+        ),
+    )
+    hannah_purge_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    hannah_purge_parser.add_argument("--storage-env-file", help="Path to the Symgov storage env file.")
+    hannah_purge_parser.add_argument(
+        "--apply", action="store_true", help="Apply the purge. Omit for dry-run."
+    )
 
     gate_parser = subparsers.add_parser(
         "evaluate-automation-gates",
@@ -656,6 +670,23 @@ def main(argv: Sequence[str] | None = None):
                 return 1
         print(json.dumps(result, indent=2, default=str))
         return 0
+
+    if args.command == "purge-hannah-photos":
+        bridge = RuntimePersistenceBridge(env_file=args.db_env_file)
+        session_factory = create_session_factory(env_file=args.db_env_file, nopool=True)
+        with session_factory() as session:
+            try:
+                result = purge_hannah_photos(
+                    session,
+                    apply=args.apply,
+                    delete_object=lambda key: bridge.delete_object(object_key=key, env_file=args.storage_env_file),
+                )
+            except Exception as exc:
+                session.rollback()
+                print(f"Hannah photo purge failed: {exc}", file=sys.stderr)
+                return 1
+        print(json.dumps(result, indent=2))
+        return 1 if result.get("object_delete_failures") else 0
 
     if args.command == "evaluate-automation-gates":
         if args.review_split_metadata:

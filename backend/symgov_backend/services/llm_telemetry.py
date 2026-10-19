@@ -68,10 +68,10 @@ _CATEGORIES = {
     "environment": {"development", "test", "staging", "production"},
     "use_case": {
         "workspace_chat", "admin_llm_test", "symbol_property_vision", "vlad_graphic_edit", "ed_guru",
-        "catalog_embedding",
+        "catalog_embedding", "hannah_vision", "hannah_targets",
     },
     "service_name": {"symgov-api", "libby", "vlad"},
-    "agent_slug": {None, "libby", "vlad", "ed"},
+    "agent_slug": {None, "libby", "vlad", "ed", "hannah"},
     "provider": {"openrouter", "google", "ollama"},
     "request_kind": {"text", "vision", "image_generation", "embedding"},
     "status": {"succeeded", "failed", "timed_out", "cancelled"},

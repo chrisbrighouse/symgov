@@ -802,9 +802,9 @@ class LLMUsageEvent(Base):
     __tablename__ = "llm_usage_events"
     __table_args__ = (
         CheckConstraint("environment in ('development', 'test', 'staging', 'production')", name="llm_usage_events_environment"),
-        CheckConstraint("use_case in ('workspace_chat', 'admin_llm_test', 'symbol_property_vision', 'vlad_graphic_edit', 'ed_guru', 'catalog_embedding')", name="llm_usage_events_use_case"),
+        CheckConstraint("use_case in ('workspace_chat', 'admin_llm_test', 'symbol_property_vision', 'vlad_graphic_edit', 'ed_guru', 'catalog_embedding', 'hannah_vision', 'hannah_targets')", name="llm_usage_events_use_case"),
         CheckConstraint("service_name in ('symgov-api', 'libby', 'vlad')", name="llm_usage_events_service_name"),
-        CheckConstraint("agent_slug is null or agent_slug in ('libby', 'vlad', 'ed')", name="llm_usage_events_agent_slug"),
+        CheckConstraint("agent_slug is null or agent_slug in ('libby', 'vlad', 'ed', 'hannah')", name="llm_usage_events_agent_slug"),
         CheckConstraint("provider in ('openrouter', 'google', 'ollama')", name="llm_usage_events_provider"),
         CheckConstraint("request_kind in ('text', 'vision', 'image_generation', 'embedding')", name="llm_usage_events_request_kind"),
         CheckConstraint("status in ('succeeded', 'failed', 'timed_out', 'cancelled')", name="llm_usage_events_status"),
@@ -2381,6 +2381,125 @@ class HannahCurationSourceSite(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
+
+
+class HannahConceptTarget(Base):
+    """Hannah's own view of one semantic concept as a photo subject.
+
+    Whether the concept can be photographed (and on what basis), the plain
+    search terms, and the Wikidata item / Commons category it was linked to.
+    Kept apart from `semantic_concepts.concept_kind` and
+    `concept_external_references`, which are under concept governance.
+    """
+
+    __tablename__ = "hannah_concept_targets"
+    __table_args__ = (
+        CheckConstraint("photographable is null or photographable in ('yes', 'no', 'unsure')", name="photographable"),
+        CheckConstraint(
+            "photographable_basis is null or photographable_basis in ('concept_kind', 'llm', 'steward')",
+            name="photographable_basis",
+        ),
+        CheckConstraint("(photographable is null) = (photographable_basis is null)", name="basis_with_decision"),
+        CheckConstraint(
+            "status in ('pending', 'searched', 'no_candidates', 'has_proposals', 'has_photos', 'excluded')",
+            name="status",
+        ),
+        CheckConstraint("link_confidence is null or (link_confidence >= 0 and link_confidence <= 1)", name="link_confidence"),
+        CheckConstraint("attempt_count >= 0", name="attempt_count"),
+        Index("uq_hannah_concept_targets_concept", "semantic_concept_id", unique=True),
+        Index("ix_hannah_concept_targets_status_eligible", "status", "next_eligible_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    semantic_concept_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("semantic_concepts.id", ondelete="RESTRICT", name="fk_hannah_concept_targets_concept"),
+        nullable=False,
+    )
+    photographable: Mapped[str | None] = mapped_column(Text, nullable=True)
+    photographable_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_terms_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    wikidata_qid: Mapped[str | None] = mapped_column(Text, nullable=True)
+    commons_category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    wikipedia_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    link_confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    last_attempt_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_eligible_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL", name="fk_hannah_concept_targets_updated_by"), nullable=True
+    )
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class HannahConceptPhoto(Base):
+    """One candidate real-world photo for a semantic concept.
+
+    Carries the credit, the vision model's verdict and the decision. An
+    approved photo is stored at `object_key`; there is no `attachments` row,
+    because attachment parents are revisions and these belong to concepts.
+    """
+
+    __tablename__ = "hannah_concept_photos"
+    __table_args__ = (
+        CheckConstraint(
+            "source in ('wikidata_image', 'commons_category', 'commons_search', 'wikipedia_lead', 'web_search')",
+            name="source",
+        ),
+        CheckConstraint(
+            "status in ('candidate', 'filtered', 'proposed', 'approved', 'rejected', 'removed')",
+            name="status",
+        ),
+        CheckConstraint("score is null or (score >= 0 and score <= 1)", name="score"),
+        CheckConstraint("decided_by_agent is null or decided_by_agent = 'hannah'", name="decided_by_agent"),
+        CheckConstraint(
+            "status not in ('approved', 'rejected', 'removed') or decided_at is not null",
+            name="decision_is_dated",
+        ),
+        CheckConstraint("status <> 'approved' or object_key is not null", name="approved_has_object"),
+        Index("uq_hannah_concept_photos_concept_image", "semantic_concept_id", "image_url", unique=True),
+        Index("ix_hannah_concept_photos_concept_status_rank", "semantic_concept_id", "status", "rank"),
+        Index("ix_hannah_concept_photos_status_seen", "status", "last_seen_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    semantic_concept_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("semantic_concepts.id", ondelete="RESTRICT", name="fk_hannah_concept_photos_concept"),
+        nullable=False,
+    )
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    image_url: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    author: Mapped[str | None] = mapped_column(Text, nullable=True)
+    license_label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    license_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sha256: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vision_model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vision_verdict_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    score: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'candidate'"))
+    filter_reasons_json: Mapped[list] = mapped_column(JSONB, nullable=False, server_default=text("'[]'::jsonb"))
+    rank: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    object_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_type: Mapped[str | None] = mapped_column(Text, nullable=True)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    decided_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL", name="fk_hannah_concept_photos_decided_by"), nullable=True
+    )
+    decided_by_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    queue_item_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("agent_queue_items.id", ondelete="SET NULL", name="fk_hannah_concept_photos_queue_item"), nullable=True
+    )
+    first_seen_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_seen_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 class IntakeRecord(Base):
     __tablename__ = "intake_records"
