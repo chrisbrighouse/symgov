@@ -70,8 +70,9 @@ AGENT_SPECS: dict[str, dict[str, Any]] = {
     },
     "hannah": {
         "runtime_root": Path("/data/.openclaw/workspaces/hannah/runtime"),
-        "runner_path": Path("/data/symgov/scripts/run_hannah_curation.py"),
-        "module": "symgov_hannah_runner_worker",
+        # The release's own copy, so a deploy changes Hannah with the rest of the code.
+        "runner_path": REPOSITORY_ROOT / "scripts" / "run_hannah_concept_curation.py",
+        "module": "symgov_hannah_concept_runner_worker",
         "persist_db": True,
         "storage": True,
     },
@@ -504,7 +505,7 @@ def process_agent_queue_once(agent: str, config: AgentQueueWorkerConfig) -> dict
 
     if agent == "hannah" and runner is not None and config.db_env_file:
         try:
-            runner.seed_hannah_symbol_queue_cards(
+            runner.seed_hannah_concept_queue_cards(
                 db_env_file=str(config.db_env_file),
                 runtime_root=runtime_root,
                 limit=config.limit,

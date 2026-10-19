@@ -126,6 +126,17 @@ The raw verdict is stored with each candidate, so later threshold changes need n
 - **Catalog camera icon.** `_PHOTO_COUNT` (`catalog_browse_search.py:87-94`) changes to count by concept.
 - **Organisation-private rows** keep `supplementalPhotos: []` (`published.py:273`).
 
+### 1.7 Changes from the H3 trials (2026-10-20, production dry runs, `anthropic/claude-haiku-5.5`)
+
+- **Reply limit:** the vision call needs `max_tokens` of about 1,500. At 400, the model's hidden reasoning used up the allowance, and about a quarter of the replies were cut off mid-JSON.
+- **Captions:** the model is shown the file's own title and Commons description as a caption, marked as possibly wrong. It decides on photograph-ness from the image alone.
+- **Broad categories:** head-noun Wikidata links give broad categories ("Machines", "Filters", "Pipes"), and their files come back alphabetically. The run now:
+  - takes at most 20 files from a category;
+  - vision-checks the Wikidata image first, then files whose title or description shares a *distinctive* search word. Words also in the category name don't count, unless nothing else is left.
+  - checks at most 3 unmatched files per run and filters the rest as `no_term_match`.
+- **Proposal threshold:** set to 0.35, because proposals go to a steward. Automatic approval gets its own calibrated threshold in WP-H6.
+- **Results:** on 5 sampled concepts, duct, siphon, HEPA filter and magnetic separator each got two sensible proposals. The bag filling machine got none, because Commons has no photo of one. That is the case the deferred web source (Q2) would cover.
+
 ## 2. Work packages
 
 ### WP-H1: Schema (S). Migration `20261020_0074_hannah_concept_photos`

@@ -375,6 +375,7 @@ def build_targets(
     reclassify: bool = False,
     relink: bool = False,
     kind: str | None = None,
+    concept_codes: list[str] | None = None,
     pause: Callable[[], None] = lambda: time.sleep(0.5),
     now: datetime | None = None,
 ) -> dict[str, Any]:
@@ -414,6 +415,9 @@ def build_targets(
             work.append(scope)
     if kind is not None:
         work = [scope for scope in work if scope.concept_kind == kind]
+    if concept_codes is not None:
+        wanted = set(concept_codes)
+        work = [scope for scope in work if scope.concept_code in wanted]
     if limit is not None:
         work = work[:limit]
 
@@ -488,6 +492,10 @@ def build_targets(
                 "search_terms": terms,
                 "wikidata_qid": link.get("qid"),
                 "commons_category": link.get("commons_category"),
+                "wikidata_image": link.get("image"),
+                "wikipedia_url": link.get("wikipedia_url"),
+                "concept_id": scope.concept_id,
+                "definition": scope.definition,
             }
         )
 
@@ -530,3 +538,27 @@ def build_targets(
         session.commit()
         summary["applied"] = True
     return summary
+
+
+def make_text_completer(model: str, *, initiator_kind: str, session_factory: Any) -> CompleteFn:
+    """The OpenRouter text call, recorded in the usage ledger as `hannah_targets`."""
+    from .services.llm_router import request_llm_completion
+
+    def complete(messages: list[dict[str, Any]]) -> str:
+        return request_llm_completion(
+            model=model,
+            provider="openrouter",
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=0,
+            max_tokens=2000,
+            timeout=90,
+            use_case="hannah_targets",
+            service_name="symgov-api",
+            agent_slug="hannah",
+            feature="hannah_targets",
+            initiator_kind=initiator_kind,
+            session_factory_provider=lambda: session_factory,
+        )["outputText"]
+
+    return complete

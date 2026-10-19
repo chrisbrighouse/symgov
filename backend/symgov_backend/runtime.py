@@ -3133,6 +3133,11 @@ class RuntimePersistenceBridge:
                     signal.evidence_json = signal_payload.get("evidence") or {}
                     signal.status = signal_payload.get("status") or "active"
                     signal.last_seen_at = completed_at
+            elif durable_kind == "hannah_concept_curation_report":
+                # The runner has already written its candidates and target state
+                # (symgov_backend.hannah_photos); only the card, run and report
+                # above are mirrored here.
+                pass
             else:
                 raise ValueError(f"Unsupported durable_kind: {durable_kind}")
 

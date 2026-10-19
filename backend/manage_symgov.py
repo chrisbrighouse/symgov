@@ -277,6 +277,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--model", help="OpenRouter model for this run; defaults to the hannah_targets feature model in the LLM settings."
     )
 
+    hannah_run_parser = subparsers.add_parser(
+        "hannah-run",
+        help=(
+            "Run Hannah's photo search for chosen or sampled concepts and print every candidate with the vision "
+            "verdict. Dry run unless --apply; a dry run works before migration 20261020_0074 by previewing targets."
+        ),
+    )
+    hannah_run_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    hannah_run_parser.add_argument("--concept", action="append", default=[], help="Concept code, e.g. SGC-00000276. Repeatable.")
+    hannah_run_parser.add_argument("--sample", type=int, help="Run this many randomly chosen photographable concepts.")
+    hannah_run_parser.add_argument("--seed", type=int, default=20261020, help="Random seed for --sample.")
+    hannah_run_parser.add_argument("--kind", help="Sample only concepts of this concept_kind.")
+    hannah_run_parser.add_argument("--apply", action="store_true", help="Write candidates and target state. Needs targets.")
+    hannah_run_parser.add_argument("--model", help="Vision model; defaults to the hannah_vision feature model.")
+    hannah_run_parser.add_argument("--targets-model", help="Model for previewing targets; defaults to the hannah_targets feature model.")
+    hannah_run_parser.add_argument("--max-vision", type=int, default=100, help="Most vision calls for the whole run.")
+
     gate_parser = subparsers.add_parser(
         "evaluate-automation-gates",
         help="Evaluate conservative publication automation gates without creating publication work.",
@@ -709,29 +726,12 @@ def main(argv: Sequence[str] | None = None):
         return 1 if result.get("object_delete_failures") else 0
 
     if args.command == "hannah-build-targets":
-        from symgov_backend.hannah_targets import build_targets, default_http_get_json
+        from symgov_backend.hannah_targets import build_targets, default_http_get_json, make_text_completer
         from symgov_backend.services.llm import resolve_model_for_feature
-        from symgov_backend.services.llm_router import request_llm_completion
 
         session_factory = create_session_factory(env_file=args.db_env_file, nopool=True)
         model = (args.model or resolve_model_for_feature("hannah_targets")).strip()
-
-        def complete(messages):
-            return request_llm_completion(
-                model=model,
-                provider="openrouter",
-                messages=messages,
-                response_format={"type": "json_object"},
-                temperature=0,
-                max_tokens=2000,
-                timeout=90,
-                use_case="hannah_targets",
-                service_name="symgov-api",
-                agent_slug="hannah",
-                feature="hannah_targets",
-                initiator_kind="admin",
-                session_factory_provider=lambda: session_factory,
-            )["outputText"]
+        complete = make_text_completer(model, initiator_kind="admin", session_factory=session_factory)
 
         with session_factory() as session:
             try:
@@ -753,6 +753,97 @@ def main(argv: Sequence[str] | None = None):
         if args.summary_only:
             result.pop("concepts", None)
         print(json.dumps(result, indent=2))
+        return 0
+
+    if args.command == "hannah-run":
+        import random
+        import uuid
+
+        from sqlalchemy import text
+
+        from symgov_backend.hannah_photos import (
+            TargetView,
+            curate_concept,
+            default_fetch_bytes,
+            make_vision_completer,
+            target_view_from_row,
+        )
+        from symgov_backend.hannah_targets import (
+            FIXED_KIND_DECISIONS,
+            build_targets,
+            default_http_get_json,
+            load_concept_scope,
+            make_text_completer,
+        )
+        from symgov_backend.models.schema import HannahConceptTarget
+        from symgov_backend.services.llm import resolve_model_for_feature
+
+        session_factory = create_session_factory(env_file=args.db_env_file, nopool=True)
+        vision_model = (args.model or resolve_model_for_feature("hannah_vision")).strip()
+        targets_model = (args.targets_model or resolve_model_for_feature("hannah_targets")).strip()
+        complete_text = make_text_completer(targets_model, initiator_kind="admin", session_factory=session_factory)
+
+        complete_vision = make_vision_completer(vision_model, initiator_kind="admin", session_factory=session_factory)
+        reports = []
+        with session_factory() as session:
+            try:
+                scopes = {scope.concept_code: scope for scope in load_concept_scope(session)}
+                codes = list(args.concept)
+                if args.sample:
+                    pool = sorted(
+                        code for code, scope in scopes.items()
+                        if FIXED_KIND_DECISIONS.get(scope.concept_kind) != "no"
+                        and (args.kind is None or scope.concept_kind == args.kind)
+                    )
+                    codes += random.Random(args.seed).sample(pool, min(args.sample, len(pool)))
+                unknown = [code for code in codes if code not in scopes]
+                if unknown:
+                    raise SystemExit(f"Not in scope: {', '.join(unknown)}")
+                has_table = session.execute(text("SELECT to_regclass('hannah_concept_targets') IS NOT NULL")).scalar()
+                views = {}
+                if has_table:
+                    for code in codes:
+                        target = (
+                            session.query(HannahConceptTarget)
+                            .filter_by(semantic_concept_id=uuid.UUID(scopes[code].concept_id))
+                            .one_or_none()
+                        )
+                        if target is not None:
+                            views[code] = target_view_from_row(session, target)
+                missing = [code for code in codes if code not in views]
+                if missing and args.apply:
+                    raise SystemExit(f"No target yet for {', '.join(missing)}; run hannah-build-targets --apply first.")
+                if missing:
+                    preview = build_targets(
+                        session, apply=False, complete=complete_text, http_get_json=default_http_get_json,
+                        concept_codes=missing,
+                    )
+                    for row in preview["concepts"]:
+                        if row["photographable"] not in ("yes", "unsure"):
+                            reports.append({"concept_code": row["concept_code"], "name": row["name"], "skipped": "not photographable"})
+                            continue
+                        views[row["concept_code"]] = TargetView(
+                            concept_id=row["concept_id"], concept_code=row["concept_code"], name=row["name"],
+                            definition=row["definition"], search_terms=row["search_terms"],
+                            wikidata_image=row["wikidata_image"], commons_category=row["commons_category"],
+                            wikipedia_url=row["wikipedia_url"],
+                        )
+                remaining = max(0, args.max_vision)
+                for code in codes:
+                    if code not in views:
+                        continue
+                    report = curate_concept(
+                        session, views[code], apply=args.apply, http_get_json=default_http_get_json,
+                        fetch_bytes=default_fetch_bytes, complete_vision=complete_vision,
+                        vision_model=vision_model, max_vision_calls=remaining,
+                    )
+                    remaining -= report["vision_calls"]
+                    reports.append(report)
+            except Exception as exc:
+                session.rollback()
+                print(f"Hannah run failed: {exc}", file=sys.stderr)
+                return 1
+        print(json.dumps({"vision_model": vision_model, "applied": bool(args.apply), "concepts": reports}, indent=2))
         return 0
 
     if args.command == "evaluate-automation-gates":
