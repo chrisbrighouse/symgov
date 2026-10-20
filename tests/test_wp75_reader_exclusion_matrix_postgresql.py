@@ -9,7 +9,9 @@ plan §13 acceptance bar names actually excludes a demoted symbol:
 readers." Reuses the full promote-then-demote pipeline
 `test_wp74_symbol_demotion_postgresql.py` already built (via its own
 Postgres-backed HTTP fixtures) to get a realistic public symbol, then
-demotes it and checks every reader before/after.
+demotes it and checks every reader before/after. Hannah's per-symbol
+photo-candidate reader was retired with WP-H7; her concept photos reach a
+symbol only through the published list itself, which this module covers.
 
 Real Postgres is required for the identical reasons the WP7.1-7.4 tests
 already are: `active_public_symbol_projections`'s join semantics and the
@@ -49,7 +51,6 @@ from fastapi.testclient import TestClient  # noqa: E402
 from symgov_backend.app import create_app  # noqa: E402
 from symgov_backend.catalog_symbol_resolution import resolve_catalog_symbol  # noqa: E402
 from symgov_backend.dependencies import get_db_session  # noqa: E402
-from symgov_backend.models import HannahPhotoCandidate, WhitneyDemandSignal  # noqa: E402
 from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E402
 
 
@@ -119,7 +120,6 @@ def wp75_database():
                 "GRANT SELECT, INSERT ON symbol_sets TO symgov_app",
                 "GRANT SELECT, INSERT ON symbol_set_items TO symgov_app",
                 "GRANT SELECT, INSERT, DELETE ON catalog_favourites TO symgov_app",
-                "GRANT SELECT, INSERT ON hannah_photo_candidates TO symgov_app",
                 "GRANT SELECT, INSERT ON whitney_demand_signals TO symgov_app",
             ):
                 connection.execute(statement)
@@ -263,14 +263,14 @@ def test_favourites_hide_details_but_do_not_leak_or_crash(wp75_database):
     assert detail_after.status_code == 404
 
 
-def test_hannah_and_whitney_background_readers_exclude_the_demoted_symbol(wp75_database):
+def test_whitney_background_reader_excludes_the_demoted_symbol(wp75_database):
     engine, _, _ = wp75_database
     Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
     symbol_id = _setup_promoted_symbol(engine, Session, suffix="3")
 
     reviewer_client, _ = _client(engine)
-    # Hannah/Whitney read routes require the global "admin" role specifically
+    # The Whitney read route requires the global "admin" role specifically
     # (WORKSPACE_POLICY_BY_OPERATION classifies them "admin", not
     # "reviewer_admin", unlike the review-case decision endpoint).
     _create_user_with_global_roles(Session, email="wp75hannah@example.test", display_name="HannahReviewer", roles=["admin"])
@@ -285,14 +285,6 @@ def test_hannah_and_whitney_background_readers_exclude_the_demoted_symbol(wp75_d
         ).scalar_one()
         connection.execute(
             text(
-                "INSERT INTO hannah_photo_candidates "
-                "(id,symbol_id,published_page_id,source_url,image_url,source_domain,rights_status,status,evidence_json,first_seen_at,last_seen_at) "
-                "VALUES (:id,:symbol,:page,'https://example.test/src','https://example.test/img.jpg','example.test','cleared','new','{}'::jsonb,:now,:now)"
-            ),
-            {"id": uuid.uuid4(), "symbol": symbol_id, "page": page_id, "now": now},
-        )
-        connection.execute(
-            text(
                 "INSERT INTO whitney_demand_signals "
                 "(id,symbol_id,published_page_id,signal_type,source_type,title,summary,status,evidence_json,first_seen_at,last_seen_at) "
                 "VALUES (:id,:symbol,:page,'search_gap','manual','WP7.5 signal','test','new','{}'::jsonb,:now,:now)"
@@ -300,21 +292,11 @@ def test_hannah_and_whitney_background_readers_exclude_the_demoted_symbol(wp75_d
             {"id": uuid.uuid4(), "symbol": symbol_id, "page": page_id, "now": now},
         )
 
-    hannah_before = reviewer_client.get("/api/v1/workspace/hannah/photo-candidates")
-    assert hannah_before.status_code == 200, hannah_before.text
-    assert any(item["symbolId"] == symbol_id for item in hannah_before.json()["items"])
-
     whitney_before = reviewer_client.get("/api/v1/workspace/whitney/demand-signals")
     assert whitney_before.status_code == 200, whitney_before.text
     assert any(item.get("symbolId") == symbol_id for item in whitney_before.json()["items"])
 
     _demote(engine, Session, symbol_id, suffix="3")
-
-    hannah_after = reviewer_client.get("/api/v1/workspace/hannah/photo-candidates")
-    assert hannah_after.status_code == 200, hannah_after.text
-    assert not any(item["symbolId"] == symbol_id for item in hannah_after.json()["items"]), (
-        "Hannah must exclude a demoted symbol's photo candidates even though the row itself still exists"
-    )
 
     whitney_after = reviewer_client.get("/api/v1/workspace/whitney/demand-signals")
     assert whitney_after.status_code == 200, whitney_after.text
@@ -324,13 +306,9 @@ def test_hannah_and_whitney_background_readers_exclude_the_demoted_symbol(wp75_d
 
     # The underlying tracking rows are never deleted by demotion.
     with engine.begin() as connection:
-        hannah_count = connection.execute(
-            text("SELECT count(*) FROM hannah_photo_candidates WHERE symbol_id=:id"), {"id": symbol_id}
-        ).scalar_one()
         whitney_count = connection.execute(
             text("SELECT count(*) FROM whitney_demand_signals WHERE symbol_id=:id"), {"id": symbol_id}
         ).scalar_one()
-        assert hannah_count == 1
         assert whitney_count == 1
 
 

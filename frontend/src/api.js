@@ -1420,60 +1420,6 @@ export async function decideHannahPhoto(photoId, decision) {
   return hannahPayload(result, 'The photo decision could not be saved.');
 }
 
-export async function fetchHannahPhotoCandidates({ offset = 0, limit = 50, sort = 'lastSeenAt', direction = 'desc', filters = {} } = {}) {
-  if (!appConfig.apiRoot) {
-    return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [], total: 0, hasMore: false };
-  }
-
-  const params = new URLSearchParams({
-    offset: String(offset),
-    limit: String(limit),
-    sort,
-    direction
-  });
-
-  Object.entries(filters || {}).forEach(([key, value]) => {
-    const normalized = String(value || '').trim();
-    if (normalized) {
-      params.set(key, normalized);
-    }
-  });
-
-  try {
-    const response = await fetch(workspaceUrl(`/workspace/hannah/photo-candidates?${params.toString()}`), { cache: 'no-store' });
-    const payload = await parseJson(response);
-
-    if (!response.ok) {
-      return {
-        ok: false,
-        mode: 'error',
-        message: payload?.detail || 'Hannah photo candidates could not be loaded.',
-        items: [],
-        total: 0,
-        hasMore: false
-      };
-    }
-
-    return {
-      ok: true,
-      mode: 'live',
-      message: 'Hannah photo candidates loaded.',
-      items: Array.isArray(payload?.items) ? payload.items : [],
-      total: Number(payload?.total || 0),
-      hasMore: Boolean(payload?.hasMore)
-    };
-  } catch (error) {
-    return {
-      ok: false,
-      mode: 'offline',
-      message: error instanceof Error ? error.message : 'Hannah photo candidates could not be loaded.',
-      items: [],
-      total: 0,
-      hasMore: false
-    };
-  }
-}
-
 export async function startWhitneyDemandScan({ durationSeconds = 120, focus = '' } = {}) {
   if (!appConfig.apiRoot) {
     throw new Error('API root is not configured.');

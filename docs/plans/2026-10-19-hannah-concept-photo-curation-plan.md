@@ -282,6 +282,12 @@ How it behaves:
 - Delete the old runner functions and the DuckDuckGo Lite scraper.
 - Remove the old preview route.
 
+**As built (2026-10-21).**
+- **Migration `20261021_0075`:** drops the three tables. Production had 0 candidates and 0 states after the purge, plus 2 never-used seed source sites. The downgrade rebuilds the tables empty.
+- **Deleted:** the ORM models, `scripts/run_hannah_curation.py` (the per-symbol runner and its DuckDuckGo search), the runtime persistence for `hannah_curation_report`, `GET /hannah/photo-candidates` and its schemas, `fetchHannahPhotoCandidates`, the old `published/symbols/{id}/supplemental-photos/{photo}/preview` route, and the `purge-hannah-photos` command, whose job is done.
+- **Kept:** `/hannah/curation-searches` (start and stop) serve the concept flow, and `/hannah/cleanup-actions` is a symbol admin tool. The unmounted `symgov_backend/workspace.py` twin is left alone, as before.
+- **Tests:** the old runner, persistence and purge tests are removed, and the Hannah parts of WP5.2b, WP5.6, WP7.5 and WP8.2 are trimmed. The seeder test now proves a concept on no public symbol is never queued. The concept preview refuses mislabelled bytes. The six head assertions move to 0075.
+
 **Order:** H1 → H2 → H3 → (H4 ∥ H5) → H6 → H7. H1–H5 can ship in one release with the worker still off. Nothing is public until a photo is approved.
 
 ## 3. Cost estimate (illustrative)

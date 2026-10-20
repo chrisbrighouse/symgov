@@ -888,41 +888,6 @@ class WorkspaceHannahCurationSearchStopResponse(BaseModel):
     termination: str
 
 
-class WorkspaceHannahPhotoCandidateResponse(BaseModel):
-    id: str
-    symbolId: str
-    symbolSlug: str | None = None
-    symbolName: str | None = None
-    pageTitle: str | None = None
-    category: str | None = None
-    discipline: str | None = None
-    sourceUrl: str
-    imageUrl: str
-    sourceDomain: str
-    title: str | None = None
-    description: str | None = None
-    rightsStatus: str
-    rightsDisposition: str | None = None
-    processingOutcome: str | None = None
-    riskLevel: str | None = None
-    licenseLabel: str | None = None
-    status: str
-    relevanceScore: float | None = None
-    previewUrl: str | None = None
-    evidence: dict[str, Any] = Field(default_factory=dict)
-    firstSeenAt: str
-    lastSeenAt: str
-    lastSessionQueueItemId: str | None = None
-
-
-class WorkspaceHannahPhotoCandidateListResponse(BaseModel):
-    items: list[WorkspaceHannahPhotoCandidateResponse]
-    total: int
-    offset: int
-    limit: int
-    hasMore: bool
-
-
 class WorkspaceHannahCleanupActionRequest(BaseModel):
     message: str = Field(min_length=3, max_length=600)
 

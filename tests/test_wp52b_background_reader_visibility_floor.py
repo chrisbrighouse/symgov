@@ -1,7 +1,9 @@
-"""WP5.2b regression: the background agent readers (Hannah curation,
-Whitney market intelligence) must not surface an organization_private
-symbol, even though before this fix each restated its own independent
-copy of the legacy publication predicate with no visibility check.
+"""WP5.2b regression: the background agent readers must not surface an
+organization_private symbol, even though before this fix each restated its
+own independent copy of the legacy publication predicate with no visibility
+check. Whitney market intelligence is the one left: Hannah's per-symbol
+reader was retired with WP-H7, and her concept seeder applies the
+visibility floor itself (tests/test_hannah_photos_postgresql.py).
 
 Unlike the HTTP routes covered by WP5.2a, these are not driven through
 FastAPI's dependency-injected session; each script builds its own
@@ -37,7 +39,6 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-import run_hannah_curation  # noqa: E402
 import run_whitney_market_intelligence  # noqa: E402
 
 
@@ -77,13 +78,6 @@ def wp52b_fixtures(stage5_database, monkeypatch):
         "engine": engine,
         "segment": segment,
     }
-
-
-def test_hannah_load_eligible_symbols_excludes_organization_private(wp52b_fixtures):
-    rows = run_hannah_curation.load_eligible_symbols(db_env_file=None, limit=200)
-    returned_ids = {row["symbol_id"] for row in rows}
-    assert str(wp52b_fixtures["public_symbol"]) in returned_ids
-    assert str(wp52b_fixtures["private_symbol"]) not in returned_ids
 
 
 def test_whitney_published_segments_excludes_organization_private_count(wp52b_fixtures):

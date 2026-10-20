@@ -264,7 +264,6 @@ WORKSPACE_OPERATIONS = (
     WorkspaceOperation("POST", "/hannah/cleanup-actions", ("v1", "legacy"), "admin", "agent_control"),
     WorkspaceOperation("POST", "/hannah/curation-searches", ("v1", "legacy"), "admin", "scan_control"),
     WorkspaceOperation("POST", "/hannah/curation-searches/{queue_item_id}/stop", ("v1", "legacy"), "admin", "scan_control"),
-    WorkspaceOperation("GET", "/hannah/photo-candidates", ("v1", "legacy"), "admin", "agent_operational"),
     WorkspaceOperation("GET", "/hannah/concepts", ("v1",), "admin", "agent_operational"),
     WorkspaceOperation("GET", "/hannah/concepts/{target_id}/photos", ("v1",), "admin", "agent_operational"),
     WorkspaceOperation("PATCH", "/hannah/concepts/{target_id}", ("v1",), "admin", "agent_control"),

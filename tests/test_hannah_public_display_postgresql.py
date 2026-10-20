@@ -166,3 +166,13 @@ def test_the_preview_needs_a_session(photos):
     engine, seeded = photos
     client, _Session = _client(engine)
     assert client.get(f"/api/v1/published/concept-photos/{seeded['valve first']}/preview").status_code == 401
+
+
+def test_the_preview_refuses_bytes_that_are_not_the_image_they_claim(reader, monkeypatch):
+    client, seeded = reader
+    monkeypatch.setattr(
+        published_routes, "download_object_bytes",
+        lambda *, object_key, env_file: {"payload": b"<html><script>alert(1)</script></html>", "content_type": "image/png"},
+    )
+    response = client.get(f"/api/v1/published/concept-photos/{seeded['valve first']}/preview")
+    assert response.status_code == 404

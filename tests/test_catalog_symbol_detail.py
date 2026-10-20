@@ -270,8 +270,6 @@ def test_published_preview_routes_authenticate_missing_and_invalid_sessions_befo
     paths = (
         "/api/v1/published/symbols/0003-12/preview",
         "/api/published/symbols/0003-12/preview",
-        "/api/v1/published/symbols/0003-12/supplemental-photos/11111111-1111-1111-1111-111111111111/preview",
-        "/api/published/symbols/0003-12/supplemental-photos/11111111-1111-1111-1111-111111111111/preview",
         "/api/v1/published/concept-photos/11111111-1111-1111-1111-111111111111/preview",
     )
 

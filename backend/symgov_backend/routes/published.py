@@ -62,12 +62,10 @@ from ..image_content import (
 )
 from ..models import (
     AgentQueueItem,
-    Attachment,
     AuditEvent,
     ClarificationRecord,
     GovernedSymbol,
     HannahConceptPhoto,
-    HannahPhotoCandidate,
     SemanticConcept,
     SymbolRevision,
     SymbolSemanticAssignment,
@@ -1517,71 +1515,6 @@ def list_published_data_sources(session: Session = Depends(get_db_session)) -> d
             }
         )
     return {"sources": sources}
-
-
-@router.get("/symbols/{symbol_id}/supplemental-photos/{photo_id}/preview")
-@legacy_router.get("/published/symbols/{symbol_id}/supplemental-photos/{photo_id}/preview", include_in_schema=False)
-def get_published_symbol_supplemental_photo_preview(
-    symbol_id: str,
-    photo_id: str,
-    current_user: AuthenticatedUser = Depends(require_user),
-    session: Session = Depends(get_db_session),
-    settings: SymgovAPISettings = Depends(get_settings),
-) -> Response:
-    # Stage 8 WP8.2: resolved the same way the detail/preview routes are.
-    # In practice an organization-private symbol has no `HannahPhotoCandidate`
-    # rows -- that pipeline only ever runs on symbols going through Stage
-    # 1-7's drawing-intake/promotion flow (plan §1.10's "supplementalPhotos: []"
-    # for WP8.1's organization-private list entries reflects the same fact)
-    # -- so extending resolution here costs nothing today and keeps this
-    # route consistent with the other two rather than silently diverging.
-    source, resolved, _resolved_by = _load_symbol_for_detail(session, symbol_id, current_user, settings)
-    if source == "public":
-        published_row = resolved
-        candidate_symbol_id = published_row.symbol_id
-        candidate_revision_id = published_row.symbol_revision_id
-    else:
-        governed_symbol, revision = resolved
-        candidate_symbol_id = governed_symbol.id
-        candidate_revision_id = revision.id if revision is not None else None
-
-    candidate = (
-        session.query(HannahPhotoCandidate)
-        .filter(HannahPhotoCandidate.id == photo_id)
-        .filter(HannahPhotoCandidate.symbol_id == candidate_symbol_id)
-        .filter(HannahPhotoCandidate.symbol_revision_id == candidate_revision_id)
-        .filter(HannahPhotoCandidate.status == "attached")
-        .filter(HannahPhotoCandidate.attachment_id.isnot(None))
-        .filter(HannahPhotoCandidate.object_key.isnot(None))
-        .one_or_none()
-    )
-    if candidate is None or not candidate.object_key:
-        raise HTTPException(status_code=404, detail="Published supplemental photo was not found.")
-
-    attachment = (
-        session.query(Attachment)
-        .filter(Attachment.id == candidate.attachment_id)
-        .filter(Attachment.object_key == candidate.object_key)
-        .filter(Attachment.parent_type == "symbol_revision")
-        .filter(Attachment.parent_id == candidate_revision_id)
-        .one_or_none()
-    )
-    if attachment is None:
-        raise HTTPException(status_code=404, detail="Published supplemental photo was not found.")
-    payload = download_object_bytes(object_key=candidate.object_key, env_file=str(get_settings().storage_env_file))
-    try:
-        media_type = validate_stored_image(
-            payload["payload"],
-            attachment.content_type,
-            payload.get("content_type"),
-        )
-    except UnsafeImageContentError as exc:
-        raise HTTPException(status_code=404, detail="Published supplemental photo was not found.") from exc
-    return Response(
-        content=payload["payload"],
-        media_type=media_type,
-        headers=safe_image_response_headers(),
-    )
 
 
 # An approved photo whose concept is on at least one public Catalog symbol.

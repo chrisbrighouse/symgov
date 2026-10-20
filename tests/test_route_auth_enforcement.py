@@ -127,12 +127,12 @@ def test_workspace_policy_inventory_exactly_matches_real_app():
     expected = {(entry.method, entry.path) for entry in expanded}
 
     assert actual == expected
-    assert len(WORKSPACE_OPERATIONS) == 33
-    assert len(expanded) == 54
-    assert Counter(entry.surface for entry in expanded) == {"v1": 33, "legacy": 21}
-    assert Counter(entry.policy for entry in WORKSPACE_OPERATIONS) == {"admin": 23, "reviewer_admin": 10}
-    assert Counter(entry.policy for entry in expanded) == {"admin": 41, "reviewer_admin": 13}
-    assert len({(entry.surface, entry.method, entry.template) for entry in expanded}) == 54
+    assert len(WORKSPACE_OPERATIONS) == 32
+    assert len(expanded) == 52
+    assert Counter(entry.surface for entry in expanded) == {"v1": 32, "legacy": 20}
+    assert Counter(entry.policy for entry in WORKSPACE_OPERATIONS) == {"admin": 22, "reviewer_admin": 10}
+    assert Counter(entry.policy for entry in expanded) == {"admin": 39, "reviewer_admin": 13}
+    assert len({(entry.surface, entry.method, entry.template) for entry in expanded}) == 52
 
 
 def test_workspace_policy_inventory_has_exact_surface_equivalence():
@@ -142,7 +142,7 @@ def test_workspace_policy_inventory_has_exact_surface_equivalence():
         for surface in ("v1", "legacy")
     }
 
-    assert len(by_surface["v1"].keys() & by_surface["legacy"].keys()) == 21
+    assert len(by_surface["v1"].keys() & by_surface["legacy"].keys()) == 20
     assert {key for key in by_surface["v1"] if key not in by_surface["legacy"]} == EXPECTED_V1_ONLY
     assert not (by_surface["legacy"].keys() - by_surface["v1"].keys())
     assert all(by_surface["v1"][key] == by_surface["legacy"][key] for key in by_surface["legacy"])
@@ -159,7 +159,7 @@ def test_every_workspace_route_has_the_same_central_authorization_dependency():
         ("POST", "/api/v1/workspace/hannah/photos/{photo_id}/decision"),
     }
 
-    assert len(routes) == 54
+    assert len(routes) == 52
     for key, route in routes.items():
         calls = [dependency.call for dependency in route.dependant.dependencies]
         expected_count = 2 if key in actor_attributed_mutations else 1
@@ -199,7 +199,7 @@ def test_every_workspace_route_accepts_admin(inert_workspace_app, entry):
 @pytest.mark.parametrize("roles,expected", [(None, 401), (("reviewer",), None), (("admin",), 404)])
 def test_all_shared_workspace_operations_have_legacy_v1_authorization_parity(inert_workspace_app, roles, expected):
     shared = [entry for entry in WORKSPACE_OPERATIONS if set(entry.surfaces) == {"v1", "legacy"}]
-    assert len(shared) == 21
+    assert len(shared) == 20
     inert_workspace_app.dependency_overrides[get_current_user] = (
         (lambda: None) if roles is None else (lambda: authenticated_user(*roles))
     )

@@ -31,8 +31,6 @@ from ..models import (
     ClarificationRecord,
     HumanReviewDecision,
     HannahConceptTarget,
-    HannahPhotoCandidate,
-    HannahSymbolCurationState,
     IntakeRecord,
     ProvenanceAssessment,
     PublicationPack,
@@ -112,8 +110,6 @@ from ..schemas import (
     WorkspaceHannahCurationSearchStartRequest,
     WorkspaceHannahCurationSearchStartResponse,
     WorkspaceHannahCurationSearchStopResponse,
-    WorkspaceHannahPhotoCandidateListResponse,
-    WorkspaceHannahPhotoCandidateResponse,
     WorkspaceHannahCleanupActionRequest,
     WorkspaceHannahCleanupActionResponse,
     WorkspaceHannahConceptListResponse,
@@ -3193,129 +3189,6 @@ def stop_hannah_curation_search(
         status="cancelled",
         stoppedAt=isoformat_utc(stopped_at),
         termination=termination,
-    )
-
-
-HANNAH_PHOTO_SORT_COLUMNS = {
-    "symbolName": GovernedSymbol.canonical_name,
-    "sourceUrl": HannahPhotoCandidate.source_url,
-    "sourceDomain": HannahPhotoCandidate.source_domain,
-    "title": HannahPhotoCandidate.title,
-    "description": HannahPhotoCandidate.description,
-    "rightsStatus": HannahPhotoCandidate.rights_status,
-    "licenseLabel": HannahPhotoCandidate.license_label,
-    "status": HannahPhotoCandidate.status,
-    "relevanceScore": HannahPhotoCandidate.relevance_score,
-    "lastSeenAt": HannahPhotoCandidate.last_seen_at,
-    "lastSessionQueueItemId": HannahPhotoCandidate.queue_item_id,
-}
-
-
-def hannah_photo_candidate_response(row) -> WorkspaceHannahPhotoCandidateResponse:
-    candidate = row[0]
-    preview_url = (
-        f"/api/v1/published/symbols/{row.symbol_slug}/supplemental-photos/{candidate.id}/preview"
-        if candidate.object_key and candidate.status == "attached" and row.symbol_slug
-        else None
-    )
-    return WorkspaceHannahPhotoCandidateResponse(
-        id=str(candidate.id),
-        symbolId=str(candidate.symbol_id),
-        symbolSlug=row.symbol_slug,
-        symbolName=row.symbol_name,
-        pageTitle=row.page_title,
-        category=row.category,
-        discipline=row.discipline,
-        sourceUrl=candidate.source_url,
-        imageUrl=candidate.image_url,
-        sourceDomain=candidate.source_domain,
-        title=candidate.title,
-        description=candidate.description,
-        rightsStatus=candidate.rights_status,
-        rightsDisposition=candidate.evidence_json.get("rights_disposition") if candidate.evidence_json else None,
-        processingOutcome=candidate.evidence_json.get("processing_outcome") if candidate.evidence_json else None,
-        riskLevel=candidate.evidence_json.get("risk_level") if candidate.evidence_json else None,
-        licenseLabel=candidate.license_label,
-        status=candidate.status,
-        relevanceScore=float(candidate.relevance_score) if candidate.relevance_score is not None else None,
-        previewUrl=preview_url,
-        evidence=candidate.evidence_json or {},
-        firstSeenAt=isoformat_utc(candidate.first_seen_at),
-        lastSeenAt=isoformat_utc(candidate.last_seen_at),
-        lastSessionQueueItemId=str(candidate.queue_item_id) if candidate.queue_item_id else None,
-    )
-
-
-@router.get(
-    "/hannah/photo-candidates",
-    response_model=WorkspaceHannahPhotoCandidateListResponse,
-)
-@legacy_router.get(
-    "/workspace/hannah/photo-candidates",
-    response_model=WorkspaceHannahPhotoCandidateListResponse,
-    include_in_schema=False,
-)
-def list_hannah_photo_candidates(
-    session: Session = Depends(get_db_session),
-    offset: int = Query(default=0, ge=0),
-    limit: int = Query(default=50, ge=1, le=200),
-    sort: str = Query(default="lastSeenAt"),
-    direction: str = Query(default="desc", pattern="^(asc|desc)$"),
-    symbolName: str | None = Query(default=None),
-    sourceUrl: str | None = Query(default=None),
-    sourceDomain: str | None = Query(default=None),
-    title: str | None = Query(default=None),
-    description: str | None = Query(default=None),
-    rightsStatus: str | None = Query(default=None),
-    licenseLabel: str | None = Query(default=None),
-    status: str | None = Query(default=None),
-    relevanceScore: str | None = Query(default=None),
-    lastSeenAt: str | None = Query(default=None),
-    lastSessionQueueItemId: str | None = Query(default=None),
-) -> WorkspaceHannahPhotoCandidateListResponse:
-    query = (
-        session.query(
-            HannahPhotoCandidate,
-            GovernedSymbol.slug.label("symbol_slug"),
-            GovernedSymbol.canonical_name.label("symbol_name"),
-            GovernedSymbol.category.label("category"),
-            GovernedSymbol.discipline.label("discipline"),
-            PublishedPage.title.label("page_title"),
-        )
-        .join(GovernedSymbol, GovernedSymbol.id == HannahPhotoCandidate.symbol_id)
-        .outerjoin(PublishedPage, PublishedPage.id == HannahPhotoCandidate.published_page_id)
-        .filter(GovernedSymbol.visibility == "public")
-    )
-    filter_values = {
-        "symbolName": symbolName,
-        "sourceUrl": sourceUrl,
-        "sourceDomain": sourceDomain,
-        "title": title,
-        "description": description,
-        "rightsStatus": rightsStatus,
-        "licenseLabel": licenseLabel,
-        "status": status,
-        "relevanceScore": relevanceScore,
-        "lastSeenAt": lastSeenAt,
-        "lastSessionQueueItemId": lastSessionQueueItemId,
-    }
-    for key, raw_value in filter_values.items():
-        value = (raw_value or "").strip()
-        if not value:
-            continue
-        column = HANNAH_PHOTO_SORT_COLUMNS[key]
-        query = query.filter(func.lower(cast(column, Text)).like(f"%{value.lower()}%"))
-
-    total = query.count()
-    sort_column = HANNAH_PHOTO_SORT_COLUMNS.get(sort, HannahPhotoCandidate.last_seen_at)
-    ordered_column = sort_column.asc() if direction == "asc" else sort_column.desc()
-    rows = query.order_by(ordered_column, HannahPhotoCandidate.source_url.asc()).offset(offset).limit(limit).all()
-    return WorkspaceHannahPhotoCandidateListResponse(
-        items=[hannah_photo_candidate_response(row) for row in rows],
-        total=total,
-        offset=offset,
-        limit=limit,
-        hasMore=offset + len(rows) < total,
     )
 
 

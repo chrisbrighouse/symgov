@@ -17,10 +17,11 @@ enforced:
    twin) and the Hannah/Whitney display-join queries
    (`list_hannah_photo_candidates`, `list_whitney_demand_signals`, in both
    files) joined `GovernedSymbol`/`PublishedPage`/`PublicationPack` with no
-   independent `visibility` check. This module proves each of those six call
-   sites now excludes an `organization_private` governed symbol constructed
-   to otherwise satisfy every other condition the query checks, while a
-   legitimate public row is returned unchanged.
+   independent `visibility` check. This module proves each live call site
+   now excludes an `organization_private` governed symbol constructed to
+   otherwise satisfy every other condition the query checks, while a
+   legitimate public row is returned unchanged. The Hannah photo-candidate
+   list was retired with WP-H7; it survives only in the unmounted twin.
 
 Follows the disposable-PostgreSQL harness and fixture-construction patterns
 established in `test_organization_symbol_postgresql.py` and
@@ -72,7 +73,7 @@ import symgov_backend.routes.workspace as routes_workspace  # noqa: E402
 # exercised via direct import, so its regression coverage here is a static
 # source check rather than a live call.
 
-NEW_MIGRATION_HEAD = "20261020_0074"
+NEW_MIGRATION_HEAD = "20261021_0075"
 
 psycopg = pytest.importorskip("psycopg")
 
@@ -322,28 +323,6 @@ def _publish_symbol_for_display(
     return symbol, revision, page
 
 
-def _hannah_candidate(connection, symbol_id: uuid.UUID, published_page_id: uuid.UUID) -> uuid.UUID:
-    candidate_id = uuid.uuid4()
-    now = datetime.now(timezone.utc).replace(microsecond=0)
-    connection.execute(
-        text(
-            "INSERT INTO hannah_photo_candidates "
-            "(id,symbol_id,published_page_id,source_url,image_url,source_domain,rights_status,status,evidence_json,first_seen_at,last_seen_at) "
-            "VALUES (:id,:symbol,:page,:source_url,:image_url,:domain,'public_domain','candidate','{}'::jsonb,:now,:now)"
-        ),
-        {
-            "id": candidate_id,
-            "symbol": symbol_id,
-            "page": published_page_id,
-            "source_url": f"https://example.test/source/{candidate_id}",
-            "image_url": f"https://example.test/image/{candidate_id}.jpg",
-            "domain": "example.test",
-            "now": now,
-        },
-    )
-    return candidate_id
-
-
 def _whitney_signal(connection, symbol_id: uuid.UUID, published_page_id: uuid.UUID) -> uuid.UUID:
     signal_id = uuid.uuid4()
     now = datetime.now(timezone.utc).replace(microsecond=0)
@@ -407,8 +386,6 @@ def wp56_display_fixtures(wp56_database):
             private_symbol, private_revision, private_page = _publish_symbol_for_display(
                 connection, actor, organization, visibility="organization_private"
             )
-            _hannah_candidate(connection, public_symbol, public_page)
-            _hannah_candidate(connection, private_symbol, private_page)
             _whitney_signal(connection, public_symbol, public_page)
             _whitney_signal(connection, private_symbol, private_page)
     finally:
@@ -438,42 +415,6 @@ def test_rupert_published_metadata_excludes_organization_private_symbol(wp56_dis
         )
     assert private_result == {}
     assert public_result.get("published_symbol_id") is not None
-
-
-_HANNAH_KWARGS = dict(
-    offset=0,
-    limit=50,
-    sort="lastSeenAt",
-    direction="desc",
-    symbolName=None,
-    sourceUrl=None,
-    sourceDomain=None,
-    title=None,
-    rightsStatus=None,
-    licenseLabel=None,
-    status=None,
-    relevanceScore=None,
-    lastSeenAt=None,
-    lastSessionQueueItemId=None,
-)
-
-
-@pytest.mark.parametrize(
-    "module,extra_kwargs",
-    [
-        (routes_workspace, {"description": None}),
-    ],
-)
-def test_list_hannah_photo_candidates_excludes_organization_private_symbol(
-    wp56_display_fixtures, module, extra_kwargs
-):
-    with Session(wp56_display_fixtures.engine) as session:
-        response = module.list_hannah_photo_candidates(
-            session=session, **_HANNAH_KWARGS, **extra_kwargs
-        )
-    returned_symbol_ids = {item.symbolId for item in response.items}
-    assert str(wp56_display_fixtures.public_symbol) in returned_symbol_ids
-    assert str(wp56_display_fixtures.private_symbol) not in returned_symbol_ids
 
 
 _WHITNEY_KWARGS = dict(

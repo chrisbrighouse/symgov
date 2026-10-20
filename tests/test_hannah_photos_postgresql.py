@@ -6,7 +6,8 @@ Commons and the vision model are faked, so this proves the write rules:
   target to `has_proposals`; a dry run writes nothing;
 - a second run never checks a seen image again, and an approved photo keeps
   its slot so only one proposal remains;
-- the seeder queues one card per due target, never a second open card, and
+- the seeder queues one card per due target, never a second open card,
+  never a concept that is on no public Catalog symbol, and
   never a target waiting on a steward.
 """
 
@@ -169,13 +170,25 @@ def test_the_seeder_queues_due_targets_once(targets, tmp_path):
             ),
             {"code": VALVE},
         )
+        # A concept seen only on an unpublished revision: due, but never on the Catalog.
+        connection.execute(
+            text(
+                "INSERT INTO hannah_concept_targets (id, semantic_concept_id, photographable, photographable_basis, "
+                "search_terms_json, status, created_at, updated_at) "
+                "SELECT gen_random_uuid(), c.id, 'yes', 'steward', '[\"fire hydrant\"]'::jsonb, 'pending', :now, :now "
+                "FROM semantic_concepts c WHERE c.concept_code = 'SGC-90000004' "
+                "ON CONFLICT DO NOTHING"
+            ),
+            {"now": NOW},
+        )
     runner = _runner()
     factory = sessionmaker(bind=engine)
 
     first = runner.seed_hannah_concept_queue_cards(db_env_file=None, runtime_root=tmp_path, session_factory=factory)
     second = runner.seed_hannah_concept_queue_cards(db_env_file=None, runtime_root=tmp_path, session_factory=factory)
 
-    # The pump is due; the valve waits on a steward; the tag bubble is excluded.
+    # The pump is due; the valve waits on a steward; the tag bubble is excluded;
+    # the hydrant is on no public symbol, so the visibility floor keeps it out.
     assert [card["concept_code"] for card in first["created"]] == ["SGC-90000002"]
     assert second["createdCount"] == 0
     card = json.loads((tmp_path / "agent_queue_items" / f"{first['created'][0]['queue_item_id']}.json").read_text())

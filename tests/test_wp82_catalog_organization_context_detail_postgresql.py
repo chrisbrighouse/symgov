@@ -1,5 +1,5 @@
-"""Stage 8 WP8.2 regression: organization-aware Catalog detail/preview/
-supplemental-photo resolution against a real disposable PostgreSQL container.
+"""Stage 8 WP8.2 regression: organization-aware Catalog detail/preview
+resolution against a real disposable PostgreSQL container.
 
 Real Postgres is required for the same reason WP8.1's own test is: the
 public resolution path this falls back from (`_load_published_symbol_row`)
@@ -17,9 +17,10 @@ WP8.2/SS1.6):
 - A personal-mode session gets 404 for it too.
 - Both feature flags gate the fallback off, even for an organization-bound
   session -- the public-only 404 is what the caller sees.
-- The preview/supplemental-photo routes route through the same resolver
-  and 404 correctly (without needing a real asset store) when there is no
-  preview asset for the organization-private symbol's payload.
+- The preview route routes through the same resolver and 404s correctly
+  (without needing a real asset store) when there is no preview asset for
+  the organization-private symbol's payload. (The per-symbol supplemental
+  photo route was retired with WP-H7; concept photos are public-only.)
 """
 
 from __future__ import annotations
@@ -185,6 +186,3 @@ def test_preview_route_404s_cleanly_when_there_is_no_preview_asset(wp82_database
 
     preview = acme_client.get(f"/api/v1/published/symbols/{symbol_id}/preview")
     assert preview.status_code == 404, preview.text
-
-    supplemental = acme_client.get(f"/api/v1/published/symbols/{symbol_id}/supplemental-photos/{symbol_id}/preview")
-    assert supplemental.status_code == 404, supplemental.text
