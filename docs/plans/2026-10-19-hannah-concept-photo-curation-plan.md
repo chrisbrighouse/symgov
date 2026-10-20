@@ -215,6 +215,25 @@ The photo stays in its own row, with no `attachments` row: `attachments` parents
   - Approve, Reject and Remove buttons, keyboard reachable with visible focus.
 - **Tests:** route tests (admin and non-admin), state transitions, frontend tab tests.
 
+**As built (2026-10-20).**
+
+The routes are v1 only and admin only, registered in `WORKSPACE_OPERATIONS`:
+
+| Route | Purpose |
+|---|---|
+| `GET /hannah/concepts` | Concept list with status filter, code or name search and a per-status summary |
+| `GET /hannah/concepts/{id}/photos` | Every image Hannah checked for one concept |
+| `PATCH /hannah/concepts/{id}` | Steward correction of photographable and search terms |
+| `POST /hannah/concepts/{id}/search` | Search one concept now |
+| `POST /hannah/photos/{id}/decision` | Approve, reject or remove a photo |
+
+How it behaves:
+- **Searching:** "Search due concepts" (`POST /hannah/curation-searches`) and "Search now" create `running` cards and run them in a FastAPI background task, because Hannah is off the worker. The worker's queued-card scan ignores `running` cards. Stop now accepts concept cards.
+- **Approving:** fetches a Commons thumbnail at most 1,280 px wide, checks the bytes with `validate_stored_image`, and stores it at `hannah/concept-photos/<code>/<id>.<ext>`.
+- **Re-ranking:** every decision re-ranks the concept's open candidates and writes an audit event naming the steward. A concept with proposals waiting stays `has_proposals`, even when one photo is already approved.
+- **Workspace screen:** `HannahConceptReview.js` replaces the old per-symbol candidate grid in the Curation tab.
+- **Thumbnails:** shown straight from Wikimedia at 500 px; the site has no CSP.
+
 ### WP-H5: Public display (M)
 - Concept-based `load_supplemental_photos`, the new preview route, `_PHOTO_COUNT`, and the credit line in `SupplementalPhotoStrip`.
 - **Tests:**

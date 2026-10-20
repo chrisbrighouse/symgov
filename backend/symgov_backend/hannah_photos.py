@@ -570,10 +570,11 @@ def curate_concept(
     approved = sum(1 for row in rows if row["status"] == "approved")
     if source_errors and not gathered:
         target_status, next_eligible = "searched", now + ERROR_RETRY_AFTER
+    elif proposed:
+        # Steward work comes first, whatever is already approved.
+        target_status, next_eligible = "has_proposals", None
     elif approved:
         target_status, next_eligible = "has_photos", (None if approved >= PHOTOS_PER_CONCEPT else now + SEARCHED_COOLDOWN)
-    elif proposed:
-        target_status, next_eligible = "has_proposals", None
     elif not any(row["score"] is not None for row in rows) and counts["unchecked"] == 0 and counts["vision_errors"] == 0:
         target_status, next_eligible = "no_candidates", now + NO_CANDIDATES_COOLDOWN
     else:

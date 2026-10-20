@@ -26,7 +26,6 @@ import {
   fetchOpenRouterModels,
   fetchReggieQueueControls,
   fetchScottSourceSites,
-  fetchHannahPhotoCandidates,
   fetchWhitneyDemandSignals,
   fetchHealth,
   changeCurrentUserPin,
@@ -43,10 +42,8 @@ import {
   fetchWorkspaceRightsReviewCases,
   fetchWorkspaceReviewSymbolPropertyOptions,
   processWorkspaceSplitReviewDecisions,
-  startHannahCurationSearch,
   startScottSourceSearch,
   startWhitneyDemandScan,
-  stopHannahCurationSearch,
   stopScottSourceSearch,
   stopWhitneyDemandScan,
   submitWorkspaceReviewDecision,
@@ -114,6 +111,7 @@ import { canMountOrganizationSymbolDrafts, canMountProjectContext, canReviewOrga
 import { OrganizationSymbolDraftsPage } from './OrganizationSymbolDraftsPage.js';
 import { OrganizationSymbolReviewsPage } from './OrganizationSymbolReviewsPage.js';
 import { ReviewClassificationForecast } from './ReviewClassificationForecast.js';
+import { HannahConceptReview } from './HannahConceptReview.js';
 import { Header } from './Header.js';
 import FavouriteButton from './FavouriteButton.js';
 import FavouriteFilter from './FavouriteFilter.js';
@@ -314,8 +312,6 @@ const PUBLISHED_SYMBOL_SELECTION_LIMIT = 10;
 const DEFAULT_HIDDEN_WORKSPACE_STATUSES = new Set(['completed']);
 const SCOTT_SOURCE_SITE_PAGE_SIZE = 50;
 const SCOTT_SOURCE_SEARCH_DURATION_SECONDS = DEFAULT_AGENT_RUN_DURATION_SECONDS;
-const HANNAH_CANDIDATE_PAGE_SIZE = 50;
-const HANNAH_CURATION_SEARCH_DURATION_SECONDS = 120;
 const WHITNEY_SIGNAL_PAGE_SIZE = 50;
 const WHITNEY_DEMAND_SCAN_DURATION_SECONDS = DEFAULT_AGENT_RUN_DURATION_SECONDS;
 const SCOTT_SOURCE_COLUMNS = [
@@ -343,22 +339,6 @@ const SCOTT_SOURCE_STATUS_OPTIONS = [
   ['candidate', 'Candidate'],
   ['low_signal', 'Low_signal'],
   ['ignored', 'Ignore']
-];
-const HANNAH_CANDIDATE_COLUMNS = [
-  ['symbolName', 'Symbol'],
-  ['status', 'Status'],
-  ['relevanceScore', 'Score'],
-  ['rightsStatus', 'Rights'],
-  ['licenseLabel', 'License'],
-  ['sourceDomain', 'Domain'],
-  ['title', 'Title'],
-  ['description', 'Feedback'],
-  ['sourceUrl', 'Source URL'],
-  ['imageUrl', 'Image URL'],
-  ['category', 'Category'],
-  ['discipline', 'Discipline'],
-  ['lastSeenAt', 'Last seen'],
-  ['lastSessionQueueItemId', 'Last queue item']
 ];
 const WHITNEY_SIGNAL_COLUMNS = [
   ['signalType', 'Signal'],
@@ -3200,23 +3180,6 @@ function WorkspacePage() {
     setScottSearchDurationSeconds((current) => setDurationPart(current, part, value));
   };
   const {
-    curationState,
-    candidatesSort,
-    candidateFilters,
-    candidatesState,
-    handleStartHannahCuration,
-    handleStopHannahCuration,
-    handleCandidateSort,
-    updateCandidateFilter,
-    handleHannahCandidatesScroll
-  } = useHannahCurationControls({
-    enabled: Boolean(appConfig.apiRoot),
-    curationActive: activeWorkspaceTab === 'curation'
-  });
-  const curationIsRunning = Boolean(curationState.result && curationState.remainingSeconds > 0 && curationState.result.status === 'searching');
-  const curationDisabled = curationState.pending || curationIsRunning || curationState.stopping || !appConfig.apiRoot;
-  const curationStatusText = hannahCurationStatusText(curationState);
-  const {
     scanState,
     signalsSort,
     signalFilters,
@@ -3647,41 +3610,7 @@ function WorkspacePage() {
         </div>
       ) : activeWorkspaceTab === 'curation' ? (
         <div className="workspace-sources-tab" role="tabpanel" aria-label="Hannah curation">
-          <div className="workspace-content-titlebar glass-panel">
-            <div>
-              <p className="eyebrow">Hannah curation</p>
-              <h2>Curation</h2>
-            </div>
-            <div className="workspace-content-tools">
-              {curationStatusText ? <span className="search-inline-status">{curationStatusText}</span> : null}
-              <button type="button" className="action-button primary compact" disabled={curationDisabled} onClick={handleStartHannahCuration}>
-                {curationState.pending ? 'Searching...' : 'Start search'}
-              </button>
-              {curationIsRunning ? (
-                <button
-                  type="button"
-                  className="action-button danger solid compact"
-                  disabled={curationState.stopping}
-                  onClick={handleStopHannahCuration}
-                >
-                  {curationState.stopping ? 'Stopping...' : 'Stop'}
-                </button>
-              ) : null}
-              <span className="search-countdown">
-                {formatHannahCurationTimer(curationState)}
-              </span>
-            </div>
-          </div>
-          {curationState.error ? <p className="error-text">{curationState.error}</p> : null}
-
-          <HannahCurationPanel
-            state={candidatesState}
-            sort={candidatesSort}
-            filters={candidateFilters}
-            onSort={handleCandidateSort}
-            onFilterChange={updateCandidateFilter}
-            onScroll={handleHannahCandidatesScroll}
-          />
+          <HannahConceptReview />
         </div>
       ) : (
         <div className="workspace-sources-tab" role="tabpanel" aria-label="Whitney market intelligence">
@@ -6204,30 +6133,6 @@ function scottSearchStatusText(searchState) {
   return `Scott queue item ${searchState.result.queueItemId} is ${statusLabel}.`;
 }
 
-function formatHannahCurationTimer(curationState) {
-  if (!curationState.result) {
-    return formatCountdown(HANNAH_CURATION_SEARCH_DURATION_SECONDS);
-  }
-  if (curationState.remainingSeconds > 0) {
-    return formatCountdown(curationState.remainingSeconds);
-  }
-  return 'Progress Saved';
-}
-
-function hannahCurationStatusText(curationState) {
-  if (!curationState.result) {
-    return '';
-  }
-  if (curationState.result.queueItemId === 'starting') {
-    return 'Starting Hannah curation search.';
-  }
-  if (curationState.result.message) {
-    return curationState.result.message;
-  }
-  const statusLabel = curationState.remainingSeconds > 0 ? 'Searching' : 'Progress Saved';
-  return `Hannah queue item ${curationState.result.queueItemId} is ${statusLabel}.`;
-}
-
 function formatWhitneyDemandScanTimer(scanState, configuredDurationSeconds = WHITNEY_DEMAND_SCAN_DURATION_SECONDS) {
   if (!scanState.result) {
     return formatCountdown(configuredDurationSeconds);
@@ -6434,194 +6339,6 @@ function useWhitneyDemandSensingControls({ enabled = true, intelligenceActive = 
     handleSignalSort,
     updateSignalFilter,
     handleWhitneySignalsScroll
-  };
-}
-
-function useHannahCurationControls({ enabled = true, curationActive = false } = {}) {
-  const stopRequestedRef = useRef(false);
-  const [curationState, setCurationState] = useState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
-  const [candidatesSort, setCandidatesSort] = useState({ key: 'lastSeenAt', direction: 'desc' });
-  const [candidateFilters, setCandidateFilters] = useState({});
-  const [candidatesState, setCandidatesState] = useState({
-    loading: false,
-    loadingMore: false,
-    error: '',
-    items: [],
-    total: 0,
-    hasMore: false
-  });
-
-  useEffect(() => {
-    if (!curationState.result?.expectedCompletedAt) {
-      return undefined;
-    }
-
-    const updateRemaining = () => {
-      const target = new Date(curationState.result.expectedCompletedAt).getTime();
-      const remainingSeconds = Number.isFinite(target) ? Math.max(0, Math.ceil((target - Date.now()) / 1000)) : 0;
-      setCurationState((current) => ({
-        ...current,
-        pending: remainingSeconds > 0 && current.result?.status === 'searching' && !current.stopping,
-        remainingSeconds
-      }));
-    };
-
-    updateRemaining();
-    const timer = window.setInterval(updateRemaining, 1000);
-    return () => window.clearInterval(timer);
-  }, [curationState.result]);
-
-  useEffect(() => {
-    if (!enabled || !curationActive) {
-      return undefined;
-    }
-
-    let cancelled = false;
-    setCandidatesState((current) => ({ ...current, loading: true, loadingMore: false, error: '' }));
-
-    fetchHannahPhotoCandidates({
-      offset: 0,
-      limit: HANNAH_CANDIDATE_PAGE_SIZE,
-      sort: candidatesSort.key,
-      direction: candidatesSort.direction,
-      filters: candidateFilters
-    }).then((payload) => {
-      if (cancelled) {
-        return;
-      }
-
-      setCandidatesState({
-        loading: false,
-        loadingMore: false,
-        error: payload.ok ? '' : payload.message,
-        items: payload.ok ? payload.items : [],
-        total: payload.ok ? payload.total : 0,
-        hasMore: payload.ok ? payload.hasMore : false
-      });
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, curationActive, candidatesSort.key, candidatesSort.direction, candidateFilters]);
-
-  function updateCandidateFilter(key, value) {
-    setCandidateFilters((current) => ({ ...current, [key]: value }));
-  }
-
-  function handleCandidateSort(key) {
-    setCandidatesSort((current) => ({
-      key,
-      direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
-    }));
-  }
-
-  function loadMoreHannahCandidates() {
-    if (!enabled || !curationActive || candidatesState.loading || candidatesState.loadingMore || !candidatesState.hasMore) {
-      return;
-    }
-
-    const offset = candidatesState.items.length;
-    setCandidatesState((current) => ({ ...current, loadingMore: true, error: '' }));
-
-    fetchHannahPhotoCandidates({
-      offset,
-      limit: HANNAH_CANDIDATE_PAGE_SIZE,
-      sort: candidatesSort.key,
-      direction: candidatesSort.direction,
-      filters: candidateFilters
-    }).then((payload) => {
-      setCandidatesState((current) => ({
-        loading: false,
-        loadingMore: false,
-        error: payload.ok ? '' : payload.message,
-        items: payload.ok ? [...current.items, ...payload.items] : current.items,
-        total: payload.ok ? payload.total : current.total,
-        hasMore: payload.ok ? payload.hasMore : current.hasMore
-      }));
-    });
-  }
-
-  function handleHannahCandidatesScroll(event) {
-    const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
-    if (scrollHeight - scrollTop - clientHeight < 120) {
-      loadMoreHannahCandidates();
-    }
-  }
-
-  function handleStartHannahCuration() {
-    if (!enabled) {
-      return;
-    }
-
-    const durationSeconds = HANNAH_CURATION_SEARCH_DURATION_SECONDS;
-    stopRequestedRef.current = false;
-    const startedAt = new Date();
-    const expectedCompletedAt = new Date(startedAt.getTime() + durationSeconds * 1000).toISOString();
-    setCurationState({
-      pending: true,
-      stopping: false,
-      result: {
-        queueItemId: 'starting',
-        status: 'searching',
-        durationSeconds,
-        startedAt: startedAt.toISOString(),
-        expectedCompletedAt
-      },
-      error: '',
-      remainingSeconds: durationSeconds
-    });
-
-    startHannahCurationSearch({ durationSeconds }).then((payload) => {
-      if (stopRequestedRef.current) {
-        setCurationState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
-        return stopHannahCurationSearch(payload.queueItemId).catch(() => {});
-      }
-
-      setCurationState({
-        pending: payload.status === 'searching',
-        stopping: false,
-        result: payload,
-        error: '',
-        remainingSeconds: payload.durationSeconds || HANNAH_CURATION_SEARCH_DURATION_SECONDS
-      });
-    }).catch((curationError) => {
-      setCurationState({
-        pending: false,
-        stopping: false,
-        result: null,
-        error: curationError instanceof Error ? curationError.message : 'Hannah curation search could not be started.',
-        remainingSeconds: 0
-      });
-    });
-  }
-
-  function handleStopHannahCuration() {
-    const queueItemId = curationState.result?.queueItemId;
-    if (!queueItemId) {
-      return;
-    }
-
-    stopRequestedRef.current = true;
-    setCurationState({ pending: false, stopping: false, result: null, error: '', remainingSeconds: 0 });
-
-    if (queueItemId === 'starting') {
-      return;
-    }
-
-    stopHannahCurationSearch(queueItemId).catch(() => {});
-  }
-
-  return {
-    curationState,
-    candidatesSort,
-    candidateFilters,
-    candidatesState,
-    handleStartHannahCuration,
-    handleStopHannahCuration,
-    handleCandidateSort,
-    updateCandidateFilter,
-    handleHannahCandidatesScroll
   };
 }
 
@@ -8140,94 +7857,6 @@ function normalizeScottSourceStatus(status) {
     return 'ignored';
   }
   return SCOTT_SOURCE_STATUS_OPTIONS.some(([value]) => value === normalized) ? normalized : 'candidate';
-}
-
-function HannahCurationPanel({ state, sort, filters, onSort, onFilterChange, onScroll }) {
-  return (
-    <section className="glass-panel pane scott-sources-panel">
-      <div className="scott-sources-toolbar">
-        <div>
-          <p className="eyebrow">Hannah results</p>
-          <h3>Photo candidates</h3>
-        </div>
-        <div className="scott-sources-summary">
-          <span>{state.loading ? 'Loading...' : `${state.items.length} of ${state.total} shown`}</span>
-        </div>
-      </div>
-
-      {state.error ? <p className="error-text">{state.error}</p> : null}
-
-      <div className="scott-sources-grid-shell hannah-candidates-grid-shell" onScroll={onScroll}>
-        <table className="scott-sources-grid hannah-candidates-grid">
-          <thead>
-            <tr>
-              {HANNAH_CANDIDATE_COLUMNS.map(([key, label]) => (
-                <th key={key} scope="col">
-                  <button type="button" className="source-column-sort" onClick={() => onSort(key)}>
-                    <span>{label}</span>
-                    <span className="source-sort-indicator">{sort.key === key ? (sort.direction === 'asc' ? 'Up' : 'Down') : ''}</span>
-                  </button>
-                  <input
-                    type="search"
-                    value={filters[key] || ''}
-                    onChange={(event) => onFilterChange(key, event.target.value)}
-                    aria-label={`Filter ${label}`}
-                  />
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {state.items.map((candidate) => (
-              <tr key={candidate.id}>
-                {HANNAH_CANDIDATE_COLUMNS.map(([key]) => (
-                  <td key={key} className={`source-cell source-cell-${key}`}>
-                    {formatHannahCandidateValue(candidate, key)}
-                  </td>
-                ))}
-              </tr>
-            ))}
-            {!state.loading && !state.items.length ? (
-              <tr>
-                <td colSpan={HANNAH_CANDIDATE_COLUMNS.length} className="source-empty-cell">
-                  No curation records match the current filters.
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
-        {state.loadingMore ? <p className="source-loading-row">Loading more candidates...</p> : null}
-      </div>
-    </section>
-  );
-}
-
-function formatHannahCandidateValue(candidate, key) {
-  const value = candidate?.[key];
-  if (key === 'rightsStatus') {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-        <span>{String(value || '')}</span>
-        {candidate.rightsDisposition && (
-          <RightsBadge disposition={candidate.rightsDisposition} />
-        )}
-      </div>
-    );
-  }
-  if (key === 'relevanceScore') {
-    return value == null ? '' : Number(value).toFixed(4);
-  }
-  if (key === 'lastSeenAt') {
-    return value ? new Date(value).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '';
-  }
-  if (key === 'sourceUrl' || key === 'imageUrl') {
-    return value ? (
-      <a href={value} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
-        {value}
-      </a>
-    ) : '';
-  }
-  return String(value || '');
 }
 
 function WhitneyDemandSignalsPanel({ state, sort, filters, onSort, onFilterChange, onScroll }) {

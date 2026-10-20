@@ -7160,3 +7160,161 @@ button.catalog-preview-format-badge:focus-visible {
 .symbol-set-builder-item-actions .danger {
   margin-left: auto;
 }
+
+/* WP-H4: Hannah's concept photo review (Workspace Curation tab). */
+.hannah-review {
+  display: grid;
+  gap: 1rem;
+}
+
+.hannah-review-filters {
+  display: grid;
+  grid-template-columns: minmax(12rem, 16rem) minmax(12rem, 24rem);
+  gap: 1rem;
+  align-items: end;
+}
+
+.hannah-review-count {
+  margin: 0;
+  font-size: var(--idox-font-size-sm);
+  color: var(--idox-text-secondary);
+}
+
+.hannah-concept {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+}
+
+.hannah-concept-header h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.hannah-concept-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: var(--idox-font-weight-semibold);
+  color: var(--idox-text-brand-accent);
+}
+
+.hannah-concept-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  align-items: center;
+  margin: 0.35rem 0 0;
+  font-size: var(--idox-font-size-sm);
+  color: var(--idox-text-secondary);
+}
+
+.hannah-concept-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.hannah-concept-terms {
+  display: flex;
+  gap: 0.5rem;
+  align-items: end;
+  flex: 1 1 22rem;
+}
+
+.hannah-concept-terms .field {
+  flex: 1;
+}
+
+.hannah-concept-empty {
+  margin: 0;
+  font-size: var(--idox-font-size-sm);
+  color: var(--idox-text-tertiary);
+}
+
+.hannah-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.hannah-photo {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-bg-surface-default);
+}
+
+.hannah-photo-approved {
+  border-color: var(--idox-success-border);
+}
+
+.hannah-photo-filtered,
+.hannah-photo-rejected,
+.hannah-photo-removed {
+  opacity: 0.7;
+}
+
+.hannah-photo img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  background: var(--idox-bg-surface-subtle);
+}
+
+.hannah-photo-body {
+  display: grid;
+  gap: 0.35rem;
+  align-content: start;
+  padding: 0.6rem 0.75rem 0.75rem;
+}
+
+.hannah-photo-body p {
+  margin: 0;
+}
+
+.hannah-photo-status {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: var(--idox-font-size-xs);
+  color: var(--idox-text-secondary);
+}
+
+.hannah-photo-title {
+  font-weight: var(--idox-font-weight-medium);
+  color: var(--idox-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.hannah-photo-reason,
+.hannah-photo-credit {
+  font-size: var(--idox-font-size-xs);
+  color: var(--idox-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.hannah-photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.25rem;
+}
+
+@media (max-width: 720px) {
+  .hannah-review-filters {
+    grid-template-columns: 1fr;
+  }
+
+  .hannah-concept-terms {
+    flex-wrap: wrap;
+  }
+
+  .hannah-concept-terms .field {
+    flex-basis: 100%;
+  }
+}

@@ -1369,6 +1369,57 @@ export async function stopHannahCurationSearch(queueItemId) {
   return payload;
 }
 
+// WP-H4: Hannah's concept photo review. Every write returns the concept as
+// the list shows it, so the screen replaces one card rather than reloading.
+const HANNAH_ROOT = '/workspace/hannah';
+
+function hannahPayload(result, fallbackMessage) {
+  if (!result.ok) {
+    const validationDetails = formatValidationIssues(result.payload?.issues);
+    const error = new Error(validationDetails || result.payload?.detail || result.message || fallbackMessage);
+    error.status = result.status;
+    throw error;
+  }
+  return result.payload;
+}
+
+export async function listHannahConcepts({ status = '', q = '', offset = 0, limit = 25 } = {}) {
+  const result = await requestJson(withQuery(`${HANNAH_ROOT}/concepts`, { status, q, offset, limit }), { cache: 'no-store' });
+  return hannahPayload(result, 'Hannah concepts could not be loaded.');
+}
+
+export async function listHannahConceptPhotos(targetId, { status = '' } = {}) {
+  const result = await requestJson(
+    withQuery(`${HANNAH_ROOT}/concepts/${encodeURIComponent(targetId)}/photos`, { status }),
+    { cache: 'no-store' },
+  );
+  return hannahPayload(result, 'Hannah photos could not be loaded.').items || [];
+}
+
+export async function updateHannahConcept(targetId, { photographable, searchTerms } = {}) {
+  const body = {};
+  if (photographable) body.photographable = photographable;
+  if (Array.isArray(searchTerms)) body.searchTerms = searchTerms;
+  const result = await requestJson(`${HANNAH_ROOT}/concepts/${encodeURIComponent(targetId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+  return hannahPayload(result, 'The concept could not be updated.');
+}
+
+export async function searchHannahConceptNow(targetId) {
+  const result = await requestJson(`${HANNAH_ROOT}/concepts/${encodeURIComponent(targetId)}/search`, { method: 'POST' });
+  return hannahPayload(result, 'The search could not be started.');
+}
+
+export async function decideHannahPhoto(photoId, decision) {
+  const result = await requestJson(`${HANNAH_ROOT}/photos/${encodeURIComponent(photoId)}/decision`, {
+    method: 'POST',
+    body: JSON.stringify({ decision }),
+  });
+  return hannahPayload(result, 'The photo decision could not be saved.');
+}
+
 export async function fetchHannahPhotoCandidates({ offset = 0, limit = 50, sort = 'lastSeenAt', direction = 'desc', filters = {} } = {}) {
   if (!appConfig.apiRoot) {
     return { ok: false, mode: 'unconfigured', message: 'No API root configured for this environment.', items: [], total: 0, hasMore: false };

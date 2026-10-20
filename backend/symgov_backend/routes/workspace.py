@@ -5,15 +5,14 @@ import os
 import signal
 import subprocess
 import sys
-import importlib.util
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from sqlalchemy import Text, and_, cast, func, inspect as inspect_database, or_, select
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
+from sqlalchemy import Text, and_, cast, func, inspect as inspect_database, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, load_only
 
@@ -31,6 +30,7 @@ from ..models import (
     ClassificationRecord,
     ClarificationRecord,
     HumanReviewDecision,
+    HannahConceptTarget,
     HannahPhotoCandidate,
     HannahSymbolCurationState,
     IntakeRecord,
@@ -67,8 +67,10 @@ from ..review_followup_handoff import execute_review_followup_handoff
 from ..runtime import (
     SCOTT_SOURCE_DISCOVERY_DEFAULT_SEED_QUERY,
     SCOTT_SOURCE_DISCOVERY_SEED_QUERIES,
+    RuntimePersistenceBridge,
     coerce_uuid,
     download_object_bytes,
+    upload_object_bytes,
 )
 from ..schemas import (
     WorkspaceAgentQueueItemListResponse,
@@ -114,6 +116,12 @@ from ..schemas import (
     WorkspaceHannahPhotoCandidateResponse,
     WorkspaceHannahCleanupActionRequest,
     WorkspaceHannahCleanupActionResponse,
+    WorkspaceHannahConceptListResponse,
+    WorkspaceHannahConceptResponse,
+    WorkspaceHannahConceptSearchResponse,
+    WorkspaceHannahPhotoDecisionRequest,
+    WorkspaceHannahPhotoListResponse,
+    WorkspaceHannahTargetUpdateRequest,
     WorkspaceWhitneyDemandScanStartRequest,
     WorkspaceWhitneyDemandScanStartResponse,
     WorkspaceWhitneyDemandScanStopResponse,
@@ -124,6 +132,8 @@ from ..schemas import (
     WorkspaceSplitReviewProcessResponse,
 )
 from ..settings import get_settings
+from .. import hannah_review, hannah_runner
+from ..hannah_photos import default_fetch_bytes
 
 
 router = APIRouter(prefix="/workspace", tags=["workspace"])
@@ -133,9 +143,10 @@ SCOTT_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/scott/runtime")
 SCOTT_RUNNER = Path("/data/symgov/scripts/run_scott_intake.py")
 SCOTT_DB_ENV_FILE = Path("/data/.openclaw/workspace/symgov/.env.backend.database")
 HANNAH_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/hannah/runtime")
-HANNAH_RUNNER = Path("/data/symgov/scripts/run_hannah_curation.py")
 HANNAH_DB_ENV_FILE = SCOTT_DB_ENV_FILE
 HANNAH_STORAGE_ENV_FILE = Path("/data/.openclaw/workspace/symgov/.env.backend.storage")
+# How many due concepts one "Start search" runs; each takes up to a minute.
+HANNAH_START_SEARCH_CONCEPTS = 5
 WHITNEY_RUNTIME_ROOT = Path("/data/.openclaw/workspaces/whitney/runtime")
 WHITNEY_RUNNER = Path("/data/.openclaw/workspaces/whitney/run_whitney_market_intelligence.py")
 WHITNEY_DB_ENV_FILE = SCOTT_DB_ENV_FILE
@@ -233,15 +244,6 @@ def split_item_status_after_handoff(item: ReviewSplitItem | None, *, is_approval
     if item.status in DURABLE_SPLIT_ITEM_STATUSES or is_open_split_item_status(item.status):
         return item.status, item.downstream_agent_slug
     return fallback_status, fallback_agent
-
-
-def _load_hannah_runner_module():
-    spec = importlib.util.spec_from_file_location("symgov_hannah_runner_routes", HANNAH_RUNNER)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Unable to load Hannah runner from {HANNAH_RUNNER}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 DECISION_TRANSITIONS = {
@@ -3058,39 +3060,48 @@ def run_hannah_cleanup_action(
 )
 def start_hannah_curation_search(
     request: WorkspaceHannahCurationSearchStartRequest,
+    background_tasks: BackgroundTasks,
     session: Session = Depends(get_db_session),
 ) -> WorkspaceHannahCurationSearchStartResponse:
-    """Convert the old broad-search button into bounded Hannah card seeding."""
+    """Search the next few due concepts now, whether or not Hannah is on the worker.
+
+    The cards are created `running`, so a worker scanning for queued cards
+    leaves them alone, and they run one after another in the background.
+    """
     hannah_definition = session.query(AgentDefinition).filter_by(slug="hannah").one_or_none()
     if hannah_definition is None:
         raise HTTPException(status_code=500, detail="Hannah agent definition is missing.")
 
     started_at = datetime.now(timezone.utc).replace(microsecond=0)
-    runner = _load_hannah_runner_module()
-    seed_result = runner.seed_hannah_symbol_queue_cards(
-        db_env_file=str(HANNAH_DB_ENV_FILE),
+    settings = get_settings()
+    seed_result = hannah_runner.seed_hannah_concept_queue_cards(
+        db_env_file=str(settings.db_env_file),
         runtime_root=HANNAH_RUNTIME_ROOT,
+        limit=HANNAH_START_SEARCH_CONCEPTS,
+        status="running",
+        started_by="workspace",
     )
-    created_count = int(seed_result.get("createdCount") or 0)
-    skipped_count = int(seed_result.get("skippedCount") or 0)
-    first_created = (seed_result.get("created") or [{}])[0].get("queue_item_id")
-    queue_item_id = first_created or f"hannah-seed-{started_at.strftime('%Y%m%d%H%M%S')}"
-    expected_completed_at = started_at + timedelta(seconds=request.durationSeconds)
-    if created_count:
-        message = f"Seeded {created_count} Hannah curation cards; {skipped_count} symbols skipped."
-    elif skipped_count:
-        message = f"No Hannah cards were seeded; {skipped_count} symbols were skipped or still inside the curation cooldown."
+    created = seed_result.get("created") or []
+    if created:
+        background_tasks.add_task(
+            hannah_runner.run_cards,
+            [card["path"] for card in created],
+            runtime_root=HANNAH_RUNTIME_ROOT,
+            db_env_file=str(settings.db_env_file),
+        )
+        codes = ", ".join(card["concept_code"] for card in created)
+        message = f"Searching {len(created)} concepts: {codes}."
     else:
-        message = "No Hannah cards were seeded because no public published symbols are currently eligible outside the curation cooldown."
-
+        message = "No concepts are due a search: each is waiting on a steward, excluded, or inside its wait."
+    expected_completed_at = started_at + timedelta(seconds=request.durationSeconds)
     return WorkspaceHannahCurationSearchStartResponse(
-        queueItemId=str(queue_item_id),
-        status="queued" if first_created else "completed",
+        queueItemId=str(created[0]["queue_item_id"]) if created else f"hannah-seed-{started_at.strftime('%Y%m%d%H%M%S')}",
+        status="searching" if created else "completed",
         durationSeconds=request.durationSeconds,
         startedAt=isoformat_utc(started_at),
         expectedCompletedAt=isoformat_utc(expected_completed_at),
-        createdCount=created_count,
-        skippedCount=skipped_count,
+        createdCount=len(created),
+        skippedCount=0,
         message=message,
     )
 
@@ -3116,7 +3127,7 @@ def stop_hannah_curation_search(
         session.query(AgentQueueItem)
         .filter(AgentQueueItem.id == queue_item_id)
         .filter(AgentQueueItem.agent_id == hannah_definition.id)
-        .filter(AgentQueueItem.source_type == "published_symbol_photo_search")
+        .filter(AgentQueueItem.source_type.in_((hannah_runner.CARD_SOURCE_TYPE, "published_symbol_photo_search")))
         .one_or_none()
     )
     if queue_item is None:
@@ -3169,7 +3180,7 @@ def stop_hannah_curation_search(
             {
                 "id": str(queue_item_id),
                 "agent_id": "hannah",
-                "source_type": "published_symbol_photo_search",
+                "source_type": queue_item.source_type,
                 "status": "cancelled",
                 "payload_json": payload,
                 "completed_at": isoformat_utc(stopped_at),
@@ -3305,6 +3316,112 @@ def list_hannah_photo_candidates(
         offset=offset,
         limit=limit,
         hasMore=offset + len(rows) < total,
+    )
+
+
+def _hannah_review_call(call, *args, **kwargs):
+    try:
+        return call(*args, **kwargs)
+    except hannah_review.HannahReviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get("/hannah/concepts", response_model=WorkspaceHannahConceptListResponse)
+def list_hannah_concepts(
+    session: Session = Depends(get_db_session),
+    status: str | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=120),
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> WorkspaceHannahConceptListResponse:
+    """Hannah's concept targets, those waiting on a steward first, with their proposed and approved photos."""
+    return WorkspaceHannahConceptListResponse(
+        **_hannah_review_call(hannah_review.list_concepts, session, status=status, query=q, offset=offset, limit=limit)
+    )
+
+
+@router.get("/hannah/concepts/{target_id}/photos", response_model=WorkspaceHannahPhotoListResponse)
+def list_hannah_concept_photos(
+    target_id: uuid.UUID,
+    session: Session = Depends(get_db_session),
+    status: str | None = Query(default=None),
+) -> WorkspaceHannahPhotoListResponse:
+    """Every image Hannah has looked at for one concept, with her reasons."""
+    return WorkspaceHannahPhotoListResponse(
+        items=_hannah_review_call(hannah_review.list_concept_photos, session, target_id, status=status)
+    )
+
+
+@router.patch("/hannah/concepts/{target_id}", response_model=WorkspaceHannahConceptResponse)
+def update_hannah_concept(
+    target_id: uuid.UUID,
+    body: WorkspaceHannahTargetUpdateRequest,
+    current_user: AuthenticatedUser = Depends(require_workspace_access),
+    session: Session = Depends(get_db_session),
+) -> WorkspaceHannahConceptResponse:
+    """A steward's correction of whether a concept can be photographed, or of its search terms."""
+    return WorkspaceHannahConceptResponse(
+        **_hannah_review_call(
+            hannah_review.update_target, session, target_id, user_id=current_user.id,
+            photographable=body.photographable, search_terms=body.searchTerms,
+        )
+    )
+
+
+@router.post("/hannah/concepts/{target_id}/search", response_model=WorkspaceHannahConceptSearchResponse)
+def search_hannah_concept_now(
+    target_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    session: Session = Depends(get_db_session),
+) -> WorkspaceHannahConceptSearchResponse:
+    """Search one concept now, in the background, whatever its wait."""
+    target = session.get(HannahConceptTarget, target_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Hannah concept target not found.")
+    if target.photographable not in ("yes", "unsure"):
+        raise HTTPException(status_code=409, detail="This concept is marked as not photographable.")
+    try:
+        hannah_id = hannah_runner.hannah_agent_id(session)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if hannah_runner.open_card_exists(session, hannah_id=hannah_id, concept_id=str(target.semantic_concept_id)):
+        raise HTTPException(status_code=409, detail="Hannah is already searching this concept.")
+    row = session.execute(
+        text(hannah_runner.CARD_QUERY + " WHERE t.id = :id"), {"id": target_id}
+    ).mappings().one()
+    card = hannah_runner.create_concept_card(
+        session, hannah_id=hannah_id, row=row, runtime_root=HANNAH_RUNTIME_ROOT,
+        created_at=hannah_runner.utc_now(), status="running", started_by="workspace",
+    )
+    session.commit()
+    settings = get_settings()
+    background_tasks.add_task(
+        hannah_runner.run_cards, [card["path"]], runtime_root=HANNAH_RUNTIME_ROOT, db_env_file=str(settings.db_env_file)
+    )
+    return WorkspaceHannahConceptSearchResponse(
+        queueItemId=card["id"], status="searching", message=f"Searching {row['concept_code']} now."
+    )
+
+
+@router.post("/hannah/photos/{photo_id}/decision", response_model=WorkspaceHannahConceptResponse)
+def decide_hannah_photo(
+    photo_id: uuid.UUID,
+    body: WorkspaceHannahPhotoDecisionRequest,
+    current_user: AuthenticatedUser = Depends(require_workspace_access),
+    session: Session = Depends(get_db_session),
+) -> WorkspaceHannahConceptResponse:
+    """Approve, reject or remove one photo; returns its concept as the list shows it."""
+    storage_env_file = str(get_settings().storage_env_file)
+    bridge = RuntimePersistenceBridge(env_file=str(get_settings().db_env_file))
+    return WorkspaceHannahConceptResponse(
+        **_hannah_review_call(
+            hannah_review.decide_photo, session, photo_id, body.decision, user_id=current_user.id,
+            fetch_bytes=default_fetch_bytes,
+            store_object=lambda key, payload, content_type: upload_object_bytes(
+                object_key=key, payload=payload, content_type=content_type, env_file=storage_env_file
+            ),
+            delete_object=lambda key: bridge.delete_object(object_key=key, env_file=storage_env_file),
+        )
     )
 
 

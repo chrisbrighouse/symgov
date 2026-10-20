@@ -29,6 +29,11 @@ EXPECTED_V1_ONLY = {
     ("POST", "/review-cases/{review_case_id}/split-items/process-decisions"),
     ("GET", "/review-cases/{review_case_id}/children/preview"),
     ("GET", "/review-cases/{review_case_id}/source/preview"),
+    ("GET", "/hannah/concepts"),
+    ("GET", "/hannah/concepts/{target_id}/photos"),
+    ("PATCH", "/hannah/concepts/{target_id}"),
+    ("POST", "/hannah/concepts/{target_id}/search"),
+    ("POST", "/hannah/photos/{photo_id}/decision"),
 }
 
 
@@ -122,12 +127,12 @@ def test_workspace_policy_inventory_exactly_matches_real_app():
     expected = {(entry.method, entry.path) for entry in expanded}
 
     assert actual == expected
-    assert len(WORKSPACE_OPERATIONS) == 28
-    assert len(expanded) == 49
-    assert Counter(entry.surface for entry in expanded) == {"v1": 28, "legacy": 21}
-    assert Counter(entry.policy for entry in WORKSPACE_OPERATIONS) == {"admin": 18, "reviewer_admin": 10}
-    assert Counter(entry.policy for entry in expanded) == {"admin": 36, "reviewer_admin": 13}
-    assert len({(entry.surface, entry.method, entry.template) for entry in expanded}) == 49
+    assert len(WORKSPACE_OPERATIONS) == 33
+    assert len(expanded) == 54
+    assert Counter(entry.surface for entry in expanded) == {"v1": 33, "legacy": 21}
+    assert Counter(entry.policy for entry in WORKSPACE_OPERATIONS) == {"admin": 23, "reviewer_admin": 10}
+    assert Counter(entry.policy for entry in expanded) == {"admin": 41, "reviewer_admin": 13}
+    assert len({(entry.surface, entry.method, entry.template) for entry in expanded}) == 54
 
 
 def test_workspace_policy_inventory_has_exact_surface_equivalence():
@@ -150,9 +155,11 @@ def test_every_workspace_route_has_the_same_central_authorization_dependency():
         ("POST", "/api/v1/workspace/rights-review-cases/{review_case_id}/decisions"),
         ("POST", "/api/v1/workspace/review-cases/{review_case_id}/decisions"),
         ("POST", "/api/v1/workspace/review-cases/{review_case_id}/split-items/process-decisions"),
+        ("PATCH", "/api/v1/workspace/hannah/concepts/{target_id}"),
+        ("POST", "/api/v1/workspace/hannah/photos/{photo_id}/decision"),
     }
 
-    assert len(routes) == 49
+    assert len(routes) == 54
     for key, route in routes.items():
         calls = [dependency.call for dependency in route.dependant.dependencies]
         expected_count = 2 if key in actor_attributed_mutations else 1

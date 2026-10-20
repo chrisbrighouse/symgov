@@ -935,6 +935,77 @@ class WorkspaceHannahCleanupActionResponse(BaseModel):
     changes: dict[str, Any] = Field(default_factory=dict)
 
 
+class WorkspaceHannahPhotoResponse(BaseModel):
+    id: str
+    status: str
+    rank: int | None = None
+    score: float | None = None
+    source: str
+    sourceUrl: str
+    thumbUrl: str
+    title: str | None = None
+    author: str | None = None
+    licenseLabel: str | None = None
+    licenseUrl: str | None = None
+    width: int | None = None
+    height: int | None = None
+    depicts: str | None = None
+    reason: str | None = None
+    filterReasons: list[str] = Field(default_factory=list)
+    decidedAt: str | None = None
+    decidedByAgent: str | None = None
+    lastSeenAt: str | None = None
+
+
+class WorkspaceHannahConceptResponse(BaseModel):
+    targetId: str
+    conceptId: str
+    conceptCode: str
+    name: str
+    conceptKind: str
+    photographable: str | None = None
+    photographableBasis: str | None = None
+    searchTerms: list[str] = Field(default_factory=list)
+    status: str
+    attemptCount: int = 0
+    lastAttemptAt: str | None = None
+    nextEligibleAt: str | None = None
+    wikidataQid: str | None = None
+    commonsCategory: str | None = None
+    wikipediaUrl: str | None = None
+    symbolCount: int = 0
+    exampleSymbolIds: list[str] = Field(default_factory=list)
+    photoCounts: dict[str, int] = Field(default_factory=dict)
+    photos: list[WorkspaceHannahPhotoResponse] = Field(default_factory=list)
+
+
+class WorkspaceHannahConceptListResponse(BaseModel):
+    items: list[WorkspaceHannahConceptResponse]
+    total: int
+    offset: int
+    limit: int
+    summary: dict[str, int] = Field(default_factory=dict)
+
+
+class WorkspaceHannahPhotoListResponse(BaseModel):
+    items: list[WorkspaceHannahPhotoResponse]
+
+
+class WorkspaceHannahPhotoDecisionRequest(BaseModel):
+    decision: Literal["approve", "reject", "remove"]
+
+
+class WorkspaceHannahTargetUpdateRequest(BaseModel):
+    photographable: Literal["yes", "no", "unsure"] | None = None
+    searchTerms: list[str] | None = Field(default=None, max_length=3)
+
+
+class WorkspaceHannahConceptSearchResponse(BaseModel):
+    queueItemId: str
+    status: str
+    message: str
+
+
 class WorkspaceWhitneyDemandScanStartRequest(BaseModel):
     durationSeconds: int = Field(default=120, ge=30, le=300)
     focus: str | None = Field(default=None, max_length=120)
