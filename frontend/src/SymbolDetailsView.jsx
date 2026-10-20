@@ -334,7 +334,11 @@ export default function SymbolDetailsView({
               {attribution.attribution ? <p>{attribution.attribution}</p> : null}
               <KeyValueList rows={[
                 attribution.licensor ? { label: 'Licensor', value: attribution.licensor } : null,
-                attribution.creator ? { label: 'Creator', value: attribution.creator } : null
+                attribution.creator ? { label: 'Creator', value: attribution.creator } : null,
+                attribution.sourceUrl ? {
+                  label: 'Source',
+                  value: <a href={attribution.sourceUrl} target="_blank" rel="noreferrer">{attribution.sourceLabel}</a>
+                } : null
               ].filter(Boolean)} />
             </div>
           ) : null}

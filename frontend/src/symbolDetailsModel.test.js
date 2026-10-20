@@ -219,6 +219,17 @@ test('the attribution block comes from the rights record, with its placeholder f
   assert.equal(attributionBlock(discValve, { rights: { ...discDetails.rights, attributionIsPlaceholder: false } }).placeholder, false);
 });
 
+test('the attribution block links the source by its host name, and only an http(s) one', () => {
+  const details = normalizeSymbolDetails(discDetails);
+  const block = attributionBlock(discValve, details);
+  assert.equal(block.sourceUrl, 'https://github.com/ToniaPedersen/DISCDEXPI');
+  assert.equal(block.sourceLabel, 'github.com');
+  const qet = attributionBlock(discValve, { rights: { ...discDetails.rights, sourceUrl: 'https://www.qelectrotech.org/' } });
+  assert.equal(qet.sourceLabel, 'qelectrotech.org');
+  assert.equal(attributionBlock(discValve, { rights: { ...discDetails.rights, sourceUrl: 'javascript:alert(1)' } }).sourceUrl, '');
+  assert.equal(attributionBlock(discValve, { rights: { ...discDetails.rights, sourceUrl: null } }).sourceLabel, '');
+});
+
 test('without a rights record the stored wording stands in and claims nothing about being final', () => {
   const block = attributionBlock(discValve, normalizeSymbolDetails(null));
   assert.equal(block.attribution, 'Licensed from the DISCDEXPI GitHub repo by Tonia Pedersen.');

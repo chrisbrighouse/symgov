@@ -264,6 +264,42 @@ class TestDiscSymbol:
         assert rights["attributionIsPlaceholder"] is True
         assert rights["sourceUrl"] == SOURCE_URL
 
+    def test_a_template_on_the_record_credits_the_symbols_own_author(self, reader, published, env):
+        client, _ = reader
+        template = "From the Example collection (https://example.test), by {creator}. Licensed under CC BY 3.0."
+        revision_sql = (
+            "SELECT gs.current_revision_id FROM governed_symbols gs WHERE gs.catalog_symbol_id = :ref"
+        )
+        with env["engine"].begin() as connection:
+            revision_id = connection.execute(text(revision_sql), {"ref": published["nd0004"]}).scalar_one()
+            connection.execute(text(
+                "UPDATE rights_records SET evidence_json = evidence_json || jsonb_build_object('attribution_template', CAST(:t AS text)) "
+                "WHERE decision_status = 'approved'"
+            ), {"t": template})
+        try:
+            rights = _details(client, published["nd0004"])["rights"]
+            # No author on the symbol: the record's own creator is credited.
+            assert rights["creator"] == "The Example project (example.test)"
+            assert rights["attributionText"] == template.replace("{creator}", "The Example project (example.test)")
+            with env["engine"].begin() as connection:
+                connection.execute(text(
+                    "UPDATE symbol_revisions SET payload_json = payload_json || '{\"attribution\": {\"creator\": \"Ada Element\"}}'::jsonb "
+                    "WHERE id = :r"
+                ), {"r": revision_id})
+            rights = _details(client, published["nd0004"])["rights"]
+            assert rights["creator"] == "Ada Element"
+            assert rights["attributionText"] == template.replace("{creator}", "Ada Element")
+            assert rights["sourceUrl"] == SOURCE_URL
+        finally:
+            with env["engine"].begin() as connection:
+                connection.execute(text(
+                    "UPDATE rights_records SET evidence_json = evidence_json - 'attribution_template' WHERE decision_status = 'approved'"
+                ))
+                connection.execute(text(
+                    "UPDATE symbol_revisions SET payload_json = payload_json - 'attribution' WHERE id = :r"
+                ), {"r": revision_id})
+        assert _details(client, published["nd0004"])["rights"]["attributionText"] == ATTRIBUTION
+
     def test_provenance_names_the_package_commit_and_source_file(self, reader, published):
         client, _ = reader
         provenance = _details(client, published["nd0004"])["provenance"]

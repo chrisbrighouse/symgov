@@ -167,12 +167,24 @@ export function attributionBlock(symbol, details) {
   const licensor = text(rights?.licensor);
   const creator = text(rights?.creator);
   if (!attribution && !licensor && !creator) return null;
+  const sourceUrl = isHttpUrl(rights?.sourceUrl) ? rights.sourceUrl.trim() : '';
   return {
     attribution,
     licensor,
     creator,
+    sourceUrl,
+    sourceLabel: sourceUrl ? urlHostLabel(sourceUrl) : '',
     placeholder: Boolean(rights?.attributionIsPlaceholder)
   };
+}
+
+// "https://www.qelectrotech.org/" -> "qelectrotech.org"; the link text for a source.
+export function urlHostLabel(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./i, '') || url;
+  } catch {
+    return url;
+  }
 }
 
 export const IDENTIFIER_LABELS = {

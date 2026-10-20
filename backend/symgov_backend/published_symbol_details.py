@@ -41,7 +41,10 @@ Decisions the contract left open:
   includes the symbol being viewed; `items` never do. A symbol listed in two
   packs counts twice, exactly as the search counts it.
 * `rights` is the approved rights record of the symbol's source package, as the
-  attribution text is read; a symbol with no such record has `null`.
+  attribution text is read; a symbol with no such record has `null`. A record
+  whose evidence carries an `attribution_template` with `{creator}` credits
+  each symbol's own author (`payload.attribution.creator`), falling back to the
+  record's `creator`; `creator` is then that same name.
 * `history` kinds are only `revision_created`, `revision_imported`,
   `rights_approved`, `review_approved`, `published` and `demoted`.
 """
@@ -84,6 +87,11 @@ _APPROVING_DECISIONS = ("approve", "approved")
 
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+# In a rights record's `attribution_template`, stands for the symbol's own
+# author (`payload.attribution.creator`).
+CREATOR_PLACEHOLDER = "{creator}"
 
 
 def _text_or_none(value: Any) -> str | None:
@@ -302,10 +310,12 @@ def _rights(session: Session, revision_id: uuid.UUID) -> dict | None:
         text(
             """
             SELECT rr.rights_status, rr.disposition, rr.evidence_json,
-                   sp.metadata_json, sp.source_uri
+                   sp.metadata_json, sp.source_uri,
+                   sr.payload_json -> 'attribution' ->> 'creator' AS symbol_creator
             FROM source_package_entries spe
             JOIN source_packages sp ON sp.id = spe.source_package_id
             JOIN rights_records rr ON rr.source_package_id = sp.id
+            JOIN symbol_revisions sr ON sr.id = spe.symbol_revision_id
             WHERE spe.symbol_revision_id = :revision_id
               AND rr.decision_status = 'approved'
             ORDER BY rr.created_at DESC
@@ -318,12 +328,21 @@ def _rights(session: Session, revision_id: uuid.UUID) -> dict | None:
         return None
     evidence = record.evidence_json or {}
     metadata = record.metadata_json or {}
+    creator = _text_or_none(evidence.get("creator") or metadata.get("creator"))
+    attribution = _text_or_none(evidence.get("attribution_text"))
+    template = _text_or_none(evidence.get("attribution_template"))
+    if template and CREATOR_PLACEHOLDER in template:
+        # A library whose licence credits each element's own author: the
+        # approved wording names the symbol's author, or the record's fallback.
+        creator = _text_or_none(record.symbol_creator) or creator
+        if creator:
+            attribution = template.replace(CREATOR_PLACEHOLDER, creator)
     return {
         "status": record.rights_status,
         "disposition": record.disposition,
         "licensor": _text_or_none(evidence.get("licensor") or metadata.get("licensor")),
-        "creator": _text_or_none(evidence.get("creator") or metadata.get("creator")),
-        "attributionText": _text_or_none(evidence.get("attribution_text")),
+        "creator": creator,
+        "attributionText": attribution,
         "attributionIsPlaceholder": bool(evidence.get("attribution_is_placeholder")),
         "sourceUrl": _text_or_none(evidence.get("source_url") or record.source_uri),
     }
