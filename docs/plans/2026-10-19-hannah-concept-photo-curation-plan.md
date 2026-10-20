@@ -243,6 +243,13 @@ How it behaves:
   - two symbols on one concept share photos;
   - the tenant matrix files need updating (see the WP1.6 memory).
 
+**As built (2026-10-20).**
+- **Lookup:** `load_supplemental_photos` follows served revision → verified primary assignment → active concept → approved photos with a stored object. It caps at 2, ordered by `rank`, then score, then decision time. Items keep the old shape and add `author` and `licenseUrl`. `rightsStatus` is gone; the frontend never read it.
+- **Preview:** `GET /api/v1/published/concept-photos/{id}/preview` is v1 only and needs a session. It serves a photo only if the photo is approved and stored, its concept is active, and the concept has a verified primary assignment on a revision in `active_public_symbol_projections` (public, no owner organization). Anything else returns 404.
+- **Catalog camera icon:** `_PHOTO_COUNT` counts by the same chain.
+- **Credit line:** `SupplementalPhotoStrip` moves out of `App.jsx` into its own module. Each photo shows author · licence (linked when a licence URL is known) · source, each only when known. The strip is labelled "Illustrative equipment photos".
+- **Old route:** the per-symbol `supplemental-photos/{id}/preview` route is left in place for WP-H7. It reads only `hannah_photo_candidates`, which the purge emptied, so it can only return 404.
+
 ### WP-H6: Calibration, automation, re-enable (S, plus Chris's time)
 1. Run `hannah-run --sample 40` on concepts of mixed difficulty with `anthropic/claude-haiku-5.5`. Chris approves or rejects in the tab, and those decisions are the labels.
 2. Re-score the same candidates with `google/gemini-3.1-flash-lite`. The stored verdicts make this one CLI pass.

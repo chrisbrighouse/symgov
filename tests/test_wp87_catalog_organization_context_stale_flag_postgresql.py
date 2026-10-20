@@ -43,7 +43,9 @@ from test_wp74_symbol_demotion_postgresql import (  # noqa: E402
 # which exist at 20260904_0043. An upgrade target, not a head assertion: it is
 # here so the fixture has the schema the code under test reads, and it must
 # track head for as long as that stays true.
-NEW_MIGRATION_HEAD = "20260911_0057"
+# Moved to 20261020_0074 by WP-H5: the published list and detail now read
+# `hannah_concept_photos`.
+NEW_MIGRATION_HEAD = "20261020_0074"
 
 psycopg = pytest.importorskip("psycopg")
 

@@ -47,7 +47,9 @@ BACKEND = Path(__file__).resolve().parents[1] / "backend"
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 
-NEW_MIGRATION_HEAD = "20260904_0039"
+# Moved to 20261020_0074 by WP-H5: the published list and detail now read
+# `hannah_concept_photos`.
+NEW_MIGRATION_HEAD = "20261020_0074"
 
 psycopg = pytest.importorskip("psycopg")
 

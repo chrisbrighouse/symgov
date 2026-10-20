@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Literal
+from urllib.parse import urlparse
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -65,8 +66,11 @@ from ..models import (
     AuditEvent,
     ClarificationRecord,
     GovernedSymbol,
+    HannahConceptPhoto,
     HannahPhotoCandidate,
+    SemanticConcept,
     SymbolRevision,
+    SymbolSemanticAssignment,
     User,
 )
 from ..product_usage_events import record_browse_usage_event_best_effort
@@ -423,36 +427,62 @@ def _published_command_replay_response(
     return JSONResponse(status_code=202 if pending else 200, content=body)
 
 
+SUPPLEMENTAL_PHOTOS_PER_SYMBOL = 2
+
+
+def supplemental_photo_item(photo: HannahConceptPhoto) -> dict:
+    """One approved concept photo as `supplementalPhotos` carries it.
+
+    `author`, `licenseLabel` and `licenseUrl` are `None` when Commons did not
+    say; the credit line shows only what is known.
+    """
+    source_domain = urlparse(photo.source_url).hostname if photo.source_url else None
+    return {
+        "id": str(photo.id),
+        "title": photo.title,
+        "sourceUrl": photo.source_url,
+        "sourceDomain": source_domain,
+        "author": photo.author,
+        "licenseLabel": photo.license_label,
+        "licenseUrl": photo.license_url,
+        "score": float(photo.score) if photo.score is not None else None,
+        "previewUrl": f"/api/v1/published/concept-photos/{photo.id}/preview",
+    }
+
+
 def load_supplemental_photos(session: Session, rows) -> dict[str, list[dict]]:
-    symbol_ids = [row.symbol_id for row in rows]
-    if not symbol_ids:
+    """Hannah's approved photos for each row, keyed by symbol ID.
+
+    Photos belong to semantic concepts: a symbol shows the photos of the
+    verified primary concept on the revision the Catalog serves, so every
+    symbol on one concept shares them. Steward order first, then score.
+    """
+    symbol_by_revision = {str(row.symbol_revision_id): str(row.symbol_id) for row in rows if row.symbol_revision_id}
+    if not symbol_by_revision:
         return {}
     photo_rows = (
-        session.query(HannahPhotoCandidate, GovernedSymbol.slug)
-        .join(GovernedSymbol, GovernedSymbol.id == HannahPhotoCandidate.symbol_id)
-        .filter(HannahPhotoCandidate.symbol_id.in_(symbol_ids))
-        .filter(HannahPhotoCandidate.status == "attached")
-        .filter(HannahPhotoCandidate.object_key.isnot(None))
-        .order_by(HannahPhotoCandidate.relevance_score.desc(), HannahPhotoCandidate.last_seen_at.desc())
+        session.query(SymbolSemanticAssignment.symbol_revision_id, HannahConceptPhoto)
+        .join(HannahConceptPhoto, HannahConceptPhoto.semantic_concept_id == SymbolSemanticAssignment.semantic_concept_id)
+        .join(SemanticConcept, SemanticConcept.id == SymbolSemanticAssignment.semantic_concept_id)
+        .filter(SymbolSemanticAssignment.symbol_revision_id.in_([uuid.UUID(key) for key in symbol_by_revision]))
+        .filter(SymbolSemanticAssignment.assignment_role == "primary")
+        .filter(SymbolSemanticAssignment.status == "verified")
+        .filter(SemanticConcept.status == "active")
+        .filter(HannahConceptPhoto.status == "approved")
+        .filter(HannahConceptPhoto.object_key.isnot(None))
+        .order_by(
+            HannahConceptPhoto.rank.asc().nulls_last(),
+            HannahConceptPhoto.score.desc().nulls_last(),
+            HannahConceptPhoto.decided_at.asc(),
+            HannahConceptPhoto.id,
+        )
         .all()
     )
     grouped: dict[str, list[dict]] = {}
-    for candidate, slug in photo_rows:
-        bucket = grouped.setdefault(str(candidate.symbol_id), [])
-        if len(bucket) >= 2:
-            continue
-        bucket.append(
-            {
-                "id": str(candidate.id),
-                "title": candidate.title,
-                "sourceUrl": candidate.source_url,
-                "sourceDomain": candidate.source_domain,
-                "licenseLabel": candidate.license_label,
-                "rightsStatus": candidate.rights_status,
-                "score": float(candidate.relevance_score) if candidate.relevance_score is not None else None,
-                "previewUrl": f"/api/v1/published/symbols/{slug}/supplemental-photos/{candidate.id}/preview",
-            }
-        )
+    for revision_id, photo in photo_rows:
+        bucket = grouped.setdefault(symbol_by_revision[str(revision_id)], [])
+        if len(bucket) < SUPPLEMENTAL_PHOTOS_PER_SYMBOL:
+            bucket.append(supplemental_photo_item(photo))
     return grouped
 
 
@@ -1552,6 +1582,52 @@ def get_published_symbol_supplemental_photo_preview(
         media_type=media_type,
         headers=safe_image_response_headers(),
     )
+
+
+# An approved photo whose concept is on at least one public Catalog symbol.
+# A concept seen only on organization-private or unpublished revisions never
+# has its photos served, whoever asks.
+PUBLIC_CONCEPT_PHOTO_SQL = """
+    SELECT p.object_key, p.content_type
+    FROM hannah_concept_photos p
+    JOIN semantic_concepts c ON c.id = p.semantic_concept_id AND c.status = 'active'
+    WHERE p.id = :photo_id
+      AND p.status = 'approved'
+      AND p.object_key IS NOT NULL
+      AND EXISTS (
+          SELECT 1
+          FROM active_public_symbol_projections app
+          JOIN symbol_semantic_assignments a
+            ON a.symbol_revision_id = app.symbol_revision_id
+           AND a.assignment_role = 'primary'
+           AND a.status = 'verified'
+          WHERE a.semantic_concept_id = p.semantic_concept_id
+            AND app.visibility = 'public'
+            AND app.owner_organization_id IS NULL
+      )
+"""
+
+
+@router.get("/concept-photos/{photo_id}/preview")
+def get_published_concept_photo_preview(
+    photo_id: str,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+) -> Response:
+    not_found = HTTPException(status_code=404, detail="Published supplemental photo was not found.")
+    try:
+        photo_uuid = uuid.UUID(photo_id)
+    except ValueError as exc:
+        raise not_found from exc
+    photo = session.execute(text(PUBLIC_CONCEPT_PHOTO_SQL), {"photo_id": photo_uuid}).one_or_none()
+    if photo is None:
+        raise not_found
+    payload = download_object_bytes(object_key=photo.object_key, env_file=str(get_settings().storage_env_file))
+    try:
+        media_type = validate_stored_image(payload["payload"], photo.content_type, payload.get("content_type"))
+    except UnsafeImageContentError as exc:
+        raise not_found from exc
+    return Response(content=payload["payload"], media_type=media_type, headers=safe_image_response_headers())
 
 
 @router.get("/pages/{page_code}")

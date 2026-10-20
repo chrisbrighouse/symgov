@@ -90,11 +90,17 @@ def _shown_date(column: str) -> str:
     )
 
 
+# Hannah's photos belong to the verified primary concept on the served
+# revision, the same chain `load_supplemental_photos` follows.
 _PHOTO_COUNT = """
     CASE WHEN c.source = 'public' THEN LEAST(2, (
-        SELECT count(*) FROM hannah_photo_candidates hp
-        WHERE hp.symbol_id = c.governed_symbol_id
-          AND hp.status = 'attached'
+        SELECT count(*) FROM symbol_semantic_assignments ssa
+        JOIN semantic_concepts sc ON sc.id = ssa.semantic_concept_id AND sc.status = 'active'
+        JOIN hannah_concept_photos hp ON hp.semantic_concept_id = ssa.semantic_concept_id
+        WHERE ssa.symbol_revision_id = c.symbol_revision_id
+          AND ssa.assignment_role = 'primary'
+          AND ssa.status = 'verified'
+          AND hp.status = 'approved'
           AND hp.object_key IS NOT NULL
     )) ELSE 0 END
 """

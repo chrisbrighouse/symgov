@@ -112,6 +112,7 @@ import { OrganizationSymbolDraftsPage } from './OrganizationSymbolDraftsPage.js'
 import { OrganizationSymbolReviewsPage } from './OrganizationSymbolReviewsPage.js';
 import { ReviewClassificationForecast } from './ReviewClassificationForecast.js';
 import { HannahConceptReview } from './HannahConceptReview.js';
+import SupplementalPhotoStrip from './SupplementalPhotoStrip.js';
 import { Header } from './Header.js';
 import FavouriteButton from './FavouriteButton.js';
 import FavouriteFilter from './FavouriteFilter.js';
@@ -2765,7 +2766,7 @@ function StandardsPage() {
                 <div className="symbol-stage">
                   <PublishedSymbolPreview symbol={activeSymbol} large />
                 </div>
-                <SupplementalPhotoStrip photos={activeSymbol.supplementalPhotos || []} />
+                <SupplementalPhotoStrip photos={activeSymbol.supplementalPhotos || []} resolveUrl={resolveWorkspaceAssetUrl} />
                 {activeSymbol.paletteEntry ? (
                   <section className="catalog-set-entry" aria-label="In the Symbol Set">
                     <h4>
@@ -4401,31 +4402,6 @@ function PublishedSymbolPreview({ symbol, large = false }) {
       )}
       <FormatPreviewBadges options={previewOptions} onSelect={(option) => setSelectedFormat(option.format)} />
     </div>
-  );
-}
-
-function SupplementalPhotoStrip({ photos }) {
-  if (!Array.isArray(photos) || photos.length === 0) {
-    return null;
-  }
-
-  return (
-    <section className="supplemental-photo-strip" aria-label="Real equipment photos">
-      <div className="supplemental-photo-grid">
-        {photos.slice(0, 2).map((photo) => (
-          <a
-            key={photo.id}
-            className="supplemental-photo-card"
-            href={photo.sourceUrl || photo.previewUrl}
-            target="_blank"
-            rel="noreferrer"
-          >
-            <img src={resolveWorkspaceAssetUrl(photo.previewUrl)} alt={photo.title || 'Supplemental equipment reference'} />
-            <span>{photo.title || photo.sourceDomain || 'Equipment photo'}</span>
-          </a>
-        ))}
-      </div>
-    </section>
   );
 }
 
