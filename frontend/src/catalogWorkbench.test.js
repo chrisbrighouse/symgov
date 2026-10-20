@@ -221,6 +221,22 @@ test('review format badges prefer the selected preview when a format has duplica
   ]);
 });
 
+test('a split child keeps its own region preview, never the parent sheet', () => {
+  // 2026-10-20: the sheet's key was appended to the region's URL, which 404s.
+  const regionUrl = '/api/v1/workspace/review-cases/case-1/children/preview?object_key=derived-splits%2Fregion-01.png';
+  const review = {
+    reviewItemType: 'split_item',
+    sourcePreviewUrl: regionUrl,
+    availableFormats: ['png'],
+    sourceAssets: [
+      { objectKey: 'external-submissions/sheet.png', format: 'png', previewable: true, selectedPreview: true }
+    ]
+  };
+
+  assert.deepEqual(buildReviewPreviewOptions(review), []);
+  assert.equal(buildReviewPreviewUrl(review, 'external-submissions/sheet.png', 'PNG'), regionUrl);
+});
+
 test('Ed guided search maps natural language to non-mutating Catalog filters', () => {
   const interpretation = interpretEdCatalogPrompt('Find fire alarm detector symbols I can insert into CAD as DXF');
 

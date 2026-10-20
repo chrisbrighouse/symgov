@@ -537,7 +537,18 @@ export function buildCatalogPreviewOptions(symbol = {}, selectedFormat = '') {
   });
 }
 
+// A split child is previewed by its own cut-out region: `sourcePreviewUrl` is
+// already that region's URL, and `sourceAssets` describe the parent sheet.
+// Offering the sheet's formats would append its object key to the region's URL,
+// and the route answers the second key with 404 (seen 2026-10-20 on a PNG sheet).
+function isSplitReviewItem(review) {
+  return review?.reviewItemType === 'split_item';
+}
+
 export function buildReviewPreviewOptions(review = {}, selectedFormat = '') {
+  if (isSplitReviewItem(review)) {
+    return [];
+  }
   const normalizeFormat = (value) => String(value || '').trim().replace(/^\./, '').toUpperCase();
   const assetsByFormat = new Map();
   (review.sourceAssets || []).forEach((asset) => {
@@ -569,7 +580,7 @@ export function buildReviewPreviewOptions(review = {}, selectedFormat = '') {
 
 export function buildReviewPreviewUrl(review = {}, objectKey = '', format = '') {
   const sourcePreviewUrl = String(review.sourcePreviewUrl || '').trim();
-  if (!sourcePreviewUrl || !objectKey) {
+  if (!sourcePreviewUrl || !objectKey || isSplitReviewItem(review)) {
     return sourcePreviewUrl || null;
   }
   const separator = sourcePreviewUrl.includes('?') ? '&' : '?';
