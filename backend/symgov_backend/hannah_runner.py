@@ -155,7 +155,12 @@ def seed_hannah_concept_queue_cards(
     status: str = "queued",
     started_by: str = "hannah_seeder",
 ) -> dict[str, Any]:
-    """Queue one card per target that is due a search and has no open card."""
+    """Queue one card per target that is due a search and has no open card.
+
+    The worker's queue is topped up to `limit` open cards rather than grown by
+    `limit` each tick; a Workspace "search now" (`status="running"`) is not
+    capped that way. Nothing is queued while the daily vision budget is used up.
+    """
     queue_dir = Path(runtime_root) / "agent_queue_items"
     queue_dir.mkdir(parents=True, exist_ok=True)
     created_at = utc_now()
@@ -163,6 +168,19 @@ def seed_hannah_concept_queue_cards(
     session_factory = session_factory or create_session_factory(env_file=db_env_file, nopool=True)
     with session_factory() as session:
         hannah_id = hannah_agent_id(session)
+        if max_vision_calls_per_day() - vision_calls_in_last_day(session, datetime.now(timezone.utc)) <= 0:
+            return {"createdCount": 0, "created": [], "skipped": "vision_budget_used_up"}
+        if status == "queued":
+            open_cards = session.execute(
+                text(
+                    "SELECT count(*) FROM agent_queue_items WHERE agent_id = CAST(:agent_id AS uuid) "
+                    "AND source_type = :source_type AND status IN :open"
+                ).bindparams(bindparam("open", expanding=True)),
+                {"agent_id": hannah_id, "source_type": CARD_SOURCE_TYPE, "open": list(OPEN_CARD_STATUSES)},
+            ).scalar()
+            limit = max(0, limit - int(open_cards or 0))
+            if limit == 0:
+                return {"createdCount": 0, "created": [], "skipped": "queue_full"}
         rows = session.execute(
             text(
                 CARD_QUERY
@@ -237,6 +255,15 @@ def process_queue_item(
         if target is None:
             raise RuntimeError("The card's Hannah concept target no longer exists.")
         budget = max(0, max_vision_calls_per_day() - vision_calls_in_last_day(session, datetime.now(timezone.utc)))
+        if budget == 0:
+            # Searching now would gather candidates no model can check and park
+            # the concept for hours; end the card and leave the target due.
+            queue_item["status"], queue_item["completed_at"] = "retry_later", utc_now()
+            queue_item["escalation_reason"] = "Hannah's daily vision budget is used up; the concept stays due."
+            write_json(queue_item_path, queue_item)
+            if persist_db:
+                RuntimePersistenceBridge(env_file=db_env_file).upsert_agent_queue_item(queue_item)
+            return {"queue_item_id": queue_item["id"], "queue_item_status": "retry_later", "db_persistence": None}
         report = curate_concept(
             session,
             target_view_from_row(session, target),

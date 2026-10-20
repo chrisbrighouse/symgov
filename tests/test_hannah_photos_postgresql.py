@@ -194,3 +194,58 @@ def test_the_seeder_queues_due_targets_once(targets, tmp_path):
     card = json.loads((tmp_path / "agent_queue_items" / f"{first['created'][0]['queue_item_id']}.json").read_text())
     assert card["source_type"] == "concept_photo_curation"
     assert card["payload_json"]["display_name"] == "SGC-90000002 Pump, centrifugal type"
+
+
+def test_the_worker_seeder_tops_up_and_stops_when_the_budget_is_spent(targets, tmp_path, monkeypatch):
+    from symgov_backend import hannah_runner
+
+    engine, _ids = targets
+    factory = sessionmaker(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM agent_queue_items"))
+        connection.execute(text("UPDATE hannah_concept_targets SET status = 'pending', next_eligible_at = NULL WHERE status <> 'excluded'"))
+
+    # One open card already fills a queue of one: nothing more is added.
+    first = hannah_runner.seed_hannah_concept_queue_cards(db_env_file=None, runtime_root=tmp_path, session_factory=factory, limit=1)
+    assert first["createdCount"] == 1
+    again = hannah_runner.seed_hannah_concept_queue_cards(db_env_file=None, runtime_root=tmp_path, session_factory=factory, limit=1)
+    assert (again["createdCount"], again["skipped"]) == (0, "queue_full")
+
+    # A Workspace "search now" is not capped by the worker's queue.
+    now_cards = hannah_runner.seed_hannah_concept_queue_cards(
+        db_env_file=None, runtime_root=tmp_path, session_factory=factory, limit=1, status="running"
+    )
+    assert now_cards["createdCount"] == 1
+
+    monkeypatch.setattr(hannah_runner, "max_vision_calls_per_day", lambda: 0)
+    spent = hannah_runner.seed_hannah_concept_queue_cards(db_env_file=None, runtime_root=tmp_path, session_factory=factory, limit=10)
+    assert (spent["createdCount"], spent["skipped"]) == (0, "vision_budget_used_up")
+
+
+def test_a_card_with_no_vision_budget_ends_without_searching(targets, tmp_path, monkeypatch):
+    from symgov_backend import hannah_runner
+
+    engine, _ids = targets
+    factory = sessionmaker(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(text("DELETE FROM agent_queue_items"))
+        connection.execute(text("UPDATE hannah_concept_targets SET status = 'pending', next_eligible_at = NULL WHERE status <> 'excluded'"))
+    seeded = hannah_runner.seed_hannah_concept_queue_cards(db_env_file=None, runtime_root=tmp_path, session_factory=factory, limit=1)
+    card_path = Path(seeded["created"][0]["path"])
+    with factory() as session:
+        before = {row.id: (row.status, row.attempt_count) for row in session.query(HannahConceptTarget).all()}
+
+    def no_search(*args, **kwargs):
+        raise AssertionError("must not search without a vision budget")
+
+    monkeypatch.setattr(hannah_runner, "create_session_factory", lambda **kwargs: factory)
+    monkeypatch.setattr(hannah_runner, "max_vision_calls_per_day", lambda: 0)
+    monkeypatch.setattr(hannah_runner, "curate_concept", no_search)
+    result = hannah_runner.process_queue_item(card_path, tmp_path, persist_db=False)
+
+    assert result["queue_item_status"] == "retry_later"
+    card = json.loads(card_path.read_text())
+    assert card["status"] == "retry_later" and "budget" in card["escalation_reason"]
+    with factory() as session:
+        after = {row.id: (row.status, row.attempt_count) for row in session.query(HannahConceptTarget).all()}
+    assert after == before
