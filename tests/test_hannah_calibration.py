@@ -24,10 +24,19 @@ def test_the_sweep_counts_what_each_threshold_would_approve():
 
 def test_the_recommendation_is_the_lowest_threshold_with_no_rejected_approval():
     pairs = [(0.9, True), (0.8, True), (0.75, False), (0.6, True)]
-    picked = recommend(sweep(pairs, thresholds=(0.5, 0.7, 0.8, 0.95)))
+    picked = recommend(sweep(pairs, thresholds=(0.5, 0.7, 0.8, 0.95)), rejections=1)
     assert picked["threshold"] == 0.8 and picked["enough_evidence"] is False
-    assert recommend(sweep([(0.9, False)], thresholds=(0.5, 0.95))) is None
-    assert recommend(sweep([], thresholds=(0.5,))) is None
+    assert recommend(sweep([(0.9, False)], thresholds=(0.5, 0.95)), rejections=1) is None
+    assert recommend(sweep([], thresholds=(0.5,)), rejections=0) is None
+
+
+def test_approvals_alone_are_never_enough_evidence():
+    # 2026-10-20: 43 approved and none rejected recommended the lowest threshold as "enough".
+    approvals = [(0.4 + 0.01 * index, True) for index in range(43)]
+    assert recommend(sweep(approvals), rejections=0)["enough_evidence"] is False
+    mixed = approvals + [(0.36, False)] * 5
+    picked = recommend(sweep(mixed), rejections=5)
+    assert picked["threshold"] == 0.4 and picked["enough_evidence"] is True
 
 
 @pytest.mark.parametrize(
@@ -40,3 +49,11 @@ def test_automatic_approval_is_off_unless_a_sensible_threshold_is_set(monkeypatc
     else:
         monkeypatch.setenv("SYMGOV_HANNAH_AUTO_APPROVE_MIN_SCORE", value)
     assert auto_approve_min_score() == expected
+
+
+def test_the_check_width_is_one_wikimedia_serves():
+    # Wikimedia answers 400 to non-standard thumbnail widths such as 800.
+    from symgov_backend.hannah_calibration import CHECK_WIDTH
+    from symgov_backend.hannah_review import DISPLAY_WIDTH, GRID_THUMB_WIDTH
+
+    assert {CHECK_WIDTH, DISPLAY_WIDTH, GRID_THUMB_WIDTH} <= {500, 960, 1280}

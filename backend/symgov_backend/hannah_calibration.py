@@ -2,8 +2,8 @@
 
 The steward's approvals and rejections in the Workspace are the labels. For
 each vision model under test, every labelled photo gets a score: the stored
-one when that model checked it, otherwise a fresh vision call on the same
-800 px thumbnail. A threshold sweep then shows, for each candidate threshold,
+one when that model checked it, otherwise a fresh vision call on a 960 px
+thumbnail. A threshold sweep then shows, for each candidate threshold,
 how many labelled photos it would have approved automatically, how many of
 those the steward rejected, and what share of the steward's approvals it
 would have caught. The recommended threshold is the lowest that would have
@@ -28,7 +28,6 @@ from sqlalchemy.orm import Session
 from .hannah_photos import (
     PHOTOS_PER_CONCEPT,
     PROPOSE_MIN_SCORE,
-    THUMB_WIDTH,
     CompleteVisionFn,
     FetchBytesFn,
     TargetView,
@@ -49,6 +48,14 @@ THRESHOLDS = tuple(round(PROPOSE_MIN_SCORE + 0.05 * step, 2) for step in range(1
 # Fewer steward approvals than this at the recommended threshold, and the
 # recommendation is marked as resting on too little evidence.
 MIN_SUPPORT = 10
+# Fewer rejected photos than this in the labels, and no threshold can be
+# shown to keep a bad photo out.
+MIN_REJECTIONS = 5
+# Wikimedia serves thumbnails only at its standard widths and answers 400 to
+# any other ("Use thumbnail sizes listed on https://w.wiki/GHai"): 500, 960
+# and 1280 work, 800 and 1024 do not (checked 2026-10-20). The search itself
+# uses the thumbnail URL the imageinfo API returns, so it is unaffected.
+CHECK_WIDTH = 960
 
 
 @dataclass
@@ -96,7 +103,7 @@ def score_photo(
         verdict = photo.vision_verdict_json or {}
         return {"score": float(photo.score), "from": "stored", "depicts": verdict.get("depicts"), "reason": verdict.get("reason")}
     try:
-        image, content_type = fetch_bytes(commons_thumb_url(photo.image_url, THUMB_WIDTH, photo.width))
+        image, content_type = fetch_bytes(commons_thumb_url(photo.image_url, CHECK_WIDTH, photo.width))
         verdict = parse_verdict(complete_vision(vision_messages(item.view, image, content_type, photo.title)))
     except Exception as exc:  # one failed photo must not end the run
         return {"score": None, "from": "error", "error": f"{type(exc).__name__}: {exc}"[:300]}
@@ -133,11 +140,17 @@ def sweep(pairs: list[tuple[float | None, bool]], thresholds: tuple[float, ...] 
     return rows
 
 
-def recommend(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """The lowest threshold that approves something and nothing the steward rejected."""
+def recommend(rows: list[dict[str, Any]], rejections: int) -> dict[str, Any] | None:
+    """The lowest threshold that approves something and nothing the steward rejected.
+
+    `rejections` is how many labelled photos the steward rejected. With too
+    few, every threshold "approves nothing rejected" and the sweep cannot
+    tell them apart, so the evidence is never enough.
+    """
     for row in rows:
         if row["would_approve"] and not row["steward_rejected"]:
-            return {**row, "enough_evidence": row["steward_approved_caught"] >= MIN_SUPPORT}
+            enough = row["steward_approved_caught"] >= MIN_SUPPORT and rejections >= MIN_REJECTIONS
+            return {**row, "enough_evidence": enough}
     return None
 
 
@@ -182,11 +195,12 @@ def calibrate(
             )
         scored = [photo for photo in photos if photo["from"] in ("stored", "fresh")]
         rows = sweep([(photo["score"], photo["steward"] == "approved") for photo in scored])
+        rejections = sum(1 for photo in scored if photo["steward"] == "rejected")
         report["models"][model] = {
             "scored": len(scored),
             "not_scored": len(photos) - len(scored),
             "sweep": rows,
-            "recommended": recommend(rows),
+            "recommended": recommend(rows, rejections),
             "photos": photos,
         }
     report["vision_calls"] = calls
