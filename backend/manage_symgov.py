@@ -805,17 +805,28 @@ def main(argv: Sequence[str] | None = None):
             try:
                 scopes = {scope.concept_code: scope for scope in load_concept_scope(session)}
                 codes = list(args.concept)
+                has_table = session.execute(text("SELECT to_regclass('hannah_concept_targets') IS NOT NULL")).scalar()
+                excluded = set()
+                if has_table:
+                    excluded = set(
+                        session.execute(
+                            text(
+                                "SELECT c.concept_code FROM hannah_concept_targets t "
+                                "JOIN semantic_concepts c ON c.id = t.semantic_concept_id WHERE t.photographable = 'no'"
+                            )
+                        ).scalars()
+                    )
                 if args.sample:
                     pool = sorted(
                         code for code, scope in scopes.items()
                         if FIXED_KIND_DECISIONS.get(scope.concept_kind) != "no"
+                        and code not in excluded
                         and (args.kind is None or scope.concept_kind == args.kind)
                     )
                     codes += random.Random(args.seed).sample(pool, min(args.sample, len(pool)))
                 unknown = [code for code in codes if code not in scopes]
                 if unknown:
                     raise SystemExit(f"Not in scope: {', '.join(unknown)}")
-                has_table = session.execute(text("SELECT to_regclass('hannah_concept_targets') IS NOT NULL")).scalar()
                 views = {}
                 if has_table:
                     for code in codes:
@@ -824,9 +835,13 @@ def main(argv: Sequence[str] | None = None):
                             .filter_by(semantic_concept_id=uuid.UUID(scopes[code].concept_id))
                             .one_or_none()
                         )
-                        if target is not None:
+                        if target is not None and target.photographable == "no":
+                            # An excluded concept is never searched; a steward's "yes" re-opens it.
+                            reports.append({"concept_code": code, "skipped": "not photographable"})
+                        elif target is not None:
                             views[code] = target_view_from_row(session, target)
-                missing = [code for code in codes if code not in views]
+                skipped = {report["concept_code"] for report in reports}
+                missing = [code for code in codes if code not in views and code not in skipped]
                 if missing and args.apply:
                     raise SystemExit(f"No target yet for {', '.join(missing)}; run hannah-build-targets --apply first.")
                 if missing:

@@ -78,9 +78,11 @@ def commons_thumb_url(image_url: str, width: int, original_width: int | None) ->
 
     `.../commons/a/ab/Name.jpg` -> `.../commons/thumb/a/ab/Name.jpg/500px-Name.jpg`.
     Wikimedia refuses a thumbnail wider than the original, and anything not on
-    Commons is returned as it is.
+    Commons is returned as it is. The imageinfo API adds `?utm_...` tracking to
+    original URLs; it is dropped, or every large original is fetched in full
+    and refused as too big (2026-10-20).
     """
-    match = _COMMONS_ORIGINAL.match(image_url)
+    match = _COMMONS_ORIGINAL.match(image_url.split("#", 1)[0].split("?", 1)[0])
     if not match or (original_width is not None and original_width <= width):
         return image_url
     root, first, second, name = match.groups()
