@@ -23,6 +23,7 @@ from sqlalchemy import bindparam, text
 
 from .db import create_session_factory
 from .hannah_photos import (
+    auto_approve_min_score,
     curate_concept,
     default_fetch_bytes,
     make_vision_completer,
@@ -30,9 +31,10 @@ from .hannah_photos import (
     target_view_from_row,
     vision_calls_in_last_day,
 )
+from .hannah_review import HannahReviewError, auto_approve
 from .hannah_targets import ConceptScope, default_http_get_json, readable_name
 from .models.schema import HannahConceptTarget
-from .runtime import RuntimePersistenceBridge
+from .runtime import RuntimePersistenceBridge, upload_object_bytes
 from .services.llm import resolve_model_for_feature
 
 
@@ -246,6 +248,27 @@ def process_queue_item(
             max_vision_calls=budget,
             queue_item_id=queue_item["id"],
         )
+        min_score = auto_approve_min_score()
+        report["auto_approve_min_score"] = min_score
+        if persist_db and min_score is not None and report["proposed"]:
+            try:
+                report["auto_approved"] = auto_approve(
+                    session,
+                    target.semantic_concept_id,
+                    min_score=min_score,
+                    fetch_bytes=default_fetch_bytes,
+                    store_object=lambda key, payload, content_type: upload_object_bytes(
+                        object_key=key, payload=payload, content_type=content_type, env_file=storage_env_file
+                    ),
+                )
+            except HannahReviewError as exc:
+                report["auto_approved"] = {"approved": [], "failed": [{"error": exc.detail}]}
+            session.refresh(target)
+            report["target_status"] = target.status
+            report["proposed"] = session.execute(
+                text("SELECT count(*) FROM hannah_concept_photos WHERE semantic_concept_id = :id AND status = 'proposed'"),
+                {"id": target.semantic_concept_id},
+            ).scalar()
     report.update({"queue_item_id": queue_item["id"], "agent": "hannah", "schema_version": SCHEMA_VERSION, "vision_budget": budget})
 
     completed_at = utc_now()

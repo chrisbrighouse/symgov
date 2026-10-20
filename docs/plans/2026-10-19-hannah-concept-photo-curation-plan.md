@@ -257,6 +257,26 @@ How it behaves:
 4. Turn on auto-approve (`SYMGOV_HANNAH_AUTO_APPROVE_MIN_SCORE`, unset means off).
 5. With Chris's approval, add `hannah` back to `SYMGOV_AGENT_WORKERS`.
 
+**Code as built (2026-10-20).** Steps 1–5 still need the release and Chris's time.
+- **`hannah-calibrate`:** labels are the photos a steward approved or rejected. Removed photos are reported but not used, and Hannah's own decisions are never labels.
+  - Each `--model` reuses the stored score where that model checked the photo, and otherwise makes a fresh vision call on the 800 px thumbnail.
+  - Fresh checks are captioned with the file title only, because the description was never stored.
+  - It sweeps thresholds 0.35–0.95 and recommends the lowest that would have approved nothing a steward rejected. Under 10 caught approvals marks the recommendation as thin evidence.
+  - It is read-only: no photo row changes. Vision calls are logged as `hannah_vision` with initiator `admin`. `--out` keeps the full report.
+- **Automatic approval:** `SYMGOV_HANNAH_AUTO_APPROVE_MIN_SCORE` is off when unset, unreadable or not above 0.35.
+  - When it is set, the runner approves Hannah's proposals at or above it after each applied search, in rank order, up to two per concept.
+  - Each one goes through the steward's approval path, so the copy is stored and validated in the same way. It is recorded as `decided_by_agent = 'hannah'` with no user, and audited with its score.
+  - A proposal that cannot be fetched stays proposed for a steward.
+- **Workspace:** each decided photo now says "by Hannah" or "by a steward", with the time.
+
+**Run order once H1–H6 are released:**
+1. `hannah-build-targets --apply`.
+2. `hannah-run --sample 40 --apply`, with the `hannah_vision` feature model set to `anthropic/claude-haiku-5.5`.
+3. Chris decides every proposal in the Curation tab.
+4. `hannah-calibrate --model anthropic/claude-haiku-5.5 --model google/gemini-3.1-flash-lite --out <file>`.
+5. Pick the model and threshold. Set the env var on the API and worker.
+6. With approval, add `hannah` back to `SYMGOV_AGENT_WORKERS`.
+
 ### WP-H7: Retire the old path (S, later release)
 - Drop `hannah_photo_candidates`, `hannah_symbol_curation_states` and the unused `hannah_curation_source_sites`.
 - Delete the old runner functions and the DuckDuckGo Lite scraper.

@@ -671,6 +671,24 @@ def max_vision_calls_per_day() -> int:
         return DEFAULT_MAX_VISION_CALLS_PER_DAY
 
 
+def auto_approve_min_score() -> float | None:
+    """`SYMGOV_HANNAH_AUTO_APPROVE_MIN_SCORE`, or None when automatic approval is off.
+
+    Unset, unreadable or outside (PROPOSE_MIN_SCORE, 1] means off: a value
+    at or below the proposal threshold would approve every proposal.
+    """
+    import os
+
+    raw = os.environ.get("SYMGOV_HANNAH_AUTO_APPROVE_MIN_SCORE", "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return value if PROPOSE_MIN_SCORE < value <= 1 else None
+
+
 def make_vision_completer(model: str, *, initiator_kind: str, session_factory: Any) -> CompleteVisionFn:
     """The OpenRouter vision call, recorded in the usage ledger as `hannah_vision`."""
     from .services.llm_router import request_llm_completion

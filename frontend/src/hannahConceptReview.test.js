@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { act, create } from 'react-test-renderer';
 
-import { HannahConceptReview, formatTimestamp, parseSearchTerms, photoDecisions } from './HannahConceptReview.js';
+import { HannahConceptReview, formatTimestamp, parseSearchTerms, photoDecisionNote, photoDecisions } from './HannahConceptReview.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -207,5 +207,19 @@ describe('Hannah review helpers', () => {
     assert.deepEqual(parseSearchTerms(' gate valve, ,sluice valve '), ['gate valve', 'sluice valve']);
     assert.equal(formatTimestamp('2026-10-20T09:05:41Z'), '2026-10-20 09:05 UTC');
     assert.equal(formatTimestamp(null), '');
+  });
+});
+
+describe('photoDecisionNote', () => {
+  it('says who decided, and marks an automatic approval as Hannah\'s', () => {
+    assert.equal(photoDecisionNote(photo({ status: 'proposed' })), '');
+    assert.equal(
+      photoDecisionNote(photo({ status: 'approved', decidedAt: '2026-10-20T09:30:00Z', decidedByAgent: 'hannah' })),
+      'by Hannah, 2026-10-20 09:30 UTC',
+    );
+    assert.equal(
+      photoDecisionNote(photo({ status: 'rejected', decidedAt: '2026-10-20T09:30:00Z', decidedByAgent: null })),
+      'by a steward, 2026-10-20 09:30 UTC',
+    );
   });
 });

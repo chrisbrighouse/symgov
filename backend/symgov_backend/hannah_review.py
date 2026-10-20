@@ -11,6 +11,10 @@ approved photos, and a steward:
 - removes an approved photo, which deletes the stored copy;
 - corrects a target: whether it can be photographed, and its search terms.
 
+With automatic approval on (WP-H6), Hannah approves her own proposals that
+score at or above the calibrated threshold through the same path, recorded as
+`decided_by_agent = 'hannah'` with no user; a steward can still remove them.
+
 After every decision the concept's open candidates are re-ranked, so the next
 best is proposed when a slot frees, and the target's status follows. Each
 decision writes an audit event naming the steward. Storage and HTTP are
@@ -334,8 +338,12 @@ def decide_photo(
     store_object: StoreObjectFn,
     delete_object: DeleteObjectFn,
     now: datetime | None = None,
+    agent: str | None = None,
 ) -> dict[str, Any]:
-    """Approve, reject or remove one photo; returns the concept as the list shows it."""
+    """Approve, reject or remove one photo; returns the concept as the list shows it.
+
+    `agent="hannah"` records an automatic decision instead of a steward's.
+    """
     if decision not in DECISIONS:
         raise HannahReviewError(422, f"Unsupported decision: {decision}.")
     now = now or utc_now()
@@ -377,17 +385,66 @@ def decide_photo(
         photo.status, photo.rank = "removed", None
         photo.object_key, photo.content_type, photo.size_bytes = None, None, None
 
-    photo.decided_by_user_id = user_id
-    photo.decided_by_agent = None
+    photo.decided_by_user_id = None if agent else user_id
+    photo.decided_by_agent = agent
     photo.decided_at = now
     session.flush()
     _refresh_concept(session, target, now)
+    payload = {"concept_code": concept_code, "title": photo.title, "source_url": photo.source_url}
+    if agent:
+        payload.update({"agent": agent, "score": float(photo.score) if photo.score is not None else None})
     _audit(
-        session, action=f"hannah_photo_{PAST_TENSE[decision]}", entity_id=photo.id, actor_id=user_id, now=now,
-        payload={"concept_code": concept_code, "title": photo.title, "source_url": photo.source_url},
+        session, action=f"hannah_photo_{PAST_TENSE[decision]}", entity_id=photo.id,
+        actor_id=None if agent else user_id, now=now, payload=payload,
     )
     session.commit()
     return concept_detail(session, target.id)
+
+
+def auto_approve(
+    session: Session,
+    concept_id: uuid.UUID,
+    *,
+    min_score: float,
+    fetch_bytes: FetchBytesFn,
+    store_object: StoreObjectFn,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Hannah approves her best proposals scoring at least `min_score` (WP-H6).
+
+    Proposals are taken in rank order until the concept holds its two photos.
+    One that cannot be fetched or stored stays proposed for a steward.
+    """
+    approved: list[str] = []
+    failed: list[dict[str, str]] = []
+    while True:
+        query = (
+            session.query(HannahConceptPhoto)
+            .filter_by(semantic_concept_id=concept_id, status="proposed")
+            .filter(HannahConceptPhoto.score >= min_score)
+        )
+        if failed:
+            query = query.filter(HannahConceptPhoto.id.notin_([uuid.UUID(item["id"]) for item in failed]))
+        photo = query.order_by(HannahConceptPhoto.rank.nulls_last(), HannahConceptPhoto.id).first()
+        if photo is None:
+            break
+        try:
+            decide_photo(
+                session, photo.id, "approve", user_id=None, agent="hannah", fetch_bytes=fetch_bytes,
+                store_object=store_object, delete_object=lambda key: None, now=now,
+            )
+        except HannahReviewError as exc:
+            session.rollback()
+            if exc.status_code == 409:  # the concept is full
+                break
+            failed.append({"id": str(photo.id), "error": exc.detail})
+            continue
+        except Exception as exc:  # storage failed: leave the proposal for a steward
+            session.rollback()
+            failed.append({"id": str(photo.id), "error": f"The photo could not be stored: {type(exc).__name__}."})
+            continue
+        approved.append(str(photo.id))
+    return {"approved": approved, "failed": failed}
 
 
 def update_target(

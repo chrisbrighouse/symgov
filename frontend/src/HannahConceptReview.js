@@ -77,6 +77,16 @@ export function photoDecisions(photo) {
   return [];
 }
 
+// Who made the decision, shown beside the status: "by Hannah" marks an
+// automatic approval (WP-H6), which a steward can still remove.
+export function photoDecisionNote(photo) {
+  if (!photo.decidedAt || !['approved', 'rejected', 'removed'].includes(photo.status)) {
+    return '';
+  }
+  const who = photo.decidedByAgent === 'hannah' ? 'by Hannah' : 'by a steward';
+  return `${who}, ${formatTimestamp(photo.decidedAt)}`;
+}
+
 export function parseSearchTerms(value) {
   return String(value || '')
     .split(',')
@@ -107,6 +117,7 @@ function PhotoCard({ photo, concept, busy, onDecide }) {
           ? createElement('span', { className: 'hannah-photo-score' }, `Score ${photo.score.toFixed(2)}`)
           : null,
       ),
+      photoDecisionNote(photo) ? createElement('p', { className: 'hannah-photo-decided' }, photoDecisionNote(photo)) : null,
       createElement('p', { className: 'hannah-photo-title' }, label),
       photo.reason ? createElement('p', { className: 'hannah-photo-reason' }, photo.reason) : null,
       photo.filterReasons?.length

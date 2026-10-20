@@ -294,6 +294,22 @@ def build_parser() -> argparse.ArgumentParser:
     hannah_run_parser.add_argument("--targets-model", help="Model for previewing targets; defaults to the hannah_targets feature model.")
     hannah_run_parser.add_argument("--max-vision", type=int, default=100, help="Most vision calls for the whole run.")
 
+    hannah_calibrate_parser = subparsers.add_parser(
+        "hannah-calibrate",
+        help=(
+            "Score the photos a steward approved or rejected with one or more vision models and sweep thresholds for "
+            "automatic approval. Read-only: writes no photo rows; fresh scores appear only in the report."
+        ),
+    )
+    hannah_calibrate_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    hannah_calibrate_parser.add_argument(
+        "--model", action="append", default=[], help="Vision model to score with. Repeatable; defaults to the hannah_vision feature model."
+    )
+    hannah_calibrate_parser.add_argument("--fresh", action="store_true", help="Call the model even where a stored score from it exists.")
+    hannah_calibrate_parser.add_argument("--max-vision", type=int, default=200, help="Most vision calls for the whole run.")
+    hannah_calibrate_parser.add_argument("--out", help="Also write the full report as JSON to this path.")
+    hannah_calibrate_parser.add_argument("--summary-only", action="store_true", help="Print the sweeps without the per-photo rows.")
+
     gate_parser = subparsers.add_parser(
         "evaluate-automation-gates",
         help="Evaluate conservative publication automation gates without creating publication work.",
@@ -844,6 +860,35 @@ def main(argv: Sequence[str] | None = None):
                 print(f"Hannah run failed: {exc}", file=sys.stderr)
                 return 1
         print(json.dumps({"vision_model": vision_model, "applied": bool(args.apply), "concepts": reports}, indent=2))
+        return 0
+
+    if args.command == "hannah-calibrate":
+        from symgov_backend.hannah_calibration import calibrate
+        from symgov_backend.hannah_photos import default_fetch_bytes, make_vision_completer
+        from symgov_backend.services.llm import resolve_model_for_feature
+
+        session_factory = create_session_factory(env_file=args.db_env_file, nopool=True)
+        models = [model.strip() for model in args.model if model.strip()] or [resolve_model_for_feature("hannah_vision").strip()]
+        with session_factory() as session:
+            try:
+                report = calibrate(
+                    session,
+                    models,
+                    completer_for=lambda model: make_vision_completer(model, initiator_kind="admin", session_factory=session_factory),
+                    fetch_bytes=default_fetch_bytes,
+                    fresh=args.fresh,
+                    max_vision_calls=max(0, args.max_vision),
+                )
+            except Exception as exc:
+                session.rollback()
+                print(f"Hannah calibration failed: {exc}", file=sys.stderr)
+                return 1
+        if args.out:
+            Path(args.out).write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        if args.summary_only:
+            for model_report in report["models"].values():
+                model_report.pop("photos", None)
+        print(json.dumps(report, indent=2))
         return 0
 
     if args.command == "evaluate-automation-gates":

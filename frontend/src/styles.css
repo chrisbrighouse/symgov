@@ -7314,6 +7314,7 @@ button.catalog-preview-format-badge:focus-visible {
 }
 
 .hannah-photo-reason,
+.hannah-photo-decided,
 .hannah-photo-credit {
   font-size: var(--idox-font-size-xs);
   color: var(--idox-text-secondary);
