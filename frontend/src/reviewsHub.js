@@ -7,6 +7,7 @@ import { symbolIdLabelOrState } from './catalogWorkbench.js';
 import { lifecycleLabel, workingRevision } from './OrganizationSymbolDraftsPanel.js';
 import { OrganizationSymbolReviewQueuePanel } from './OrganizationSymbolReviewQueuePanel.js';
 import { canReviewOrganizationSymbols } from './projectContext.js';
+import { ScopeTabs } from './scopeTabs.js';
 
 // Unified submission & review WP4 (spec draft 2 FR11). One Reviews surface with
 // a Public / Private filter. Each tab appears only for a role that holds it, in
@@ -53,33 +54,21 @@ export function ReviewsHub({ auth, renderPublic, renderDenied }) {
     setSearchParams(next, { replace: true });
   }
 
-  function onKeyDown(event) {
-    if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
-    event.preventDefault?.();
-    const index = available.findIndex((entry) => entry.key === scope);
-    const step = event.key === 'ArrowRight' ? 1 : -1;
-    select(available[(index + step + available.length) % available.length].key);
-  }
-
   return createElement(
     'div',
     { className: 'reviews-hub' },
     available.length > 1
-      ? createElement(
-        'nav',
-        { className: 'reviews-scope-tabs', role: 'tablist', 'aria-label': 'Review queues', onKeyDown },
-        available.map((entry) => createElement('button', {
+      ? createElement(ScopeTabs, {
+        entries: available.map((entry) => ({
           key: entry.key,
-          type: 'button',
-          role: 'tab',
-          id: scopeTabId(entry.key),
-          'aria-selected': entry.key === scope,
-          'aria-controls': 'reviews-scope-panel',
-          tabIndex: entry.key === scope ? 0 : -1,
-          className: `reviews-scope-tab${entry.key === scope ? ' active' : ''}`,
-          onClick: () => select(entry.key),
-        }, entry.key === 'private' && access.canPrivate ? `Private · ${organizationName}` : entry.label)),
-      )
+          label: entry.key === 'private' && access.canPrivate ? `Private · ${organizationName}` : entry.label,
+        })),
+        selected: scope,
+        onSelect: select,
+        label: 'Review queues',
+        idPrefix: 'reviews-scope-tab',
+        panelId: 'reviews-scope-panel',
+      })
       : null,
     createElement(
       'div',

@@ -112,7 +112,18 @@ function readFileAsBase64(file) {
   });
 }
 
-export function OrganizationSymbolDraftsPanel({ canCreate = false, workflowV2 = false, currentUserId = '', api = DEFAULT_API }) {
+const OWNERSHIP_VIEWS = [
+  { key: 'mine', label: 'My submissions' },
+  { key: 'all', label: 'All in organization' },
+];
+
+// On Submissions (WP5) the panel is `submissionsView`: the create form comes
+// first and the list starts at the caller's own symbols. Org Admins and Org
+// Reviewers are served the whole organization's drafts, so `canViewAll` offers
+// them an "All in organization" view of the same list.
+export function OrganizationSymbolDraftsPanel({
+  canCreate = false, workflowV2 = false, currentUserId = '', submissionsView = false, canViewAll = false, api = DEFAULT_API,
+}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [status, setStatus] = useState({ mode: '', message: '' });
@@ -122,6 +133,7 @@ export function OrganizationSymbolDraftsPanel({ canCreate = false, workflowV2 = 
   const [busyDraftId, setBusyDraftId] = useState('');
   const [rationaleByDraftId, setRationaleByDraftId] = useState({});
   const [reviewPolicy, setReviewPolicy] = useState(null);
+  const [ownership, setOwnership] = useState('mine');
 
   useEffect(() => {
     if (!workflowV2 || !api.fetchReviewPolicy) return;
@@ -226,25 +238,120 @@ export function OrganizationSymbolDraftsPanel({ canCreate = false, workflowV2 = 
     }
   }
 
+  const showingAll = !submissionsView || (canViewAll && ownership === 'all');
+  const visibleDrafts = showingAll ? drafts : drafts.filter((draft) => draft.ownerId === currentUserId);
+  const heading = submissionsView ? OWNERSHIP_VIEWS.find((view) => view.key === (showingAll ? 'all' : 'mine')).label : 'Organization Symbol Drafts';
   const normalizedAliases = normalizeFacetValues(form.aliases);
   const normalizedKeywords = normalizeFacetValues(form.keywords);
+
+  const createForm = canCreate
+    ? createElement(
+      'form',
+      {
+        className: `set-admin-form organization-symbol-create-form${submissionsView ? ' prominent' : ''}`,
+        onSubmit: createDraft,
+        'aria-labelledby': 'organization-symbol-create-heading',
+      },
+      createElement('h3', { id: 'organization-symbol-create-heading' }, submissionsView ? 'New private symbol' : 'Create Draft'),
+      submissionsView
+        ? createElement('p', { className: 'set-admin-muted' }, 'Start a draft, attach its files, then submit it for your organization to review.')
+        : null,
+      createElement('div', { className: 'organization-symbol-create-grid' },
+        formField('org-symbol-draft-name', 'Symbol name', createElement('input', {
+          id: 'org-symbol-draft-name',
+          value: form.name,
+          onChange: (event) => setForm((current) => ({ ...current, name: event.target.value })),
+          required: true,
+        })),
+        formField('org-symbol-draft-category', 'Category', createElement('input', {
+          id: 'org-symbol-draft-category',
+          value: form.category,
+          onChange: (event) => setForm((current) => ({ ...current, category: event.target.value })),
+          required: true,
+        })),
+        formField('org-symbol-draft-discipline', 'Discipline',
+          // Only the Catalog's standard names are accepted (X-04).
+          createElement('select', {
+            id: 'org-symbol-draft-discipline',
+            value: form.discipline,
+            onChange: (event) => setForm((current) => ({ ...current, discipline: event.target.value })),
+            required: true,
+          },
+            createElement('option', { value: '' }, 'Choose a discipline'),
+            ...CATALOG_DISCIPLINE_ORDER.map((name) => createElement('option', { key: name, value: name }, name)),
+          )),
+      ),
+      formField('org-symbol-draft-summary', 'Summary', createElement('textarea', {
+        id: 'org-symbol-draft-summary',
+        rows: 2,
+        value: form.summary,
+        onChange: (event) => setForm((current) => ({ ...current, summary: event.target.value })),
+        required: true,
+      })),
+      formField('org-symbol-draft-description', 'Description (optional)', createElement('textarea', {
+        id: 'org-symbol-draft-description',
+        rows: 3,
+        value: form.description,
+        onChange: (event) => setForm((current) => ({ ...current, description: event.target.value })),
+      })),
+      createElement('div', { className: 'organization-symbol-create-grid two' },
+        createElement('div', null,
+          formField('org-symbol-draft-aliases', 'Aliases', createElement('textarea', {
+            id: 'org-symbol-draft-aliases',
+            rows: 2,
+            value: form.aliases,
+            onChange: (event) => setForm((current) => ({ ...current, aliases: event.target.value })),
+          })),
+          createElement('p', { className: 'set-admin-muted', role: 'status' }, `Normalized aliases: ${normalizedAliases.join(', ') || 'none'}`),
+        ),
+        createElement('div', null,
+          formField('org-symbol-draft-keywords', 'Keywords', createElement('textarea', {
+            id: 'org-symbol-draft-keywords',
+            rows: 2,
+            value: form.keywords,
+            onChange: (event) => setForm((current) => ({ ...current, keywords: event.target.value })),
+          })),
+          createElement('p', { className: 'set-admin-muted', role: 'status' }, `Normalized keywords: ${normalizedKeywords.join(', ') || 'none'}`),
+        ),
+      ),
+      createElement('div', { className: 'set-admin-actions' },
+        createElement('button', {
+          type: 'submit', className: 'action-button primary', disabled: saving, 'aria-label': 'Create organization symbol draft',
+        }, saving ? 'Saving…' : 'Create draft'),
+      ),
+    )
+    : null;
 
   return createElement(
     'section',
     { className: 'organization-symbol-drafts-panel', 'aria-labelledby': 'organization-symbol-drafts-heading' },
-    createElement('h2', { id: 'organization-symbol-drafts-heading' }, 'Organization Symbol Drafts'),
+    submissionsView ? createForm : null,
+    createElement('div', { className: 'organization-symbol-list-header' },
+      createElement('h2', { id: 'organization-symbol-drafts-heading' }, heading),
+      submissionsView && canViewAll
+        ? createElement('div', { className: 'segmented-control', role: 'group', 'aria-label': 'Whose symbols to list' },
+          OWNERSHIP_VIEWS.map((view) => createElement('button', {
+            key: view.key,
+            type: 'button',
+            className: (showingAll ? 'all' : 'mine') === view.key ? 'active' : '',
+            'aria-pressed': (showingAll ? 'all' : 'mine') === view.key,
+            onClick: () => setOwnership(view.key),
+          }, view.label)))
+        : null,
+    ),
     loading ? createElement('p', { role: 'status' }, 'Loading organization symbol drafts…') : null,
     error ? createElement('p', { role: 'alert', className: 'set-admin-status error' }, error) : null,
-    !loading && !error && drafts.length === 0
-      ? createElement('p', { role: 'status' }, 'No organization symbol drafts yet.')
+    !loading && !error && visibleDrafts.length === 0
+      ? createElement('p', { role: 'status' }, submissionsView && !showingAll ? 'You have no private submissions yet.' : 'No organization symbol drafts yet.')
       : null,
     StatusMessage({ status }),
     createElement(
       'ul',
       { className: 'set-admin-list' },
-      drafts.map((draft) => createElement(DraftItem, {
+      visibleDrafts.map((draft) => createElement(DraftItem, {
         key: draft.id,
         draft,
+        showOwner: submissionsView && showingAll,
         workflowV2,
         currentUserId,
         selfApprovalAllowed: reviewPolicy?.allowSelfApproval === true,
@@ -260,90 +367,15 @@ export function OrganizationSymbolDraftsPanel({ canCreate = false, workflowV2 = 
     error
       ? createElement('button', { type: 'button', onClick: () => { refresh(); }, 'aria-label': 'Retry organization symbol drafts' }, 'Retry')
       : null,
-    canCreate
-      ? createElement(
-        'form',
-        { className: 'set-admin-form', onSubmit: createDraft },
-        createElement('h3', null, 'Create Draft'),
-        createElement('label', { htmlFor: 'org-symbol-draft-name' },
-          'Symbol name',
-          createElement('input', {
-            id: 'org-symbol-draft-name',
-            value: form.name,
-            onChange: (event) => setForm((current) => ({ ...current, name: event.target.value })),
-            required: true,
-          }),
-        ),
-        createElement('label', { htmlFor: 'org-symbol-draft-category' },
-          'Category',
-          createElement('input', {
-            id: 'org-symbol-draft-category',
-            value: form.category,
-            onChange: (event) => setForm((current) => ({ ...current, category: event.target.value })),
-            required: true,
-          }),
-        ),
-        createElement('label', { htmlFor: 'org-symbol-draft-discipline' },
-          'Discipline',
-          // Only the Catalog's standard names are accepted (X-04).
-          createElement('select', {
-            id: 'org-symbol-draft-discipline',
-            value: form.discipline,
-            onChange: (event) => setForm((current) => ({ ...current, discipline: event.target.value })),
-            required: true,
-          },
-            createElement('option', { value: '' }, 'Choose a discipline'),
-            ...CATALOG_DISCIPLINE_ORDER.map((name) => createElement('option', { key: name, value: name }, name)),
-          ),
-        ),
-        createElement('label', { htmlFor: 'org-symbol-draft-summary' },
-          'Summary',
-          createElement('textarea', {
-            id: 'org-symbol-draft-summary',
-            rows: 2,
-            value: form.summary,
-            onChange: (event) => setForm((current) => ({ ...current, summary: event.target.value })),
-            required: true,
-          }),
-        ),
-        createElement('label', { htmlFor: 'org-symbol-draft-description' },
-          'Description (optional)',
-          createElement('textarea', {
-            id: 'org-symbol-draft-description',
-            rows: 3,
-            value: form.description,
-            onChange: (event) => setForm((current) => ({ ...current, description: event.target.value })),
-          }),
-        ),
-        createElement('label', { htmlFor: 'org-symbol-draft-aliases' },
-          'Aliases',
-          createElement('textarea', {
-            id: 'org-symbol-draft-aliases',
-            rows: 2,
-            value: form.aliases,
-            onChange: (event) => setForm((current) => ({ ...current, aliases: event.target.value })),
-          }),
-        ),
-        createElement('p', { className: 'set-admin-muted', role: 'status' }, `Normalized aliases: ${normalizedAliases.join(', ') || 'none'}`),
-        createElement('label', { htmlFor: 'org-symbol-draft-keywords' },
-          'Keywords',
-          createElement('textarea', {
-            id: 'org-symbol-draft-keywords',
-            rows: 2,
-            value: form.keywords,
-            onChange: (event) => setForm((current) => ({ ...current, keywords: event.target.value })),
-          }),
-        ),
-        createElement('p', { className: 'set-admin-muted', role: 'status' }, `Normalized keywords: ${normalizedKeywords.join(', ') || 'none'}`),
-        createElement('div', { className: 'set-admin-actions' },
-          createElement('button', { type: 'submit', disabled: saving, 'aria-label': 'Create organization symbol draft' }, saving ? 'Saving…' : 'Create draft'),
-        ),
-      )
-      : null,
+    submissionsView ? null : createForm,
   );
 }
 
-function DraftItem({ draft, workflowV2, currentUserId, selfApprovalAllowed = false, api, busy, rationale, onRationaleChange, onUploadAsset, onSubmit, runAction }) {
+function formField(id, label, control) {
+  return createElement('label', { className: 'field', htmlFor: id }, createElement('span', null, label), control);
+}
+
+function DraftItem({ draft, showOwner = false, workflowV2, currentUserId, selfApprovalAllowed = false, api, busy, rationale, onRationaleChange, onUploadAsset, onSubmit, runAction }) {
   const [editForm, setEditForm] = useState(null);
   const [history, setHistory] = useState(null);
   const [historyError, setHistoryError] = useState('');
@@ -392,16 +424,13 @@ function DraftItem({ draft, workflowV2, currentUserId, selfApprovalAllowed = fal
 
   function field(key, label, { multiline = false, required = false } = {}) {
     const id = `org-symbol-edit-${draft.id}-${key}`;
-    return createElement('label', { htmlFor: id },
-      label,
-      createElement(multiline ? 'textarea' : 'input', {
-        id,
-        rows: multiline ? 2 : undefined,
-        value: editForm[key],
-        required,
-        onChange: (event) => setEditForm((form) => ({ ...form, [key]: event.target.value })),
-      }),
-    );
+    return formField(id, label, createElement(multiline ? 'textarea' : 'input', {
+      id,
+      rows: multiline ? 2 : undefined,
+      value: editForm[key],
+      required,
+      onChange: (event) => setEditForm((form) => ({ ...form, [key]: event.target.value })),
+    }));
   }
 
   return createElement(
@@ -411,6 +440,9 @@ function DraftItem({ draft, workflowV2, currentUserId, selfApprovalAllowed = fal
       'div',
       null,
       createElement('strong', null, `${name} · ${symbolIdLabelOrState(draft)}`),
+      showOwner
+        ? createElement('p', { className: 'set-admin-muted' }, `Owner: ${draft.ownerId === currentUserId ? 'you' : draft.ownerName || 'unknown'}`)
+        : null,
       createElement('p', { className: 'set-admin-muted' }, `Category: ${draft.category} · Discipline: ${draft.discipline}`),
       createElement('p', { className: 'set-admin-muted' }, workflowV2 ? `Status: ${lifecycleLabel(draft)}` : `Revision status: ${current?.lifecycleState || 'none'}`),
       working.pending
@@ -446,8 +478,8 @@ function DraftItem({ draft, workflowV2, currentUserId, selfApprovalAllowed = fal
       ? createElement('form', { className: 'set-admin-form', onSubmit: saveEdit, 'aria-label': `Edit ${name}` },
         field('name', 'Symbol name', { required: true }),
         field('category', 'Category', { required: true }),
-        createElement('label', { htmlFor: `org-symbol-edit-${draft.id}-discipline` },
-          'Discipline',
+        createElement('label', { className: 'field', htmlFor: `org-symbol-edit-${draft.id}-discipline` },
+          createElement('span', null, 'Discipline'),
           createElement('select', {
             id: `org-symbol-edit-${draft.id}-discipline`,
             value: editForm.discipline,
@@ -501,8 +533,8 @@ function DraftItem({ draft, workflowV2, currentUserId, selfApprovalAllowed = fal
         }, 'Edit details')
         : null,
       isDraft
-        ? createElement('label', { htmlFor: `submit-rationale-${draft.id}` },
-          'Submission rationale (optional)',
+        ? createElement('label', { className: 'field organization-symbol-rationale', htmlFor: `submit-rationale-${draft.id}` },
+          createElement('span', null, 'Submission rationale (optional)'),
           createElement('input', {
             id: `submit-rationale-${draft.id}`,
             value: rationale,

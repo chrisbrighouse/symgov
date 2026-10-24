@@ -25,7 +25,7 @@ from ..dependencies import (
     require_recent_step_up,
     require_user,
 )
-from ..models import GovernedSymbol, OrganizationSymbolReviewSubmission, PromotionRequest, SymbolRevision
+from ..models import GovernedSymbol, OrganizationSymbolReviewSubmission, PromotionRequest, SymbolRevision, User
 from ..organization_review_policy import ReviewPolicy, get_review_policy, set_review_policy
 from ..organization_symbol_drafts import (
     OrganizationSymbolDraftError,
@@ -158,6 +158,8 @@ def full_draft_response(session: Session, symbol) -> OrganizationSymbolDraftResp
     current = session.get(SymbolRevision, symbol.current_revision_id) if symbol.current_revision_id else None
     pending = session.get(SymbolRevision, symbol.pending_revision_id) if symbol.pending_revision_id else None
     response = _draft_response(symbol, current, _pending_submission(session, current.id) if current is not None else None)
+    owner = session.get(User, symbol.owner_id) if symbol.owner_id else None
+    response.ownerName = owner.display_name if owner is not None else None
     if pending is not None:
         response.pendingRevisionId = str(pending.id)
         response.pendingRevision = _revision_response(pending, _pending_submission(session, pending.id))

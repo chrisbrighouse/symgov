@@ -1544,6 +1544,7 @@ class OrganizationSymbolDraftResponse(BaseModel):
     organizationWide: bool
     organizationId: str
     ownerId: str
+    ownerName: str | None = None
     currentRevisionId: str | None
     currentRevision: OrganizationSymbolRevisionResponse | None
     pendingRevisionId: str | None = None

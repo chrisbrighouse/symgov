@@ -250,6 +250,17 @@ describe('mounted semantic review journey', () => {
     await act(async () => renderer.unmount());
   });
 
+  it('moves organization drafts into Submissions once the unified workflow is on', async () => {
+    const requests = [];
+    const orgSubmitter = user({ roles: [], orgCode: 'acme' });
+    orgSubmitter.organization.capabilities = ['contributor'];
+    orgSubmitter.capabilities = { ...orgSubmitter.capabilities, organizationsEnabled: true, organizationSymbolsEnabled: true, organizationSymbolWorkflowV2Enabled: true };
+    const renderer = await mount('/semantic-review', orgSubmitter, requests);
+    assert.ok(renderer.root.findAllByProps({ 'aria-label': 'Submissions' }).length > 0);
+    assert.equal(renderer.root.findAllByProps({ 'aria-label': 'Org Symbols' }).length, 0);
+    await act(async () => renderer.unmount());
+  });
+
   it('leaves the legacy intake Rights lane alone', async () => {
     const requests = [];
     const renderer = await mount('/semantic-review', user({ roles: ['reviewer'] }), requests);

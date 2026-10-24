@@ -222,6 +222,8 @@ def test_list_and_detail_expose_pending_submission_only_once_submitted():
     item_before = next(item for item in list_before.json()["items"] if item["id"] == symbol_id)
     assert item_before["currentRevision"] is not None
     assert item_before["currentRevision"]["pendingSubmissionId"] is None
+    # The owner is named, for the "All in organization" view on Submissions.
+    assert (item_before["ownerId"], item_before["ownerName"]) == (str(user_id), "Member")
 
     submit_response = client.post(
         f"/api/v1/organization-symbols/{symbol_id}/revisions/{revision_id}/submit",

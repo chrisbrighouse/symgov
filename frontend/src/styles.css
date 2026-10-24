@@ -7416,3 +7416,67 @@ button.catalog-preview-format-badge:focus-visible {
 .private-support-item {
   flex-wrap: wrap;
 }
+
+/* Unified submission & review WP5: the private symbol form on Submissions. */
+.organization-symbol-create-form {
+  gap: 0.75rem;
+}
+
+.organization-symbol-create-form.prominent {
+  margin: 1rem 0 1.5rem;
+  padding: 1rem 1.25rem 1.25rem;
+  border: 1px solid var(--idox-border-default);
+  border-radius: var(--idox-radius-lg);
+  background: var(--idox-bg-surface-base);
+}
+
+.organization-symbol-create-form h3 {
+  margin: 0;
+}
+
+.organization-symbol-create-form .set-admin-muted {
+  margin: 0.25rem 0 0;
+}
+
+.organization-symbol-create-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.organization-symbol-create-grid.two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+/* `.set-admin-form label` sets a 220px floor that would overflow a phone. */
+.organization-symbol-drafts-panel .field {
+  min-width: 0;
+}
+
+.organization-symbol-rationale {
+  min-width: 16rem;
+}
+
+.organization-symbol-list-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.organization-symbol-list-header .segmented-control {
+  min-width: min(100%, 22rem);
+}
+
+@media (max-width: 720px) {
+  .organization-symbol-create-grid,
+  .organization-symbol-create-grid.two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .organization-symbol-rationale {
+    min-width: 0;
+    width: 100%;
+  }
+}
