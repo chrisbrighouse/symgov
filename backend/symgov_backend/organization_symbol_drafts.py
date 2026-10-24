@@ -594,7 +594,12 @@ def submission_history(
     session: Session, current_user: AuthenticatedUser, symbol_id: uuid.UUID
 ) -> list[SubmissionHistoryEntry]:
     """Every submission of every revision of one symbol, newest first."""
-    symbol = get_draft(session, current_user, symbol_id)
+    return history_for_symbol(session, get_draft(session, current_user, symbol_id))
+
+
+def history_for_symbol(session: Session, symbol: GovernedSymbol) -> list[SubmissionHistoryEntry]:
+    """`submission_history` without the caller check, for a caller that has
+    already established it may see this symbol (the platform support view)."""
     submissions = session.execute(
         select(OrganizationSymbolReviewSubmission)
         .where(

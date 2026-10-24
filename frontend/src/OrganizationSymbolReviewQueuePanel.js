@@ -348,6 +348,7 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
             DECISIONS.map((option) => createElement('button', {
               key: option.value,
               type: 'button',
+              className: `action-button compact${option.value === 'approved' ? ' primary' : ''}`,
               disabled: decidingSymbolId === activeDraft.id,
               onClick: () => decide(activeDraft, option.value),
               'aria-label': `${option.label} ${activeDraft.canonicalName}`,
@@ -386,6 +387,7 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
             ),
             createElement('button', {
               type: 'button',
+              className: 'action-button compact',
               disabled: togglingSymbolId === draft.id,
               onClick: () => toggleOrganizationWide(draft),
               'aria-pressed': Boolean(draft.organizationWide),

@@ -47,14 +47,19 @@ from ..schemas import (
     OrgMemberResponse,
     OrganizationContributionsResponse,
     OrganizationReviewPolicyResponse,
+    OrganizationSymbolDraftListResponse,
+    OrganizationSymbolHistoryResponse,
     OrganizationReviewPolicyUpdateRequest,
     OrganizationUsageSummaryResponse,
 )
 from ..organization_review_policy import get_review_policy, set_review_policy
 from ..product_usage_rollups import get_organization_usage_summary
-from .organization_symbols import review_policy_response
+from ..organization_service import _emit_audit
+from ..organization_symbol_drafts import history_for_symbol
+from .organization_symbols import full_draft_response, history_response, review_policy_response
 from ..settings import SymgovAPISettings, get_settings
 from ..models import (
+    GovernedSymbol,
     Organization,
     OrganizationMemberCapability,
     OrganizationMembership,
@@ -678,3 +683,67 @@ def put_platform_organization_review_policy(
     )
     session.commit()
     return review_policy_response(policy)
+
+
+# --- Unified submission & review WP4: read-only support view (spec draft 2 FR10) ---
+#
+# A Platform Admin may look at one organization's private symbols and their
+# review history to support it. There are no write routes here: decisions stay
+# with the organization. Every read is audited, because it crosses the
+# organization's privacy boundary.
+
+def _audit_support_read(session: Session, current_user: AuthenticatedUser, organization_id: uuid.UUID, **details) -> None:
+    _emit_audit(
+        session,
+        entity_type="organization",
+        entity_id=organization_id,
+        action="platform.organization_private_symbols_viewed",
+        actor_id=uuid.UUID(current_user.id),
+        payload={"organization_id": str(organization_id), "source": "platform_support_view", **details},
+    )
+
+
+@router.get(
+    "/platform/organizations/{organization_id}/organization-symbols",
+    response_model=OrganizationSymbolDraftListResponse,
+    dependencies=[Depends(_require_platform_admin_enabled), Depends(_require_workflow_v2)],
+)
+def list_platform_organization_private_symbols(
+    organization_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_platform_admin),
+) -> OrganizationSymbolDraftListResponse:
+    org_id = _existing_organization_id(session, organization_id)
+    symbols = session.execute(
+        select(GovernedSymbol)
+        .where(GovernedSymbol.owner_organization_id == org_id, GovernedSymbol.visibility == "organization_private")
+        .order_by(GovernedSymbol.updated_at.desc())
+    ).scalars().all()
+    _audit_support_read(session, current_user, org_id, view="list", count=len(symbols))
+    response = OrganizationSymbolDraftListResponse(items=[full_draft_response(session, symbol) for symbol in symbols])
+    session.commit()
+    return response
+
+
+@router.get(
+    "/platform/organizations/{organization_id}/organization-symbols/{symbol_id}/history",
+    response_model=OrganizationSymbolHistoryResponse,
+    dependencies=[Depends(_require_platform_admin_enabled), Depends(_require_workflow_v2)],
+)
+def platform_organization_private_symbol_history(
+    organization_id: str,
+    symbol_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_platform_admin),
+) -> OrganizationSymbolHistoryResponse:
+    org_id = _existing_organization_id(session, organization_id)
+    try:
+        symbol = session.get(GovernedSymbol, uuid.UUID(symbol_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Symbol not found.") from exc
+    if symbol is None or symbol.owner_organization_id != org_id or symbol.visibility != "organization_private":
+        raise HTTPException(status_code=404, detail="Symbol not found.")
+    _audit_support_read(session, current_user, org_id, view="history", governed_symbol_id=str(symbol.id))
+    response = history_response(history_for_symbol(session, symbol))
+    session.commit()
+    return response

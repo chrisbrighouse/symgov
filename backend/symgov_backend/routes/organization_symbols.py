@@ -153,7 +153,7 @@ def _revision_response(
     )
 
 
-def _full_draft_response(session: Session, symbol) -> OrganizationSymbolDraftResponse:
+def full_draft_response(session: Session, symbol) -> OrganizationSymbolDraftResponse:
     """The symbol with its current revision and, when one is in progress, its pending revision."""
     current = session.get(SymbolRevision, symbol.current_revision_id) if symbol.current_revision_id else None
     pending = session.get(SymbolRevision, symbol.pending_revision_id) if symbol.pending_revision_id else None
@@ -215,7 +215,7 @@ def list_organization_symbol_drafts(
     current_user: AuthenticatedUser = Depends(require_organization_session),
 ) -> OrganizationSymbolDraftListResponse:
     symbols = list_drafts(session, current_user)
-    return OrganizationSymbolDraftListResponse(items=[_full_draft_response(session, symbol) for symbol in symbols])
+    return OrganizationSymbolDraftListResponse(items=[full_draft_response(session, symbol) for symbol in symbols])
 
 
 def review_policy_response(policy: ReviewPolicy) -> OrganizationReviewPolicyResponse:
@@ -274,7 +274,7 @@ def get_organization_symbol_draft(
         symbol = get_draft(session, current_user, parsed_id)
     except OrganizationSymbolDraftNotVisible as exc:
         raise HTTPException(status_code=404, detail="Organization symbol draft was not found.") from exc
-    return _full_draft_response(session, symbol)
+    return full_draft_response(session, symbol)
 
 
 @router.post(
@@ -437,7 +437,7 @@ def create_organization_symbol_draft_revision(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
     if workflow_v2:
-        return _full_draft_response(session, symbol)
+        return full_draft_response(session, symbol)
     return _draft_response(symbol, revision)
 
 
@@ -495,7 +495,7 @@ def update_organization_symbol_draft(
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
-    return _full_draft_response(session, symbol)
+    return full_draft_response(session, symbol)
 
 
 @router.delete(
@@ -526,7 +526,7 @@ def remove_organization_symbol_draft_asset(
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
-    return _full_draft_response(session, get_draft(session, current_user, parsed_symbol_id))
+    return full_draft_response(session, get_draft(session, current_user, parsed_symbol_id))
 
 
 @router.post(
@@ -577,6 +577,10 @@ def organization_symbol_review_history(
         entries = submission_history(session, current_user, _parse_uuid(symbol_id))
     except OrganizationSymbolDraftNotVisible as exc:
         raise HTTPException(status_code=404, detail="Organization symbol draft was not found.") from exc
+    return history_response(entries)
+
+
+def history_response(entries) -> OrganizationSymbolHistoryResponse:
     return OrganizationSymbolHistoryResponse(
         items=[
             OrganizationSymbolHistoryEntry(
@@ -617,7 +621,7 @@ def discard_organization_symbol_pending_revision(
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
-    return _full_draft_response(session, symbol)
+    return full_draft_response(session, symbol)
 
 
 # --- Stage 7 WP7.2/WP7.3: promotion requests ---

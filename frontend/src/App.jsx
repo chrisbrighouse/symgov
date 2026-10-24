@@ -81,6 +81,7 @@ import OrganizationSelectionPage, { OrganizationSwitchPage } from './Organizatio
 import { adminRouteElements } from './adminRoutes.js';
 import { canAccessOrganizationAdmin, sessionRoles, canAccessPlatformAdmin, canAccessPlatformWorkspace, canManageOrganizationUsers } from './adminJourneys.js';
 import { semanticReviewRouteElements } from './semanticReviewRoutes.js';
+import { ReviewsHub, reviewsAccess } from './reviewsHub.js';
 import { canAccessSemanticReview } from './semanticReviewJourney.js';
 import { edRouteElements } from './edRoutes.js';
 import { canUseEd } from './edChat.js';
@@ -596,8 +597,20 @@ function AppContent() {
           {adminRouteElements(auth, RequireAuth)}
           {semanticReviewRouteElements(auth, RequireAnyRole)}
           <Route path="/organization/symbols" element={<RequireAuth><OrganizationSymbolDraftsPage auth={auth} /></RequireAuth>} />
-          <Route path="/organization/symbols/review" element={<RequireAuth><OrganizationSymbolReviewsPage auth={auth} /></RequireAuth>} />
-          <Route path="/reviews" element={<RequireAnyRole roles={['admin', 'reviewer']}><ReviewsPage /></RequireAnyRole>} />
+          <Route
+            path="/organization/symbols/review"
+            element={<RequireAuth>{auth.user?.capabilities?.organizationSymbolWorkflowV2Enabled === true
+              ? <Navigate to="/reviews?scope=private" replace />
+              : <OrganizationSymbolReviewsPage auth={auth} />}</RequireAuth>}
+          />
+          <Route
+            path="/reviews"
+            element={<RequireAuth><ReviewsHub
+              auth={auth}
+              renderPublic={() => <ReviewsPage />}
+              renderDenied={() => <AccessDenied roles={['Public Reviewer', 'Org Reviewer', 'Org Admin']} />}
+            /></RequireAuth>}
+          />
           {/* Route path="/rights" element={<RightsReviewPage />} protected by reviewer/admin auth. */}
           <Route path="/rights" element={<RequireAnyRole roles={['admin', 'reviewer']}><RightsReviewPage /></RequireAnyRole>} />
           <Route path="/standards" element={<RequireAuth><SessionScopedStandardsPage /></RequireAuth>} />
@@ -820,6 +833,9 @@ function SideRail() {
   const user = auth.user;
   const canSubmit = hasAnyRole(user, ['admin', 'submitter']);
   const canReview = hasAnyRole(user, ['admin', 'reviewer']);
+  // Reviews also opens for Org Reviewers/Admins (Private) and the platform support view.
+  const canOpenReviews = reviewsAccess(auth).any;
+  const workflowV2 = user?.capabilities?.organizationSymbolWorkflowV2Enabled === true;
   const canIntegrate = hasAnyRole(user, ['admin', 'integrator']);
   const canAdmin = Boolean(adminAccessScope(user));
   const canAdminOrganization = canAccessOrganizationAdmin(user);
@@ -836,7 +852,7 @@ function SideRail() {
         {canIntegrate ? <RailNavLink to="/integrator/catalog" label="Integrator" icon="developers" /> : null}
         {canSubmit ? <RailNavLink to="/standards/submit" label="Submissions" icon="submissions" /> : null}
         {canReview ? <RailNavLink to="/rights" label="Rights" icon="rights" /> : null}
-        {canReview ? <RailNavLink to="/reviews" label="Reviews" icon="reviews" /> : null}
+        {canOpenReviews ? <RailNavLink to="/reviews" label="Reviews" icon="reviews" /> : null}
         {canReviewSemantics ? <RailNavLink to="/semantic-review" label="Semantics" icon="semantics" /> : null}
         {canAskEd ? <RailNavLink to="/ed" label="Ed" icon="ed" /> : null}
         <RailNavLink to="/support" label="Support" icon="support" />
@@ -852,10 +868,10 @@ function SideRail() {
           {canAdminPlatform ? <RailNavLink to="/platform/admin" label="Platform" icon="platform" /> : null}
         </nav>
       ) : null}
-      {canUseOrganizationSymbolDrafts || canReviewOrganizationSymbolSubmissions ? (
+      {canUseOrganizationSymbolDrafts || (canReviewOrganizationSymbolSubmissions && !workflowV2) ? (
         <nav className="rail-nav rail-nav-admin" aria-label="Organization symbol drafts">
           {canUseOrganizationSymbolDrafts ? <RailNavLink to="/organization/symbols" label="Org Symbols" icon="symbols" /> : null}
-          {canReviewOrganizationSymbolSubmissions ? <RailNavLink to="/organization/symbols/review" label="Org Symbol Review" icon="reviews" /> : null}
+          {canReviewOrganizationSymbolSubmissions && !workflowV2 ? <RailNavLink to="/organization/symbols/review" label="Org Symbol Review" icon="reviews" /> : null}
         </nav>
       ) : null}
     </aside>
