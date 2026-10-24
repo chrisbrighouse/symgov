@@ -55,18 +55,20 @@ export function describeEventChange(event) {
 
 /**
  * What each plan role lets a member do. Each line is the effect in the product,
- * not the internal role name: "reviewer" here is governance review in Symgov's
- * Reviews, which is a different thing from the Reviewer setting an organization
- * admin gives for the organization's own private symbols.
+ * not the internal role name. These are the public roles (Public Submitter,
+ * Public Reviewer): they work in the organization's session but cover public
+ * catalogue work only, and are a different thing from the Org Submitter and Org
+ * Reviewer settings an organization admin gives for the organization's own
+ * private symbols.
  */
 export const PLAN_ROLE_INFO = {
   submitter: {
-    label: 'Submissions',
-    summary: 'Submit symbols and files to Symgov for governance review.',
+    label: 'Public Submitter',
+    summary: 'Submit symbols and files to the public catalogue for governance review.',
   },
   reviewer: {
-    label: 'Governance review',
-    summary: 'Decide review and rights-review cases and triage promotion requests in Reviews.',
+    label: 'Public Reviewer',
+    summary: 'Decide public review and rights-review cases and triage promotion requests in Reviews.',
   },
   integrator: {
     label: 'Catalog developer',
@@ -78,7 +80,7 @@ export const PLAN_ROLES_SCOPE_NOTE =
   'Plan roles apply to this member only while they work as this organization and only while its plan is active.';
 
 export const ORGANIZATION_CAPABILITY_NOTE =
-  'They are separate from the Contributor and Reviewer settings an organization admin gives for the organization’s own private symbols.';
+  'They cover public catalogue work only, and are separate from the Org Submitter and Org Reviewer settings an organization admin gives for the organization’s own private symbols.';
 
 export function describeRole(role) {
   return PLAN_ROLE_INFO[role] || { label: role, summary: '' };

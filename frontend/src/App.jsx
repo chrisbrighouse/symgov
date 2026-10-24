@@ -79,7 +79,7 @@ import CatalogDeveloperHub from './CatalogDeveloperHub.jsx';
 import ProfilePage from './ProfilePage.jsx';
 import OrganizationSelectionPage, { OrganizationSwitchPage } from './OrganizationSelectionPage.js';
 import { adminRouteElements } from './adminRoutes.js';
-import { canAccessOrganizationAdmin, isCustomerOrganizationSession, canAccessPlatformAdmin, canAccessPlatformWorkspace, canManageOrganizationUsers } from './adminJourneys.js';
+import { canAccessOrganizationAdmin, sessionRoles, canAccessPlatformAdmin, canAccessPlatformWorkspace, canManageOrganizationUsers } from './adminJourneys.js';
 import { semanticReviewRouteElements } from './semanticReviewRoutes.js';
 import { canAccessSemanticReview } from './semanticReviewJourney.js';
 import { edRouteElements } from './edRoutes.js';
@@ -362,12 +362,15 @@ const WORKSPACE_MONITOR_SCREENS = {
 const WORKSPACE_MONITOR_SCREEN_SEQUENCE = ['pipeline', 'intelligence'];
 export const AuthContext = createContext(null);
 
+// Submitter and reviewer are the public roles; the organization's own
+// Org Submitter / Org Reviewer settings live in Organization Admin.
+const GLOBAL_ROLE_LABELS = { submitter: 'public submitter', reviewer: 'public reviewer' };
+
 // Global roles (admin, reviewer, submitter, integrator) describe platform
-// access. In a customer-organization session the organization role governs
-// instead, so global roles do not unlock rail items or routes there.
+// access. In a customer-organization session only the public roles (Public
+// Submitter, Public Reviewer) still unlock rail items and routes.
 function roleList(user) {
-  if (isCustomerOrganizationSession(user)) return [];
-  return Array.isArray(user?.roles) ? user.roles : [];
+  return sessionRoles(user);
 }
 
 function hasAnyRole(user, roles) {
@@ -6890,7 +6893,7 @@ function AdminUsersPage() {
                               disabled={organizationScoped || isRowBusy(user.id) || user.subscription?.tier !== 'plus' || (user.subscription?.isProtected && role === 'admin')}
                               onChange={(event) => toggleUserRole(user, role, event.target.checked)}
                             />
-                            <span>{role}</span>
+                            <span>{GLOBAL_ROLE_LABELS[role] || role}</span>
                           </label>
                         ))}
                       </div>

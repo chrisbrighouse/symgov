@@ -514,7 +514,8 @@ def require_workspace_access(
     policy = classify_workspace_policy(request.scope.get("method"), matched_route_template(request))
     if policy == "admin" and is_customer_organization_session(current_user):
         raise HTTPException(status_code=403, detail=PLATFORM_OPERATOR_ONLY_DETAIL)
-    if "admin" in current_user.roles or (policy == "reviewer_admin" and "reviewer" in current_user.roles):
+    roles = public_workflow_roles(current_user)
+    if "admin" in roles or (policy == "reviewer_admin" and "reviewer" in roles):
         return current_user
     raise HTTPException(status_code=403, detail="Insufficient role for this operation.")
 
@@ -535,6 +536,23 @@ def is_customer_organization_session(current_user: AuthenticatedUser) -> bool:
         and current_user.active_organization_id is not None
         and str(current_user.organization_code or "").strip().lower() != PLATFORM_ORGANIZATION_CODE
     )
+
+
+def public_workflow_roles(current_user: AuthenticatedUser) -> frozenset[str]:
+    """The roles that unlock public catalogue work (submit, review, integrate) in this session.
+
+    Public roles such as Public Submitter and Public Reviewer work in every
+    session, including a customer organization session, so a member need not
+    leave their organization to do public work. The global `admin` role is the
+    exception: it is not scoped to an organization, so inside a customer
+    organization session it unlocks nothing on the public side either.
+    Organization capabilities (`contributor`, `symbol_reviewer`) are a separate
+    grant and never appear here.
+    """
+    roles = frozenset(current_user.roles)
+    if is_customer_organization_session(current_user):
+        return roles - {"admin"}
+    return roles
 
 
 def require_platform_operator(current_user: AuthenticatedUser = Depends(require_user)) -> AuthenticatedUser:
@@ -582,11 +600,18 @@ def require_any_role(roles: set[str]) -> Callable[[AuthenticatedUser], Authentic
     return dependency
 
 
+def require_public_submitter(current_user: AuthenticatedUser = Depends(require_user)) -> AuthenticatedUser:
+    """Public Submitter (or admin outside a customer organization session) may submit to the public catalogue."""
+    if not {"admin", "submitter"}.intersection(public_workflow_roles(current_user)):
+        raise HTTPException(status_code=403, detail="Insufficient role for this operation.")
+    return current_user
+
+
 def require_authoritative_external_submission_user(
     request: Request,
     session: Session = Depends(get_db_session),
     settings: SymgovAPISettings = Depends(get_settings),
-    _: AuthenticatedUser = Depends(require_any_role({"admin", "submitter"})),
+    _: AuthenticatedUser = Depends(require_public_submitter),
 ) -> AuthenticatedUser:
     current_user = authoritative_user_from_token(
         session,
@@ -601,7 +626,7 @@ def require_authoritative_external_submission_user(
         request.method,
         matched_route_template(request),
     )
-    if not {"admin", "submitter"}.intersection(current_user.roles):
+    if not {"admin", "submitter"}.intersection(public_workflow_roles(current_user)):
         raise HTTPException(status_code=403, detail="Insufficient role for this operation.")
     return current_user
 

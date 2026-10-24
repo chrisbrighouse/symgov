@@ -54,6 +54,17 @@ export function isCustomerOrganizationSession(user) {
   );
 }
 
+// Public Submitter and Public Reviewer work in every session, so a member need
+// not leave their organization to do public work. In a customer organization
+// session the other global roles (admin, integrator) unlock nothing.
+const PUBLIC_WORKFLOW_ROLES_IN_ORGANIZATION = ['submitter', 'reviewer'];
+
+export function sessionRoles(user) {
+  const roles = Array.isArray(user?.roles) ? user.roles : [];
+  if (!isCustomerOrganizationSession(user)) return roles;
+  return roles.filter((role) => PUBLIC_WORKFLOW_ROLES_IN_ORGANIZATION.includes(role));
+}
+
 export function canAccessPlatformWorkspace(user) {
   return Boolean(
     Array.isArray(user?.roles)

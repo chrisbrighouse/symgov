@@ -529,19 +529,19 @@ function MemberRow({ member, isAdmin, onRoleChange, onCapabilityChange, onDeacti
             'div',
             { className: 'organization-admin-cell-stack', role: 'group', 'aria-label': `Capabilities for ${member.displayName}` },
             createElement(CapabilityToggle, {
-              member, capability: 'contributor', label: 'Contributor',
+              member, capability: 'contributor', label: 'Org Submitter',
               granted: hasContributor, busy, onChange: handleCapability,
             }),
             createElement(CapabilityToggle, {
-              member, capability: 'symbol_reviewer', label: 'Reviewer',
+              member, capability: 'symbol_reviewer', label: 'Org Reviewer',
               granted: hasReviewer, busy, onChange: handleCapability,
             })
           )
         : createElement(
             'div',
             { className: 'organization-admin-cell-stack' },
-            hasContributor ? createElement('span', { className: 'organization-admin-badge is-capability' }, 'contributor') : null,
-            hasReviewer ? createElement('span', { className: 'organization-admin-badge is-capability' }, 'reviewer') : null,
+            hasContributor ? createElement('span', { className: 'organization-admin-badge is-capability' }, 'org submitter') : null,
+            hasReviewer ? createElement('span', { className: 'organization-admin-badge is-capability' }, 'org reviewer') : null,
             !hasContributor && !hasReviewer ? createElement('span', { className: 'muted-text' }, '—') : null
           )
     ),

@@ -47,6 +47,7 @@ from .agent_queue_worker import AgentQueueWorkerConfig, AgentQueueWorkerState, r
 from .dependencies import (
     BoundedMutationBodyMiddleware,
     require_any_role,
+    require_public_submitter,
     require_cookie_mutation_security,
     require_session_access,
     require_user,
@@ -163,7 +164,7 @@ def create_app() -> FastAPI:
     app.include_router(
         public_router,
         prefix=settings.api_prefix,
-        dependencies=[csrf, session_access, Depends(require_any_role({"admin", "submitter"}))],
+        dependencies=[csrf, session_access, Depends(require_public_submitter)],
     )
     app.include_router(published_router, prefix=settings.api_prefix, dependencies=[csrf, session_access, Depends(require_user)])
     app.include_router(profile_router, prefix=settings.api_prefix, dependencies=[csrf, session_access])
@@ -232,7 +233,7 @@ def create_app() -> FastAPI:
     app.include_router(
         legacy_public_router,
         prefix="/api",
-        dependencies=[csrf, session_access, Depends(require_any_role({"admin", "submitter"}))],
+        dependencies=[csrf, session_access, Depends(require_public_submitter)],
     )
     app.include_router(legacy_published_router, prefix="/api", dependencies=[csrf, session_access, Depends(require_user)])
     app.include_router(

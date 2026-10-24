@@ -180,7 +180,18 @@ def test_reviewer_who_is_active_member_of_submitting_organization_cannot_accept(
     assert submit_promotion.status_code == 200, submit_promotion.text
     promotion_request_id = submit_promotion.json()["id"]
 
-    open_review = reviewer_client.post(f"/api/v1/organization-symbols/{symbol_id}/promotion-requests/{promotion_request_id}/open-review")
+    # The member reviewer is refused at triage...
+    refused = reviewer_client.post(f"/api/v1/organization-symbols/{symbol_id}/promotion-requests/{promotion_request_id}/open-review")
+    assert refused.status_code == 403, refused.text
+    assert "member of the organization that submitted" in refused.json()["detail"]
+
+    # ...and when an outside reviewer opens the case, the member reviewer
+    # still cannot accept it: the handoff check is the second line.
+    opener_client, _ = _client(engine)
+    opener_email = f"wp96opener-{uuid.uuid4().hex[:8]}@example.test"
+    _create_user_with_global_roles(Session, email=opener_email, display_name="WP9.6 Opener", roles=["reviewer"])
+    _login(opener_client, opener_email)
+    open_review = opener_client.post(f"/api/v1/organization-symbols/{symbol_id}/promotion-requests/{promotion_request_id}/open-review")
     assert open_review.status_code == 200, open_review.text
     review_case_id = open_review.json()["reviewCaseId"]
 

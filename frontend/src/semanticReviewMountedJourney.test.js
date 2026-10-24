@@ -224,11 +224,14 @@ describe('mounted semantic review journey', () => {
     await act(async () => renderer.unmount());
   });
 
-  it('shows a platform user only org-role rail items in a customer organization', async () => {
+  it('keeps only the public roles\' rail items for a platform user in a customer organization', async () => {
     const requests = [];
     const renderer = await mount('/semantic-review', user({ roles: ['admin', 'reviewer', 'submitter', 'integrator'], orgCode: 'acme' }), requests);
 
-    for (const label of ['Reviews', 'Rights', 'Semantics', 'Submissions', 'Integrator']) {
+    for (const label of ['Reviews', 'Rights', 'Submissions']) {
+      assert.ok(renderer.root.findAllByProps({ 'aria-label': label }).length > 0, label);
+    }
+    for (const label of ['Semantics', 'Integrator']) {
       assert.equal(renderer.root.findAllByProps({ 'aria-label': label }).length, 0, label);
     }
     assert.ok(renderer.root.findByProps({ 'aria-label': 'Catalog' }));

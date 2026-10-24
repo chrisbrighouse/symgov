@@ -60,8 +60,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import AuthenticatedUser
+from .dependencies import public_workflow_roles
 from .models import (
     GovernedSymbol,
+    OrganizationMembership,
     OrganizationSymbolReviewDecision,
     OrganizationSymbolReviewSubmission,
     PromotionRequest,
@@ -336,9 +338,34 @@ def _require_reviewer_authority(current_user: AuthenticatedUser) -> None:
     `dependencies.require_workspace_access` -- may also open (triage) a
     promotion request's review case. Deliberately not organization-scoped:
     this is public-governance review, not the submitting organization's own
-    authority."""
-    if "admin" not in current_user.roles and "reviewer" not in current_user.roles:
+    authority. A Public Reviewer may hold that role inside a customer
+    organization session, where the global `admin` role counts for nothing
+    (`dependencies.public_workflow_roles`)."""
+    roles = public_workflow_roles(current_user)
+    if "admin" not in roles and "reviewer" not in roles:
         raise PromotionRequestError("The 'admin' or 'reviewer' role is required to review a promotion request.")
+
+
+def _refuse_submitting_organization_member(
+    session: Session, current_user: AuthenticatedUser, request: PromotionRequest
+) -> None:
+    """A Public Reviewer who is an active member of the submitting
+    organization may not take up that organization's promotion request.
+    The handoff already refuses such a decider at acceptance
+    (`organization_promotion_handoff.py`); refusing at triage as well stops
+    the case being opened by someone who could never decide it."""
+    is_member = session.execute(
+        select(OrganizationMembership.id).where(
+            OrganizationMembership.organization_id == request.organization_id,
+            OrganizationMembership.user_id == uuid.UUID(current_user.id),
+            OrganizationMembership.status == "active",
+        )
+    ).first()
+    if is_member is not None:
+        raise PromotionRequestError(
+            "You are a member of the organization that submitted this promotion request; "
+            "a reviewer from a different organization must review it."
+        )
 
 
 def open_promotion_review_case(
@@ -361,6 +388,7 @@ def open_promotion_review_case(
         raise PromotionRequestNotVisible()
     if request.status != "submitted":
         raise PromotionRequestConflict("Only a freshly submitted promotion request can be opened for review.")
+    _refuse_submitting_organization_member(session, current_user, request)
 
     now = _utc_now()
     review_case = ReviewCase(
@@ -385,7 +413,7 @@ def open_promotion_review_case(
             to_status="triage",
             decided_by_user_id=uuid.UUID(current_user.id),
             decider_name=current_user.display_name,
-            decider_role="reviewer" if "reviewer" in current_user.roles else "admin",
+            decider_role="reviewer" if "reviewer" in public_workflow_roles(current_user) else "admin",
             note=None,
             created_at=now,
         )

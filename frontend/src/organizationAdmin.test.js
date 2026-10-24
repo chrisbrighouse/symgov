@@ -353,11 +353,11 @@ describe('member controls', () => {
     const contributor = renderer.root.findByProps({ id: 'member-m-2-contributor' });
     assert.equal(contributor.props.type, 'checkbox');
     assert.equal(contributor.props.checked, true);
-    assert.equal(contributor.props['aria-label'], 'Contributor capability for Org Member');
+    assert.equal(contributor.props['aria-label'], 'Org Submitter capability for Org Member');
 
     const reviewer = renderer.root.findByProps({ id: 'member-m-2-symbol_reviewer' });
     assert.equal(reviewer.props.checked, false);
-    assert.equal(reviewer.props['aria-label'], 'Reviewer capability for Org Member');
+    assert.equal(reviewer.props['aria-label'], 'Org Reviewer capability for Org Member');
 
     assert.equal(renderer.root.findByProps({ id: 'member-m-1-contributor' }).props.checked, false);
     await act(async () => renderer.unmount());

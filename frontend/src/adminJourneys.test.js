@@ -8,6 +8,7 @@ import {
   canManageOrganizationUsers,
   isCustomerOrganizationSession,
   runWithStepUp,
+  sessionRoles,
 } from './adminJourneys.js';
 
 function stepUpRequired(status = 403) {
@@ -191,5 +192,21 @@ describe('platform workspace versus organization user management', () => {
     assert.equal(canAccessPlatformWorkspace(adminUser({ code: 'symgov' })), true);
     assert.equal(canManageOrganizationUsers(adminUser({ code: 'symgov' })), false);
     assert.equal(canAccessPlatformWorkspace(adminUser({ mode: 'personal', roles: [] })), false);
+  });
+});
+
+describe('roles that unlock public work in a session', () => {
+  it('keeps Public Submitter and Public Reviewer in a customer organization session', () => {
+    assert.deepEqual(sessionRoles(adminUser({ roles: ['admin', 'integrator', 'reviewer', 'submitter'] })), ['reviewer', 'submitter']);
+  });
+
+  it('gives a customer organization session nothing from admin or integrator alone', () => {
+    assert.deepEqual(sessionRoles(adminUser({ roles: ['admin', 'integrator'] })), []);
+  });
+
+  it('keeps every role in a personal or Symgov session', () => {
+    assert.deepEqual(sessionRoles(adminUser({ mode: 'personal' })), ['admin']);
+    assert.deepEqual(sessionRoles(adminUser({ code: 'symgov', roles: ['admin', 'reviewer'] })), ['admin', 'reviewer']);
+    assert.deepEqual(sessionRoles(null), []);
   });
 });

@@ -123,20 +123,20 @@ describe('platform admin Plan roles', () => {
     await act(async () => renderer.root.findByProps({ 'aria-label': 'View plan for Acme' }).props.onClick());
   }
 
-  it('explains each role, separates them from the org Contributor/Reviewer, and lists only active members', async () => {
+  it('explains each role, separates them from the Org Submitter/Org Reviewer, and lists only active members', async () => {
     backend({ rolesEnabled: false, onGrant: () => response(500, null) });
     const renderer = await mount();
     await openPlan(renderer);
     const page = text(renderer);
     assert.match(page, /Plan roles/);
-    for (const label of ['Submissions', 'Governance review', 'Catalog developer']) assert.ok(page.includes(label), label);
-    assert.match(page, /Submit symbols and files to Symgov for governance review/);
+    for (const label of ['Public Submitter', 'Public Reviewer', 'Catalog developer']) assert.ok(page.includes(label), label);
+    assert.match(page, /Submit symbols and files to the public catalogue for governance review/);
     assert.match(page, /only while they work as this organization and only while its plan is active/);
-    assert.match(page, /separate from the Contributor and Reviewer settings/);
+    assert.match(page, /separate from the Org Submitter and Org Reviewer settings/);
     assert.match(page, /Not switched on yet/);
     assert.ok(page.includes('ann@acme.test'));
     assert.ok(!page.includes('gone@acme.test'), 'inactive members are not offered roles');
-    assert.equal(renderer.root.findAllByProps({ 'aria-label': 'Governance review for ann@acme.test' }).length, 1);
+    assert.equal(renderer.root.findAllByProps({ 'aria-label': 'Public Reviewer for ann@acme.test' }).length, 1);
     await act(async () => renderer.unmount());
   });
 
@@ -144,7 +144,7 @@ describe('platform admin Plan roles', () => {
     const requests = backend({ onGrant: () => response(500, null) });
     const renderer = await mount();
     await openPlan(renderer);
-    const box = renderer.root.findByProps({ 'aria-label': 'Governance review for ann@acme.test' });
+    const box = renderer.root.findByProps({ 'aria-label': 'Public Reviewer for ann@acme.test' });
     await act(async () => box.props.onChange({ target: { checked: true } }));
     assert.match(text(renderer), /Give a reason of at least 10 characters first/);
     assert.equal(requests.filter((r) => r.method === 'PUT').length, 0);
@@ -166,14 +166,14 @@ describe('platform admin Plan roles', () => {
       input(renderer, 'platform-step-up-pin').props.onChange({ target: { value: '1234' } });
       input(renderer, 'plan-roles-reason').props.onChange({ target: { value: 'Contracted review seat for Ann' } });
     });
-    await act(async () => renderer.root.findByProps({ 'aria-label': 'Governance review for ann@acme.test' }).props.onChange({ target: { checked: true } }));
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Public Reviewer for ann@acme.test' }).props.onChange({ target: { checked: true } }));
 
     const puts = requests.filter((r) => r.method === 'PUT');
     assert.equal(puts.length, 2, 'one refused attempt and one retry');
     assert.deepEqual(JSON.parse(puts[1].body), { reason: 'Contracted review seat for Ann' });
     assert.equal(requests.filter((r) => r.url.endsWith('/auth/reauthenticate')).length, 1);
-    assert.match(text(renderer), /Governance review given to ann@acme.test/);
-    assert.equal(renderer.root.findByProps({ 'aria-label': 'Governance review for ann@acme.test' }).props.checked, true);
+    assert.match(text(renderer), /Public Reviewer given to ann@acme.test/);
+    assert.equal(renderer.root.findByProps({ 'aria-label': 'Public Reviewer for ann@acme.test' }).props.checked, true);
     await act(async () => renderer.unmount());
   });
 });
