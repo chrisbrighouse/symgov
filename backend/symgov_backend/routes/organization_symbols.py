@@ -18,8 +18,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..auth import AuthenticatedUser
-from ..dependencies import get_db_session, require_organization_admin, require_organization_session, require_user
+from ..dependencies import (
+    get_db_session,
+    require_organization_admin,
+    require_organization_session,
+    require_recent_step_up,
+    require_user,
+)
 from ..models import GovernedSymbol, OrganizationSymbolReviewSubmission, PromotionRequest, SymbolRevision
+from ..organization_review_policy import ReviewPolicy, get_review_policy, set_review_policy
 from ..organization_symbol_drafts import (
     OrganizationSymbolDraftError,
     OrganizationSymbolDraftNotVisible,
@@ -62,6 +69,8 @@ from ..schemas import (
     OrganizationSymbolHistoryEntry,
     OrganizationSymbolHistoryResponse,
     OrganizationSymbolOrganizationWideRequest,
+    OrganizationReviewPolicyResponse,
+    OrganizationReviewPolicyUpdateRequest,
     OrganizationSymbolReviewDecisionRequest,
     OrganizationSymbolReviewDecisionResponse,
     OrganizationSymbolRevisionResponse,
@@ -207,6 +216,51 @@ def list_organization_symbol_drafts(
 ) -> OrganizationSymbolDraftListResponse:
     symbols = list_drafts(session, current_user)
     return OrganizationSymbolDraftListResponse(items=[_full_draft_response(session, symbol) for symbol in symbols])
+
+
+def review_policy_response(policy: ReviewPolicy) -> OrganizationReviewPolicyResponse:
+    return OrganizationReviewPolicyResponse(
+        organizationId=str(policy.organization_id),
+        allowSelfApproval=policy.allow_self_approval,
+        updatedAt=policy.updated_at,
+        updatedByName=policy.updated_by_name,
+    )
+
+
+# Declared before `/{symbol_id}` so the literal path is matched first.
+@router.get(
+    "/review-policy",
+    response_model=OrganizationReviewPolicyResponse,
+    dependencies=[Depends(require_workflow_v2)],
+)
+def get_organization_review_policy(
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_session),
+) -> OrganizationReviewPolicyResponse:
+    """Every member may read it: submitters need to know whether they may decide their own."""
+    return review_policy_response(get_review_policy(session, uuid.UUID(current_user.active_organization_id)))
+
+
+@router.put(
+    "/review-policy",
+    response_model=OrganizationReviewPolicyResponse,
+    dependencies=[Depends(require_workflow_v2)],
+)
+def put_organization_review_policy(
+    body: OrganizationReviewPolicyUpdateRequest,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_admin),
+    _step_up: AuthenticatedUser = Depends(require_recent_step_up),
+) -> OrganizationReviewPolicyResponse:
+    policy = set_review_policy(
+        session,
+        current_user,
+        uuid.UUID(current_user.active_organization_id),
+        allow_self_approval=body.allowSelfApproval,
+        effective_authority="organization_admin",
+    )
+    session.commit()
+    return review_policy_response(policy)
 
 
 @router.get("/{symbol_id}", response_model=OrganizationSymbolDraftResponse)

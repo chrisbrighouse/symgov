@@ -44,6 +44,13 @@ async function apiPatch(path, body) {
   }));
 }
 
+async function apiPut(path, body) {
+  return resultValue(await requestJson(path, {
+    method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }));
+}
+
 async function apiDelete(path) {
   resultValue(await requestJson(path, {
     method: 'DELETE', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -454,6 +461,63 @@ function MemberDiagnostics({ organization, members, loading, error, onReactivate
 
 const ORGANIZATION_DETAIL_PANEL_ID = 'platform-organization-detail-panel';
 
+// Unified submission & review WP3: a Platform Admin can set any organization's
+// self-approval policy for its private symbols (spec draft 2 §6).
+function PlatformReviewPolicyPanel({ organization, protect }) {
+  const [policy, setPolicy] = useState(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const path = `/platform/organizations/${organization.id}/review-policy`;
+
+  useEffect(() => {
+    setPolicy(null);
+    setError('');
+    apiGet(path).then(setPolicy).catch((err) => setError(err.message));
+  }, [path]);
+
+  async function handleChange(allowSelfApproval) {
+    setSaving(true);
+    setError('');
+    try {
+      setPolicy(await protect(() => apiPut(path, { allowSelfApproval })));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputId = `platform-review-policy-${organization.id}`;
+  return createElement(
+    EmbeddedPanel,
+    null,
+    ErrorMessage({ message: error }),
+    policy
+      ? createElement(
+          Fragment,
+          null,
+          createElement(
+            'label',
+            { className: 'checkbox-row', htmlFor: inputId },
+            createElement('input', {
+              id: inputId,
+              type: 'checkbox',
+              checked: policy.allowSelfApproval === true,
+              disabled: saving,
+              onChange: (event) => handleChange(event.target.checked),
+            }),
+            createElement('span', null, `Submitters in ${organization.displayName} may approve their own private symbols`)
+          ),
+          createElement(HelpText, null, 'Applies to this organization\u2019s private symbols only. Public submissions and promotion always keep an independent review.'),
+          policy.updatedAt
+            ? createElement('p', { className: 'title-support' },
+                `Last changed ${new Date(policy.updatedAt).toLocaleString()}${policy.updatedByName ? ` by ${policy.updatedByName}` : ''}.`)
+            : createElement('p', { className: 'title-support' }, 'Using the default setting.')
+        )
+      : (!error ? createElement('p', { role: 'status' }, 'Loading…') : null)
+  );
+}
+
 function detailTabId(key) {
   return `platform-org-detail-tab-${key}`;
 }
@@ -466,7 +530,7 @@ function detailTabId(key) {
  * one organization, one view, always named in the heading.
  */
 function OrganizationDetailPane({
-  organization, view, onSelectView, onClose, agentOversightUiEnabled,
+  organization, view, onSelectView, onClose, agentOversightUiEnabled, reviewPolicyUiEnabled = false,
   members, membersLoading, membersError, onReactivateMembership, onProtect,
 }) {
   const views = [
@@ -475,6 +539,7 @@ function OrganizationDetailPane({
     { key: 'contributions', label: 'Contributions' },
     { key: 'plan', label: 'Plan' },
     agentOversightUiEnabled ? { key: 'findings', label: 'Agent findings' } : null,
+    reviewPolicyUiEnabled ? { key: 'review-policy', label: 'Review policy' } : null,
   ].filter(Boolean);
   const currentView = views.some((entry) => entry.key === view) ? view : views[0].key;
 
@@ -545,6 +610,9 @@ function OrganizationDetailPane({
         : null,
       currentView === 'plan'
         ? createElement(OrganizationSubscriptionPanel, { organization, protect: onProtect })
+        : null,
+      currentView === 'review-policy' && reviewPolicyUiEnabled
+        ? createElement(PlatformReviewPolicyPanel, { organization, protect: onProtect })
         : null,
       currentView === 'findings' && agentOversightUiEnabled
         ? createElement(EmbeddedPanel, null, createElement(PlatformAgentFindingsDashboardSection, {
@@ -1688,6 +1756,7 @@ export function PlatformAdminPage({ auth }) {
                   onSelectView: selectOrganizationView,
                   onClose: closeOrganizationDetail,
                   agentOversightUiEnabled,
+                  reviewPolicyUiEnabled: auth?.user?.capabilities?.organizationSymbolWorkflowV2Enabled === true,
                   members: diagnosticMembers,
                   membersLoading: diagnosticLoading,
                   membersError: diagnosticError,

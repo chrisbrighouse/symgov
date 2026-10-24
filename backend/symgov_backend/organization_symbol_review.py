@@ -43,6 +43,7 @@ from .models import (
     PromotionRequest,
     SymbolRevision,
 )
+from .organization_review_policy import decision_authority, get_review_policy
 from .organization_symbol_drafts import record_organization_symbol_audit
 from .product_usage_events import record_governance_usage_event
 
@@ -123,13 +124,15 @@ def decide_submission(
 ) -> OrganizationSymbolReviewDecision:
     """Decide an active submission.
 
-    With `workflow_v2` (spec draft 2 FR7/FR9): rejection is final for the
-    revision; approval publishes it to the organization's library
-    (organization-wide); and approving a pending revision makes it the
-    symbol's current one.
+    With `workflow_v2` (spec draft 2 FR7/FR8/FR9): who may decide follows the
+    organization's review policy (`organization_review_policy`); rejection
+    is final for the revision; approval publishes it to the organization's
+    library (organization-wide); and approving a pending revision makes it
+    the symbol's current one.
     """
     organization_id = _active_organization_id(current_user)
-    _require_reviewer(current_user)
+    if not workflow_v2:
+        _require_reviewer(current_user)
 
     if decision not in DECISIONS:
         raise OrganizationSymbolReviewError(f"decision must be one of {DECISIONS}.")
@@ -137,6 +140,20 @@ def decide_submission(
     submission = session.get(OrganizationSymbolReviewSubmission, submission_id)
     if submission is None or submission.organization_id != organization_id:
         raise OrganizationSymbolReviewNotVisible()
+    authority = "symbol_reviewer"
+    if workflow_v2:
+        policy = get_review_policy(session, organization_id, lock=True)
+        authority = decision_authority(
+            current_user, submitted_by_user_id=submission.submitted_by_user_id, policy=policy
+        )
+        if authority is None:
+            if uuid.UUID(current_user.id) == submission.submitted_by_user_id:
+                raise OrganizationSymbolReviewError(
+                    "Your organization requires another Org Reviewer or Org Admin to decide your own submission."
+                )
+            raise OrganizationSymbolReviewError(
+                "The Org Reviewer capability or Organization Admin privileges are required to decide this submission."
+            )
     if submission.status != "active":
         raise OrganizationSymbolReviewConflict(
             "This submission has already been decided by another reviewer."
@@ -215,6 +232,8 @@ def decide_submission(
                 "decision": decision,
                 "rationale": clean_rationale,
                 "published_to_library": bool(workflow_v2 and decision == "approved"),
+                "authority": authority,
+                "self_approved": authority == "self_approval",
             },
         )
     return decision_row

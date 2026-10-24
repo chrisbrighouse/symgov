@@ -497,6 +497,24 @@ class SubscriptionEvent(Base):
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class OrganizationReviewPolicy(Base):
+    """How an organization reviews its own private symbols (spec draft 2 FR8).
+
+    No row means the defaults: self-approval allowed. It never applies to
+    public submissions or promotion."""
+
+    __tablename__ = "organization_review_policies"
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), primary_key=True
+    )
+    allow_self_approval: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    updated_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class OrganizationMemberRole(Base):
     """A Plus-level role (submitter, reviewer, integrator) held by one member
     within one organization. It takes effect only in that organization's session

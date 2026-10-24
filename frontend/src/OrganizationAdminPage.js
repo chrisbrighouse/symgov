@@ -33,6 +33,13 @@ async function apiPatch(path, body) {
   }));
 }
 
+async function apiPut(path, body) {
+  return resultValue(await requestJson(path, {
+    method: 'PUT', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  }));
+}
+
 async function apiPost(path, body) {
   return resultValue(await requestJson(path, {
     method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
@@ -117,6 +124,73 @@ function AdminSection({ id, title, description, actions, children }) {
       actions || null
     ),
     children
+  );
+}
+
+const REVIEW_POLICY_PATH = '/organization-symbols/review-policy';
+
+// Unified submission & review WP3 (spec draft 2 FR8): whether a submitter may
+// approve their own private symbol. Public submissions and promotion always
+// keep their independent review, whatever this says.
+export function ReviewPolicySection({ isAdmin, protect }) {
+  const [policy, setPolicy] = useState(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    apiGet(REVIEW_POLICY_PATH).then(setPolicy).catch((err) => setError(err.message));
+  }, []);
+
+  async function handleChange(allowSelfApproval) {
+    setSaving(true);
+    setError('');
+    try {
+      setPolicy(await protect(() => apiPut(REVIEW_POLICY_PATH, { allowSelfApproval })));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const allowed = policy?.allowSelfApproval === true;
+  return createElement(
+    AdminSection,
+    {
+      id: 'org-review-policy-heading',
+      title: 'Private symbol review',
+      description: 'How this organization approves its own private symbols. Public submissions always get an independent review.',
+    },
+    ErrorMessage({ message: error }),
+    policy
+      ? createElement(
+          Fragment,
+          null,
+          createElement(
+            'label',
+            { className: 'checkbox-row', htmlFor: 'org-review-policy-self-approval' },
+            createElement('input', {
+              id: 'org-review-policy-self-approval',
+              type: 'checkbox',
+              checked: allowed,
+              disabled: !isAdmin || saving,
+              onChange: (event) => handleChange(event.target.checked),
+            }),
+            createElement('span', null, 'Submitters may approve their own private symbols')
+          ),
+          createElement(
+            HelpText,
+            null,
+            allowed
+              ? 'On: a submitter can approve their own submission. It still goes through the same steps and is recorded as self-approved.'
+              : 'Off: another Org Reviewer or Org Admin must decide every submission.'
+          ),
+          policy.updatedAt
+            ? createElement('p', { className: 'title-support' },
+                `Last changed ${new Date(policy.updatedAt).toLocaleString()}${policy.updatedByName ? ` by ${policy.updatedByName}` : ''}.`)
+            : createElement('p', { className: 'title-support' }, 'Using the default setting.')
+        )
+      : (!error ? createElement('p', { role: 'status' }, 'Loading…') : null)
   );
 }
 
@@ -1032,6 +1106,9 @@ export function OrganizationAdminPage({ auth }) {
             Fragment,
             null,
             createElement(OrgDetailSection, { org, isAdmin, onUpdate: setOrg, protect }),
+            auth?.user?.capabilities?.organizationSymbolWorkflowV2Enabled === true
+              ? createElement(ReviewPolicySection, { isAdmin, protect })
+              : null,
             createElement(OrgIconSection, {
               org,
               isAdmin,

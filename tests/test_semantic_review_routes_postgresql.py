@@ -83,7 +83,7 @@ from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E40
 # dotted node codes -- below it the grammar check refuses `13.220` outright --
 # so a fixture pinned under that revision cannot hold the vocabulary this
 # module now has to exercise. Same move nine fixtures made in SM-P0-08.
-MIGRATION_HEAD = "20261024_0076"
+MIGRATION_HEAD = "20261024_0077"
 
 V1 = "/api/v1"
 

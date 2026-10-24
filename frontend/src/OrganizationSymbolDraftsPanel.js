@@ -3,7 +3,9 @@ import { createElement, useCallback, useEffect, useState } from 'react';
 import {
   attachOrganizationSymbolAsset,
   createOrganizationSymbolDraft,
+  decideOrganizationSymbolReviewSubmission,
   discardOrganizationSymbolPendingRevision,
+  fetchOrganizationReviewPolicy,
   fetchOrganizationSymbolHistory,
   listOrganizationSymbolDrafts,
   removeOrganizationSymbolAsset,
@@ -26,6 +28,8 @@ const DEFAULT_API = {
   fetchHistory: fetchOrganizationSymbolHistory,
   startRevision: startOrganizationSymbolRevision,
   discardPendingRevision: discardOrganizationSymbolPendingRevision,
+  fetchReviewPolicy: fetchOrganizationReviewPolicy,
+  decide: decideOrganizationSymbolReviewSubmission,
 };
 
 // The revision being worked on: a published symbol's pending revision when it
@@ -117,6 +121,12 @@ export function OrganizationSymbolDraftsPanel({ canCreate = false, workflowV2 = 
   const [saving, setSaving] = useState(false);
   const [busyDraftId, setBusyDraftId] = useState('');
   const [rationaleByDraftId, setRationaleByDraftId] = useState({});
+  const [reviewPolicy, setReviewPolicy] = useState(null);
+
+  useEffect(() => {
+    if (!workflowV2 || !api.fetchReviewPolicy) return;
+    api.fetchReviewPolicy().then(setReviewPolicy).catch(() => setReviewPolicy(null));
+  }, [api, workflowV2]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -237,6 +247,7 @@ export function OrganizationSymbolDraftsPanel({ canCreate = false, workflowV2 = 
         draft,
         workflowV2,
         currentUserId,
+        selfApprovalAllowed: reviewPolicy?.allowSelfApproval === true,
         api,
         busy: busyDraftId === draft.id,
         rationale: rationaleByDraftId[draft.id] || '',
@@ -332,7 +343,7 @@ export function OrganizationSymbolDraftsPanel({ canCreate = false, workflowV2 = 
   );
 }
 
-function DraftItem({ draft, workflowV2, currentUserId, api, busy, rationale, onRationaleChange, onUploadAsset, onSubmit, runAction }) {
+function DraftItem({ draft, workflowV2, currentUserId, selfApprovalAllowed = false, api, busy, rationale, onRationaleChange, onUploadAsset, onSubmit, runAction }) {
   const [editForm, setEditForm] = useState(null);
   const [history, setHistory] = useState(null);
   const [historyError, setHistoryError] = useState('');
@@ -344,6 +355,8 @@ function DraftItem({ draft, workflowV2, currentUserId, api, busy, rationale, onR
     && ['approved', 'rejected'].includes(current?.lifecycleState);
   const canWithdraw = workflowV2 && revision?.pendingSubmissionId
     && revision.pendingSubmissionSubmittedByUserId === currentUserId;
+  // Spec draft 2 FR8: with self-approval on, the submitter decides their own.
+  const canSelfApprove = canWithdraw && selfApprovalAllowed;
   const name = draft.canonicalName;
 
   async function saveEdit(event) {
@@ -406,6 +419,9 @@ function DraftItem({ draft, workflowV2, currentUserId, api, busy, rationale, onR
       revision?.pendingSubmissionId
         ? createElement('p', { className: 'set-admin-muted' }, `Awaiting organization review (submitted ${formatWhen(revision.pendingSubmissionSubmittedAt)}).`)
         : null,
+      canSelfApprove
+        ? createElement('p', { className: 'set-admin-muted' }, 'Your organization lets you approve your own submission; it is recorded as self-approved.')
+        : null,
       workflowV2
         ? createElement('div', { className: 'set-admin-muted' },
           'Files: ',
@@ -438,6 +454,11 @@ function DraftItem({ draft, workflowV2, currentUserId, api, busy, rationale, onR
             required: true,
             onChange: (event) => setEditForm((form) => ({ ...form, discipline: event.target.value })),
           },
+            // Keep a stored value that is not a standard name selectable, so
+            // saving other fields never silently changes the discipline.
+            ...(CATALOG_DISCIPLINE_ORDER.includes(editForm.discipline) || !editForm.discipline
+              ? []
+              : [createElement('option', { key: editForm.discipline, value: editForm.discipline }, editForm.discipline)]),
             ...CATALOG_DISCIPLINE_ORDER.map((option) => createElement('option', { key: option, value: option }, option)),
           ),
         ),
@@ -446,8 +467,8 @@ function DraftItem({ draft, workflowV2, currentUserId, api, busy, rationale, onR
         field('aliases', 'Aliases', { multiline: true }),
         field('keywords', 'Keywords', { multiline: true }),
         createElement('div', { className: 'set-admin-actions' },
-          createElement('button', { type: 'submit', disabled: busy }, busy ? 'Saving…' : 'Save changes'),
-          createElement('button', { type: 'button', onClick: () => setEditForm(null) }, 'Cancel'),
+          createElement('button', { type: 'submit', className: 'action-button compact primary', disabled: busy }, busy ? 'Saving…' : 'Save changes'),
+          createElement('button', { type: 'button', className: 'action-button compact ghost', onClick: () => setEditForm(null) }, 'Cancel'),
         ),
       )
       : null,
@@ -473,6 +494,7 @@ function DraftItem({ draft, workflowV2, currentUserId, api, busy, rationale, onR
       isDraft && workflowV2 && !editForm
         ? createElement('button', {
           type: 'button',
+          className: 'action-button compact',
           disabled: busy,
           onClick: () => setEditForm(editFormFor(draft, revision)),
           'aria-label': `Edit details of ${name}`,
@@ -491,14 +513,28 @@ function DraftItem({ draft, workflowV2, currentUserId, api, busy, rationale, onR
       isDraft
         ? createElement('button', {
           type: 'button',
+          className: 'action-button compact primary',
           disabled: busy,
           onClick: onSubmit,
           'aria-label': `Submit ${name} for organization review`,
         }, busy ? 'Working…' : 'Submit for review')
         : null,
+      canSelfApprove
+        ? createElement('button', {
+          type: 'button',
+          disabled: busy,
+          className: 'action-button compact primary',
+          onClick: () => runAction(
+            () => api.decide(draft.id, revision.pendingSubmissionId, { decision: 'approved' }),
+            `${name} approved and published to the organization library.`,
+          ),
+          'aria-label': `Approve your own submission of ${name}`,
+        }, 'Approve')
+        : null,
       canWithdraw
         ? createElement('button', {
           type: 'button',
+          className: 'action-button compact',
           disabled: busy,
           onClick: () => runAction(() => api.withdrawSubmission(draft.id, revision.pendingSubmissionId), `${name} withdrawn from review.`),
           'aria-label': `Withdraw ${name} from review`,
@@ -507,6 +543,7 @@ function DraftItem({ draft, workflowV2, currentUserId, api, busy, rationale, onR
       canStartRevision
         ? createElement('button', {
           type: 'button',
+          className: 'action-button compact',
           disabled: busy,
           onClick: () => runAction(() => api.startRevision(draft.id), `New revision of ${name} started.`),
           'aria-label': `Start a new revision of ${name}`,
@@ -515,6 +552,7 @@ function DraftItem({ draft, workflowV2, currentUserId, api, busy, rationale, onR
       workflowV2 && working.pending && isDraft && !revision?.pendingSubmissionId
         ? createElement('button', {
           type: 'button',
+          className: 'action-button compact',
           disabled: busy,
           onClick: () => runAction(() => api.discardPendingRevision(draft.id), `New revision of ${name} discarded.`),
           'aria-label': `Discard the new revision of ${name}`,
@@ -523,6 +561,7 @@ function DraftItem({ draft, workflowV2, currentUserId, api, busy, rationale, onR
       workflowV2
         ? createElement('button', {
           type: 'button',
+          className: 'action-button compact ghost',
           onClick: toggleHistory,
           'aria-expanded': Boolean(history),
           'aria-label': `${history ? 'Hide' : 'Show'} review history of ${name}`,

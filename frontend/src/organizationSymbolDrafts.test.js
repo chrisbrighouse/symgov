@@ -572,3 +572,58 @@ describe('OrganizationSymbolReviewQueuePanel with pending revisions (WP2)', () =
     await act(async () => renderer.unmount());
   });
 });
+
+
+describe('self-approval in the drafts panel and the queue (WP3)', () => {
+  const ownPending = baseDraft({
+    currentRevision: {
+      ...baseDraft().currentRevision, lifecycleState: 'review', pendingSubmissionId: 'sub-1',
+      pendingSubmissionSubmittedAt: '2026-10-24T10:00:00Z', pendingSubmissionSubmittedByUserId: 'user-1',
+    },
+  });
+
+  async function mountDrafts(allowSelfApproval) {
+    const calls = [];
+    const api = {
+      listDrafts: async () => ({ items: [ownPending] }),
+      fetchReviewPolicy: async () => ({ allowSelfApproval }),
+      decide: async (...args) => { calls.push(args); return {}; },
+      withdrawSubmission: async () => ({}),
+    };
+    let renderer;
+    await act(async () => {
+      renderer = create(createElement(OrganizationSymbolDraftsPanel, { workflowV2: true, currentUserId: 'user-1', api }));
+    });
+    return { renderer, calls };
+  }
+
+  it('lets a submitter approve their own submission when the organization allows it', async () => {
+    const { renderer, calls } = await mountDrafts(true);
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Approve your own submission of Fire hydrant' }).props.onClick());
+    assert.deepEqual(calls[0], ['sym-1', 'sub-1', { decision: 'approved' }]);
+    await act(async () => renderer.unmount());
+  });
+
+  it('offers no self-approval when the organization has switched it off', async () => {
+    const { renderer } = await mountDrafts(false);
+    assert.equal(renderer.root.findAllByProps({ 'aria-label': 'Approve your own submission of Fire hydrant' }).length, 0);
+    assert.ok(renderer.root.findAllByProps({ 'aria-label': 'Withdraw Fire hydrant from review' }).length > 0);
+    await act(async () => renderer.unmount());
+  });
+
+  it('hides the decision buttons on a reviewer\'s own submission when self-approval is off', async () => {
+    const api = {
+      listDrafts: async () => ({ items: [ownPending] }),
+      decide: async () => ({}),
+      setOrganizationWide: async () => ({}),
+      fetchSymbolRevision: async () => ({}),
+      fetchReviewPolicy: async () => ({ allowSelfApproval: false }),
+    };
+    const auth = { user: { id: 'user-1', capabilities: { organizationSymbolWorkflowV2Enabled: true } } };
+    let renderer;
+    await act(async () => { renderer = create(createElement(OrganizationSymbolReviewQueuePanel, { auth, api })); });
+    assert.equal(renderer.root.findAllByProps({ 'aria-label': 'Approve Fire hydrant' }).length, 0);
+    assert.match(JSON.stringify(renderer.toJSON()), /requires another Org Reviewer or Org Admin/);
+    await act(async () => renderer.unmount());
+  });
+});

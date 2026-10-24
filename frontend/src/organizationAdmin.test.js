@@ -13,6 +13,7 @@ import { act, create } from 'react-test-renderer';
 import {
   OrganizationAdminPage,
   OrganizationMemberAddForm,
+  ReviewPolicySection,
   addExistingOrganizationMember,
 } from './OrganizationAdminPage.js';
 import { OrgUsageDashboardSection } from './UsageDashboardSection.js';
@@ -665,6 +666,42 @@ describe('OrgContributionSection (WP9.8)', () => {
       throw error;
     });
     assert.match(renderer.root.findByProps({ role: 'alert' }).children.join(''), /not available/i);
+    await act(async () => renderer.unmount());
+  });
+});
+
+
+describe('private symbol review policy (WP3)', () => {
+  it('shows the policy and changes it through the protected operation', async () => {
+    const requests = [];
+    globalThis.fetch = async (url, options = {}) => {
+      requests.push({ url, method: options.method || 'GET', body: options.body });
+      const allow = options.method === 'PUT' ? JSON.parse(options.body).allowSelfApproval : true;
+      return { ok: true, json: async () => ({ organizationId: 'org-1', allowSelfApproval: allow, updatedAt: null, updatedByName: null }) };
+    };
+    let protectedAttempts = 0;
+    const protect = async (operation) => { protectedAttempts += 1; return operation(); };
+    let renderer;
+    await act(async () => { renderer = create(createElement(ReviewPolicySection, { isAdmin: true, protect })); });
+    const box = renderer.root.findByProps({ id: 'org-review-policy-self-approval' });
+    assert.equal(box.props.checked, true);
+    assert.match(JSON.stringify(renderer.toJSON()), /Using the default setting/);
+
+    await act(async () => box.props.onChange({ target: { checked: false } }));
+    assert.equal(protectedAttempts, 1);
+    const put = requests.find((request) => request.method === 'PUT');
+    assert.match(put.url, /\/organization-symbols\/review-policy$/);
+    assert.deepEqual(JSON.parse(put.body), { allowSelfApproval: false });
+    assert.equal(renderer.root.findByProps({ id: 'org-review-policy-self-approval' }).props.checked, false);
+    assert.match(JSON.stringify(renderer.toJSON()), /another Org Reviewer or Org Admin must decide/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('is read-only for a member who is not an organization admin', async () => {
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ organizationId: 'org-1', allowSelfApproval: true }) });
+    let renderer;
+    await act(async () => { renderer = create(createElement(ReviewPolicySection, { isAdmin: false, protect: (op) => op() })); });
+    assert.equal(renderer.root.findByProps({ id: 'org-review-policy-self-approval' }).props.disabled, true);
     await act(async () => renderer.unmount());
   });
 });

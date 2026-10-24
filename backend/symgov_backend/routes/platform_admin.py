@@ -46,9 +46,13 @@ from ..schemas import (
     OrgMemberListResponse,
     OrgMemberResponse,
     OrganizationContributionsResponse,
+    OrganizationReviewPolicyResponse,
+    OrganizationReviewPolicyUpdateRequest,
     OrganizationUsageSummaryResponse,
 )
+from ..organization_review_policy import get_review_policy, set_review_policy
 from ..product_usage_rollups import get_organization_usage_summary
+from .organization_symbols import review_policy_response
 from ..settings import SymgovAPISettings, get_settings
 from ..models import (
     Organization,
@@ -624,3 +628,53 @@ def reactivate_organization_membership(
     if detail is None:
          raise HTTPException(status_code=404, detail="Membership not found after reactivation.")
     return _member_response(detail)
+
+
+# --- Unified submission & review WP3: an organization's review policy ---
+
+def _require_workflow_v2(settings: SymgovAPISettings = Depends(get_settings)) -> None:
+    if not settings.organization_symbol_workflow_v2_enabled:
+        raise HTTPException(status_code=404, detail="Not found.")
+
+
+def _existing_organization_id(session: Session, organization_id: str) -> uuid.UUID:
+    org_id = _parse_organization_id(organization_id)
+    if session.get(Organization, org_id) is None:
+        raise HTTPException(status_code=404, detail="Organization not found.")
+    return org_id
+
+
+@router.get(
+    "/platform/organizations/{organization_id}/review-policy",
+    response_model=OrganizationReviewPolicyResponse,
+    dependencies=[Depends(_require_platform_admin_enabled), Depends(_require_workflow_v2)],
+)
+def get_platform_organization_review_policy(
+    organization_id: str,
+    session: Session = Depends(get_db_session),
+    _current_user: AuthenticatedUser = Depends(require_platform_admin),
+) -> OrganizationReviewPolicyResponse:
+    return review_policy_response(get_review_policy(session, _existing_organization_id(session, organization_id)))
+
+
+@router.put(
+    "/platform/organizations/{organization_id}/review-policy",
+    response_model=OrganizationReviewPolicyResponse,
+    dependencies=[Depends(_require_platform_admin_enabled), Depends(_require_workflow_v2)],
+)
+def put_platform_organization_review_policy(
+    organization_id: str,
+    body: OrganizationReviewPolicyUpdateRequest,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_platform_admin),
+    _step_up: AuthenticatedUser = Depends(require_recent_step_up),
+) -> OrganizationReviewPolicyResponse:
+    policy = set_review_policy(
+        session,
+        current_user,
+        _existing_organization_id(session, organization_id),
+        allow_self_approval=body.allowSelfApproval,
+        effective_authority="platform_admin",
+    )
+    session.commit()
+    return review_policy_response(policy)

@@ -675,6 +675,11 @@ export async function discardOrganizationSymbolPendingRevision(symbolId) {
   return requireOk(result, 'Discarding the new revision failed.');
 }
 
+export async function fetchOrganizationReviewPolicy() {
+  const result = await requestJson('/organization-symbols/review-policy', { cache: 'no-store' });
+  return requireOk(result, 'Review policy load failed.');
+}
+
 export async function decideOrganizationSymbolReviewSubmission(symbolId, submissionId, payload) {
   const result = await requestJson(
     `/organization-symbols/${encodeURIComponent(symbolId)}/review-submissions/${encodeURIComponent(submissionId)}/decision`,

@@ -1522,6 +1522,18 @@ class OrganizationSymbolHistoryResponse(BaseModel):
     items: list[OrganizationSymbolHistoryEntry]
 
 
+class OrganizationReviewPolicyResponse(BaseModel):
+    organizationId: str
+    allowSelfApproval: bool
+    updatedAt: datetime | None = None
+    updatedByName: str | None = None
+
+
+class OrganizationReviewPolicyUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    allowSelfApproval: bool
+
+
 class OrganizationSymbolDraftResponse(BaseModel):
     id: str
     slug: str

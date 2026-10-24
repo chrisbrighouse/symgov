@@ -2,6 +2,7 @@ import { createElement, useCallback, useEffect, useMemo, useState } from 'react'
 
 import {
   decideOrganizationSymbolReviewSubmission,
+  fetchOrganizationReviewPolicy,
   fetchSemanticReviewSymbolRevision,
   listOrganizationSymbolDrafts,
   setOrganizationSymbolOrganizationWide,
@@ -16,6 +17,7 @@ const DEFAULT_API = {
   decide: decideOrganizationSymbolReviewSubmission,
   setOrganizationWide: setOrganizationSymbolOrganizationWide,
   fetchSymbolRevision: fetchSemanticReviewSymbolRevision,
+  fetchReviewPolicy: fetchOrganizationReviewPolicy,
 };
 
 const DECISIONS = [
@@ -177,6 +179,11 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
   }, [refresh]);
 
   const workflowV2 = auth?.user?.capabilities?.organizationSymbolWorkflowV2Enabled === true;
+  const [reviewPolicy, setReviewPolicy] = useState(null);
+  useEffect(() => {
+    if (!workflowV2 || !api.fetchReviewPolicy) return;
+    api.fetchReviewPolicy().then(setReviewPolicy).catch(() => setReviewPolicy(null));
+  }, [api, workflowV2]);
   // A published symbol's pending revision is reviewed in its place.
   const queue = useMemo(
     () => drafts.filter((draft) => Boolean(workingRevision(draft).revision?.pendingSubmissionId)),
@@ -192,6 +199,11 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
   const activeDraft = queue.find((draft) => draft.id === activeSymbolId) || queue[0] || null;
   const activeWorking = workingRevision(activeDraft);
   const activeRevision = activeWorking.revision;
+  // Spec draft 2 FR8: with self-approval off, nobody decides their own submission.
+  const ownSubmissionBlocked = workflowV2
+    && reviewPolicy?.allowSelfApproval === false
+    && Boolean(activeRevision?.pendingSubmissionSubmittedByUserId)
+    && activeRevision.pendingSubmissionSubmittedByUserId === auth?.user?.id;
 
   const semanticStateVisible = canAccessSemanticReview(auth?.user);
   const activeRevisionId = activeRevision?.id || '';
@@ -327,7 +339,10 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
               onChange: (event) => setRationaleBySymbolId((current) => ({ ...current, [activeDraft.id]: event.target.value })),
             }),
           ),
-          createElement(
+          ownSubmissionBlocked
+            ? createElement('p', { role: 'status', className: 'set-admin-muted' }, 'This is your own submission. Your organization requires another Org Reviewer or Org Admin to decide it.')
+            : null,
+          ownSubmissionBlocked ? null : createElement(
             'div',
             { className: 'set-admin-actions', role: 'group', 'aria-label': `Decide ${activeDraft.canonicalName}` },
             DECISIONS.map((option) => createElement('button', {
