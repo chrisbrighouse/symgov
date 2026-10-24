@@ -228,6 +228,10 @@ def submit_promotion_request(
         raise PromotionRequestNotVisible()
     if symbol.current_revision_id is None:
         raise PromotionRequestError("The symbol has no current revision to submit for public promotion.")
+    if symbol.pending_revision_id is not None:
+        raise PromotionRequestError(
+            "The symbol has a new revision in progress; finish or withdraw it before submitting for public promotion."
+        )
 
     revision_id = symbol.current_revision_id
     if not _has_approved_closed_decision(session, organization_id=organization_id, symbol_id=symbol.id, revision_id=revision_id):

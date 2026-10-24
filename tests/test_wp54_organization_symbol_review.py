@@ -67,7 +67,7 @@ def wp54_fixtures(stage5_database):
     # `stage5_database` fixture itself, since that fixture is also used
     # by several other Stage 5 test files that must stay pinned to their
     # own original schema snapshot.
-    _alembic(url, "upgrade", "20260904_0039")
+    _alembic(url, "upgrade", "head")
     with engine.begin() as connection:
         organization = _organization(connection, "wp54")
         other_organization = _organization(connection, "wp54other")

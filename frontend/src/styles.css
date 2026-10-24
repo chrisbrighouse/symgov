@@ -3351,6 +3351,34 @@ a:not([class]):active {
   }
 }
 
+/* Unified workflow (WP2): the edit form and review history open full width under a draft. */
+.organization-symbol-drafts-panel .set-admin-item {
+  flex-wrap: wrap;
+}
+
+.organization-symbol-drafts-panel .set-admin-item > .set-admin-form,
+.organization-symbol-history {
+  flex-basis: 100%;
+}
+
+.organization-symbol-asset {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 10px;
+}
+
+.organization-symbol-history {
+  margin: 4px 0 0;
+  padding-left: 20px;
+  color: var(--idox-text-secondary);
+  font-size: 0.92rem;
+}
+
+.organization-symbol-history li + li {
+  margin-top: 6px;
+}
+
 .symbol-set-builder-layout {
   display: grid;
   grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.2fr);

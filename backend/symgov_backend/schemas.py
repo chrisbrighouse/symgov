@@ -1481,6 +1481,45 @@ class OrganizationSymbolRevisionResponse(BaseModel):
     pendingSubmissionId: str | None = None
     pendingSubmissionRationale: str | None = None
     pendingSubmissionSubmittedAt: datetime | None = None
+    pendingSubmissionSubmittedByUserId: str | None = None
+    # A revision's own category and discipline, applied to the symbol when the
+    # revision is approved. None on revisions written before WP2.
+    category: str | None = None
+    discipline: str | None = None
+    authorId: str | None = None
+
+
+class OrganizationSymbolDraftUpdateRequest(BaseModel):
+    """Edit a draft revision. Omitted fields are left unchanged."""
+
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = Field(default=None, min_length=1, max_length=256)
+    category: str | None = Field(default=None, min_length=1, max_length=128)
+    discipline: str | None = Field(default=None, min_length=1, max_length=128)
+    summary: str | None = Field(default=None, min_length=1, max_length=2000)
+    description: str | None = Field(default=None, max_length=4000)
+    aliases: list[str] | None = None
+    keywords: list[str] | None = None
+
+
+class OrganizationSymbolHistoryEntry(BaseModel):
+    submissionId: str
+    revisionId: str
+    revisionLabel: str
+    submittedByUserId: str
+    submittedByName: str | None
+    submittedAt: datetime
+    submissionRationale: str | None
+    # active | withdrawn | approved | rejected | changes_requested
+    outcome: str
+    closedAt: datetime | None
+    decidedByUserId: str | None = None
+    decidedByName: str | None = None
+    decisionRationale: str | None = None
+
+
+class OrganizationSymbolHistoryResponse(BaseModel):
+    items: list[OrganizationSymbolHistoryEntry]
 
 
 class OrganizationSymbolDraftResponse(BaseModel):
@@ -1495,6 +1534,8 @@ class OrganizationSymbolDraftResponse(BaseModel):
     ownerId: str
     currentRevisionId: str | None
     currentRevision: OrganizationSymbolRevisionResponse | None
+    pendingRevisionId: str | None = None
+    pendingRevision: OrganizationSymbolRevisionResponse | None = None
     createdAt: datetime
     updatedAt: datetime
 
@@ -1524,6 +1565,7 @@ class OrganizationSymbolSubmissionResponse(BaseModel):
     submittedByUserId: str
     submittedAt: datetime
     status: str
+    closureReason: str | None = None
 
 
 # --- WP5.4: organization review lifecycle ---

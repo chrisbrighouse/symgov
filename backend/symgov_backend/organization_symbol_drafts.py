@@ -32,9 +32,12 @@ from .auth import AuthenticatedUser
 from .catalog_facets import CATALOG_DISCIPLINE_ORDER, canonical_discipline
 from .image_content import UnsafeImageContentError, validate_stored_image
 from .models import (
+    AuditEvent,
     GovernedSymbol,
+    OrganizationSymbolReviewDecision,
     OrganizationSymbolReviewSubmission,
     SymbolRevision,
+    User,
 )
 from .product_usage_events import record_governance_usage_event
 from .runtime import RuntimePersistenceBridge
@@ -61,6 +64,37 @@ def _active_organization_id(current_user: AuthenticatedUser) -> uuid.UUID:
     if current_user.session_mode != "organization" or current_user.active_organization_id is None:
         raise OrganizationSymbolDraftError("An organization-bound session is required.")
     return uuid.UUID(current_user.active_organization_id)
+
+
+def record_organization_symbol_audit(
+    session: Session,
+    current_user: AuthenticatedUser,
+    *,
+    action: str,
+    symbol: GovernedSymbol,
+    revision_id: uuid.UUID | None = None,
+    submission_id: uuid.UUID | None = None,
+    details: dict | None = None,
+) -> None:
+    """One `AuditEvent` per organization-private workflow transition (spec FR18)."""
+    payload: dict = {"organization_id": str(symbol.owner_organization_id)}
+    if revision_id is not None:
+        payload["symbol_revision_id"] = str(revision_id)
+    if submission_id is not None:
+        payload["submission_id"] = str(submission_id)
+    if details:
+        payload.update(details)
+    session.add(
+        AuditEvent(
+            id=uuid.uuid4(),
+            entity_type="governed_symbol",
+            entity_id=symbol.id,
+            action=action,
+            actor_id=uuid.UUID(current_user.id),
+            payload_json=payload,
+            created_at=_utc_now(),
+        )
+    )
 
 
 def _is_authorized_contributor(current_user: AuthenticatedUser) -> bool:
@@ -101,6 +135,8 @@ def _clean_string_list(values: list[str] | None, *, field: str, max_items: int =
 def _revision_payload(
     *,
     name: str,
+    category: str,
+    discipline: str,
     summary: str,
     description: str | None,
     aliases: list[str],
@@ -108,12 +144,24 @@ def _revision_payload(
 ) -> dict:
     return {
         "name": name,
+        "category": category,
+        "discipline": discipline,
         "summary": summary,
         "description": description or summary,
         "aliases": aliases,
         "keywords": keywords,
         "assets": [],
     }
+
+
+def _clean_discipline(discipline: str) -> str:
+    clean = canonical_discipline(_clean_text(discipline, field="discipline", max_length=128))
+    if clean is None:
+        # Only the Catalog's standard names are stored (X-04).
+        raise OrganizationSymbolDraftError(
+            f"Unknown discipline '{discipline.strip()}'. Choose one of: {', '.join(CATALOG_DISCIPLINE_ORDER)}."
+        )
+    return clean
 
 
 def create_draft(
@@ -136,12 +184,7 @@ def create_draft(
 
     clean_name = _clean_text(name, field="name", max_length=256)
     clean_category = _clean_text(category, field="category", max_length=128)
-    clean_discipline = canonical_discipline(_clean_text(discipline, field="discipline", max_length=128))
-    if clean_discipline is None:
-        # Only the Catalog's standard names are stored (X-04).
-        raise OrganizationSymbolDraftError(
-            f"Unknown discipline '{discipline.strip()}'. Choose one of: {', '.join(CATALOG_DISCIPLINE_ORDER)}."
-        )
+    clean_discipline = _clean_discipline(discipline)
     clean_summary = _clean_text(summary, field="summary", max_length=2000)
     clean_description = _clean_text(description, field="description", required=False, max_length=4000)
     clean_aliases = _clean_string_list(aliases, field="aliases")
@@ -176,6 +219,8 @@ def create_draft(
         lifecycle_state="draft",
         payload_json=_revision_payload(
             name=clean_name,
+            category=clean_category,
+            discipline=clean_discipline,
             summary=clean_summary,
             description=clean_description,
             aliases=clean_aliases,
@@ -191,6 +236,9 @@ def create_draft(
     symbol.current_revision_id = revision.id
     symbol.updated_at = now
     session.flush()
+    record_organization_symbol_audit(
+        session, current_user, action="org_symbol.draft_created", symbol=symbol, revision_id=revision.id
+    )
     return symbol, revision
 
 
@@ -234,6 +282,123 @@ def get_draft_revision(
     return symbol, revision
 
 
+def _can_edit_revision(current_user: AuthenticatedUser, symbol: GovernedSymbol, revision: SymbolRevision) -> bool:
+    actor = uuid.UUID(current_user.id)
+    return (
+        current_user.organization_base_role == "admin"
+        or symbol.owner_id == actor
+        or revision.author_id == actor
+    )
+
+
+def _workflow_revision(symbol: GovernedSymbol, revision: SymbolRevision) -> None:
+    """Only the symbol's current revision, or its pending one, is in play."""
+    if revision.id not in (symbol.current_revision_id, symbol.pending_revision_id):
+        raise OrganizationSymbolDraftError("This revision has been superseded.")
+
+
+def get_editable_draft_revision(
+    session: Session, current_user: AuthenticatedUser, symbol_id: uuid.UUID, revision_id: uuid.UUID
+) -> tuple[GovernedSymbol, SymbolRevision]:
+    symbol, revision = get_draft_revision(session, current_user, symbol_id, revision_id)
+    if not _can_edit_revision(current_user, symbol, revision):
+        raise OrganizationSymbolDraftNotVisible()
+    _workflow_revision(symbol, revision)
+    if revision.lifecycle_state != "draft":
+        raise OrganizationSymbolDraftError("Only a draft revision can be changed.")
+    return symbol, revision
+
+
+def update_draft(
+    session: Session,
+    current_user: AuthenticatedUser,
+    *,
+    symbol_id: uuid.UUID,
+    revision_id: uuid.UUID,
+    name: str | None = None,
+    category: str | None = None,
+    discipline: str | None = None,
+    summary: str | None = None,
+    description: str | None = None,
+    aliases: list[str] | None = None,
+    keywords: list[str] | None = None,
+) -> tuple[GovernedSymbol, SymbolRevision]:
+    """Edit a draft revision's details; omitted fields keep their value.
+
+    A symbol's own name, category and discipline are what readers show, so
+    they change here only while this draft is the symbol's only version. For
+    a pending revision of a published symbol they are held in the revision
+    and applied on approval.
+    """
+    symbol, revision = get_editable_draft_revision(session, current_user, symbol_id, revision_id)
+    payload_json = dict(revision.payload_json or {})
+    changed: list[str] = []
+
+    def put(key: str, value) -> None:
+        if payload_json.get(key) != value:
+            payload_json[key] = value
+            changed.append(key)
+
+    if name is not None:
+        put("name", _clean_text(name, field="name", max_length=256))
+    if category is not None:
+        put("category", _clean_text(category, field="category", max_length=128))
+    if discipline is not None:
+        put("discipline", _clean_discipline(discipline))
+    if summary is not None:
+        put("summary", _clean_text(summary, field="summary", max_length=2000))
+    if description is not None:
+        put("description", _clean_text(description, field="description", required=False, max_length=4000)
+            or payload_json.get("summary"))
+    if aliases is not None:
+        put("aliases", _clean_string_list(aliases, field="aliases"))
+    if keywords is not None:
+        put("keywords", _clean_string_list(keywords, field="keywords"))
+    if not changed:
+        return symbol, revision
+
+    revision.payload_json = payload_json
+    now = _utc_now()
+    if revision.id == symbol.current_revision_id:
+        symbol.canonical_name = payload_json.get("name") or symbol.canonical_name
+        symbol.category = payload_json.get("category") or symbol.category
+        symbol.discipline = payload_json.get("discipline") or symbol.discipline
+    symbol.updated_at = now
+    session.flush()
+    record_organization_symbol_audit(
+        session, current_user, action="org_symbol.draft_updated", symbol=symbol, revision_id=revision.id,
+        details={"fields": sorted(changed)},
+    )
+    return symbol, revision
+
+
+def remove_asset(
+    session: Session,
+    current_user: AuthenticatedUser,
+    *,
+    symbol_id: uuid.UUID,
+    revision_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> None:
+    """Take an asset off a draft revision. The stored object and its
+    `Attachment` row are kept, so the audit trail can still name it."""
+    symbol, revision = get_editable_draft_revision(session, current_user, symbol_id, revision_id)
+    payload_json = dict(revision.payload_json or {})
+    assets = list(payload_json.get("assets") or [])
+    remaining = [asset for asset in assets if str(asset.get("attachment_id")) != str(attachment_id)]
+    if len(remaining) == len(assets):
+        raise OrganizationSymbolDraftNotVisible()
+    removed = next(asset for asset in assets if str(asset.get("attachment_id")) == str(attachment_id))
+    payload_json["assets"] = remaining
+    revision.payload_json = payload_json
+    symbol.updated_at = _utc_now()
+    session.flush()
+    record_organization_symbol_audit(
+        session, current_user, action="org_symbol.asset_removed", symbol=symbol, revision_id=revision.id,
+        details={"attachment_id": str(attachment_id), "filename": removed.get("filename")},
+    )
+
+
 @dataclass(frozen=True)
 class DraftAssetUpload:
     id: uuid.UUID
@@ -257,10 +422,11 @@ def attach_asset(
     role: str = "source",
 ) -> DraftAssetUpload:
     symbol, revision = get_draft_revision(session, current_user, symbol_id, revision_id)
-    if symbol.owner_id != uuid.UUID(current_user.id) and current_user.organization_base_role != "admin":
+    if not _can_edit_revision(current_user, symbol, revision):
         raise OrganizationSymbolDraftNotVisible()
     if revision.lifecycle_state != "draft":
         raise OrganizationSymbolDraftError("Assets can only be attached while the revision is still a draft.")
+    _workflow_revision(symbol, revision)
     clean_filename = _clean_text(filename, field="filename", max_length=256)
     if not payload:
         raise OrganizationSymbolDraftError("Uploaded file is empty.")
@@ -306,6 +472,10 @@ def attach_asset(
     payload_json["assets"] = assets
     revision.payload_json = payload_json
     session.flush()
+    record_organization_symbol_audit(
+        session, current_user, action="org_symbol.asset_added", symbol=symbol, revision_id=revision.id,
+        details={"attachment_id": attachment["id"], "filename": clean_filename, "role": role},
+    )
 
     return DraftAssetUpload(
         id=uuid.UUID(attachment["id"]),
@@ -326,10 +496,11 @@ def submit_for_review(
     rationale: str | None = None,
 ) -> OrganizationSymbolReviewSubmission:
     symbol, revision = get_draft_revision(session, current_user, symbol_id, revision_id)
-    if symbol.owner_id != uuid.UUID(current_user.id) and current_user.organization_base_role != "admin":
+    if not _can_edit_revision(current_user, symbol, revision):
         raise OrganizationSymbolDraftNotVisible()
     if revision.lifecycle_state != "draft":
         raise OrganizationSymbolDraftError("Only a draft revision can be submitted for organization review.")
+    _workflow_revision(symbol, revision)
 
     clean_rationale = _clean_text(rationale, field="rationale", required=False, max_length=2000)
 
@@ -362,4 +533,103 @@ def submit_for_review(
         symbol_source="organization_private",
     )
     session.flush()
+    record_organization_symbol_audit(
+        session, current_user, action="org_symbol.submitted", symbol=symbol, revision_id=revision.id,
+        submission_id=submission.id,
+    )
     return submission
+
+
+def withdraw_submission(
+    session: Session,
+    current_user: AuthenticatedUser,
+    *,
+    symbol_id: uuid.UUID,
+    submission_id: uuid.UUID,
+) -> OrganizationSymbolReviewSubmission:
+    """The submitter takes a pending submission back; the revision returns to draft."""
+    symbol = get_draft(session, current_user, symbol_id)
+    submission = session.get(OrganizationSymbolReviewSubmission, submission_id, with_for_update=True)
+    if submission is None or submission.governed_symbol_id != symbol.id:
+        raise OrganizationSymbolDraftNotVisible()
+    if submission.submitted_by_user_id != uuid.UUID(current_user.id):
+        raise OrganizationSymbolDraftError("Only the person who submitted it can withdraw a submission.")
+    if submission.status != "active":
+        raise OrganizationSymbolDraftError("This submission has already been decided or withdrawn.")
+
+    now = _utc_now()
+    submission.status = "closed"
+    submission.closed_at = now
+    submission.closure_reason = "withdrawn"
+    revision = session.get(SymbolRevision, submission.symbol_revision_id)
+    if revision is not None and revision.lifecycle_state == "review":
+        revision.lifecycle_state = "draft"
+    symbol.updated_at = now
+    session.flush()
+    record_organization_symbol_audit(
+        session, current_user, action="org_symbol.withdrawn", symbol=symbol,
+        revision_id=submission.symbol_revision_id, submission_id=submission.id,
+    )
+    return submission
+
+
+@dataclass(frozen=True)
+class SubmissionHistoryEntry:
+    submission: OrganizationSymbolReviewSubmission
+    revision: SymbolRevision
+    submitted_by_name: str | None
+    decision: OrganizationSymbolReviewDecision | None
+    decided_by_name: str | None
+
+    @property
+    def outcome(self) -> str:
+        if self.submission.status == "active":
+            return "active"
+        if self.submission.closure_reason == "withdrawn":
+            return "withdrawn"
+        return self.decision.decision if self.decision is not None else "decided"
+
+
+def submission_history(
+    session: Session, current_user: AuthenticatedUser, symbol_id: uuid.UUID
+) -> list[SubmissionHistoryEntry]:
+    """Every submission of every revision of one symbol, newest first."""
+    symbol = get_draft(session, current_user, symbol_id)
+    submissions = session.execute(
+        select(OrganizationSymbolReviewSubmission)
+        .where(
+            OrganizationSymbolReviewSubmission.governed_symbol_id == symbol.id,
+            OrganizationSymbolReviewSubmission.organization_id == symbol.owner_organization_id,
+        )
+        .order_by(
+            OrganizationSymbolReviewSubmission.submitted_at.desc(),
+            OrganizationSymbolReviewSubmission.closed_at.desc().nulls_first(),
+            OrganizationSymbolReviewSubmission.id,
+        )
+    ).scalars().all()
+    decisions = {
+        decision.submission_id: decision
+        for decision in session.execute(
+            select(OrganizationSymbolReviewDecision).where(
+                OrganizationSymbolReviewDecision.governed_symbol_id == symbol.id
+            )
+        ).scalars()
+    }
+    user_ids = {item.submitted_by_user_id for item in submissions} | {d.decided_by_user_id for d in decisions.values()}
+    names = {
+        user.id: user.display_name
+        for user in session.execute(select(User).where(User.id.in_(user_ids))).scalars()
+    } if user_ids else {}
+    entries = []
+    for item in submissions:
+        decision = decisions.get(item.id)
+        entries.append(
+            SubmissionHistoryEntry(
+                submission=item,
+                revision=session.get(SymbolRevision, item.symbol_revision_id),
+                submitted_by_name=names.get(item.submitted_by_user_id),
+                decision=decision,
+                decided_by_name=names.get(decision.decided_by_user_id) if decision is not None else None,
+            )
+        )
+    return entries

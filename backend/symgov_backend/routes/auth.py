@@ -128,6 +128,11 @@ def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | No
             ),
             "symbolSetsEnabled": symbol_sets_enabled,
             "organizationSymbolsEnabled": effective.organizations_enabled and effective.organization_symbols_enabled,
+            "organizationSymbolWorkflowV2Enabled": (
+                effective.organizations_enabled
+                and effective.organization_symbols_enabled
+                and effective.organization_symbol_workflow_v2_enabled
+            ),
             "organizationAgentsEnabled": effective.organizations_enabled and effective.organization_agents_enabled,
             "organizationIconUploadEnabled": organization_icon_upload_enabled,
             "organizationApiKeysEnabled": effective.organizations_enabled and effective.organization_api_keys_enabled,

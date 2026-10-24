@@ -28,6 +28,7 @@ from symgov_backend.app import create_app
 from symgov_backend.auth import upsert_user
 from symgov_backend.dependencies import get_db_session
 from symgov_backend.models import (
+    AuditEvent,
     AuthLoginAttemptEvent,
     AuthLoginThrottleBucket,
     AuthOrganizationSelectionChallenge,
@@ -82,6 +83,7 @@ def _create_tables(engine) -> None:
         GovernedSymbol.__table__,
         SymbolRevision.__table__,
         OrganizationSymbolReviewSubmission.__table__,
+        AuditEvent.__table__,
         OrganizationSymbolReviewDecision.__table__,
         PromotionRequest.__table__,
         PromotionRequestDecision.__table__,

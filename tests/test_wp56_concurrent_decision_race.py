@@ -58,7 +58,7 @@ def race_fixtures(stage5_database):
     # locally here, not by bumping the shared `stage5_database` fixture
     # itself, since that fixture is also used by several other Stage 5 test
     # files that must stay pinned to their own original schema snapshot.
-    _alembic(url, "upgrade", "20260904_0039")
+    _alembic(url, "upgrade", "head")
     with engine.begin() as connection:
         organization = _organization(connection, "wp56race")
         contributor_user = _user(connection, "wp56race-contributor")

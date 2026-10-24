@@ -75,7 +75,7 @@ from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E40
 # Moved to head for the DISC DEXPI import: the served-rows query now reads the
 # classification and rights tables, which 20260908_0046 predates. Three files
 # (11.3, 11.4, 11.5) build their database from this one fixture.
-NEW_MIGRATION_HEAD = "20261020_0074"
+NEW_MIGRATION_HEAD = "20261024_0076"
 
 
 @pytest.fixture(scope="module")

@@ -432,3 +432,143 @@ describe('OrganizationSymbolReviewQueuePanel governed state (Q10)', () => {
     await act(async () => renderer.unmount());
   });
 });
+
+describe('OrganizationSymbolDraftsPanel with the unified workflow (WP2)', () => {
+  function v2Api(drafts, history = []) {
+    const calls = [];
+    return {
+      calls,
+      listDrafts: async () => ({ items: drafts }),
+      createDraft: async () => ({}),
+      attachAsset: async () => ({}),
+      submitForReview: async (...args) => { calls.push(['submit', ...args]); return {}; },
+      updateDraft: async (...args) => { calls.push(['update', ...args]); return {}; },
+      removeAsset: async (...args) => { calls.push(['remove', ...args]); return {}; },
+      withdrawSubmission: async (...args) => { calls.push(['withdraw', ...args]); return {}; },
+      fetchHistory: async (...args) => { calls.push(['history', ...args]); return { items: history }; },
+      startRevision: async (...args) => { calls.push(['start', ...args]); return {}; },
+      discardPendingRevision: async (...args) => { calls.push(['discard', ...args]); return {}; },
+    };
+  }
+
+  async function mount(api, props = {}) {
+    let renderer;
+    await act(async () => {
+      renderer = create(createElement(OrganizationSymbolDraftsPanel, { canCreate: false, workflowV2: true, currentUserId: 'user-1', api, ...props }));
+    });
+    return renderer;
+  }
+
+  it('edits a draft and takes a file off it', async () => {
+    const draft = baseDraft({
+      currentRevision: { ...baseDraft().currentRevision, name: 'Fire hydrant', category: 'fire', discipline: 'Civil', assets: [{ id: 'att-1', filename: 'hydrant.svg' }] },
+    });
+    const api = v2Api([draft]);
+    const renderer = await mount(api);
+
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Remove hydrant.svg from Fire hydrant' }).props.onClick());
+    assert.deepEqual(api.calls[0], ['remove', 'sym-1', 'rev-1', 'att-1']);
+
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Edit details of Fire hydrant' }).props.onClick());
+    await act(async () => renderer.root.findByProps({ id: 'org-symbol-edit-sym-1-name' }).props.onChange({ target: { value: 'Pillar hydrant' } }));
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Edit Fire hydrant' }).props.onSubmit({ preventDefault() {} }));
+    const [, symbolId, revisionId, payload] = api.calls[1];
+    assert.deepEqual([symbolId, revisionId, payload.name, payload.category], ['sym-1', 'rev-1', 'Pillar hydrant', 'fire']);
+    assert.match(JSON.stringify(renderer.toJSON()), /Pillar hydrant saved\./);
+    await act(async () => renderer.unmount());
+  });
+
+  it('lets only the submitter withdraw, and shows the review history', async () => {
+    const pending = (submittedBy) => baseDraft({
+      currentRevision: {
+        ...baseDraft().currentRevision, lifecycleState: 'review', pendingSubmissionId: 'sub-1',
+        pendingSubmissionSubmittedAt: '2026-10-24T10:00:00Z', pendingSubmissionSubmittedByUserId: submittedBy,
+      },
+    });
+    const history = [{
+      submissionId: 'sub-0', outcome: 'changes_requested', submittedByName: 'Ann', submittedAt: '2026-10-23T10:00:00Z',
+      closedAt: '2026-10-23T11:00:00Z', decidedByName: 'Rex', decisionRationale: 'Add the flange.', submissionRationale: null,
+    }];
+    const api = v2Api([pending('user-1')], history);
+    const renderer = await mount(api);
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Withdraw Fire hydrant from review' }).props.onClick());
+    assert.deepEqual(api.calls[0], ['withdraw', 'sym-1', 'sub-1']);
+
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Show review history of Fire hydrant' }).props.onClick());
+    const text = JSON.stringify(renderer.toJSON());
+    assert.match(text, /Changes requested/);
+    assert.match(text, /Reviewer: Add the flange\./);
+    await act(async () => renderer.unmount());
+
+    const other = await mount(v2Api([pending('someone-else')]));
+    assert.equal(other.root.findAllByProps({ 'aria-label': 'Withdraw Fire hydrant from review' }).length, 0);
+    await act(async () => other.unmount());
+  });
+
+  it('starts, works on and discards a new revision of a published symbol', async () => {
+    const published = baseDraft({
+      organizationWide: true,
+      currentRevision: { ...baseDraft().currentRevision, lifecycleState: 'approved' },
+    });
+    const startApi = v2Api([published]);
+    const renderer = await mount(startApi);
+    assert.match(JSON.stringify(renderer.toJSON()), /Published to the organization library/);
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Start a new revision of Fire hydrant' }).props.onClick());
+    assert.deepEqual(startApi.calls[0], ['start', 'sym-1']);
+    await act(async () => renderer.unmount());
+
+    const withPending = {
+      ...published,
+      pendingRevisionId: 'rev-2',
+      pendingRevision: { ...baseDraft().currentRevision, id: 'rev-2', lifecycleState: 'draft' },
+    };
+    const pendingApi = v2Api([withPending]);
+    const second = await mount(pendingApi);
+    assert.match(JSON.stringify(second.toJSON()), /New revision in progress/);
+    assert.equal(second.root.findAllByProps({ 'aria-label': 'Start a new revision of Fire hydrant' }).length, 0);
+    await act(async () => second.root.findByProps({ 'aria-label': 'Submit Fire hydrant for organization review' }).props.onClick());
+    assert.deepEqual(pendingApi.calls[0], ['submit', 'sym-1', 'rev-2', {}]);
+    await act(async () => second.root.findByProps({ 'aria-label': 'Discard the new revision of Fire hydrant' }).props.onClick());
+    assert.deepEqual(pendingApi.calls[1], ['discard', 'sym-1']);
+    await act(async () => second.unmount());
+  });
+
+  it('offers none of the new actions while the flag is off', async () => {
+    const renderer = await mount(v2Api([baseDraft()]), { workflowV2: false });
+    for (const label of ['Edit details of Fire hydrant', 'Show review history of Fire hydrant']) {
+      assert.equal(renderer.root.findAllByProps({ 'aria-label': label }).length, 0, label);
+    }
+    assert.match(JSON.stringify(renderer.toJSON()), /Revision status: draft/);
+    await act(async () => renderer.unmount());
+  });
+});
+
+describe('OrganizationSymbolReviewQueuePanel with pending revisions (WP2)', () => {
+  it('queues a pending revision and decides its submission', async () => {
+    const calls = [];
+    const draft = baseDraft({
+      organizationWide: true,
+      currentRevision: { ...baseDraft().currentRevision, lifecycleState: 'approved' },
+      pendingRevisionId: 'rev-2',
+      pendingRevision: {
+        ...baseDraft().currentRevision, id: 'rev-2', name: 'Pillar hydrant', lifecycleState: 'review',
+        pendingSubmissionId: 'sub-2', pendingSubmissionSubmittedAt: '2026-10-24T10:00:00Z',
+      },
+    });
+    const api = {
+      listDrafts: async () => ({ items: [draft] }),
+      decide: async (...args) => { calls.push(args); return {}; },
+      setOrganizationWide: async () => ({}),
+      fetchSymbolRevision: async () => ({}),
+    };
+    const auth = { user: { capabilities: { organizationSymbolWorkflowV2Enabled: true } } };
+    let renderer;
+    await act(async () => { renderer = create(createElement(OrganizationSymbolReviewQueuePanel, { auth, api })); });
+    const text = JSON.stringify(renderer.toJSON());
+    assert.match(text, /New revision of the published symbol Fire hydrant/);
+    assert.match(text, /Remove from library/);
+    await act(async () => renderer.root.findByProps({ 'aria-label': 'Approve Fire hydrant' }).props.onClick());
+    assert.deepEqual(calls[0].slice(0, 2), ['sym-1', 'sub-2']);
+    await act(async () => renderer.unmount());
+  });
+});

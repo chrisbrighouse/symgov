@@ -26,9 +26,12 @@ from ..organization_symbol_drafts import (
     attach_asset,
     create_draft,
     get_draft,
-    get_draft_revision,
     list_drafts,
+    remove_asset,
+    submission_history,
     submit_for_review,
+    update_draft,
+    withdraw_submission,
 )
 from ..organization_symbol_review import (
     OrganizationSymbolReviewConflict,
@@ -36,6 +39,7 @@ from ..organization_symbol_review import (
     OrganizationSymbolReviewNotVisible,
     create_new_draft_revision,
     decide_submission,
+    discard_pending_revision,
     set_organization_wide,
 )
 from ..promotion_requests import (
@@ -54,6 +58,9 @@ from ..schemas import (
     OrganizationSymbolDraftCreateRequest,
     OrganizationSymbolDraftListResponse,
     OrganizationSymbolDraftResponse,
+    OrganizationSymbolDraftUpdateRequest,
+    OrganizationSymbolHistoryEntry,
+    OrganizationSymbolHistoryResponse,
     OrganizationSymbolOrganizationWideRequest,
     OrganizationSymbolReviewDecisionRequest,
     OrganizationSymbolReviewDecisionResponse,
@@ -72,6 +79,12 @@ router = APIRouter(prefix="/organization-symbols", tags=["organization-symbols"]
 
 def organization_symbols_route_guard(settings: SymgovAPISettings = Depends(get_settings)) -> None:
     if not (settings.organizations_enabled and settings.organization_symbols_enabled):
+        raise HTTPException(status_code=404, detail="Not found.")
+
+
+def require_workflow_v2(settings: SymgovAPISettings = Depends(get_settings)) -> None:
+    """The WP2 endpoints are absent, not forbidden, while the flag is off."""
+    if not settings.organization_symbol_workflow_v2_enabled:
         raise HTTPException(status_code=404, detail="Not found.")
 
 
@@ -122,7 +135,24 @@ def _revision_response(
         pendingSubmissionId=str(pending_submission.id) if pending_submission is not None else None,
         pendingSubmissionRationale=pending_submission.rationale if pending_submission is not None else None,
         pendingSubmissionSubmittedAt=pending_submission.submitted_at if pending_submission is not None else None,
+        pendingSubmissionSubmittedByUserId=(
+            str(pending_submission.submitted_by_user_id) if pending_submission is not None else None
+        ),
+        category=payload.get("category"),
+        discipline=payload.get("discipline"),
+        authorId=str(revision.author_id) if revision.author_id else None,
     )
+
+
+def _full_draft_response(session: Session, symbol) -> OrganizationSymbolDraftResponse:
+    """The symbol with its current revision and, when one is in progress, its pending revision."""
+    current = session.get(SymbolRevision, symbol.current_revision_id) if symbol.current_revision_id else None
+    pending = session.get(SymbolRevision, symbol.pending_revision_id) if symbol.pending_revision_id else None
+    response = _draft_response(symbol, current, _pending_submission(session, current.id) if current is not None else None)
+    if pending is not None:
+        response.pendingRevisionId = str(pending.id)
+        response.pendingRevision = _revision_response(pending, _pending_submission(session, pending.id))
+    return response
 
 
 def _draft_response(
@@ -176,12 +206,7 @@ def list_organization_symbol_drafts(
     current_user: AuthenticatedUser = Depends(require_organization_session),
 ) -> OrganizationSymbolDraftListResponse:
     symbols = list_drafts(session, current_user)
-    items = []
-    for symbol in symbols:
-        revision = session.get(SymbolRevision, symbol.current_revision_id) if symbol.current_revision_id else None
-        pending_submission = _pending_submission(session, revision.id) if revision is not None else None
-        items.append(_draft_response(symbol, revision, pending_submission))
-    return OrganizationSymbolDraftListResponse(items=items)
+    return OrganizationSymbolDraftListResponse(items=[_full_draft_response(session, symbol) for symbol in symbols])
 
 
 @router.get("/{symbol_id}", response_model=OrganizationSymbolDraftResponse)
@@ -195,12 +220,7 @@ def get_organization_symbol_draft(
         symbol = get_draft(session, current_user, parsed_id)
     except OrganizationSymbolDraftNotVisible as exc:
         raise HTTPException(status_code=404, detail="Organization symbol draft was not found.") from exc
-    current_revision = None
-    pending_submission = None
-    if symbol.current_revision_id is not None:
-        _, current_revision = get_draft_revision(session, current_user, symbol.id, symbol.current_revision_id)
-        pending_submission = _pending_submission(session, current_revision.id)
-    return _draft_response(symbol, current_revision, pending_submission)
+    return _full_draft_response(session, symbol)
 
 
 @router.post(
@@ -301,6 +321,7 @@ def decide_organization_symbol_review_submission(
     body: OrganizationSymbolReviewDecisionRequest,
     session: Session = Depends(get_db_session),
     current_user: AuthenticatedUser = Depends(require_organization_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> OrganizationSymbolReviewDecisionResponse:
     parsed_submission_id = _parse_uuid(submission_id)
     try:
@@ -310,6 +331,7 @@ def decide_organization_symbol_review_submission(
             submission_id=parsed_submission_id,
             decision=body.decision,
             rationale=body.rationale,
+            workflow_v2=settings.organization_symbol_workflow_v2_enabled,
         )
     except OrganizationSymbolReviewNotVisible as exc:
         session.rollback()
@@ -345,10 +367,14 @@ def create_organization_symbol_draft_revision(
     symbol_id: str,
     session: Session = Depends(get_db_session),
     current_user: AuthenticatedUser = Depends(require_organization_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> OrganizationSymbolDraftResponse:
     parsed_symbol_id = _parse_uuid(symbol_id)
+    workflow_v2 = settings.organization_symbol_workflow_v2_enabled
     try:
-        symbol, revision = create_new_draft_revision(session, current_user, symbol_id=parsed_symbol_id)
+        symbol, revision = create_new_draft_revision(
+            session, current_user, symbol_id=parsed_symbol_id, workflow_v2=workflow_v2
+        )
     except OrganizationSymbolReviewNotVisible as exc:
         session.rollback()
         raise HTTPException(status_code=404, detail="Organization symbol draft was not found.") from exc
@@ -356,6 +382,8 @@ def create_organization_symbol_draft_revision(
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
+    if workflow_v2:
+        return _full_draft_response(session, symbol)
     return _draft_response(symbol, revision)
 
 
@@ -380,6 +408,162 @@ def set_organization_symbol_organization_wide(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     session.commit()
     return _draft_response(symbol)
+
+
+# --- Unified submission & review WP2: edit, withdraw, history, discard ---
+
+@router.patch(
+    "/{symbol_id}/revisions/{revision_id}",
+    response_model=OrganizationSymbolDraftResponse,
+    dependencies=[Depends(require_workflow_v2)],
+)
+def update_organization_symbol_draft(
+    symbol_id: str,
+    revision_id: str,
+    body: OrganizationSymbolDraftUpdateRequest,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_session),
+) -> OrganizationSymbolDraftResponse:
+    parsed_symbol_id = _parse_uuid(symbol_id)
+    parsed_revision_id = _parse_uuid(revision_id)
+    try:
+        symbol, _ = update_draft(
+            session,
+            current_user,
+            symbol_id=parsed_symbol_id,
+            revision_id=parsed_revision_id,
+            **body.model_dump(exclude_unset=True),
+        )
+    except OrganizationSymbolDraftNotVisible as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail="Organization symbol draft was not found.") from exc
+    except OrganizationSymbolDraftError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.commit()
+    return _full_draft_response(session, symbol)
+
+
+@router.delete(
+    "/{symbol_id}/revisions/{revision_id}/assets/{attachment_id}",
+    response_model=OrganizationSymbolDraftResponse,
+    dependencies=[Depends(require_workflow_v2)],
+)
+def remove_organization_symbol_draft_asset(
+    symbol_id: str,
+    revision_id: str,
+    attachment_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_session),
+) -> OrganizationSymbolDraftResponse:
+    parsed_symbol_id = _parse_uuid(symbol_id)
+    try:
+        remove_asset(
+            session,
+            current_user,
+            symbol_id=parsed_symbol_id,
+            revision_id=_parse_uuid(revision_id),
+            attachment_id=_parse_uuid(attachment_id),
+        )
+    except OrganizationSymbolDraftNotVisible as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail="Organization symbol draft was not found.") from exc
+    except OrganizationSymbolDraftError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.commit()
+    return _full_draft_response(session, get_draft(session, current_user, parsed_symbol_id))
+
+
+@router.post(
+    "/{symbol_id}/review-submissions/{submission_id}/withdraw",
+    response_model=OrganizationSymbolSubmissionResponse,
+    dependencies=[Depends(require_workflow_v2)],
+)
+def withdraw_organization_symbol_review_submission(
+    symbol_id: str,
+    submission_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_session),
+) -> OrganizationSymbolSubmissionResponse:
+    try:
+        submission = withdraw_submission(
+            session, current_user, symbol_id=_parse_uuid(symbol_id), submission_id=_parse_uuid(submission_id)
+        )
+    except OrganizationSymbolDraftNotVisible as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail="Organization review submission was not found.") from exc
+    except OrganizationSymbolDraftError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.commit()
+    return OrganizationSymbolSubmissionResponse(
+        id=str(submission.id),
+        organizationId=str(submission.organization_id),
+        governedSymbolId=str(submission.governed_symbol_id),
+        symbolRevisionId=str(submission.symbol_revision_id),
+        submittedByUserId=str(submission.submitted_by_user_id),
+        submittedAt=submission.submitted_at,
+        status=submission.status,
+        closureReason=submission.closure_reason,
+    )
+
+
+@router.get(
+    "/{symbol_id}/history",
+    response_model=OrganizationSymbolHistoryResponse,
+    dependencies=[Depends(require_workflow_v2)],
+)
+def organization_symbol_review_history(
+    symbol_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_session),
+) -> OrganizationSymbolHistoryResponse:
+    try:
+        entries = submission_history(session, current_user, _parse_uuid(symbol_id))
+    except OrganizationSymbolDraftNotVisible as exc:
+        raise HTTPException(status_code=404, detail="Organization symbol draft was not found.") from exc
+    return OrganizationSymbolHistoryResponse(
+        items=[
+            OrganizationSymbolHistoryEntry(
+                submissionId=str(entry.submission.id),
+                revisionId=str(entry.submission.symbol_revision_id),
+                revisionLabel=entry.revision.revision_label if entry.revision is not None else "",
+                submittedByUserId=str(entry.submission.submitted_by_user_id),
+                submittedByName=entry.submitted_by_name,
+                submittedAt=entry.submission.submitted_at,
+                submissionRationale=entry.submission.rationale,
+                outcome=entry.outcome,
+                closedAt=entry.submission.closed_at,
+                decidedByUserId=str(entry.decision.decided_by_user_id) if entry.decision is not None else None,
+                decidedByName=entry.decided_by_name,
+                decisionRationale=entry.decision.rationale if entry.decision is not None else None,
+            )
+            for entry in entries
+        ]
+    )
+
+
+@router.delete(
+    "/{symbol_id}/pending-revision",
+    response_model=OrganizationSymbolDraftResponse,
+    dependencies=[Depends(require_workflow_v2)],
+)
+def discard_organization_symbol_pending_revision(
+    symbol_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_session),
+) -> OrganizationSymbolDraftResponse:
+    try:
+        symbol = discard_pending_revision(session, current_user, symbol_id=_parse_uuid(symbol_id))
+    except OrganizationSymbolReviewNotVisible as exc:
+        session.rollback()
+        raise HTTPException(status_code=404, detail="Organization symbol draft was not found.") from exc
+    except OrganizationSymbolReviewError as exc:
+        session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    session.commit()
+    return _full_draft_response(session, symbol)
 
 
 # --- Stage 7 WP7.2/WP7.3: promotion requests ---

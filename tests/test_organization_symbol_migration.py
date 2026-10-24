@@ -84,6 +84,7 @@ def test_review_model_metadata_is_exact_revision_bound_and_append_preserving():
         "rationale",
         "status",
         "closed_at",
+        "closure_reason",  # 20261024_0076
     ]
     assert {foreign_key.target_fullname for foreign_key in submission.foreign_keys} == {
         "organizations.id",
@@ -103,6 +104,10 @@ def test_review_model_metadata_is_exact_revision_bound_and_append_preserving():
         ),
         "ck_organization_symbol_review_submissions_rationale": (
             "rationale is null or (btrim(rationale) <> '' and char_length(rationale) <= 2000)"
+        ),
+        "ck_organization_symbol_review_submissions_closure_reason": (
+            "(status = 'active' and closure_reason is null) or "
+            "(status = 'closed' and closure_reason in ('decided', 'withdrawn'))"
         ),
     }
     active = next(

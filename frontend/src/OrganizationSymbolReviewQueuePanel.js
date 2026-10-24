@@ -9,6 +9,7 @@ import {
 import { canAccessSemanticReview } from './semanticReviewJourney.js';
 import { formatReviewTimestamp, symbolLabel } from './SemanticReviewPage.js';
 import { symbolIdLabelOrState } from './catalogWorkbench.js';
+import { workingRevision } from './OrganizationSymbolDraftsPanel.js';
 
 const DEFAULT_API = {
   listDrafts: listOrganizationSymbolDrafts,
@@ -175,8 +176,10 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
     refresh();
   }, [refresh]);
 
+  const workflowV2 = auth?.user?.capabilities?.organizationSymbolWorkflowV2Enabled === true;
+  // A published symbol's pending revision is reviewed in its place.
   const queue = useMemo(
-    () => drafts.filter((draft) => Boolean(draft.currentRevision?.pendingSubmissionId)),
+    () => drafts.filter((draft) => Boolean(workingRevision(draft).revision?.pendingSubmissionId)),
     [drafts],
   );
 
@@ -187,9 +190,11 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
   }, [queue, activeSymbolId]);
 
   const activeDraft = queue.find((draft) => draft.id === activeSymbolId) || queue[0] || null;
+  const activeWorking = workingRevision(activeDraft);
+  const activeRevision = activeWorking.revision;
 
   const semanticStateVisible = canAccessSemanticReview(auth?.user);
-  const activeRevisionId = activeDraft?.currentRevision?.id || '';
+  const activeRevisionId = activeRevision?.id || '';
   const [semanticState, setSemanticState] = useState({ loading: false, error: '', revision: null });
 
   useEffect(() => {
@@ -223,7 +228,7 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
   );
 
   async function decide(draft, decisionValue) {
-    const submissionId = draft.currentRevision?.pendingSubmissionId;
+    const submissionId = workingRevision(draft).revision?.pendingSubmissionId;
     if (!submissionId) return;
     setDecidingSymbolId(draft.id);
     setStatus({ mode: '', message: '' });
@@ -251,7 +256,9 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
       await api.setOrganizationWide(draft.id, nextEnabled);
       setStatus({
         mode: 'success',
-        message: `${draft.canonicalName}: organization-wide ${nextEnabled ? 'enabled' : 'disabled'}.`,
+        message: workflowV2
+          ? `${draft.canonicalName} ${nextEnabled ? 'restored to' : 'removed from'} the organization library.`
+          : `${draft.canonicalName}: organization-wide ${nextEnabled ? 'enabled' : 'disabled'}.`,
       });
       await refresh();
     } catch (err) {
@@ -287,7 +294,7 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
             'aria-label': `Review ${draft.canonicalName}`,
           },
           createElement('strong', null, `${draft.canonicalName} · ${symbolIdLabelOrState(draft)}`),
-          createElement('p', { className: 'set-admin-muted' }, `Submitted ${new Date(draft.currentRevision.pendingSubmissionSubmittedAt).toLocaleString()}`),
+          createElement('p', { className: 'set-admin-muted' }, `${workingRevision(draft).pending ? 'New revision · ' : ''}Submitted ${new Date(workingRevision(draft).revision.pendingSubmissionSubmittedAt).toLocaleString()}`),
           ),
         )),
       ),
@@ -295,15 +302,21 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
         ? createElement(
           'div',
           { className: 'organization-symbol-review-detail' },
-          createElement('h3', null, activeDraft.canonicalName),
-          createElement('p', { className: 'set-admin-muted' }, `Category: ${activeDraft.category} · Discipline: ${activeDraft.discipline}`),
-          createElement('p', null, activeDraft.currentRevision.summary),
-          activeDraft.currentRevision.description
-            ? createElement('p', { className: 'set-admin-muted' }, activeDraft.currentRevision.description)
+          createElement('h3', null, activeWorking.pending ? (activeRevision.name || activeDraft.canonicalName) : activeDraft.canonicalName),
+          activeWorking.pending
+            ? createElement('p', { className: 'set-admin-muted' }, `New revision of the published symbol ${activeDraft.canonicalName}. Approving it replaces the published version in the organization library.`)
             : null,
-          createElement('p', { className: 'set-admin-muted' }, `Assets: ${(activeDraft.currentRevision.assets || []).map((asset) => asset.filename).join(', ') || 'none'}`),
-          activeDraft.currentRevision.pendingSubmissionRationale
-            ? createElement('p', { className: 'set-admin-muted' }, `Submitter rationale: ${activeDraft.currentRevision.pendingSubmissionRationale}`)
+          createElement('p', { className: 'set-admin-muted' }, `Category: ${(activeWorking.pending && activeRevision.category) || activeDraft.category} · Discipline: ${(activeWorking.pending && activeRevision.discipline) || activeDraft.discipline}`),
+          createElement('p', null, activeRevision.summary),
+          activeRevision.description
+            ? createElement('p', { className: 'set-admin-muted' }, activeRevision.description)
+            : null,
+          createElement('p', { className: 'set-admin-muted' }, `Assets: ${(activeRevision.assets || []).map((asset) => asset.filename).join(', ') || 'none'}`),
+          activeRevision.pendingSubmissionRationale
+            ? createElement('p', { className: 'set-admin-muted' }, `Submitter rationale: ${activeRevision.pendingSubmissionRationale}`)
+            : null,
+          workflowV2
+            ? createElement('p', { className: 'set-admin-muted' }, 'Approving publishes it to the organization library. Rejecting is final for this revision; request changes to let the submitter edit and resubmit.')
             : null,
           createElement('label', { htmlFor: `review-rationale-${activeDraft.id}` },
             'Decision rationale (optional)',
@@ -338,7 +351,7 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
     createElement(
       'section',
       { className: 'organization-symbol-wide-scope-section', 'aria-labelledby': 'organization-symbol-wide-scope-heading' },
-      createElement('h3', { id: 'organization-symbol-wide-scope-heading' }, 'Organization-wide scope'),
+      createElement('h3', { id: 'organization-symbol-wide-scope-heading' }, workflowV2 ? 'Organization library' : 'Organization-wide scope'),
       !loading && !error && approvedSymbols.length === 0
         ? createElement('p', { role: 'status' }, 'No approved organization symbols yet.')
         : null,
@@ -354,15 +367,19 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
               null,
               createElement('strong', null, `${draft.canonicalName} · ${symbolIdLabelOrState(draft)}`),
               createElement('p', { className: 'set-admin-muted' },
-                `Category: ${draft.category} · Discipline: ${draft.discipline} · ${draft.organizationWide ? 'Organization-wide' : 'Set-only'}`),
+                `Category: ${draft.category} · Discipline: ${draft.discipline} · ${draft.organizationWide ? (workflowV2 ? 'In the library' : 'Organization-wide') : (workflowV2 ? 'Removed from the library (Set-only)' : 'Set-only')}`),
             ),
             createElement('button', {
               type: 'button',
               disabled: togglingSymbolId === draft.id,
               onClick: () => toggleOrganizationWide(draft),
               'aria-pressed': Boolean(draft.organizationWide),
-              'aria-label': `${draft.organizationWide ? 'Disable' : 'Enable'} organization-wide scope for ${draft.canonicalName}`,
-            }, togglingSymbolId === draft.id ? 'Working…' : (draft.organizationWide ? 'Disable organization-wide' : 'Enable organization-wide')),
+              'aria-label': workflowV2
+                ? `${draft.organizationWide ? 'Remove' : 'Restore'} ${draft.canonicalName} ${draft.organizationWide ? 'from' : 'to'} the organization library`
+                : `${draft.organizationWide ? 'Disable' : 'Enable'} organization-wide scope for ${draft.canonicalName}`,
+            }, togglingSymbolId === draft.id ? 'Working…' : (workflowV2
+              ? (draft.organizationWide ? 'Remove from library' : 'Restore to library')
+              : (draft.organizationWide ? 'Disable organization-wide' : 'Enable organization-wide'))),
           )),
         )
         : null,

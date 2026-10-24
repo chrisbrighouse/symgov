@@ -911,6 +911,11 @@ class GovernedSymbol(Base):
             "catalog_symbol_id is null or visibility = 'public'",
             name="catalog_symbol_visibility_barrier",
         ),
+        CheckConstraint(
+            "pending_revision_id is null"
+            " or (visibility = 'organization_private' and pending_revision_id is distinct from current_revision_id)",
+            name="pending_revision_scope",
+        ),
         Index(
             "ix_governed_symbols_owner_visibility_organization_wide",
             "owner_organization_id",
@@ -932,6 +937,13 @@ class GovernedSymbol(Base):
     visibility: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'public'"))
     organization_wide: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     current_revision_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("symbol_revisions.id"), nullable=True)
+    # The next revision of a published private symbol while it is reviewed;
+    # `current_revision_id` stays the published one until this is approved.
+    pending_revision_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("symbol_revisions.id", name="fk_governed_symbols_pending_revision_id_symbol_revisions"),
+        nullable=True,
+    )
     created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -1485,7 +1497,7 @@ class SymbolRevision(Base):
     __tablename__ = "symbol_revisions"
     __table_args__ = (
         CheckConstraint(
-            "lifecycle_state in ('draft', 'review', 'approved', 'published', 'deprecated', 'withdrawn')",
+            "lifecycle_state in ('draft', 'review', 'approved', 'published', 'deprecated', 'withdrawn', 'rejected')",
             name="lifecycle_state",
         ),
         Index("uq_symbol_revisions_symbol_revision_label", "symbol_id", "revision_label", unique=True),
@@ -1508,6 +1520,11 @@ class OrganizationSymbolReviewSubmission(Base):
         CheckConstraint(
             "(status = 'active' and closed_at is null) or (status = 'closed' and closed_at is not null)",
             name="status",
+        ),
+        CheckConstraint(
+            "(status = 'active' and closure_reason is null)"
+            " or (status = 'closed' and closure_reason in ('decided', 'withdrawn'))",
+            name="closure_reason",
         ),
         CheckConstraint(
             "rationale is null or (btrim(rationale) <> '' and char_length(rationale) <= 2000)",
@@ -1536,6 +1553,8 @@ class OrganizationSymbolReviewSubmission(Base):
     rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
     closed_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # `decided` (a reviewer decided it) or `withdrawn` (the submitter withdrew it).
+    closure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class OrganizationSymbolReviewDecision(Base):

@@ -68,7 +68,7 @@ from symgov_backend.semantic_review import (  # noqa: E402
 
 # Must track head: the queue reads tables SM-P0-04 added and the ORM is one
 # global object that always reflects head.
-MIGRATION_HEAD = "20260911_0057"
+MIGRATION_HEAD = "20261024_0076"
 
 psycopg = pytest.importorskip("psycopg")
 

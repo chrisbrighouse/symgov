@@ -142,7 +142,9 @@ def _database_names(connection) -> dict[str, set[str]]:
 @pytest.fixture(scope="module")
 def repaired_database():
     with _database("symgov-name-repair") as (engine, url, raw_url):
-        _alembic(url, "upgrade", REPAIR_REVISION)
+        # Head, not REPAIR_REVISION: the guard compares the database with the
+        # *current* schema.py, so it must see every later migration too.
+        _alembic(url, "upgrade", "head")
         yield engine, url
 
 
@@ -425,8 +427,9 @@ def test_the_repair_round_trips_through_a_downgrade():
                 f"downgrade did not restore {table}'s deployed constraint names"
             )
 
-        # And a re-upgrade must land back on the ORM's names.
-        _alembic(url, "upgrade", REPAIR_REVISION)
+        # And a re-upgrade must land back on the ORM's names. Head, because
+        # later migrations add constraints the ORM already declares.
+        _alembic(url, "upgrade", "head")
         with engine.begin() as connection:
             final = _database_names(connection)
         for table in sorted(_REPAIRED_TABLE_NAMES):

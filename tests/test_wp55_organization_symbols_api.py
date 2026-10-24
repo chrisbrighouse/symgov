@@ -35,6 +35,7 @@ from symgov_backend.app import create_app
 from symgov_backend.auth import upsert_user
 from symgov_backend.dependencies import get_db_session
 from symgov_backend.models import (
+    AuditEvent,
     AuthLoginAttemptEvent,
     AuthLoginThrottleBucket,
     AuthOrganizationSelectionChallenge,
@@ -91,6 +92,7 @@ def _create_tables(engine) -> None:
         GovernedSymbol.__table__,
         SymbolRevision.__table__,
         OrganizationSymbolReviewSubmission.__table__,
+        AuditEvent.__table__,
         OrganizationSymbolReviewDecision.__table__,
     ):
         # Several WP5.1 check constraints use Postgres-only functions
@@ -98,13 +100,21 @@ def _create_tables(engine) -> None:
         # and the real enforcement is already proven against Postgres by
         # WP5.3/WP5.4. This test only needs the table shape.
         original_constraints = table.constraints
+        original_defaults = {}
         try:
             table.constraints = {
                 item for item in original_constraints if not isinstance(item, CheckConstraint)
             }
+            # audit_events.payload_json defaults to '{}'::jsonb, which SQLite cannot parse.
+            for column in table.columns:
+                if column.server_default is not None and "::jsonb" in str(column.server_default.arg):
+                    original_defaults[column.name] = column.server_default
+                    column.server_default = None
             table.create(engine)
         finally:
             table.constraints = original_constraints
+            for column_name, default in original_defaults.items():
+                table.columns[column_name].server_default = default
 
 
 def _build_client():

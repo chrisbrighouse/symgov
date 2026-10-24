@@ -151,7 +151,7 @@ def two_organizations(stage5_database):
     # decide_submission / set_organization_wide (shared, widely-tested
     # functions this file exercises directly). Applied locally, not by
     # bumping the shared `stage5_database` fixture itself.
-    _alembic(url, "upgrade", "20260904_0039")
+    _alembic(url, "upgrade", "head")
     with engine.begin() as connection:
         user_a = _user(connection, "tenant-a")
         user_b = _user(connection, "tenant-b")

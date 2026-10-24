@@ -186,6 +186,13 @@ class SymgovAPISettings:
         "yes",
         "on",
     }
+    # Unified submission & review, WP2 onward: draft editing, withdrawal,
+    # terminal rejection, publish-on-approval and pending revisions for
+    # organization-private symbols. Off by default; with it off the private
+    # workflow behaves exactly as before.
+    organization_symbol_workflow_v2_enabled: bool = os.environ.get(
+        "SYMGOV_ORGANIZATION_SYMBOL_WORKFLOW_V2_ENABLED", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
     # Organization API keys (WP-A): issued by an organization admin to a member.
     organization_api_keys_enabled: bool = os.environ.get("SYMGOV_ORGANIZATION_API_KEYS_ENABLED", "").strip().lower() in {
         "1",

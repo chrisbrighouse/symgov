@@ -31,13 +31,23 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import AuthenticatedUser
-from .models import GovernedSymbol, OrganizationSymbolReviewDecision, OrganizationSymbolReviewSubmission, SymbolRevision
+from .models import (
+    GovernedSymbol,
+    OrganizationSymbolReviewDecision,
+    OrganizationSymbolReviewSubmission,
+    PromotionRequest,
+    SymbolRevision,
+)
+from .organization_symbol_drafts import record_organization_symbol_audit
 from .product_usage_events import record_governance_usage_event
+
+# Promotion requests still open; a new revision cannot start while one is.
+ACTIVE_PROMOTION_STATUSES = ("submitted", "triage", "in_review", "changes_requested")
 
 DECISIONS = ("approved", "rejected", "changes_requested")
 
@@ -109,7 +119,15 @@ def decide_submission(
     submission_id: uuid.UUID,
     decision: str,
     rationale: str | None = None,
+    workflow_v2: bool = False,
 ) -> OrganizationSymbolReviewDecision:
+    """Decide an active submission.
+
+    With `workflow_v2` (spec draft 2 FR7/FR9): rejection is final for the
+    revision; approval publishes it to the organization's library
+    (organization-wide); and approving a pending revision makes it the
+    symbol's current one.
+    """
     organization_id = _active_organization_id(current_user)
     _require_reviewer(current_user)
 
@@ -141,6 +159,7 @@ def decide_submission(
     session.add(decision_row)
     submission.status = "closed"
     submission.closed_at = now
+    submission.closure_reason = "decided"
 
     try:
         session.flush()
@@ -153,8 +172,31 @@ def decide_submission(
         ) from exc
 
     revision = session.get(SymbolRevision, submission.symbol_revision_id)
+    symbol = session.get(GovernedSymbol, submission.governed_symbol_id)
     if revision is not None:
-        revision.lifecycle_state = "approved" if decision == "approved" else "draft"
+        if decision == "approved":
+            revision.lifecycle_state = "approved"
+        elif decision == "rejected" and workflow_v2:
+            revision.lifecycle_state = "rejected"
+        else:
+            revision.lifecycle_state = "draft"
+    if workflow_v2 and symbol is not None and revision is not None:
+        is_pending = symbol.pending_revision_id == revision.id
+        if decision == "approved":
+            if is_pending:
+                payload = revision.payload_json or {}
+                symbol.current_revision_id = revision.id
+                symbol.pending_revision_id = None
+                symbol.canonical_name = payload.get("name") or symbol.canonical_name
+                symbol.category = payload.get("category") or symbol.category
+                symbol.discipline = payload.get("discipline") or symbol.discipline
+            else:
+                # First approval publishes to the library. A pending revision
+                # keeps whatever library setting the organization chose.
+                symbol.organization_wide = True
+        elif decision == "rejected" and is_pending:
+            symbol.pending_revision_id = None
+        symbol.updated_at = now
     record_governance_usage_event(
         session,
         event_type="organization_review_decided",
@@ -165,6 +207,16 @@ def decide_submission(
         symbol_source="organization_private",
     )
     session.flush()
+    if symbol is not None:
+        record_organization_symbol_audit(
+            session, current_user, action="org_symbol.decided", symbol=symbol,
+            revision_id=submission.symbol_revision_id, submission_id=submission.id,
+            details={
+                "decision": decision,
+                "rationale": clean_rationale,
+                "published_to_library": bool(workflow_v2 and decision == "approved"),
+            },
+        )
     return decision_row
 
 
@@ -173,8 +225,13 @@ def create_new_draft_revision(
     current_user: AuthenticatedUser,
     *,
     symbol_id: uuid.UUID,
+    workflow_v2: bool = False,
 ) -> tuple[GovernedSymbol, SymbolRevision]:
     """Start a fresh review cycle after approval (or after changes/rejection).
+
+    With `workflow_v2`, a new revision of a published symbol (current revision
+    approved) is held as `pending_revision_id`: the published revision stays
+    current, and stays in the library, until the new one is approved.
 
     Per the plan, mutation after approval must not edit the approved
     revision in place — it must create a new draft revision that requires
@@ -194,7 +251,10 @@ def create_new_draft_revision(
         raise OrganizationSymbolReviewNotVisible()
 
     base_revision = session.get(SymbolRevision, symbol.current_revision_id) if symbol.current_revision_id else None
-    if base_revision is not None and base_revision.lifecycle_state not in ("approved", "draft", "withdrawn"):
+    allowed_base_states = ("approved", "draft", "withdrawn", "rejected") if workflow_v2 else ("approved", "draft", "withdrawn")
+    if symbol.pending_revision_id is not None:
+        raise OrganizationSymbolReviewError("This symbol already has a new revision in progress.")
+    if base_revision is not None and base_revision.lifecycle_state not in allowed_base_states:
         # 'review' means an active submission still exists for the current
         # revision — creating a parallel draft would orphan it. 'published'
         # is not an organization-private lifecycle state (a currently
@@ -209,8 +269,22 @@ def create_new_draft_revision(
             "Cannot start a new draft revision while the current revision is still under review."
         )
 
+    pending = workflow_v2 and base_revision is not None and base_revision.lifecycle_state == "approved"
+    if pending and session.execute(
+        select(PromotionRequest.id).where(
+            PromotionRequest.governed_symbol_id == symbol.id,
+            PromotionRequest.status.in_(ACTIVE_PROMOTION_STATUSES),
+        )
+    ).first() is not None:
+        raise OrganizationSymbolReviewError(
+            "This symbol has an open promotion request; withdraw it or wait for the decision before starting a new revision."
+        )
+
     now = _utc_now()
     payload_json = dict((base_revision.payload_json if base_revision is not None else {}) or {})
+    payload_json.setdefault("name", symbol.canonical_name)
+    payload_json.setdefault("category", symbol.category)
+    payload_json.setdefault("discipline", symbol.discipline)
     new_revision = SymbolRevision(
         id=uuid.uuid4(),
         symbol_id=symbol.id,
@@ -224,11 +298,56 @@ def create_new_draft_revision(
     session.add(new_revision)
     session.flush()
 
-    symbol.current_revision_id = new_revision.id
-    symbol.organization_wide = False
+    if pending:
+        symbol.pending_revision_id = new_revision.id
+    else:
+        symbol.current_revision_id = new_revision.id
+        symbol.organization_wide = False
     symbol.updated_at = now
     session.flush()
+    record_organization_symbol_audit(
+        session, current_user, action="org_symbol.revision_created", symbol=symbol, revision_id=new_revision.id,
+        details={"based_on_revision_id": str(base_revision.id) if base_revision is not None else None, "pending": pending},
+    )
     return symbol, new_revision
+
+
+def discard_pending_revision(
+    session: Session,
+    current_user: AuthenticatedUser,
+    *,
+    symbol_id: uuid.UUID,
+) -> GovernedSymbol:
+    """Abandon a published symbol's pending revision while it is still a draft.
+
+    The revision row is kept (as `withdrawn`) so its history stays readable;
+    the published revision is untouched.
+    """
+    organization_id = _active_organization_id(current_user)
+    symbol = session.get(GovernedSymbol, symbol_id, with_for_update=True)
+    if (
+        symbol is None
+        or symbol.owner_organization_id != organization_id
+        or symbol.visibility != "organization_private"
+    ):
+        raise OrganizationSymbolReviewNotVisible()
+    if symbol.owner_id != uuid.UUID(current_user.id) and current_user.organization_base_role != "admin":
+        raise OrganizationSymbolReviewNotVisible()
+    if symbol.pending_revision_id is None:
+        raise OrganizationSymbolReviewError("This symbol has no new revision in progress.")
+    revision = session.get(SymbolRevision, symbol.pending_revision_id)
+    if revision is not None and revision.lifecycle_state != "draft":
+        raise OrganizationSymbolReviewError("Withdraw the submission before discarding the new revision.")
+    if revision is not None:
+        revision.lifecycle_state = "withdrawn"
+    symbol.pending_revision_id = None
+    symbol.updated_at = _utc_now()
+    session.flush()
+    record_organization_symbol_audit(
+        session, current_user, action="org_symbol.revision_discarded", symbol=symbol,
+        revision_id=revision.id if revision is not None else None,
+    )
+    return symbol
 
 
 def set_organization_wide(
@@ -272,5 +391,9 @@ def set_organization_wide(
         governed_symbol_id=symbol.id,
         symbol_revision_id=symbol.current_revision_id,
         symbol_source="organization_private",
+    )
+    record_organization_symbol_audit(
+        session, current_user, action="org_symbol.library_changed", symbol=symbol,
+        revision_id=symbol.current_revision_id, details={"organization_wide": enabled},
     )
     return symbol

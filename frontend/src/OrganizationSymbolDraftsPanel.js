@@ -3,8 +3,14 @@ import { createElement, useCallback, useEffect, useState } from 'react';
 import {
   attachOrganizationSymbolAsset,
   createOrganizationSymbolDraft,
+  discardOrganizationSymbolPendingRevision,
+  fetchOrganizationSymbolHistory,
   listOrganizationSymbolDrafts,
+  removeOrganizationSymbolAsset,
+  startOrganizationSymbolRevision,
   submitOrganizationSymbolDraftForReview,
+  updateOrganizationSymbolDraft,
+  withdrawOrganizationSymbolSubmission,
 } from './api.js';
 import { CATALOG_DISCIPLINE_ORDER, symbolIdLabelOrState } from './catalogWorkbench.js';
 import { normalizeFacetValues } from './projectContext.js';
@@ -14,7 +20,59 @@ const DEFAULT_API = {
   createDraft: createOrganizationSymbolDraft,
   attachAsset: attachOrganizationSymbolAsset,
   submitForReview: submitOrganizationSymbolDraftForReview,
+  updateDraft: updateOrganizationSymbolDraft,
+  removeAsset: removeOrganizationSymbolAsset,
+  withdrawSubmission: withdrawOrganizationSymbolSubmission,
+  fetchHistory: fetchOrganizationSymbolHistory,
+  startRevision: startOrganizationSymbolRevision,
+  discardPendingRevision: discardOrganizationSymbolPendingRevision,
 };
+
+// The revision being worked on: a published symbol's pending revision when it
+// has one, otherwise its current revision.
+export function workingRevision(draft) {
+  if (draft?.pendingRevision) return { id: draft.pendingRevisionId, revision: draft.pendingRevision, pending: true };
+  return { id: draft?.currentRevisionId || '', revision: draft?.currentRevision || null, pending: false };
+}
+
+const LIFECYCLE_LABELS = {
+  draft: 'Draft',
+  review: 'In review',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  withdrawn: 'Withdrawn',
+};
+
+export function lifecycleLabel(draft) {
+  const current = draft?.currentRevision?.lifecycleState;
+  if (current === 'approved' && draft.organizationWide) return 'Published to the organization library';
+  if (current === 'approved') return 'Approved (Set-only)';
+  return LIFECYCLE_LABELS[current] || current || 'none';
+}
+
+const HISTORY_OUTCOME_LABELS = {
+  active: 'Awaiting review',
+  withdrawn: 'Withdrawn',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  changes_requested: 'Changes requested',
+};
+
+function formatWhen(value) {
+  return value ? new Date(value).toLocaleString() : '';
+}
+
+function editFormFor(draft, revision) {
+  return {
+    name: revision?.name || draft.canonicalName || '',
+    category: revision?.category || draft.category || '',
+    discipline: revision?.discipline || draft.discipline || '',
+    summary: revision?.summary || '',
+    description: revision?.description || '',
+    aliases: (revision?.aliases || []).join(', '),
+    keywords: (revision?.keywords || []).join(', '),
+  };
+}
 
 function StatusMessage({ status }) {
   if (!status?.message) return null;
@@ -50,7 +108,7 @@ function readFileAsBase64(file) {
   });
 }
 
-export function OrganizationSymbolDraftsPanel({ canCreate = false, api = DEFAULT_API }) {
+export function OrganizationSymbolDraftsPanel({ canCreate = false, workflowV2 = false, currentUserId = '', api = DEFAULT_API }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [status, setStatus] = useState({ mode: '', message: '' });
@@ -102,13 +160,30 @@ export function OrganizationSymbolDraftsPanel({ canCreate = false, api = DEFAULT
     }
   }
 
+  async function runAction(draft, action, successMessage) {
+    setBusyDraftId(draft.id);
+    setStatus({ mode: '', message: '' });
+    try {
+      await action();
+      setStatus({ mode: 'success', message: successMessage });
+      await refresh();
+      return true;
+    } catch (err) {
+      setStatus({ mode: 'error', message: err.message || 'That did not work.' });
+      return false;
+    } finally {
+      setBusyDraftId('');
+    }
+  }
+
   async function uploadAsset(draft, file) {
-    if (!file || !draft.currentRevisionId) return;
+    const working = workingRevision(draft);
+    if (!file || !working.id) return;
     setBusyDraftId(draft.id);
     setStatus({ mode: '', message: '' });
     try {
       const contentBase64 = await readFileAsBase64(file);
-      await api.attachAsset(draft.id, draft.currentRevisionId, {
+      await api.attachAsset(draft.id, working.id, {
         filename: file.name,
         contentType: file.type || 'application/octet-stream',
         contentBase64,
@@ -124,12 +199,13 @@ export function OrganizationSymbolDraftsPanel({ canCreate = false, api = DEFAULT
   }
 
   async function submitForReview(draft) {
-    if (!draft.currentRevisionId) return;
+    const working = workingRevision(draft);
+    if (!working.id) return;
     setBusyDraftId(draft.id);
     setStatus({ mode: '', message: '' });
     try {
       const rationale = (rationaleByDraftId[draft.id] || '').trim();
-      await api.submitForReview(draft.id, draft.currentRevisionId, rationale ? { rationale } : {});
+      await api.submitForReview(draft.id, working.id, rationale ? { rationale } : {});
       setStatus({ mode: 'success', message: `${draft.canonicalName} submitted for organization review.` });
       setRationaleByDraftId((current) => ({ ...current, [draft.id]: '' }));
       await refresh();
@@ -156,60 +232,19 @@ export function OrganizationSymbolDraftsPanel({ canCreate = false, api = DEFAULT
     createElement(
       'ul',
       { className: 'set-admin-list' },
-      drafts.map((draft) => {
-        const revision = draft.currentRevision;
-        const canAct = draft.currentRevisionId && revision?.lifecycleState === 'draft';
-        return createElement(
-          'li',
-          { key: draft.id, className: 'set-admin-item' },
-          createElement(
-            'div',
-            null,
-            createElement('strong', null, `${draft.canonicalName} · ${symbolIdLabelOrState(draft)}`),
-            createElement('p', { className: 'set-admin-muted' }, `Category: ${draft.category} · Discipline: ${draft.discipline}`),
-            createElement('p', { className: 'set-admin-muted' }, `Revision status: ${revision?.lifecycleState || 'none'}`),
-            revision?.pendingSubmissionId
-              ? createElement('p', { className: 'set-admin-muted' }, `Awaiting organization review (submitted ${new Date(revision.pendingSubmissionSubmittedAt).toLocaleString()}).`)
-              : null,
-            createElement('p', { className: 'set-admin-muted' }, `Assets: ${(revision?.assets || []).map((asset) => asset.filename).join(', ') || 'none'}`),
-            createElement('p', { className: 'set-admin-muted' }, `Updated: ${new Date(draft.updatedAt).toLocaleString()}`),
-          ),
-          canAct
-            ? createElement(
-              'div',
-              { className: 'set-admin-actions' },
-              createElement('label', { htmlFor: `asset-upload-${draft.id}` },
-                'Attach asset',
-                createElement('input', {
-                  id: `asset-upload-${draft.id}`,
-                  type: 'file',
-                  disabled: busyDraftId === draft.id,
-                  onChange: (event) => {
-                    const file = event.target.files?.[0];
-                    event.target.value = '';
-                    if (file) uploadAsset(draft, file);
-                  },
-                  'aria-label': `Attach asset to ${draft.canonicalName}`,
-                }),
-              ),
-              createElement('label', { htmlFor: `submit-rationale-${draft.id}` },
-                'Submission rationale (optional)',
-                createElement('input', {
-                  id: `submit-rationale-${draft.id}`,
-                  value: rationaleByDraftId[draft.id] || '',
-                  onChange: (event) => setRationaleByDraftId((current) => ({ ...current, [draft.id]: event.target.value })),
-                }),
-              ),
-              createElement('button', {
-                type: 'button',
-                disabled: busyDraftId === draft.id,
-                onClick: () => submitForReview(draft),
-                'aria-label': `Submit ${draft.canonicalName} for organization review`,
-              }, busyDraftId === draft.id ? 'Working…' : 'Submit for review'),
-            )
-            : null,
-        );
-      }),
+      drafts.map((draft) => createElement(DraftItem, {
+        key: draft.id,
+        draft,
+        workflowV2,
+        currentUserId,
+        api,
+        busy: busyDraftId === draft.id,
+        rationale: rationaleByDraftId[draft.id] || '',
+        onRationaleChange: (value) => setRationaleByDraftId((current) => ({ ...current, [draft.id]: value })),
+        onUploadAsset: (file) => uploadAsset(draft, file),
+        onSubmit: () => submitForReview(draft),
+        runAction: (action, message) => runAction(draft, action, message),
+      })),
     ),
     error
       ? createElement('button', { type: 'button', onClick: () => { refresh(); }, 'aria-label': 'Retry organization symbol drafts' }, 'Retry')
@@ -292,6 +327,221 @@ export function OrganizationSymbolDraftsPanel({ canCreate = false, api = DEFAULT
         createElement('div', { className: 'set-admin-actions' },
           createElement('button', { type: 'submit', disabled: saving, 'aria-label': 'Create organization symbol draft' }, saving ? 'Saving…' : 'Create draft'),
         ),
+      )
+      : null,
+  );
+}
+
+function DraftItem({ draft, workflowV2, currentUserId, api, busy, rationale, onRationaleChange, onUploadAsset, onSubmit, runAction }) {
+  const [editForm, setEditForm] = useState(null);
+  const [history, setHistory] = useState(null);
+  const [historyError, setHistoryError] = useState('');
+  const working = workingRevision(draft);
+  const revision = working.revision;
+  const isDraft = Boolean(working.id) && revision?.lifecycleState === 'draft';
+  const current = draft.currentRevision;
+  const canStartRevision = workflowV2 && !draft.pendingRevision
+    && ['approved', 'rejected'].includes(current?.lifecycleState);
+  const canWithdraw = workflowV2 && revision?.pendingSubmissionId
+    && revision.pendingSubmissionSubmittedByUserId === currentUserId;
+  const name = draft.canonicalName;
+
+  async function saveEdit(event) {
+    event?.preventDefault?.();
+    const saved = await runAction(
+      () => api.updateDraft(draft.id, working.id, {
+        name: editForm.name.trim(),
+        category: editForm.category.trim(),
+        discipline: editForm.discipline.trim(),
+        summary: editForm.summary.trim(),
+        description: editForm.description.trim(),
+        aliases: normalizeFacetValues(editForm.aliases),
+        keywords: normalizeFacetValues(editForm.keywords),
+      }),
+      `${editForm.name.trim() || name} saved.`,
+    );
+    if (saved) setEditForm(null);
+  }
+
+  async function toggleHistory() {
+    if (history) {
+      setHistory(null);
+      return;
+    }
+    setHistoryError('');
+    try {
+      const next = await api.fetchHistory(draft.id);
+      setHistory(next.items || []);
+    } catch (err) {
+      setHistoryError(err.message || 'Review history unavailable.');
+    }
+  }
+
+  function field(key, label, { multiline = false, required = false } = {}) {
+    const id = `org-symbol-edit-${draft.id}-${key}`;
+    return createElement('label', { htmlFor: id },
+      label,
+      createElement(multiline ? 'textarea' : 'input', {
+        id,
+        rows: multiline ? 2 : undefined,
+        value: editForm[key],
+        required,
+        onChange: (event) => setEditForm((form) => ({ ...form, [key]: event.target.value })),
+      }),
+    );
+  }
+
+  return createElement(
+    'li',
+    { className: 'set-admin-item' },
+    createElement(
+      'div',
+      null,
+      createElement('strong', null, `${name} · ${symbolIdLabelOrState(draft)}`),
+      createElement('p', { className: 'set-admin-muted' }, `Category: ${draft.category} · Discipline: ${draft.discipline}`),
+      createElement('p', { className: 'set-admin-muted' }, workflowV2 ? `Status: ${lifecycleLabel(draft)}` : `Revision status: ${current?.lifecycleState || 'none'}`),
+      working.pending
+        ? createElement('p', { className: 'set-admin-muted' }, `New revision in progress: ${LIFECYCLE_LABELS[revision?.lifecycleState] || revision?.lifecycleState}. The published version stays in the library until it is approved.`)
+        : null,
+      revision?.pendingSubmissionId
+        ? createElement('p', { className: 'set-admin-muted' }, `Awaiting organization review (submitted ${formatWhen(revision.pendingSubmissionSubmittedAt)}).`)
+        : null,
+      workflowV2
+        ? createElement('div', { className: 'set-admin-muted' },
+          'Files: ',
+          (revision?.assets || []).length === 0 ? 'none' : null,
+          ...(revision?.assets || []).map((asset) => createElement('span', { key: asset.id, className: 'organization-symbol-asset' },
+            asset.filename,
+            isDraft
+              ? createElement('button', {
+                type: 'button',
+                className: 'action-button compact',
+                disabled: busy,
+                onClick: () => runAction(() => api.removeAsset(draft.id, working.id, asset.id), `${asset.filename} removed.`),
+                'aria-label': `Remove ${asset.filename} from ${name}`,
+              }, 'Remove')
+              : null,
+          )),
+        )
+        : createElement('p', { className: 'set-admin-muted' }, `Assets: ${(revision?.assets || []).map((asset) => asset.filename).join(', ') || 'none'}`),
+      createElement('p', { className: 'set-admin-muted' }, `Updated: ${formatWhen(draft.updatedAt)}`),
+    ),
+    editForm
+      ? createElement('form', { className: 'set-admin-form', onSubmit: saveEdit, 'aria-label': `Edit ${name}` },
+        field('name', 'Symbol name', { required: true }),
+        field('category', 'Category', { required: true }),
+        createElement('label', { htmlFor: `org-symbol-edit-${draft.id}-discipline` },
+          'Discipline',
+          createElement('select', {
+            id: `org-symbol-edit-${draft.id}-discipline`,
+            value: editForm.discipline,
+            required: true,
+            onChange: (event) => setEditForm((form) => ({ ...form, discipline: event.target.value })),
+          },
+            ...CATALOG_DISCIPLINE_ORDER.map((option) => createElement('option', { key: option, value: option }, option)),
+          ),
+        ),
+        field('summary', 'Summary', { multiline: true, required: true }),
+        field('description', 'Description (optional)', { multiline: true }),
+        field('aliases', 'Aliases', { multiline: true }),
+        field('keywords', 'Keywords', { multiline: true }),
+        createElement('div', { className: 'set-admin-actions' },
+          createElement('button', { type: 'submit', disabled: busy }, busy ? 'Saving…' : 'Save changes'),
+          createElement('button', { type: 'button', onClick: () => setEditForm(null) }, 'Cancel'),
+        ),
+      )
+      : null,
+    createElement(
+      'div',
+      { className: 'set-admin-actions' },
+      isDraft
+        ? createElement('label', { htmlFor: `asset-upload-${draft.id}` },
+          'Attach asset',
+          createElement('input', {
+            id: `asset-upload-${draft.id}`,
+            type: 'file',
+            disabled: busy,
+            onChange: (event) => {
+              const file = event.target.files?.[0];
+              event.target.value = '';
+              if (file) onUploadAsset(file);
+            },
+            'aria-label': `Attach asset to ${name}`,
+          }),
+        )
+        : null,
+      isDraft && workflowV2 && !editForm
+        ? createElement('button', {
+          type: 'button',
+          disabled: busy,
+          onClick: () => setEditForm(editFormFor(draft, revision)),
+          'aria-label': `Edit details of ${name}`,
+        }, 'Edit details')
+        : null,
+      isDraft
+        ? createElement('label', { htmlFor: `submit-rationale-${draft.id}` },
+          'Submission rationale (optional)',
+          createElement('input', {
+            id: `submit-rationale-${draft.id}`,
+            value: rationale,
+            onChange: (event) => onRationaleChange(event.target.value),
+          }),
+        )
+        : null,
+      isDraft
+        ? createElement('button', {
+          type: 'button',
+          disabled: busy,
+          onClick: onSubmit,
+          'aria-label': `Submit ${name} for organization review`,
+        }, busy ? 'Working…' : 'Submit for review')
+        : null,
+      canWithdraw
+        ? createElement('button', {
+          type: 'button',
+          disabled: busy,
+          onClick: () => runAction(() => api.withdrawSubmission(draft.id, revision.pendingSubmissionId), `${name} withdrawn from review.`),
+          'aria-label': `Withdraw ${name} from review`,
+        }, 'Withdraw')
+        : null,
+      canStartRevision
+        ? createElement('button', {
+          type: 'button',
+          disabled: busy,
+          onClick: () => runAction(() => api.startRevision(draft.id), `New revision of ${name} started.`),
+          'aria-label': `Start a new revision of ${name}`,
+        }, 'Start new revision')
+        : null,
+      workflowV2 && working.pending && isDraft && !revision?.pendingSubmissionId
+        ? createElement('button', {
+          type: 'button',
+          disabled: busy,
+          onClick: () => runAction(() => api.discardPendingRevision(draft.id), `New revision of ${name} discarded.`),
+          'aria-label': `Discard the new revision of ${name}`,
+        }, 'Discard new revision')
+        : null,
+      workflowV2
+        ? createElement('button', {
+          type: 'button',
+          onClick: toggleHistory,
+          'aria-expanded': Boolean(history),
+          'aria-label': `${history ? 'Hide' : 'Show'} review history of ${name}`,
+        }, history ? 'Hide history' : 'Review history')
+        : null,
+    ),
+    historyError ? createElement('p', { role: 'alert', className: 'set-admin-status error' }, historyError) : null,
+    history
+      ? createElement('ol', { className: 'organization-symbol-history', 'aria-label': `Review history of ${name}` },
+        history.length === 0 ? createElement('li', null, 'Not submitted yet.') : null,
+        ...history.map((entry) => createElement('li', { key: entry.submissionId },
+          createElement('strong', null, HISTORY_OUTCOME_LABELS[entry.outcome] || entry.outcome),
+          ` · submitted by ${entry.submittedByName || 'unknown'} ${formatWhen(entry.submittedAt)}`,
+          entry.closedAt && entry.outcome !== 'active'
+            ? ` · ${entry.outcome === 'withdrawn' ? 'withdrawn' : `decided by ${entry.decidedByName || 'unknown'}`} ${formatWhen(entry.closedAt)}`
+            : null,
+          entry.submissionRationale ? createElement('p', { className: 'set-admin-muted' }, `Submitter: ${entry.submissionRationale}`) : null,
+          entry.decisionRationale ? createElement('p', { className: 'set-admin-muted' }, `Reviewer: ${entry.decisionRationale}`) : null,
+        )),
       )
       : null,
   );

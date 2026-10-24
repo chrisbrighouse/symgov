@@ -627,6 +627,54 @@ export async function submitOrganizationSymbolDraftForReview(symbolId, revisionI
   return requireOk(result, 'Organization symbol submission failed.');
 }
 
+// --- Unified submission & review WP2 (organizationSymbolWorkflowV2Enabled) ---
+
+export async function updateOrganizationSymbolDraft(symbolId, revisionId, payload) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/revisions/${encodeURIComponent(revisionId)}`,
+    { method: 'PATCH', body: JSON.stringify(payload) }
+  );
+  return requireOk(result, 'Organization symbol draft update failed.');
+}
+
+export async function removeOrganizationSymbolAsset(symbolId, revisionId, attachmentId) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/revisions/${encodeURIComponent(revisionId)}/assets/${encodeURIComponent(attachmentId)}`,
+    { method: 'DELETE' }
+  );
+  return requireOk(result, 'Removing the file failed.');
+}
+
+export async function withdrawOrganizationSymbolSubmission(symbolId, submissionId) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/review-submissions/${encodeURIComponent(submissionId)}/withdraw`,
+    { method: 'POST', body: JSON.stringify({}) }
+  );
+  return requireOk(result, 'Withdrawing the submission failed.');
+}
+
+export async function fetchOrganizationSymbolHistory(symbolId) {
+  const result = await requestJson(`/organization-symbols/${encodeURIComponent(symbolId)}/history`, { cache: 'no-store' });
+  const payload = requireOk(result, 'Review history load failed.');
+  return { items: Array.isArray(payload?.items) ? payload.items : [] };
+}
+
+export async function startOrganizationSymbolRevision(symbolId) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/revisions`,
+    { method: 'POST', body: JSON.stringify({}) }
+  );
+  return requireOk(result, 'Starting a new revision failed.');
+}
+
+export async function discardOrganizationSymbolPendingRevision(symbolId) {
+  const result = await requestJson(
+    `/organization-symbols/${encodeURIComponent(symbolId)}/pending-revision`,
+    { method: 'DELETE' }
+  );
+  return requireOk(result, 'Discarding the new revision failed.');
+}
+
 export async function decideOrganizationSymbolReviewSubmission(symbolId, submissionId, payload) {
   const result = await requestJson(
     `/organization-symbols/${encodeURIComponent(symbolId)}/review-submissions/${encodeURIComponent(submissionId)}/decision`,

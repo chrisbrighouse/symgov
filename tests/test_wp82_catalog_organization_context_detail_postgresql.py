@@ -50,7 +50,7 @@ if str(BACKEND) not in sys.path:
 
 # Moved to 20261020_0074 by WP-H5: the published list and detail now read
 # `hannah_concept_photos`.
-NEW_MIGRATION_HEAD = "20261020_0074"
+NEW_MIGRATION_HEAD = "20261024_0076"
 
 psycopg = pytest.importorskip("psycopg")
 

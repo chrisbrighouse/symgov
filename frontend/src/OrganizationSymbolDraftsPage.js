@@ -12,5 +12,9 @@ export function OrganizationSymbolDraftsPage({ auth }) {
       createElement('h2', null, 'Organization symbol drafts are not available for this session.'),
     );
   }
-  return createElement(OrganizationSymbolDraftsPanel, { canCreate: canCreateOrganizationSymbolDrafts(auth) });
+  return createElement(OrganizationSymbolDraftsPanel, {
+    canCreate: canCreateOrganizationSymbolDrafts(auth),
+    workflowV2: auth?.user?.capabilities?.organizationSymbolWorkflowV2Enabled === true,
+    currentUserId: auth?.user?.id || '',
+  });
 }
