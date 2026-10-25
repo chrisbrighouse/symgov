@@ -64,7 +64,7 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "kind in ('org_symbol.submitted', 'org_symbol.approved', 'org_symbol.rejected', "
             "'org_symbol.changes_requested', 'org_symbol.withdrawn')",
-            name="ck_user_notifications_kind",
+            name="kind",
         ),
     )
     op.create_index(

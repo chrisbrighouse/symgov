@@ -525,7 +525,7 @@ class UserNotification(Base):
         CheckConstraint(
             "kind in ('org_symbol.submitted', 'org_symbol.approved', 'org_symbol.rejected', "
             "'org_symbol.changes_requested', 'org_symbol.withdrawn')",
-            name="ck_user_notifications_kind",
+            name="kind",
         ),
         Index("ix_user_notifications_recipient", "user_id", "organization_id", "created_at"),
     )

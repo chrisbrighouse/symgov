@@ -72,5 +72,6 @@ def test_a_decision_reaches_the_submitter_and_the_kind_is_checked(wp54_fixtures)
             id=uuid.uuid4(), user_id=_uid(fx["contributor"]), organization_id=submission.organization_id,
             kind="org_symbol.assigned", created_at=datetime.now(timezone.utc),
         ))
-        with pytest.raises(IntegrityError):
+        # The bare name in the migration gains the convention prefix exactly once.
+        with pytest.raises(IntegrityError, match='"ck_user_notifications_kind"'):
             session.flush()
