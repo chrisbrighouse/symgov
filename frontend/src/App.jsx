@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import SupportDataSources from './SupportDataSources.jsx';
+import { CategoryPicker } from './CategoryPicker.js';
 import SymbolGeometryDetails from './SymbolGeometryDetails.jsx';
 import SymbolDetailsView, { ExpandIcon } from './SymbolDetailsView.jsx';
 import { useSymbolDetails } from './useSymbolDetails.js';
@@ -61,7 +62,8 @@ import {
   updateScottSourceSitePrompt,
   updateScottSourceSiteStatus,
   updateScottSourceSiteAuth,
-  updateWorkspaceReviewSymbolProperties
+  updateWorkspaceReviewSymbolProperties,
+  addCatalogCategory
 } from './api.js';
 import {
   authStateAfterLogout,
@@ -152,7 +154,8 @@ import {
   interpretEdCatalogPrompt,
   removeSymbolFromClipboard,
   serializeCatalogPreferences,
-  sortSymbolsByPreferredFormats
+  sortSymbolsByPreferredFormats,
+  listedCategory
 } from './catalogWorkbench.js';
 import {
   applyFavouriteState,
@@ -4491,7 +4494,7 @@ function formatReviewAssetChip(asset) {
   return parts.join(' · ') || asset?.filename || 'Asset';
 }
 
-function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, onSaveProperties, propertyOptions, workspaceMode }) {
+function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, onSaveProperties, onAddCategory = null, propertyOptions, workspaceMode }) {
   const primaryChild = activeChildren[0];
   const isLibraryProvenance = activeChange?.reviewKind === 'library_provenance';
   const reviewSourceAssets = Array.isArray(activeChange?.sourceAssets) ? activeChange.sourceAssets : [];
@@ -4530,7 +4533,14 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
     ? activeChange.availableFormats.map((format) => formatReviewAssetFormat(format)).filter(Boolean)
     : [];
   const propertyNamePattern = '^[A-Za-z0-9 \\\\-/$]*$';
-  const categoryOptions = mergePropertyOptions(propertyOptions?.category, propertyDraft.category);
+  // The Catalog's category picklist (2026-10-25). A stored value stays as it
+  // is; an agent's suggestion pre-selects only when it means a listed name.
+  const categoryList = propertyOptions?.category || [];
+  const storedCategory = symbolProperties.category || '';
+  const pickedCategory = propertyDraft.category && propertyDraft.category === storedCategory
+    ? storedCategory
+    : listedCategory(propertyDraft.category, categoryList);
+  const unlistedSuggestion = propertyDraft.category && !pickedCategory ? propertyDraft.category : '';
   // A fixed list, not remembered values: only standard names are saved (X-04).
   const disciplineOptions = propertyOptions?.discipline?.length ? propertyOptions.discipline : CATALOG_DISCIPLINE_ORDER;
 
@@ -4603,7 +4613,7 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
         name: propertyDraft.name,
         description: propertyDraft.description,
         format: propertyDraft.format,
-        category: propertyDraft.category,
+        category: pickedCategory,
         discipline: propertyDraft.discipline
       });
       setPropertyState({ pending: false, message: 'Saved.', error: '' });
@@ -4717,29 +4727,21 @@ function ReviewSourceVisual({ activeChange, activeChildren, reviewedChildCount, 
           <FormatIndicator format={propertyDraft.format} />
         </div>
         <div className="symbol-property-editor-right">
-          <label className="field">
-            <span>Category</span>
-            <div className="property-combo-field">
-              <input
-                type="text"
-                maxLength="80"
-                placeholder="Type category"
-                autoComplete="off"
-                value={propertyDraft.category}
-                onChange={(event) => updatePropertyDraft('category', event.target.value)}
-              />
-              <select
-                aria-label="Saved category values"
-                value=""
-                onChange={(event) => updatePropertyDraft('category', event.target.value)}
-              >
-                <option value="">Saved</option>
-                {categoryOptions.map((option) => (
-                  <option key={option} value={option}>{option}</option>
-                ))}
-              </select>
-            </div>
-          </label>
+          <div className="field">
+            <label htmlFor="review-symbol-category"><span>Category</span></label>
+            <CategoryPicker
+              id="review-symbol-category"
+              value={pickedCategory}
+              onChange={(name) => updatePropertyDraft('category', name)}
+              categories={categoryList}
+              onAdd={onAddCategory}
+            />
+            {unlistedSuggestion ? (
+              <small className="property-suggestion-note">
+                Suggested “{unlistedSuggestion}” is not on the list. Choose a category{onAddCategory ? ', or add it' : ''}.
+              </small>
+            ) : null}
+          </div>
           <label className="field">
             <span>Discipline</span>
             <select
@@ -4784,15 +4786,6 @@ function FormatIndicator({ format }) {
       <b>{extension}</b>
     </div>
   );
-}
-
-function mergePropertyOptions(options = [], currentValue = '') {
-  const values = [...options];
-  const current = String(currentValue || '').trim();
-  if (current && !values.some((option) => option.toLowerCase() === current.toLowerCase())) {
-    values.unshift(current);
-  }
-  return values;
 }
 
 function optionValueOrEmpty(options, value) {
@@ -5305,9 +5298,9 @@ function ReviewsPage() {
         nextOptions[fieldName].push(item.value);
       }
     });
-    Object.keys(nextOptions).forEach((fieldName) => {
-      nextOptions[fieldName].sort((left, right) => left.localeCompare(right));
-    });
+    // Categories keep the server's order: built-in names, additions, then
+    // Unclassified last.
+    nextOptions.discipline.sort((left, right) => left.localeCompare(right));
     setPropertyOptions(nextOptions);
   }
 
@@ -5524,6 +5517,14 @@ function ReviewsPage() {
     await Promise.all([refreshReviewData(), refreshPropertyOptions()]);
   }
 
+  async function addReviewCategory(name, { allowSimilar }) {
+    const result = await addCatalogCategory(name, { allowSimilar, reviewCaseId: activeReviewCaseId || null });
+    if (result.added) {
+      await refreshPropertyOptions();
+    }
+    return result;
+  }
+
   async function submitReviewDecision() {
     if (!activeChange) {
       return;
@@ -5718,6 +5719,7 @@ function ReviewsPage() {
                 activeChildren={activeChildren}
                 reviewedChildCount={reviewedChildCount}
                 onSaveProperties={saveSymbolProperties}
+                onAddCategory={addReviewCategory}
                 propertyOptions={propertyOptions}
                 workspaceMode={workspaceState.mode}
               />

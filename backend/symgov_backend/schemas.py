@@ -1529,6 +1529,54 @@ class OrganizationReviewPolicyResponse(BaseModel):
     updatedByName: str | None = None
 
 
+class CatalogCategoryResponse(BaseModel):
+    name: str
+    builtIn: bool
+    id: str | None = None
+    addedAt: datetime | None = None
+    addedByName: str | None = None
+
+
+class CatalogCategoryListResponse(BaseModel):
+    items: list[CatalogCategoryResponse]
+
+
+class CatalogCategoryAddRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    # Add it even though it is close to a listed name.
+    allowSimilar: bool = False
+    reviewCaseId: str | None = None
+
+
+class CatalogCategoryAddResponse(BaseModel):
+    name: str
+    created: bool
+    items: list[CatalogCategoryResponse]
+
+
+class PlatformCatalogCategoryAdditionResponse(BaseModel):
+    id: str
+    name: str
+    addedAt: datetime
+    addedByName: str | None = None
+    retiredAt: datetime | None = None
+    symbolCount: int
+
+
+class PlatformCatalogCategoryLegacyValueResponse(BaseModel):
+    value: str
+    useCount: int
+    lastUsedAt: datetime | None = None
+    symbolCount: int
+
+
+class PlatformCatalogCategoryReportResponse(BaseModel):
+    additions: list[PlatformCatalogCategoryAdditionResponse]
+    legacyValues: list[PlatformCatalogCategoryLegacyValueResponse]
+
+
 class OrganizationReviewPolicyUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     allowSelfApproval: bool

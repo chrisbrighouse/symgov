@@ -47,8 +47,8 @@ from ..catalog_symbol_resolution import (
     CatalogSymbolLookupUnavailable,
     resolve_catalog_symbol,
 )
+from ..catalog_categories import catalog_category_names
 from ..catalog_taxonomy import (
-    CATALOG_CATEGORY_ORDER,
     CATALOG_DISCIPLINE_ORDER,
     CATALOG_USE_CASE_ORDER,
     FORMAT_ORDER,
@@ -398,7 +398,8 @@ def get_catalog_taxonomy(
         "downloadAvailable": True,
         "facets": {
             "disciplines": CATALOG_DISCIPLINE_ORDER,
-            "categories": CATALOG_CATEGORY_ORDER,
+            # Built-in names plus reviewer additions (2026-10-25).
+            "categories": catalog_category_names(session),
             "formats": FORMAT_ORDER,
             "useCases": CATALOG_USE_CASE_ORDER,
         },

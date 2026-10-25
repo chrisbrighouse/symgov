@@ -5,6 +5,7 @@ import {
   createOrganizationSymbolDraft,
   decideOrganizationSymbolReviewSubmission,
   discardOrganizationSymbolPendingRevision,
+  fetchCatalogCategories,
   fetchOrganizationReviewPolicy,
   fetchOrganizationSymbolHistory,
   listOrganizationSymbolDrafts,
@@ -15,6 +16,7 @@ import {
   withdrawOrganizationSymbolSubmission,
 } from './api.js';
 import { CATALOG_CATEGORY_ORDER, CATALOG_DISCIPLINE_ORDER, symbolIdLabelOrState } from './catalogWorkbench.js';
+import { CategoryPicker } from './CategoryPicker.js';
 import { normalizeFacetValues } from './projectContext.js';
 
 const DEFAULT_API = {
@@ -30,6 +32,7 @@ const DEFAULT_API = {
   discardPendingRevision: discardOrganizationSymbolPendingRevision,
   fetchReviewPolicy: fetchOrganizationReviewPolicy,
   decide: decideOrganizationSymbolReviewSubmission,
+  listCategories: fetchCatalogCategories,
 };
 
 // The revision being worked on: a published symbol's pending revision when it
@@ -134,6 +137,19 @@ export function OrganizationSymbolDraftsPanel({
   const [rationaleByDraftId, setRationaleByDraftId] = useState({});
   const [reviewPolicy, setReviewPolicy] = useState(null);
   const [ownership, setOwnership] = useState('mine');
+
+  // The Catalog's category picklist, reviewer additions included; the
+  // built-in names stand in until it loads, or if it cannot.
+  const [categories, setCategories] = useState(CATALOG_CATEGORY_ORDER);
+  useEffect(() => {
+    if (!api.listCategories) return;
+    api.listCategories()
+      .then((result) => {
+        const names = (result?.items || []).map((item) => item.name).filter(Boolean);
+        if (names.length) setCategories(names);
+      })
+      .catch(() => {});
+  }, [api]);
 
   useEffect(() => {
     if (!workflowV2 || !api.fetchReviewPolicy) return;
@@ -265,16 +281,14 @@ export function OrganizationSymbolDraftsPanel({
         })),
         formField('org-symbol-draft-category', 'Category',
           // The Catalog's own category names, so the symbol files under a
-          // category readers can filter on.
-          createElement('select', {
+          // category readers can filter on. Public Reviewers add to the list.
+          createElement(CategoryPicker, {
             id: 'org-symbol-draft-category',
             value: form.category,
-            onChange: (event) => setForm((current) => ({ ...current, category: event.target.value })),
+            onChange: (name) => setForm((current) => ({ ...current, category: name })),
+            categories,
             required: true,
-          },
-            createElement('option', { value: '' }, 'Choose a category'),
-            ...CATALOG_CATEGORY_ORDER.map((name) => createElement('option', { key: name, value: name }, name)),
-          )),
+          })),
         formField('org-symbol-draft-discipline', 'Discipline',
           // Only the Catalog's standard names are accepted (X-04).
           createElement('select', {
@@ -361,6 +375,7 @@ export function OrganizationSymbolDraftsPanel({
         workflowV2,
         currentUserId,
         selfApprovalAllowed: reviewPolicy?.allowSelfApproval === true,
+        categories,
         api,
         busy: busyDraftId === draft.id,
         rationale: rationaleByDraftId[draft.id] || '',
@@ -381,7 +396,7 @@ function formField(id, label, control) {
   return createElement('label', { className: 'field', htmlFor: id }, createElement('span', null, label), control);
 }
 
-function DraftItem({ draft, showOwner = false, workflowV2, currentUserId, selfApprovalAllowed = false, api, busy, rationale, onRationaleChange, onUploadAsset, onSubmit, runAction }) {
+function DraftItem({ draft, showOwner = false, workflowV2, currentUserId, selfApprovalAllowed = false, categories = CATALOG_CATEGORY_ORDER, api, busy, rationale, onRationaleChange, onUploadAsset, onSubmit, runAction }) {
   const [editForm, setEditForm] = useState(null);
   const [history, setHistory] = useState(null);
   const [historyError, setHistoryError] = useState('');
@@ -485,19 +500,15 @@ function DraftItem({ draft, showOwner = false, workflowV2, currentUserId, selfAp
         field('name', 'Symbol name', { required: true }),
         createElement('label', { className: 'field', htmlFor: `org-symbol-edit-${draft.id}-category` },
           createElement('span', null, 'Category'),
-          createElement('select', {
+          // As for discipline: a category saved before the list was enforced
+          // stays selectable until someone changes it.
+          createElement(CategoryPicker, {
             id: `org-symbol-edit-${draft.id}-category`,
             value: editForm.category,
+            onChange: (name) => setEditForm((form) => ({ ...form, category: name })),
+            categories,
             required: true,
-            onChange: (event) => setEditForm((form) => ({ ...form, category: event.target.value })),
-          },
-            // As for discipline: a category saved before the list was
-            // enforced stays selectable until someone changes it.
-            ...(CATALOG_CATEGORY_ORDER.includes(editForm.category) || !editForm.category
-              ? []
-              : [createElement('option', { key: editForm.category, value: editForm.category }, editForm.category)]),
-            ...CATALOG_CATEGORY_ORDER.map((option) => createElement('option', { key: option, value: option }, option)),
-          ),
+          }),
         ),
         createElement('label', { className: 'field', htmlFor: `org-symbol-edit-${draft.id}-discipline` },
           createElement('span', null, 'Discipline'),

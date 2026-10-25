@@ -47,11 +47,15 @@ from ..schemas import (
     OrgMemberResponse,
     OrganizationContributionsResponse,
     OrganizationReviewPolicyResponse,
+    PlatformCatalogCategoryAdditionResponse,
+    PlatformCatalogCategoryLegacyValueResponse,
+    PlatformCatalogCategoryReportResponse,
     OrganizationSymbolDraftListResponse,
     OrganizationSymbolHistoryResponse,
     OrganizationReviewPolicyUpdateRequest,
     OrganizationUsageSummaryResponse,
 )
+from ..catalog_categories import CatalogCategoryNotFound, platform_category_report, retire_catalog_category
 from ..organization_review_policy import get_review_policy, set_review_policy
 from ..product_usage_rollups import get_organization_usage_summary
 from ..organization_service import _emit_audit
@@ -747,3 +751,67 @@ def platform_organization_private_symbol_history(
     response = history_response(history_for_symbol(session, symbol))
     session.commit()
     return response
+
+
+# --- The Catalog's category picklist (2026-10-25) ---
+
+def _category_report(session: Session) -> PlatformCatalogCategoryReportResponse:
+    additions, legacy = platform_category_report(session)
+    return PlatformCatalogCategoryReportResponse(
+        additions=[
+            PlatformCatalogCategoryAdditionResponse(
+                id=str(item.id),
+                name=item.name,
+                addedAt=item.added_at,
+                addedByName=item.added_by_name,
+                retiredAt=item.retired_at,
+                symbolCount=item.symbol_count,
+            )
+            for item in additions
+        ],
+        legacyValues=[
+            PlatformCatalogCategoryLegacyValueResponse(
+                value=item.value,
+                useCount=item.use_count,
+                lastUsedAt=item.last_used_at,
+                symbolCount=item.symbol_count,
+            )
+            for item in legacy
+        ],
+    )
+
+
+@router.get(
+    "/platform/catalog-categories",
+    response_model=PlatformCatalogCategoryReportResponse,
+    dependencies=[Depends(_require_platform_admin_enabled)],
+)
+def get_platform_catalog_categories(
+    session: Session = Depends(get_db_session),
+    _current_user: AuthenticatedUser = Depends(require_platform_admin),
+) -> PlatformCatalogCategoryReportResponse:
+    """Reviewer additions with their usage, and the values reviewers typed before the picklist."""
+    return _category_report(session)
+
+
+@router.post(
+    "/platform/catalog-categories/{addition_id}/retire",
+    response_model=PlatformCatalogCategoryReportResponse,
+    dependencies=[Depends(_require_platform_admin_enabled)],
+)
+def retire_platform_catalog_category(
+    addition_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_platform_admin),
+    _step_up: AuthenticatedUser = Depends(require_recent_step_up),
+) -> PlatformCatalogCategoryReportResponse:
+    try:
+        parsed = uuid.UUID(addition_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Category not found.") from exc
+    try:
+        retire_catalog_category(session, current_user, parsed)
+    except CatalogCategoryNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    session.commit()
+    return _category_report(session)

@@ -307,20 +307,6 @@ def canonical_discipline(value: Any) -> str | None:
     return mapped[0] if mapped else None
 
 
-_CANONICAL_CATEGORIES = {name.lower(): name for name in CATALOG_CATEGORY_ORDER}
-
-
-def canonical_category(value: Any) -> str | None:
-    """The Catalog category a value names exactly (ignoring case), or None.
-
-    What the private drafts form offers and saves. Unlike disciplines there is
-    no keyword fallback: a picklist sends the name itself, and a near miss such
-    as "Ball valve" is refused rather than guessed.
-    """
-    raw = _js_text(value).strip()
-    return _CANONICAL_CATEGORIES.get(raw.lower()) if raw else None
-
-
 def normalize_catalog_category(value: Any, symbol: dict) -> list[str]:
     raw = _js_text(value).strip()
     context = symbol_context_text(symbol)

@@ -883,6 +883,7 @@ describe('platform admin tablist', () => {
       'platform-admin-tab-organizations',
       'platform-admin-tab-admins',
       'platform-admin-tab-symgov',
+      'platform-admin-tab-categories',
     ]);
 
     // The PIN is spent by whichever protected call needs it first, so it is a
@@ -909,6 +910,7 @@ describe('platform admin tablist', () => {
       'platform-admin-tab-symgov',
       'platform-admin-tab-symbols',
       'platform-admin-tab-agents',
+      'platform-admin-tab-categories',
     ]);
 
     await act(async () => renderer.unmount());
@@ -931,21 +933,21 @@ describe('platform admin tablist', () => {
       renderer.root.findAllByProps({ role: 'tab' })
         .filter((node) => node.type === 'button')
         .map((node) => node.props.tabIndex),
-      [0, -1, -1],
+      [0, -1, -1, -1],
     );
 
     await act(async () => tablist.props.onKeyDown({ key: 'ArrowRight', preventDefault() {} }));
     assert.deepEqual(selected(), ['platform-admin-tab-admins']);
 
     await act(async () => tablist.props.onKeyDown({ key: 'End', preventDefault() {} }));
-    assert.deepEqual(selected(), ['platform-admin-tab-symgov']);
+    assert.deepEqual(selected(), ['platform-admin-tab-categories']);
 
     // Wraps rather than dead-ending at the last tab.
     await act(async () => tablist.props.onKeyDown({ key: 'ArrowRight', preventDefault() {} }));
     assert.deepEqual(selected(), ['platform-admin-tab-organizations']);
 
     await act(async () => tablist.props.onKeyDown({ key: 'ArrowLeft', preventDefault() {} }));
-    assert.deepEqual(selected(), ['platform-admin-tab-symgov']);
+    assert.deepEqual(selected(), ['platform-admin-tab-categories']);
 
     await act(async () => tablist.props.onKeyDown({ key: 'Home', preventDefault() {} }));
     assert.deepEqual(selected(), ['platform-admin-tab-organizations']);

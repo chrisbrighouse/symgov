@@ -65,7 +65,7 @@ from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E40
 # which exist at 20260904_0043. An upgrade target, not a head assertion: it is
 # here so the fixture has the schema the code under test reads, and it must
 # track head for as long as that stays true.
-NEW_MIGRATION_HEAD = "20261024_0078"
+NEW_MIGRATION_HEAD = "20261025_0079"
 
 psycopg = pytest.importorskip("psycopg")
 

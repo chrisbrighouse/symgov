@@ -692,6 +692,41 @@ export async function markAllNotificationsRead() {
   return requireOk(result, 'Could not mark notifications as read.');
 }
 
+// --- The Catalog's category picklist (2026-10-25) ---
+
+export async function fetchCatalogCategories() {
+  const result = await requestJson('/catalog-categories', { cache: 'no-store' });
+  const payload = requireOk(result, 'Category list load failed.');
+  return { items: Array.isArray(payload?.items) ? payload.items : [] };
+}
+
+// Adds a category for every reviewer and submitter. A name close to a listed
+// one comes back as `{ similarTo }` instead, unless `allowSimilar` is set.
+export async function addCatalogCategory(name, { allowSimilar = false, reviewCaseId = null } = {}) {
+  const result = await requestJson('/catalog-categories', {
+    method: 'POST',
+    body: JSON.stringify({ name, allowSimilar, ...(reviewCaseId ? { reviewCaseId } : {}) })
+  });
+  if (result.status === 409 && result.payload?.similarTo) {
+    return { added: false, similarTo: result.payload.similarTo, message: result.message };
+  }
+  const payload = requireOk(result, 'Category could not be added.');
+  return { added: true, name: payload.name, created: payload.created, items: payload.items || [] };
+}
+
+export async function fetchPlatformCatalogCategories() {
+  const result = await requestJson('/platform/catalog-categories', { cache: 'no-store' });
+  return requireOk(result, 'Category report load failed.');
+}
+
+export async function retirePlatformCatalogCategory(additionId) {
+  const result = await requestJson(
+    `/platform/catalog-categories/${encodeURIComponent(additionId)}/retire`,
+    { method: 'POST' }
+  );
+  return requireOk(result, 'Category could not be retired.');
+}
+
 export async function fetchOrganizationReviewPolicy() {
   const result = await requestJson('/organization-symbols/review-policy', { cache: 'no-store' });
   return requireOk(result, 'Review policy load failed.');

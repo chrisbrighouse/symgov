@@ -1,11 +1,14 @@
 import { createElement, Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { runWithStepUp } from './adminJourneys.js';
 import {
+  addCatalogCategory,
   demoteGovernedSymbol,
   fetchAdminUsers,
   fetchDemotionImpactPreview,
+  fetchPlatformCatalogCategories,
   openOrganizationSymbolPromotionReview,
   requestJson,
+  retirePlatformCatalogCategory,
   submitWorkspaceReviewDecision,
 } from './api.js';
 import { canMountOrganizationSymbolDrafts } from './projectContext.js';
@@ -1178,6 +1181,154 @@ function DemotionConsole({ protect }) {
 
 // With the workflow v2 flag on, promotion requests are listed in Reviews (WP7),
 // so this hand-typed-ID form gives way to a pointer there.
+// The Catalog's category picklist (2026-10-25): what Public Reviewers have
+// added, with retirement, and the values reviewers typed before the picklist
+// existed, so the useful ones can be added to it.
+const CATALOG_CATEGORIES_API = { load: fetchPlatformCatalogCategories, retire: retirePlatformCatalogCategory, add: addCatalogCategory };
+
+export function CatalogCategoriesPanel({ protect, api = CATALOG_CATEGORIES_API }) {
+  const [report, setReport] = useState(null);
+  const [error, setError] = useState('');
+  const [busyKey, setBusyKey] = useState('');
+  const [similarByValue, setSimilarByValue] = useState({});
+
+  const load = useCallback(() => {
+    setError('');
+    api.load().then(setReport).catch((err) => setError(err.message));
+  }, [api]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  async function handleRetire(addition) {
+    if (!window.confirm(`Stop offering "${addition.name}"? Symbols that already carry it keep it.`)) return;
+    setBusyKey(`retire-${addition.id}`);
+    setError('');
+    try {
+      setReport(await protect(() => api.retire(addition.id)));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyKey('');
+    }
+  }
+
+  async function handleAdd(value, allowSimilar = false) {
+    setBusyKey(`add-${value}`);
+    setError('');
+    try {
+      const result = await api.add(value, { allowSimilar });
+      if (!result.added && result.similarTo) {
+        setSimilarByValue((current) => ({ ...current, [value]: result.similarTo }));
+        return;
+      }
+      setSimilarByValue((current) => ({ ...current, [value]: '' }));
+      load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyKey('');
+    }
+  }
+
+  const additions = report?.additions || [];
+  const legacyValues = report?.legacyValues || [];
+  const when = (value) => (value ? formatReviewTimestamp(value) : '');
+
+  return createElement(
+    Fragment,
+    null,
+    createElement(
+      AdminSection,
+      {
+        headingId: 'catalog-category-additions-heading',
+        title: `Added categories (${additions.length})`,
+        description: 'Categories Public Reviewers have added to the picklist. Retiring one stops it being offered; symbols that carry it keep it.',
+      },
+      ErrorMessage({ message: error }),
+      !report && !error ? createElement('p', { role: 'status', className: 'platform-admin-help' }, 'Loading…') : null,
+      report
+        ? createElement('div', { className: 'admin-users-table-shell' },
+            createElement('table', { className: 'platform-admin-grid' },
+              createElement('thead', null,
+                createElement('tr', null,
+                  createElement('th', { scope: 'col' }, 'Category'),
+                  createElement('th', { scope: 'col' }, 'Added by'),
+                  createElement('th', { scope: 'col' }, 'Added'),
+                  createElement('th', { scope: 'col' }, 'Symbols'),
+                  createElement('th', { scope: 'col' }, 'Status'))),
+              createElement('tbody', null,
+                additions.length === 0
+                  ? createElement('tr', null, createElement('td', { colSpan: 5, className: 'admin-users-empty' }, 'No categories have been added yet.'))
+                  : additions.map((addition) => createElement('tr', { key: addition.id },
+                      createElement('td', null, addition.name),
+                      createElement('td', null, addition.addedByName || 'Unknown'),
+                      createElement('td', null, when(addition.addedAt)),
+                      createElement('td', null, String(addition.symbolCount)),
+                      createElement('td', null,
+                        addition.retiredAt
+                          ? `Retired ${when(addition.retiredAt)}`
+                          : createElement('button', {
+                              type: 'button',
+                              className: 'action-button compact ghost',
+                              disabled: Boolean(busyKey),
+                              onClick: () => handleRetire(addition),
+                              'aria-label': `Retire ${addition.name}`,
+                            }, busyKey === `retire-${addition.id}` ? 'Retiring…' : 'Retire')))))))
+        : null
+    ),
+    createElement(
+      AdminSection,
+      {
+        headingId: 'catalog-category-legacy-heading',
+        title: `Categories typed before the picklist (${legacyValues.length})`,
+        description: 'Values reviewers typed into the old free-text field that are on no list. Add the ones worth keeping; the rest stay on the symbols that have them and are no longer offered.',
+      },
+      report
+        ? createElement('div', { className: 'admin-users-table-shell' },
+            createElement('table', { className: 'platform-admin-grid' },
+              createElement('thead', null,
+                createElement('tr', null,
+                  createElement('th', { scope: 'col' }, 'Value'),
+                  createElement('th', { scope: 'col' }, 'Times saved'),
+                  createElement('th', { scope: 'col' }, 'Last saved'),
+                  createElement('th', { scope: 'col' }, 'Symbols'),
+                  createElement('th', { scope: 'col' }, 'Action'))),
+              createElement('tbody', null,
+                legacyValues.length === 0
+                  ? createElement('tr', null, createElement('td', { colSpan: 5, className: 'admin-users-empty' }, 'Nothing left to review.'))
+                  : legacyValues.map((item) => {
+                      const similarTo = similarByValue[item.value];
+                      return createElement('tr', { key: item.value },
+                        createElement('td', null, item.value),
+                        createElement('td', null, String(item.useCount)),
+                        createElement('td', null, when(item.lastUsedAt)),
+                        createElement('td', null, String(item.symbolCount)),
+                        createElement('td', null,
+                          similarTo
+                            ? createElement(Fragment, null,
+                                createElement('span', { className: 'platform-admin-help' }, `Close to "${similarTo}". `),
+                                createElement('button', {
+                                  type: 'button',
+                                  className: 'action-button compact',
+                                  disabled: Boolean(busyKey),
+                                  onClick: () => handleAdd(item.value, true),
+                                  'aria-label': `Add ${item.value} anyway`,
+                                }, 'Add anyway'))
+                            : createElement('button', {
+                                type: 'button',
+                                className: 'action-button compact',
+                                disabled: Boolean(busyKey),
+                                onClick: () => handleAdd(item.value),
+                                'aria-label': `Add ${item.value} to the category list`,
+                              }, busyKey === `add-${item.value}` ? 'Adding…' : 'Add to list')));
+                    }))))
+        : null
+    )
+  );
+}
+
 function PromotionReviewPointer() {
   return createElement(
     AdminSection,
@@ -1581,6 +1732,7 @@ export function PlatformAdminPage({ auth }) {
     agentOversightUiEnabled ? { key: 'agents', label: 'Agents' } : null,
     usageUiEnabled ? { key: 'usage', label: 'Usage' } : null,
     usageUiEnabled ? { key: 'audit', label: 'Audit' } : null,
+    { key: 'categories', label: 'Categories' },
   ].filter(Boolean);
   const currentTab = tabs.some((tab) => tab.key === activeTab) ? activeTab : tabs[0].key;
 
@@ -1802,6 +1954,7 @@ export function PlatformAdminPage({ auth }) {
               : createElement(PromotionReviewPanel, null)
           )
         : null,
+      currentTab === 'categories' ? createElement(CatalogCategoriesPanel, { protect }) : null,
       currentTab === 'usage' ? createElement(PlatformUsagePanel, {}) : null,
       currentTab === 'audit' ? createElement(PlatformAuditPanel, {}) : null,
       currentTab === 'agents'

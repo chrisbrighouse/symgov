@@ -515,6 +515,35 @@ class OrganizationReviewPolicy(Base):
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class CatalogCategoryAddition(Base):
+    """A Catalog category a Public Reviewer added to the picklist (2026-10-25).
+
+    The picklist is the built-in list in `catalog_taxonomy.py` plus every row
+    not retired. A retired name stays here, so it cannot be added again unseen;
+    symbols that carry it keep it."""
+
+    __tablename__ = "catalog_category_additions"
+    __table_args__ = (
+        CheckConstraint("char_length(name) between 2 and 80", name="name_length"),
+        Index("uq_catalog_category_additions_key", "normalized_key", unique=True),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_key: Mapped[str] = mapped_column(Text, nullable=False)
+    added_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    added_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    review_case_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("review_cases.id", ondelete="SET NULL"), nullable=True
+    )
+    retired_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retired_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+
 class UserNotification(Base):
     """An in-app notice to one member about one private symbol workflow event
     (spec draft 2 FR17). Written only for active members of the owning

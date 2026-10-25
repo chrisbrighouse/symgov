@@ -103,6 +103,22 @@ function symbolContextText(symbol = {}) {
   ).join(' ');
 }
 
+// The listed category a suggested value means, or '' if none: ignores case,
+// spaces and punctuation, and a trailing plural, so an agent's `valve` or
+// `vessels/tanks` pre-selects Valves or Vessels / Tanks. Only pre-selects; the
+// server accepts exactly the listed names.
+export function listedCategory(value, categories) {
+  const key = (text) => String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const wanted = key(value);
+  if (!wanted) {
+    return '';
+  }
+  const variants = new Set([wanted, `${wanted}s`, `${wanted}es`, wanted.replace(/e?s$/, '')]);
+  return (categories || []).find((name) => key(name) === wanted)
+    || (categories || []).find((name) => variants.has(key(name)))
+    || '';
+}
+
 // The one standard discipline a value means, or '' if unknown: what the review
 // editor and the drafts form offer and save (X-04). Mirrors the backend's
 // `canonical_discipline`: a value mapped to two disciplines takes the first,

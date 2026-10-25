@@ -29,7 +29,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import AuthenticatedUser
-from .catalog_facets import CATALOG_CATEGORY_ORDER, CATALOG_DISCIPLINE_ORDER, canonical_category, canonical_discipline
+from .catalog_categories import canonical_catalog_category, catalog_category_names
+from .catalog_facets import CATALOG_DISCIPLINE_ORDER, canonical_discipline
 from .image_content import UnsafeImageContentError, validate_stored_image
 from .models import (
     AuditEvent,
@@ -164,9 +165,10 @@ def _clean_discipline(discipline: str) -> str:
     return clean
 
 
-def _clean_category(category: str, *, current: str | None = None) -> str:
+def _clean_category(session: Session, category: str, *, current: str | None = None) -> str:
+    """One of the Catalog's categories: the built-in names plus reviewer additions."""
     text = _clean_text(category, field="category", max_length=128)
-    clean = canonical_category(text)
+    clean = canonical_catalog_category(session, text)
     if clean is not None:
         return clean
     if current is not None and text == current:
@@ -174,7 +176,7 @@ def _clean_category(category: str, *, current: str | None = None) -> str:
         # someone changes it.
         return text
     raise OrganizationSymbolDraftError(
-        f"Unknown category '{category.strip()}'. Choose one of: {', '.join(CATALOG_CATEGORY_ORDER)}."
+        f"Unknown category '{category.strip()}'. Choose one of: {', '.join(catalog_category_names(session))}."
     )
 
 
@@ -197,7 +199,7 @@ def create_draft(
         )
 
     clean_name = _clean_text(name, field="name", max_length=256)
-    clean_category = _clean_category(category)
+    clean_category = _clean_category(session, category)
     clean_discipline = _clean_discipline(discipline)
     clean_summary = _clean_text(summary, field="summary", max_length=2000)
     clean_description = _clean_text(description, field="description", required=False, max_length=4000)
@@ -356,7 +358,7 @@ def update_draft(
     if name is not None:
         put("name", _clean_text(name, field="name", max_length=256))
     if category is not None:
-        put("category", _clean_category(category, current=payload_json.get("category")))
+        put("category", _clean_category(session, category, current=payload_json.get("category")))
     if discipline is not None:
         put("discipline", _clean_discipline(discipline))
     if summary is not None:

@@ -39,7 +39,6 @@ from ..models import (
     ReviewCaseAction,
     ReviewSplitItem,
     ReviewSymbolProperty,
-    ReviewSymbolPropertyOption,
     ScottSourceDiscoverySite,
     SourcePackage,
     GovernedSymbol,
@@ -60,6 +59,7 @@ from ..tracy_operations import tracy_status_summary
 from ..publication_handoff import execute_publication_handoff
 from ..publication_authority import lock_review_case_decision_authority
 from ..catalog_facets import CATALOG_DISCIPLINE_ORDER, canonical_discipline
+from ..catalog_categories import CatalogCategoryError, catalog_category_names, listed_category_or_current
 from ..property_options import UnknownDisciplineError, remember_property_option, standard_discipline_options
 from ..review_followup_handoff import execute_review_followup_handoff
 from ..runtime import (
@@ -3897,7 +3897,12 @@ def update_workspace_review_symbol_properties(
     }
     properties.name = request.name
     properties.description = request.description
-    properties.category = remember_property_option(session, field_name="category", value=request.category, now=now)
+    # The Catalog's category picklist (2026-10-25): a listed name, or the
+    # stored value left unchanged. Typed values are no longer remembered.
+    try:
+        properties.category = listed_category_or_current(session, request.category, current=previous_payload["category"])
+    except CatalogCategoryError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     try:
         properties.discipline = remember_property_option(session, field_name="discipline", value=request.discipline, now=now)
     except UnknownDisciplineError as exc:
@@ -3965,24 +3970,15 @@ def list_workspace_review_symbol_property_options(
     field: str | None = Query(default=None, pattern="^(category|discipline)$"),
     session: Session = Depends(get_db_session),
 ) -> WorkspaceReviewSymbolPropertyOptionListResponse:
-    # Categories are remembered from reviewers' saves; disciplines are the
-    # Catalog's fixed list (X-04), so legacy discipline rows are never offered.
+    # Both fields offer the Catalog's own lists: categories are the picklist
+    # (built-in plus reviewer additions, 2026-10-25) and disciplines the fixed
+    # X-04 names. Values reviewers once typed are no longer offered here;
+    # Platform Admin reviews them instead.
     items: list[WorkspaceReviewSymbolPropertyOptionResponse] = []
     if field in (None, "category"):
-        options = session.query(ReviewSymbolPropertyOption).filter(
-            ReviewSymbolPropertyOption.field_name == "category"
-        ).order_by(
-            ReviewSymbolPropertyOption.use_count.desc(),
-            ReviewSymbolPropertyOption.display_value.asc(),
-        ).all()
         items.extend(
-            WorkspaceReviewSymbolPropertyOptionResponse(
-                fieldName=option.field_name,
-                value=option.display_value,
-                useCount=option.use_count,
-                lastUsedAt=isoformat_utc(option.last_used_at),
-            )
-            for option in options
+            WorkspaceReviewSymbolPropertyOptionResponse(fieldName="category", value=value, useCount=0)
+            for value in catalog_category_names(session)
         )
     if field in (None, "discipline"):
         items.extend(

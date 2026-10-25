@@ -7640,3 +7640,41 @@ button.catalog-preview-format-badge:focus-visible {
 .promoted-symbols-panel {
   margin-top: 1.5rem;
 }
+
+/* The Catalog's category picklist (CategoryPicker.js): the inline "new
+   category" row under the select, and the near-match prompt. */
+.category-picker-adding {
+  display: grid;
+  gap: var(--idox-space-2);
+  min-width: 0;
+}
+
+.category-picker-add-row,
+.category-picker-similar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--idox-space-2);
+}
+
+.category-picker-add-row input {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+.category-picker-similar p,
+.category-picker-adding > p {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.property-suggestion-note {
+  font-size: var(--idox-font-size-xs);
+  color: var(--idox-text-secondary);
+}
+
+/* The editor bottom-aligns its fields; while the add row is open that would
+   push Discipline down beside it. */
+.symbol-property-editor-right:has(.category-picker-adding) {
+  align-items: start;
+}

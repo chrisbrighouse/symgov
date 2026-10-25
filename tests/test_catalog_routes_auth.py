@@ -12,7 +12,7 @@ from catalog_key_fakes import eligible_get, switch_off_key_policies
 from symgov_backend.app import create_app
 from symgov_backend.catalog_api_auth import hash_api_key
 from symgov_backend.dependencies import get_db_session
-from symgov_backend.models import CatalogApiKey, CatalogApiUsageEvent
+from symgov_backend.models import CatalogApiKey, CatalogApiUsageEvent, CatalogCategoryAddition
 
 
 @pytest.fixture(autouse=True)
@@ -37,6 +37,17 @@ class CatalogApiKeyQuery:
         return None
 
 
+class NoRowsQuery:
+    def filter(self, *criteria):
+        return self
+
+    def order_by(self, *criteria):
+        return self
+
+    def all(self):
+        return []
+
+
 class CapturingCatalogSession:
     def __init__(self, *, rows=None, fail_usage_logging: bool = False):
         self.rows = list(rows or [])
@@ -49,6 +60,9 @@ class CapturingCatalogSession:
         return eligible_get(model, ident)
 
     def query(self, model):
+        if model is CatalogCategoryAddition:
+            # The taxonomy lists reviewer additions; this database has none.
+            return NoRowsQuery()
         assert model is CatalogApiKey
         return CatalogApiKeyQuery(self.rows)
 

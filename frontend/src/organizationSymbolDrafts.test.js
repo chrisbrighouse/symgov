@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { act, create } from 'react-test-renderer';
 
+import { ADD_CATEGORY_OPTION } from './CategoryPicker.js';
 import { CATALOG_CATEGORY_ORDER } from './catalogWorkbench.js';
 import { OrganizationSymbolDraftsPanel } from './OrganizationSymbolDraftsPanel.js';
 
-// The category <select> by id.
+// The <select> inside a CategoryPicker, which carries the same id.
 const selectById = (renderer, id) => renderer.root.find((node) => node.type === 'select' && node.props.id === id);
 import { OrganizationSymbolReviewQueuePanel } from './OrganizationSymbolReviewQueuePanel.js';
 
@@ -483,7 +484,9 @@ describe('OrganizationSymbolDraftsPanel with the unified workflow (WP2)', () => 
     // 'fire' predates the picklist: it stays offered, first, so saving the
     // name does not change the category.
     const editCategory = selectById(renderer, 'org-symbol-edit-sym-1-category');
-    assert.deepEqual(editCategory.findAllByType('option').map((option) => option.props.value), ['fire', ...CATALOG_CATEGORY_ORDER]);
+    assert.deepEqual(editCategory.findAllByType('option').map((option) => option.props.value), ['', 'fire', ...CATALOG_CATEGORY_ORDER]);
+    // Private drafts offer no "add": Public Reviewers add categories.
+    assert.ok(!editCategory.findAllByType('option').some((option) => option.props.value === ADD_CATEGORY_OPTION));
     await act(async () => renderer.root.findByProps({ id: 'org-symbol-edit-sym-1-name' }).props.onChange({ target: { value: 'Pillar hydrant' } }));
     await act(async () => renderer.root.findByProps({ 'aria-label': 'Edit Fire hydrant' }).props.onSubmit({ preventDefault() {} }));
     const [, symbolId, revisionId, payload] = api.calls[1];
