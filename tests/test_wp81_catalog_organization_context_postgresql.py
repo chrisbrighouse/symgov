@@ -52,7 +52,7 @@ from symgov_backend.settings import SymgovAPISettings  # noqa: E402
 
 # Moved to head for the DISC DEXPI import: the served-rows query now reads the
 # classification and rights tables, which 20260904_0039 predates.
-NEW_MIGRATION_HEAD = "20261024_0077"
+NEW_MIGRATION_HEAD = "20261024_0078"
 
 psycopg = pytest.importorskip("psycopg")
 

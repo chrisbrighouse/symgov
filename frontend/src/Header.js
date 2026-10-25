@@ -2,6 +2,7 @@ import { createElement, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { OrganizationIcon } from './OrganizationSelectionPage.js';
 import { appConfig } from './config.js';
+import { NotificationBell, canUseNotifications } from './NotificationBell.js';
 
 export function EngineeringSymbolLogo() {
   return createElement(
@@ -99,6 +100,7 @@ export function Header({ auth }) {
         user.subscription?.isActive && createElement('span', { className: 'plus-subscription-badge' }, 'Plus')
       ),
       createElement('div', { className: 'build-chip' }, appConfig.build || 'local'),
+      canUseNotifications(auth) && createElement(NotificationBell),
       isOrgSession && createElement(
         'button',
         {

@@ -675,6 +675,23 @@ export async function discardOrganizationSymbolPendingRevision(symbolId) {
   return requireOk(result, 'Discarding the new revision failed.');
 }
 
+// --- Unified submission & review WP6: in-app notifications ---
+
+export async function fetchNotifications() {
+  const result = await requestJson('/notifications', { cache: 'no-store' });
+  return requireOk(result, 'Notifications load failed.');
+}
+
+export async function markNotificationRead(notificationId) {
+  const result = await requestJson(`/notifications/${encodeURIComponent(notificationId)}/read`, { method: 'POST' });
+  return requireOk(result, 'Could not mark the notification as read.');
+}
+
+export async function markAllNotificationsRead() {
+  const result = await requestJson('/notifications/read-all', { method: 'POST' });
+  return requireOk(result, 'Could not mark notifications as read.');
+}
+
 export async function fetchOrganizationReviewPolicy() {
   const result = await requestJson('/organization-symbols/review-policy', { cache: 'no-store' });
   return requireOk(result, 'Review policy load failed.');

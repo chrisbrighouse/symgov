@@ -142,7 +142,7 @@ def _create_user_with_global_roles(Session, *, email: str, display_name: str, ro
 # which exist at 20260904_0043. An upgrade target, not a head assertion: it is
 # here so the fixture has the schema the code under test reads, and it must
 # track head for as long as that stays true.
-NEW_MIGRATION_HEAD = "20261024_0077"
+NEW_MIGRATION_HEAD = "20261024_0078"
 
 psycopg = pytest.importorskip("psycopg")
 

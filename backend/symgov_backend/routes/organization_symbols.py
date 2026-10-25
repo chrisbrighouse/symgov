@@ -59,6 +59,7 @@ from ..promotion_requests import (
     submit_promotion_request,
     withdraw_promotion_request,
 )
+from ..user_notifications import notify_decided, notify_submitted, notify_withdrawn
 from ..schemas import (
     OrganizationSymbolAssetResponse,
     OrganizationSymbolAssetUploadRequest,
@@ -338,6 +339,7 @@ def submit_organization_symbol_draft_for_review(
     body: OrganizationSymbolSubmissionRequest,
     session: Session = Depends(get_db_session),
     current_user: AuthenticatedUser = Depends(require_organization_session),
+    settings: SymgovAPISettings = Depends(get_settings),
 ) -> OrganizationSymbolSubmissionResponse:
     parsed_symbol_id = _parse_uuid(symbol_id)
     parsed_revision_id = _parse_uuid(revision_id)
@@ -355,6 +357,8 @@ def submit_organization_symbol_draft_for_review(
     except OrganizationSymbolDraftError as exc:
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if settings.organization_symbol_workflow_v2_enabled:
+        notify_submitted(session, submission)
     session.commit()
     return OrganizationSymbolSubmissionResponse(
         id=str(submission.id),
@@ -401,6 +405,8 @@ def decide_organization_symbol_review_submission(
     if str(decision.governed_symbol_id) != symbol_id:
         session.rollback()
         raise HTTPException(status_code=404, detail="Organization review submission was not found.")
+    if settings.organization_symbol_workflow_v2_enabled:
+        notify_decided(session, decision)
     session.commit()
     return OrganizationSymbolReviewDecisionResponse(
         id=str(decision.id),
@@ -552,6 +558,7 @@ def withdraw_organization_symbol_review_submission(
     except OrganizationSymbolDraftError as exc:
         session.rollback()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    notify_withdrawn(session, submission)  # the route itself exists only under the v2 flag
     session.commit()
     return OrganizationSymbolSubmissionResponse(
         id=str(submission.id),

@@ -55,6 +55,7 @@ from symgov_backend.models import (
     SubscriptionEvent,
     SymbolRevision,
     User,
+    UserNotification,
     UserRole,
     UserSession,
     UserSubscription,
@@ -96,6 +97,7 @@ def _create_tables(engine) -> None:
         OrganizationSymbolReviewSubmission.__table__,
         AuditEvent.__table__,
         OrganizationSymbolReviewDecision.__table__,
+        UserNotification.__table__,
     ):
         # Several WP5.1 check constraints use Postgres-only functions
         # (btrim, char_length) or operators (~); SQLite can't parse them,

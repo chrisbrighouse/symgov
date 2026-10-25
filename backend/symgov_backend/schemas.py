@@ -1553,6 +1553,23 @@ class OrganizationSymbolDraftResponse(BaseModel):
     updatedAt: datetime
 
 
+class UserNotificationResponse(BaseModel):
+    id: str
+    kind: str
+    governedSymbolId: str | None
+    submissionId: str | None
+    symbolName: str | None
+    actorName: str | None
+    rationale: str | None = None
+    createdAt: datetime
+    readAt: datetime | None
+
+
+class UserNotificationListResponse(BaseModel):
+    items: list[UserNotificationResponse]
+    unreadCount: int
+
+
 class OrganizationSymbolDraftListResponse(BaseModel):
     items: list[OrganizationSymbolDraftResponse]
 

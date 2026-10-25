@@ -515,6 +515,38 @@ class OrganizationReviewPolicy(Base):
     updated_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class UserNotification(Base):
+    """An in-app notice to one member about one private symbol workflow event
+    (spec draft 2 FR17). Written only for active members of the owning
+    organization; every read re-checks that membership."""
+
+    __tablename__ = "user_notifications"
+    __table_args__ = (
+        CheckConstraint(
+            "kind in ('org_symbol.submitted', 'org_symbol.approved', 'org_symbol.rejected', "
+            "'org_symbol.changes_requested', 'org_symbol.withdrawn')",
+            name="ck_user_notifications_kind",
+        ),
+        Index("ix_user_notifications_recipient", "user_id", "organization_id", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    governed_symbol_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("governed_symbols.id", ondelete="CASCADE"), nullable=True
+    )
+    submission_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization_symbol_review_submissions.id", ondelete="CASCADE"), nullable=True
+    )
+    payload_json: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[object] = mapped_column(DateTime(timezone=True), nullable=False)
+    read_at: Mapped[object | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class OrganizationMemberRole(Base):
     """A Plus-level role (submitter, reviewer, integrator) held by one member
     within one organization. It takes effect only in that organization's session

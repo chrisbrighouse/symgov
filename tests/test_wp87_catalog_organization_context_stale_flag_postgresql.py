@@ -45,7 +45,7 @@ from test_wp74_symbol_demotion_postgresql import (  # noqa: E402
 # track head for as long as that stays true.
 # Moved to 20261020_0074 by WP-H5: the published list and detail now read
 # `hannah_concept_photos`.
-NEW_MIGRATION_HEAD = "20261024_0077"
+NEW_MIGRATION_HEAD = "20261024_0078"
 
 psycopg = pytest.importorskip("psycopg")
 
