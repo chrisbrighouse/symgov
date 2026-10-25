@@ -35,7 +35,7 @@ def _uid(actor):
 
 def _submitted(engine, actor):
     with Session(engine) as session:
-        symbol, revision = create_draft(session, actor, name="Pump", category="pumps", discipline="Mechanical", summary="s")
+        symbol, revision = create_draft(session, actor, name="Pump", category="Pumps", discipline="Mechanical", summary="s")
         session.commit()
         symbol_id, revision_id = symbol.id, revision.id
     with Session(engine) as session:

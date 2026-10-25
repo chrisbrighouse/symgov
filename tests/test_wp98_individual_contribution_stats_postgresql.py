@@ -106,7 +106,7 @@ def test_second_accepted_contribution_by_same_user_increments_further(wp95_datab
 
     response = admin_client.post(
         "/api/v1/organization-symbols",
-        json={"name": "WP9.8 Second Contribution Symbol B", "category": "fire", "discipline": "civil", "summary": "A WP9.8 test symbol."},
+        json={"name": "WP9.8 Second Contribution Symbol B", "category": "Safety Devices", "discipline": "civil", "summary": "A WP9.8 test symbol."},
     )
     assert response.status_code == 200, response.text
     symbol_id, revision_id = response.json()["id"], response.json()["currentRevisionId"]

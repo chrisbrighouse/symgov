@@ -430,7 +430,7 @@ def _approved_private_symbol(client, *, name):
     """Approved within the organization, but not organization-wide."""
     created = client.post(
         "/api/v1/organization-symbols",
-        json={"name": name, "category": "valve", "discipline": "piping", "summary": "A private relief valve."},
+        json={"name": name, "category": "Valves", "discipline": "piping", "summary": "A private relief valve."},
     )
     assert created.status_code == 200, created.text
     symbol_id, revision_id = created.json()["id"], created.json()["currentRevisionId"]

@@ -37,7 +37,7 @@ from symgov_backend.organization_symbol_review import (  # noqa: E402
 
 def _submitted(engine, actor, name="Pump"):
     with Session(engine) as session:
-        symbol, revision = create_draft(session, actor, name=name, category="pumps", discipline="Mechanical", summary="s")
+        symbol, revision = create_draft(session, actor, name=name, category="Pumps", discipline="Mechanical", summary="s")
         session.commit()
         symbol_id, revision_id = symbol.id, revision.id
     with Session(engine) as session:

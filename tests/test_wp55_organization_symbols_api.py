@@ -208,7 +208,7 @@ def test_list_and_detail_expose_pending_submission_only_once_submitted():
         "/api/v1/organization-symbols",
         json={
             "name": "Fire hydrant",
-            "category": "fire",
+            "category": "Safety Devices",
             "discipline": "civil",
             "summary": "A fire hydrant symbol.",
         },
@@ -254,7 +254,7 @@ def test_decision_closes_submission_and_clears_pending_submission_from_the_read_
 
     create_response = client.post(
         "/api/v1/organization-symbols",
-        json={"name": "Valve", "category": "process", "discipline": "mechanical", "summary": "A valve symbol."},
+        json={"name": "Valve", "category": "Valves", "discipline": "mechanical", "summary": "A valve symbol."},
     )
     draft = create_response.json()
     symbol_id, revision_id = draft["id"], draft["currentRevisionId"]

@@ -220,7 +220,7 @@ def _create_org_symbol_with_real_asset(admin_client, engine, *, name):
     `(symbol_id, revision_id, object_key)`."""
     create = admin_client.post(
         "/api/v1/organization-symbols",
-        json={"name": name, "category": "fire", "discipline": "civil", "summary": "A WP9.3 test symbol."},
+        json={"name": name, "category": "Safety Devices", "discipline": "civil", "summary": "A WP9.3 test symbol."},
     )
     assert create.status_code == 200, create.text
     symbol_id, revision_id = create.json()["id"], create.json()["currentRevisionId"]

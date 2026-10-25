@@ -12,7 +12,7 @@ export const CATALOG_DISCIPLINE_ORDER = [
   'General / Annotation'
 ];
 
-const CATALOG_CATEGORY_ORDER = [
+export const CATALOG_CATEGORY_ORDER = [
   'Valves',
   'Pumps',
   'Vessels / Tanks',
@@ -30,11 +30,12 @@ const CATALOG_CATEGORY_ORDER = [
   'Safety Devices',
   'Annotations / Tags',
   'Drawing Symbols',
+  'Doors',
   'Equipment',
   'Miscellaneous / Unclassified'
 ];
 
-const CATALOG_USE_CASE_ORDER = [
+export const CATALOG_USE_CASE_ORDER = [
   'Insert into CAD drawing',
   'Mark up / annotate drawing',
   'Use in PDF/report',
@@ -43,7 +44,7 @@ const CATALOG_USE_CASE_ORDER = [
   'Compare against standard'
 ];
 
-const FORMAT_ORDER = ['DXF', 'DWG', 'SVG', 'PNG', 'JPG', 'JPEG', 'PDF', 'RVT', 'RFA', 'IFC', 'ZIP', 'JSON'];
+export const FORMAT_ORDER = ['DXF', 'DWG', 'SVG', 'PNG', 'JPG', 'JPEG', 'PDF', 'RVT', 'RFA', 'IFC', 'ZIP', 'JSON'];
 
 function compactUnique(values) {
   return Array.from(new Set((values || []).map((value) => String(value || '').trim()).filter(Boolean)));
@@ -199,6 +200,8 @@ export function normalizeCatalogCategory(value, symbol = {}) {
     stirrer: ['Equipment'],
     symbol: ['Drawing Symbols'],
     symbol_sheet: ['Drawing Symbols'],
+    door: ['Doors'],
+    doors: ['Doors'],
     annotation: ['Annotations / Tags'],
     tag: ['Annotations / Tags'],
     tags: ['Annotations / Tags'],

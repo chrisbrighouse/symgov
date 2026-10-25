@@ -39,56 +39,19 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Session
 
+# The Catalog's names and their order are kept once, in catalog_taxonomy.py,
+# and re-exported here for the callers that import them from this module. Only
+# the rules below are this module's own.
+from .catalog_taxonomy import (  # noqa: F401
+    CATALOG_CATEGORY_ORDER,
+    CATALOG_DISCIPLINE_ORDER,
+    CATALOG_USE_CASE_ORDER,
+    FORMAT_ORDER,
+)
+
 # Bump when any rule below changes. Rows computed under another version are
 # treated as missing and recomputed on the next search (or by the backfill).
-CATALOG_FACET_RULES_VERSION = 5  # 2: canonical S-<n> display ID; 3: word-split search text (P-01); 4: governed category/discipline win over keyword rules; 5: verified secondary disciplines are listed too
-
-CATALOG_DISCIPLINE_ORDER = [
-    "Electrical",
-    "Fire & Life Safety",
-    "Piping / P&ID",
-    "Process",
-    "Instrumentation & Controls",
-    "Mechanical",
-    "HVAC",
-    "Civil / Structural",
-    "Architectural",
-    "Safety / Signage",
-    "General / Annotation",
-]
-
-CATALOG_CATEGORY_ORDER = [
-    "Valves",
-    "Pumps",
-    "Vessels / Tanks",
-    "Pipework / Fittings",
-    "Instruments",
-    "Fire Alarm Devices",
-    "Sensors / Detectors",
-    "Motors / Drives",
-    "Electrical Devices",
-    "Switchgear / Distribution",
-    "Lighting",
-    "Controls",
-    "Actuators",
-    "Heating / HVAC",
-    "Safety Devices",
-    "Annotations / Tags",
-    "Drawing Symbols",
-    "Equipment",
-    "Miscellaneous / Unclassified",
-]
-
-CATALOG_USE_CASE_ORDER = [
-    "Insert into CAD drawing",
-    "Mark up / annotate drawing",
-    "Use in PDF/report",
-    "Use as web/app icon",
-    "Use as reference only",
-    "Compare against standard",
-]
-
-FORMAT_ORDER = ["DXF", "DWG", "SVG", "PNG", "JPG", "JPEG", "PDF", "RVT", "RFA", "IFC", "ZIP", "JSON"]
+CATALOG_FACET_RULES_VERSION = 6  # 2: canonical S-<n> display ID; 3: word-split search text (P-01); 4: governed category/discipline win over keyword rules; 5: verified secondary disciplines are listed too; 6: Doors is a category
 
 _DISCIPLINE_MAP = {
     "electrical": ["Electrical"],
@@ -154,6 +117,8 @@ _CATEGORY_MAP = {
     "stirrer": ["Equipment"],
     "symbol": ["Drawing Symbols"],
     "symbol_sheet": ["Drawing Symbols"],
+    "door": ["Doors"],
+    "doors": ["Doors"],
     "annotation": ["Annotations / Tags"],
     "tag": ["Annotations / Tags"],
     "tags": ["Annotations / Tags"],
@@ -340,6 +305,20 @@ def canonical_discipline(value: Any) -> str | None:
         return exact
     mapped = _DISCIPLINE_MAP.get(_normalized_key(raw))
     return mapped[0] if mapped else None
+
+
+_CANONICAL_CATEGORIES = {name.lower(): name for name in CATALOG_CATEGORY_ORDER}
+
+
+def canonical_category(value: Any) -> str | None:
+    """The Catalog category a value names exactly (ignoring case), or None.
+
+    What the private drafts form offers and saves. Unlike disciplines there is
+    no keyword fallback: a picklist sends the name itself, and a near miss such
+    as "Ball valve" is refused rather than guessed.
+    """
+    raw = _js_text(value).strip()
+    return _CANONICAL_CATEGORIES.get(raw.lower()) if raw else None
 
 
 def normalize_catalog_category(value: Any, symbol: dict) -> list[str]:

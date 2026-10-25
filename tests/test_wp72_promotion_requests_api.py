@@ -216,7 +216,7 @@ def _create_approved_symbol(client):
     sibling test already exercises."""
     create_response = client.post(
         "/api/v1/organization-symbols",
-        json={"name": "Fire hydrant", "category": "fire", "discipline": "civil", "summary": "A fire hydrant symbol."},
+        json={"name": "Fire hydrant", "category": "Safety Devices", "discipline": "civil", "summary": "A fire hydrant symbol."},
     )
     assert create_response.status_code == 200, create_response.text
     draft = create_response.json()
@@ -287,7 +287,7 @@ def test_submission_for_an_unapproved_revision_is_rejected():
 
     create_response = client.post(
         "/api/v1/organization-symbols",
-        json={"name": "Draft-only", "category": "fire", "discipline": "civil", "summary": "Still a draft."},
+        json={"name": "Draft-only", "category": "Safety Devices", "discipline": "civil", "summary": "Still a draft."},
     )
     symbol_id = create_response.json()["id"]
 

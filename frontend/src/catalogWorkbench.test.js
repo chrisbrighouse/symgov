@@ -13,7 +13,10 @@ import {
   buildCatalogSearchText,
   buildCatalogViewSnapshot,
   canonicalDiscipline,
+  CATALOG_CATEGORY_ORDER,
   CATALOG_DISCIPLINE_ORDER,
+  CATALOG_USE_CASE_ORDER,
+  FORMAT_ORDER,
   symbolIdLabel,
   symbolIdLabelOrState,
   catalogScopeBadge,
@@ -369,22 +372,33 @@ test('a symbol ID is shown as S-<n> once published, and never as a slug or UUID 
   assert.equal(symbolIdLabelOrState({ visibility: 'organization_private', slug: 'x' }), 'Private');
 });
 
-// The Catalog's discipline names live in three places: here, the backend facet
-// store (catalog_facets.py) and the /catalog API (catalog_taxonomy.py). An
-// importer that writes a discipline the browser does not list (the Commons
-// import writes HVAC) would file symbols under a facet nobody can pick.
-function pythonDisciplineOrder(relativePath) {
+// The Catalog's names and their order are kept once on the backend, in
+// catalog_taxonomy.py (catalog_facets.py imports them), and once here. The
+// browser cannot import the Python, so this test is what keeps the two equal.
+// An importer that writes a name the browser does not list (the Commons import
+// writes HVAC) would file symbols under a facet nobody can pick.
+const TAXONOMY_PY = '../../backend/symgov_backend/catalog_taxonomy.py';
+
+function pythonList(relativePath, name) {
   const source = readFileSync(new URL(relativePath, import.meta.url), 'utf8');
-  const match = source.match(/^CATALOG_DISCIPLINE_ORDER = \[([\s\S]*?)\]/m);
-  assert.ok(match, `CATALOG_DISCIPLINE_ORDER not found in ${relativePath}`);
+  const match = source.match(new RegExp(`^${name} = \\[([\\s\\S]*?)\\]`, 'm'));
+  assert.ok(match, `${name} not found in ${relativePath}`);
   return [...match[1].matchAll(/"([^"]*)"/g)].map((item) => item[1]);
 }
 
-test('the discipline list matches catalog_facets.py and catalog_taxonomy.py exactly', () => {
-  assert.deepEqual(pythonDisciplineOrder('../../backend/symgov_backend/catalog_facets.py'), CATALOG_DISCIPLINE_ORDER);
-  assert.deepEqual(pythonDisciplineOrder('../../backend/symgov_backend/catalog_taxonomy.py'), CATALOG_DISCIPLINE_ORDER);
+test('every Catalog list matches catalog_taxonomy.py exactly', () => {
+  assert.deepEqual(pythonList(TAXONOMY_PY, 'CATALOG_DISCIPLINE_ORDER'), CATALOG_DISCIPLINE_ORDER);
+  assert.deepEqual(pythonList(TAXONOMY_PY, 'CATALOG_CATEGORY_ORDER'), CATALOG_CATEGORY_ORDER);
+  assert.deepEqual(pythonList(TAXONOMY_PY, 'CATALOG_USE_CASE_ORDER'), CATALOG_USE_CASE_ORDER);
+  assert.deepEqual(pythonList(TAXONOMY_PY, 'FORMAT_ORDER'), FORMAT_ORDER);
   assert.ok(CATALOG_DISCIPLINE_ORDER.includes('HVAC'));
+  assert.ok(CATALOG_CATEGORY_ORDER.includes('Doors'));
   assert.equal(canonicalDiscipline('hvac'), 'HVAC');
+});
+
+test('catalog_facets.py keeps no list of its own', () => {
+  const facets = readFileSync(new URL('../../backend/symgov_backend/catalog_facets.py', import.meta.url), 'utf8');
+  assert.doesNotMatch(facets, /^(CATALOG_DISCIPLINE_ORDER|CATALOG_CATEGORY_ORDER|CATALOG_USE_CASE_ORDER|FORMAT_ORDER) = \[/m);
 });
 
 test('a verified secondary discipline is listed beside the governed primary one', () => {

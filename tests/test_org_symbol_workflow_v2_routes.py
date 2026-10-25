@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from symgov_backend.settings import get_settings  # noqa: E402
 from test_wp55_organization_symbols_api import _add_membership, _build_client, _login  # noqa: E402
 
-DRAFT = {"name": "Fire hydrant", "category": "fire", "discipline": "civil", "summary": "A fire hydrant symbol."}
+DRAFT = {"name": "Fire hydrant", "category": "Safety Devices", "discipline": "civil", "summary": "A fire hydrant symbol."}
 
 
 def _client(*, workflow_v2: bool, base_role: str = "user"):
@@ -55,7 +55,7 @@ def test_edit_withdraw_and_history_round_trip_with_the_flag_on():
     body = edited.json()
     assert body["canonicalName"] == "Pillar hydrant"
     assert body["currentRevision"]["keywords"] == ["hydrant"]
-    assert body["currentRevision"]["category"] == "fire"
+    assert body["currentRevision"]["category"] == "Safety Devices"
     assert body["pendingRevision"] is None
 
     unknown = client.patch(f"{base}/revisions/{revision_id}", json={"discipline": "Astrology"})

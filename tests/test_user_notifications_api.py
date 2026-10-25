@@ -31,7 +31,7 @@ from symgov_backend.settings import get_settings  # noqa: E402
 from symgov_backend.user_notifications import list_notifications  # noqa: E402
 from test_wp55_organization_symbols_api import _add_membership, _build_client  # noqa: E402
 
-DRAFT = {"name": "Fire hydrant", "category": "fire", "discipline": "civil", "summary": "A fire hydrant symbol."}
+DRAFT = {"name": "Fire hydrant", "category": "Safety Devices", "discipline": "civil", "summary": "A fire hydrant symbol."}
 
 
 def _join(Session, organization_id, email, name, *, base_role="user", capabilities=()):

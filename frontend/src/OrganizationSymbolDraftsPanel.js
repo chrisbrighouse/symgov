@@ -14,7 +14,7 @@ import {
   updateOrganizationSymbolDraft,
   withdrawOrganizationSymbolSubmission,
 } from './api.js';
-import { CATALOG_DISCIPLINE_ORDER, symbolIdLabelOrState } from './catalogWorkbench.js';
+import { CATALOG_CATEGORY_ORDER, CATALOG_DISCIPLINE_ORDER, symbolIdLabelOrState } from './catalogWorkbench.js';
 import { normalizeFacetValues } from './projectContext.js';
 
 const DEFAULT_API = {
@@ -263,12 +263,18 @@ export function OrganizationSymbolDraftsPanel({
           onChange: (event) => setForm((current) => ({ ...current, name: event.target.value })),
           required: true,
         })),
-        formField('org-symbol-draft-category', 'Category', createElement('input', {
-          id: 'org-symbol-draft-category',
-          value: form.category,
-          onChange: (event) => setForm((current) => ({ ...current, category: event.target.value })),
-          required: true,
-        })),
+        formField('org-symbol-draft-category', 'Category',
+          // The Catalog's own category names, so the symbol files under a
+          // category readers can filter on.
+          createElement('select', {
+            id: 'org-symbol-draft-category',
+            value: form.category,
+            onChange: (event) => setForm((current) => ({ ...current, category: event.target.value })),
+            required: true,
+          },
+            createElement('option', { value: '' }, 'Choose a category'),
+            ...CATALOG_CATEGORY_ORDER.map((name) => createElement('option', { key: name, value: name }, name)),
+          )),
         formField('org-symbol-draft-discipline', 'Discipline',
           // Only the Catalog's standard names are accepted (X-04).
           createElement('select', {
@@ -477,7 +483,22 @@ function DraftItem({ draft, showOwner = false, workflowV2, currentUserId, selfAp
     editForm
       ? createElement('form', { className: 'set-admin-form', onSubmit: saveEdit, 'aria-label': `Edit ${name}` },
         field('name', 'Symbol name', { required: true }),
-        field('category', 'Category', { required: true }),
+        createElement('label', { className: 'field', htmlFor: `org-symbol-edit-${draft.id}-category` },
+          createElement('span', null, 'Category'),
+          createElement('select', {
+            id: `org-symbol-edit-${draft.id}-category`,
+            value: editForm.category,
+            required: true,
+            onChange: (event) => setEditForm((form) => ({ ...form, category: event.target.value })),
+          },
+            // As for discipline: a category saved before the list was
+            // enforced stays selectable until someone changes it.
+            ...(CATALOG_CATEGORY_ORDER.includes(editForm.category) || !editForm.category
+              ? []
+              : [createElement('option', { key: editForm.category, value: editForm.category }, editForm.category)]),
+            ...CATALOG_CATEGORY_ORDER.map((option) => createElement('option', { key: option, value: option }, option)),
+          ),
+        ),
         createElement('label', { className: 'field', htmlFor: `org-symbol-edit-${draft.id}-discipline` },
           createElement('span', null, 'Discipline'),
           createElement('select', {

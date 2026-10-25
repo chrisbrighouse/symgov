@@ -221,7 +221,7 @@ def test_promotion_request_publishes_the_existing_symbol_through_the_real_worksp
 
     create_response = admin_client.post(
         "/api/v1/organization-symbols",
-        json={"name": "WP7.3 Fire Hydrant", "category": "fire", "discipline": "civil", "summary": "A fire hydrant symbol."},
+        json={"name": "WP7.3 Fire Hydrant", "category": "Safety Devices", "discipline": "civil", "summary": "A fire hydrant symbol."},
     )
     assert create_response.status_code == 200, create_response.text
     draft = create_response.json()
@@ -341,7 +341,7 @@ def test_a_promotion_accepted_from_the_review_queue_is_listed_as_promoted_with_i
 
     draft = admin_client.post(
         "/api/v1/organization-symbols",
-        json={"name": "WP7 Queue Valve", "category": "valve", "discipline": "process", "summary": "A queue valve."},
+        json={"name": "WP7 Queue Valve", "category": "Valves", "discipline": "process", "summary": "A queue valve."},
     ).json()
     symbol_id, revision_id = draft["id"], draft["currentRevisionId"]
     submission = admin_client.post(f"/api/v1/organization-symbols/{symbol_id}/revisions/{revision_id}/submit", json={})
@@ -406,7 +406,7 @@ def test_only_admin_or_reviewer_role_can_open_a_promotion_review_case(wp73_datab
     admin_client.post("/api/v1/auth/login", json={"email": "wp73admin2@example.test", "pin": "1234"})
     create_response = admin_client.post(
         "/api/v1/organization-symbols",
-        json={"name": "WP7.3 Valve", "category": "process", "discipline": "mechanical", "summary": "A valve."},
+        json={"name": "WP7.3 Valve", "category": "Valves", "discipline": "mechanical", "summary": "A valve."},
     )
     symbol_id, revision_id = create_response.json()["id"], create_response.json()["currentRevisionId"]
     submit_review = admin_client.post(f"/api/v1/organization-symbols/{symbol_id}/revisions/{revision_id}/submit", json={})
@@ -457,6 +457,10 @@ def _promote_organization_symbol(engine, *, suffix, name, category, discipline):
     Returns `(symbol_id, revision_id)`. Each call uses its own admin and
     reviewer emails: the database fixture is module-scoped, and the deciding
     reviewer must not be a member of the submitting organization.
+
+    `category` is free text, as a draft saved before the category picklist
+    stored it: the draft is created under a listed name and the free text
+    written in afterwards, because the mapper must still handle such drafts.
     """
     admin_email = f"wp10admin-{suffix}@example.test"
     reviewer_email = f"wp10reviewer-{suffix}@example.test"
@@ -480,11 +484,17 @@ def _promote_organization_symbol(engine, *, suffix, name, category, discipline):
 
     create_response = admin_client.post(
         "/api/v1/organization-symbols",
-        json={"name": name, "category": category, "discipline": discipline, "summary": "A WP1.0 fixture symbol."},
+        json={"name": name, "category": "Equipment", "discipline": discipline, "summary": "A WP1.0 fixture symbol."},
     )
     assert create_response.status_code == 200, create_response.text
     symbol_id = create_response.json()["id"]
     revision_id = create_response.json()["currentRevisionId"]
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE governed_symbols SET category=:c WHERE id=:id"), {"c": category, "id": symbol_id})
+        connection.execute(
+            text("UPDATE symbol_revisions SET payload_json = jsonb_set(payload_json, '{category}', to_jsonb(CAST(:c AS text))) WHERE id=:id"),
+            {"c": category, "id": revision_id},
+        )
 
     submit_review = admin_client.post(
         f"/api/v1/organization-symbols/{symbol_id}/revisions/{revision_id}/submit", json={}
@@ -607,8 +617,9 @@ def test_organization_promotion_keeps_a_coarse_taxonomy_match_out_of_the_legacy_
 
     This used `civil` until X-04 (2026-09-26): a draft now stores its
     discipline under the standard name, so `civil` arrives as `Civil /
-    Structural` and matches exactly. Category is still free text, and
-    `Cylinder` -> `Equipment` is the coarsening the rule was measured on.
+    Structural` and matches exactly. Category became a picklist later, but a
+    draft saved before it keeps its free text, and `Cylinder` -> `Equipment`
+    is the coarsening the rule was measured on.
     """
     engine, _, _ = wp73_database
     symbol_id, revision_id = _promote_organization_symbol(

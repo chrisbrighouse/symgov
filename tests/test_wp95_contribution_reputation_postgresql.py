@@ -165,7 +165,7 @@ def _email(Session, user_id) -> str:
 def _create_org_symbol(admin_client, *, name):
     response = admin_client.post(
         "/api/v1/organization-symbols",
-        json={"name": name, "category": "fire", "discipline": "civil", "summary": "A WP9.5 test symbol."},
+        json={"name": name, "category": "Safety Devices", "discipline": "civil", "summary": "A WP9.5 test symbol."},
     )
     assert response.status_code == 200, response.text
     body = response.json()

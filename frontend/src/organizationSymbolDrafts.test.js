@@ -3,7 +3,11 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { act, create } from 'react-test-renderer';
 
+import { CATALOG_CATEGORY_ORDER } from './catalogWorkbench.js';
 import { OrganizationSymbolDraftsPanel } from './OrganizationSymbolDraftsPanel.js';
+
+// The category <select> by id.
+const selectById = (renderer, id) => renderer.root.find((node) => node.type === 'select' && node.props.id === id);
 import { OrganizationSymbolReviewQueuePanel } from './OrganizationSymbolReviewQueuePanel.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -89,16 +93,22 @@ describe('OrganizationSymbolDraftsPanel', () => {
 
     await act(async () => {
       renderer.root.findByProps({ id: 'org-symbol-draft-name' }).props.onChange({ target: { value: 'Valve' } });
-      renderer.root.findByProps({ id: 'org-symbol-draft-category' }).props.onChange({ target: { value: 'process' } });
+      selectById(renderer, 'org-symbol-draft-category').props.onChange({ target: { value: 'Valves' } });
       renderer.root.findByProps({ id: 'org-symbol-draft-discipline' }).props.onChange({ target: { value: 'Mechanical' } });
       renderer.root.findByProps({ id: 'org-symbol-draft-summary' }).props.onChange({ target: { value: 'A valve symbol.' } });
     });
     await act(async () => renderer.root.findByType('form').props.onSubmit({ preventDefault() {} }));
     assert.deepEqual(api.calls[0], ['create', {
-      name: 'Valve', category: 'process', discipline: 'Mechanical', summary: 'A valve symbol.',
+      name: 'Valve', category: 'Valves', discipline: 'Mechanical', summary: 'A valve symbol.',
       description: undefined, aliases: [], keywords: [],
     }]);
     assert.match(JSON.stringify(renderer.toJSON()), /Draft created\./);
+
+    // The category is a picklist of the Catalog's own names, Doors included.
+    const categoryOptions = selectById(renderer, 'org-symbol-draft-category')
+      .findAllByType('option').map((option) => option.props.value);
+    assert.deepEqual(categoryOptions, ['', ...CATALOG_CATEGORY_ORDER]);
+    assert.ok(categoryOptions.includes('Doors'));
 
     await act(async () => renderer.root.findByProps({ 'aria-label': 'Submit Fire hydrant for organization review' }).props.onClick());
     assert.deepEqual(api.calls[1], ['submit', 'sym-1', 'rev-1', {}]);
@@ -470,6 +480,10 @@ describe('OrganizationSymbolDraftsPanel with the unified workflow (WP2)', () => 
     assert.deepEqual(api.calls[0], ['remove', 'sym-1', 'rev-1', 'att-1']);
 
     await act(async () => renderer.root.findByProps({ 'aria-label': 'Edit details of Fire hydrant' }).props.onClick());
+    // 'fire' predates the picklist: it stays offered, first, so saving the
+    // name does not change the category.
+    const editCategory = selectById(renderer, 'org-symbol-edit-sym-1-category');
+    assert.deepEqual(editCategory.findAllByType('option').map((option) => option.props.value), ['fire', ...CATALOG_CATEGORY_ORDER]);
     await act(async () => renderer.root.findByProps({ id: 'org-symbol-edit-sym-1-name' }).props.onChange({ target: { value: 'Pillar hydrant' } }));
     await act(async () => renderer.root.findByProps({ 'aria-label': 'Edit Fire hydrant' }).props.onSubmit({ preventDefault() {} }));
     const [, symbolId, revisionId, payload] = api.calls[1];

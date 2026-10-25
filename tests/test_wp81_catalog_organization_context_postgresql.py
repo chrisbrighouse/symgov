@@ -82,7 +82,7 @@ def _make_organization_wide_symbol(admin_client, *, name):
     visibility for a symbol that stays organization-private)."""
     create_response = admin_client.post(
         "/api/v1/organization-symbols",
-        json={"name": name, "category": "fire", "discipline": "civil", "summary": "A fire hydrant symbol."},
+        json={"name": name, "category": "Safety Devices", "discipline": "civil", "summary": "A fire hydrant symbol."},
     )
     assert create_response.status_code == 200, create_response.text
     draft = create_response.json()
@@ -131,7 +131,7 @@ def test_organization_bound_session_sees_its_own_organization_wide_symbol(wp81_d
     assert item["packId"] is None and item["packCode"] is None and item["pack"] is None
     assert item["effectiveDate"] is None
     assert item["name"] == "WP8.1 Acme Hydrant"
-    assert item["category"] == "fire"
+    assert item["category"] == "Safety Devices"
     assert item["discipline"] == "Civil / Structural"  # stored under its standard name (X-04)
     assert item["status"] == "Approved"
 

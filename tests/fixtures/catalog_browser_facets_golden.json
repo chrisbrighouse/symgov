@@ -1430,6 +1430,80 @@
         },
         "searchText": "S-000096-014 Smoke detector gate-valve 5d2c7a1e-8f3b-4a61-9c0e-1b2d3e4f5a6b Equipment Piping / P&ID DEXPI pilot DEXPI-1 P-014 Heat Exchanger, converted from the DEXPI TrainingTestCases corpus. DEXPI HeatExchanger DXF SVG Insert into CAD drawing Mark up / annotate drawing Use in PDF/report s 000096 014 smoke detector gate valve 5d2c7a1e 8f3b 4a61 9c0e 1b2d3e4f5a6b equipment piping p&id dexpi pilot dexpi 1 p 014 heat exchanger, converted from the dexpi training test cases corpus dexpi heat exchanger dxf svg insert into cad drawing mark up annotate drawing use in pdf report"
       }
+    },
+    {
+      "name": "door row in the Doors category",
+      "input": {
+        "id": "single-leaf-door",
+        "symbolId": "5d2c7a1e-8f3b-4a61-9c0e-1b2d3e4f5a6b",
+        "catalogSymbolId": "S-000096-014",
+        "displayName": "S-000096-014",
+        "packageDisplayId": null,
+        "packageSymbolSequence": null,
+        "slug": "single-leaf-door",
+        "name": "Single leaf door",
+        "category": "doors",
+        "discipline": "architectural",
+        "summary": "Hinged single leaf door.",
+        "keywords": [
+          "door",
+          "hinged"
+        ],
+        "downloads": [
+          "single-leaf-door.dxf"
+        ],
+        "downloadAssets": [
+          {
+            "format": "DXF",
+            "filename": "single-leaf-door.dxf",
+            "object_key": "symbols/single-leaf-door.dxf",
+            "role": "download"
+          }
+        ],
+        "previewAsset": {
+          "format": "SVG",
+          "filename": "gate-valve.svg",
+          "content_type": "image/svg+xml"
+        },
+        "previewAssets": [
+          {
+            "format": "SVG",
+            "filename": "gate-valve.svg"
+          }
+        ],
+        "pack": "DEXPI pilot",
+        "packCode": "DEXPI-1",
+        "pageCode": "P-014",
+        "payload": {
+          "name": "Gate valve",
+          "summary": "Manual isolation valve.",
+          "keywords": [
+            "isolation",
+            "manual"
+          ]
+        },
+        "source": "public"
+      },
+      "expected": {
+        "taxonomy": {
+          "disciplines": [
+            "Architectural"
+          ],
+          "categories": [
+            "Doors"
+          ],
+          "availableFormats": [
+            "DXF",
+            "SVG"
+          ],
+          "useCases": [
+            "Insert into CAD drawing",
+            "Mark up / annotate drawing",
+            "Use in PDF/report"
+          ]
+        },
+        "searchText": "S-000096-014 Single leaf door single-leaf-door 5d2c7a1e-8f3b-4a61-9c0e-1b2d3e4f5a6b doors architectural DEXPI pilot DEXPI-1 P-014 Hinged single leaf door. door hinged Architectural Doors DXF SVG Insert into CAD drawing Mark up / annotate drawing Use in PDF/report s 000096 014 single leaf door single leaf door 5d2c7a1e 8f3b 4a61 9c0e 1b2d3e4f5a6b doors architectural dexpi pilot dexpi 1 p 014 hinged single leaf door door hinged architectural doors dxf svg insert into cad drawing mark up annotate drawing use in pdf report"
+      }
     }
   ]
 }

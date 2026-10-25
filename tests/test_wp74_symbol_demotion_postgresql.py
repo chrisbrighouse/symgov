@@ -243,7 +243,7 @@ def _make_platform_admin(Session, user_id):
 def _promote_symbol(admin_client, reviewer_client, *, name="WP7.4 Fire Hydrant"):
     create_response = admin_client.post(
         "/api/v1/organization-symbols",
-        json={"name": name, "category": "fire", "discipline": "civil", "summary": "A fire hydrant symbol."},
+        json={"name": name, "category": "Safety Devices", "discipline": "civil", "summary": "A fire hydrant symbol."},
     )
     assert create_response.status_code == 200, create_response.text
     draft = create_response.json()

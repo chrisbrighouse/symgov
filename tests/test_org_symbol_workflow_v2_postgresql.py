@@ -59,7 +59,7 @@ V2 = {"workflow_v2": True}
 def _draft(engine, fx, name="Pump"):
     with Session(engine) as session:
         symbol, revision = create_draft(
-            session, fx["contributor"], name=name, category="pumps", discipline="Mechanical", summary="A pump"
+            session, fx["contributor"], name=name, category="Pumps", discipline="Mechanical", summary="A pump"
         )
         session.commit()
         return symbol.id, revision.id
