@@ -7621,3 +7621,22 @@ button.catalog-preview-format-badge:focus-visible {
     width: auto;
   }
 }
+
+/* Unified submission & review WP7: promotion requests in Reviews, promoted symbols in Submissions. */
+.promotion-review-shell {
+  margin-bottom: 1rem;
+}
+
+.promotion-review-item,
+.promoted-symbol-item {
+  flex-wrap: wrap;
+}
+
+.promotion-review-item p,
+.promoted-symbol-item p {
+  margin: 0.25rem 0 0;
+}
+
+.promoted-symbols-panel {
+  margin-top: 1.5rem;
+}

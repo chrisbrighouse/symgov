@@ -1655,6 +1655,38 @@ class PromotionRequestListResponse(BaseModel):
     items: list[PromotionRequestResponse]
 
 
+class PromotionReviewQueueItemResponse(PromotionRequestResponse):
+    organizationName: str
+    symbolName: str
+    slug: str
+    category: str
+    discipline: str
+    revision: OrganizationSymbolRevisionResponse | None = None
+    submittedByName: str | None = None
+    canDecide: bool
+    blockedReason: str | None = None
+
+
+class PromotionReviewQueueResponse(BaseModel):
+    items: list[PromotionReviewQueueItemResponse]
+
+
+class PromotedSymbolResponse(BaseModel):
+    id: str
+    slug: str
+    canonicalName: str
+    category: str
+    discipline: str
+    catalogSymbolId: str | None
+    promotionRequestId: str
+    promotedAt: datetime | None
+    promotedFromOrganizationName: str
+
+
+class PromotedSymbolListResponse(BaseModel):
+    items: list[PromotedSymbolResponse]
+
+
 class PromotionRequestWithdrawRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     note: str | None = Field(default=None, max_length=2000)

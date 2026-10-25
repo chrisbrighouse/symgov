@@ -54,7 +54,9 @@ from ..promotion_requests import (
     PromotionRequestError,
     PromotionRequestNotVisible,
     get_promotion_request,
+    list_promoted_symbols,
     list_promotion_requests,
+    list_promotion_review_queue,
     open_promotion_review_case,
     submit_promotion_request,
     withdraw_promotion_request,
@@ -81,6 +83,10 @@ from ..schemas import (
     PromotionRequestResponse,
     PromotionRequestSubmitRequest,
     PromotionRequestWithdrawRequest,
+    PromotedSymbolListResponse,
+    PromotedSymbolResponse,
+    PromotionReviewQueueItemResponse,
+    PromotionReviewQueueResponse,
 )
 from ..settings import SymgovAPISettings, get_settings
 
@@ -227,6 +233,74 @@ def review_policy_response(policy: ReviewPolicy) -> OrganizationReviewPolicyResp
         allowSelfApproval=policy.allow_self_approval,
         updatedAt=policy.updated_at,
         updatedByName=policy.updated_by_name,
+    )
+
+
+# WP7: promotion review usability. Both declared before `/{symbol_id}`.
+@router.get(
+    "/promotion-review-queue",
+    response_model=PromotionReviewQueueResponse,
+    dependencies=[Depends(require_workflow_v2)],
+)
+def get_promotion_review_queue(
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_user),
+) -> PromotionReviewQueueResponse:
+    """Open promotion requests from every organization, for Public Reviewers.
+    Open-review and accept stay on their existing routes."""
+    try:
+        entries = list_promotion_review_queue(session, current_user)
+    except PromotionRequestError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    items = []
+    for entry in entries:
+        base = _promotion_request_response(entry.request, session=session)
+        items.append(
+            PromotionReviewQueueItemResponse(
+                **base.model_dump(),
+                organizationName=entry.organization_name,
+                symbolName=entry.symbol.canonical_name,
+                slug=entry.symbol.slug,
+                category=entry.symbol.category,
+                discipline=entry.symbol.discipline,
+                revision=_revision_response(entry.revision) if entry.revision is not None else None,
+                submittedByName=entry.submitted_by_name,
+                canDecide=entry.blocked_reason is None,
+                blockedReason=entry.blocked_reason,
+            )
+        )
+    return PromotionReviewQueueResponse(items=items)
+
+
+@router.get(
+    "/promoted",
+    response_model=PromotedSymbolListResponse,
+    dependencies=[Depends(require_workflow_v2)],
+)
+def get_promoted_organization_symbols(
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_session),
+) -> PromotedSymbolListResponse:
+    """The organization's symbols that promotion made public, with their S-numbers."""
+    try:
+        promoted = list_promoted_symbols(session, current_user)
+    except PromotionRequestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return PromotedSymbolListResponse(
+        items=[
+            PromotedSymbolResponse(
+                id=str(entry.symbol.id),
+                slug=entry.symbol.slug,
+                canonicalName=entry.symbol.canonical_name,
+                category=entry.symbol.category,
+                discipline=entry.symbol.discipline,
+                catalogSymbolId=entry.symbol.catalog_symbol_id,
+                promotionRequestId=str(entry.request.id),
+                promotedAt=entry.request.closed_at,
+                promotedFromOrganizationName=entry.organization_name,
+            )
+            for entry in promoted
+        ]
     )
 
 

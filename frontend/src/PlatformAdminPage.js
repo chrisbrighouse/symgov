@@ -1176,6 +1176,20 @@ function DemotionConsole({ protect }) {
   );
 }
 
+// With the workflow v2 flag on, promotion requests are listed in Reviews (WP7),
+// so this hand-typed-ID form gives way to a pointer there.
+function PromotionReviewPointer() {
+  return createElement(
+    AdminSection,
+    {
+      headingId: 'promotion-review-heading',
+      title: 'Review a promotion request',
+      description: 'Promotion requests are listed in Reviews, under Public, where a reviewer from a different organization can open and accept them.',
+    },
+    createElement('a', { href: '#/reviews?scope=public', className: 'action-button compact' }, 'Go to promotion requests'),
+  );
+}
+
 function PromotionReviewPanel() {
   const [symbolId, setSymbolId] = useState('');
   const [requestId, setRequestId] = useState('');
@@ -1783,7 +1797,9 @@ export function PlatformAdminPage({ auth }) {
             Fragment,
             null,
             createElement(DemotionConsole, { protect }),
-            createElement(PromotionReviewPanel, null)
+            auth?.user?.capabilities?.organizationSymbolWorkflowV2Enabled === true
+              ? createElement(PromotionReviewPointer, null)
+              : createElement(PromotionReviewPanel, null)
           )
         : null,
       currentTab === 'usage' ? createElement(PlatformUsagePanel, {}) : null,

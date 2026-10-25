@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 
 import { sessionRoles } from './adminJourneys.js';
 import { OrganizationSymbolDraftsPanel } from './OrganizationSymbolDraftsPanel.js';
+import { PromotedSymbolsPanel } from './PromotedSymbolsPanel.js';
 import { canCreateOrganizationSymbolDrafts, canReviewOrganizationSymbols } from './projectContext.js';
 import { ScopeTabs } from './scopeTabs.js';
 
@@ -12,7 +13,8 @@ import { ScopeTabs } from './scopeTabs.js';
 // - Private: the organization's private library, for Org Submitters
 //   (`contributor`) and Org Admins in their organization's session. It hosts the
 //   private draft form and the caller's own submissions with their history;
-//   Org Admins and Org Reviewers can also list every member's symbols.
+//   Org Admins and Org Reviewers can also list every member's symbols. Symbols
+//   promoted to public leave that list and are shown after it (WP7).
 // - Public: today's public intake form and agent pipeline, unchanged, for Public
 //   Submitters (and admins).
 
@@ -77,7 +79,8 @@ export function SubmissionsHub({ auth, renderPublic, renderDenied }) {
               submissionsView: true,
               canViewAll: canReviewOrganizationSymbols(auth),
               currentUserId: auth?.user?.id || '',
-            })))
+            }),
+            createElement(PromotedSymbolsPanel, {})))
         : null,
     ),
   );

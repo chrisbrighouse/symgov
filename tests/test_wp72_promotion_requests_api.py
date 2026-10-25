@@ -39,6 +39,7 @@ from symgov_backend.models import (
     OrganizationMemberRole,
     OrganizationSubscription,
     OrganizationMembership,
+    OrganizationReviewPolicy,
     OrganizationRoleAssignment,
     OrganizationSymbolReviewDecision,
     OrganizationSymbolReviewSubmission,
@@ -46,9 +47,11 @@ from symgov_backend.models import (
     ProductUsageEvent,
     PromotionRequest,
     PromotionRequestDecision,
+    ReviewCase,
     SubscriptionEvent,
     SymbolRevision,
     User,
+    UserNotification,
     UserRole,
     UserSession,
     UserSubscription,
@@ -87,6 +90,9 @@ def _create_tables(engine) -> None:
         OrganizationSymbolReviewDecision.__table__,
         PromotionRequest.__table__,
         PromotionRequestDecision.__table__,
+        UserNotification.__table__,
+        OrganizationReviewPolicy.__table__,
+        ReviewCase.__table__,
     ):
         # Postgres-only CHECK constraints (btrim/char_length/~) and the
         # unique-partial-index idempotency guard can't be parsed/enforced

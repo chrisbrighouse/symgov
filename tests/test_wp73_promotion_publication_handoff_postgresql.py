@@ -181,12 +181,13 @@ def wp73_database():
         yield engine, url, raw_url
 
 
-def _client(engine):
+def _client(engine, *, workflow_v2=False):
     app = create_app()
     TestingSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
     settings = SymgovAPISettings(
         organizations_enabled=True,
         organization_symbols_enabled=True,
+        organization_symbol_workflow_v2_enabled=workflow_v2,
     )
 
     def override_db():
@@ -321,6 +322,74 @@ def test_promotion_request_publishes_the_existing_symbol_through_the_real_worksp
             {"id": promotion_request_id},
         ).scalars().all()
         assert decisions_logged == ["triage", "accepted"]
+
+
+def test_a_promotion_accepted_from_the_review_queue_is_listed_as_promoted_with_its_s_number(wp73_database):
+    """Unified submission & review WP7, end to end on PostgreSQL: the request
+    appears in the Public Reviewer's queue, is opened and accepted from it, then
+    leaves the queue and shows in the organization's promoted list."""
+    engine, _, _ = wp73_database
+    admin_client, Session = _client(engine, workflow_v2=True)
+    with Session() as session:
+        admin_user = upsert_user(
+            session, email="wp7queue-admin@example.test", display_name="Queue Admin", roles=[], pin="1234", must_change_pin=False
+        )
+        session.commit()
+        admin_user_id = admin_user.id
+    _add_membership(Session, admin_user_id, base_role="admin", capabilities=("contributor", "symbol_reviewer"))
+    assert admin_client.post("/api/v1/auth/login", json={"email": "wp7queue-admin@example.test", "pin": "1234"}).status_code == 200
+
+    draft = admin_client.post(
+        "/api/v1/organization-symbols",
+        json={"name": "WP7 Queue Valve", "category": "valve", "discipline": "process", "summary": "A queue valve."},
+    ).json()
+    symbol_id, revision_id = draft["id"], draft["currentRevisionId"]
+    submission = admin_client.post(f"/api/v1/organization-symbols/{symbol_id}/revisions/{revision_id}/submit", json={})
+    assert submission.status_code == 200, submission.text
+    decided = admin_client.post(
+        f"/api/v1/organization-symbols/{symbol_id}/review-submissions/{submission.json()['id']}/decision",
+        json={"decision": "approved"},
+    )
+    assert decided.status_code == 200, decided.text
+    promotion = admin_client.post(
+        f"/api/v1/organization-symbols/{symbol_id}/promotion-requests",
+        json={"reason": "Useful to everyone.", "sharingAcknowledgment": True},
+    )
+    assert promotion.status_code == 200, promotion.text
+    request_id = promotion.json()["id"]
+
+    reviewer_client, _ = _client(engine, workflow_v2=True)
+    _create_user_with_global_roles(Session, email="wp7queue-reviewer@example.test", display_name="Queue Reviewer", roles=["reviewer"])
+    assert reviewer_client.post("/api/v1/auth/login", json={"email": "wp7queue-reviewer@example.test", "pin": "1234"}).status_code == 200
+
+    queue = reviewer_client.get("/api/v1/organization-symbols/promotion-review-queue")
+    assert queue.status_code == 200, queue.text
+    [item] = [entry for entry in queue.json()["items"] if entry["id"] == request_id]
+    assert (item["symbolName"], item["status"], item["canDecide"]) == ("WP7 Queue Valve", "submitted", True)
+
+    opened = reviewer_client.post(f"/api/v1/organization-symbols/{symbol_id}/promotion-requests/{request_id}/open-review")
+    assert opened.status_code == 200, opened.text
+    accepted = reviewer_client.post(
+        f"/api/v1/workspace/review-cases/{opened.json()['reviewCaseId']}/decisions", json={"decisionCode": "approve"}
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["currentStage"] == "published"
+
+    remaining = reviewer_client.get("/api/v1/organization-symbols/promotion-review-queue").json()["items"]
+    assert request_id not in [entry["id"] for entry in remaining]
+    assert symbol_id not in [entry["id"] for entry in admin_client.get("/api/v1/organization-symbols").json()["items"]]
+
+    promoted = admin_client.get("/api/v1/organization-symbols/promoted")
+    assert promoted.status_code == 200, promoted.text
+    [entry] = [row for row in promoted.json()["items"] if row["id"] == symbol_id]
+    with engine.begin() as connection:
+        catalog_symbol_id = connection.execute(
+            text("SELECT catalog_symbol_id FROM governed_symbols WHERE id=:id"), {"id": symbol_id}
+        ).scalar_one()
+    assert catalog_symbol_id.startswith("S-")
+    assert entry["catalogSymbolId"] == catalog_symbol_id
+    assert entry["promotionRequestId"] == request_id
+    assert entry["promotedAt"] is not None
 
 
 def test_only_admin_or_reviewer_role_can_open_a_promotion_review_case(wp73_database):

@@ -51,6 +51,7 @@ submission, surfaced to the reviewer via
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from datetime import timedelta
@@ -63,12 +64,15 @@ from .auth import AuthenticatedUser
 from .dependencies import public_workflow_roles
 from .models import (
     GovernedSymbol,
+    Organization,
     OrganizationMembership,
     OrganizationSymbolReviewDecision,
     OrganizationSymbolReviewSubmission,
     PromotionRequest,
     PromotionRequestDecision,
     ReviewCase,
+    SymbolRevision,
+    User,
 )
 from .product_usage_events import record_governance_usage_event
 
@@ -336,6 +340,12 @@ def withdraw_promotion_request(
     return request
 
 
+SUBMITTING_ORGANIZATION_MEMBER_MESSAGE = (
+    "You are a member of the organization that submitted this promotion request; "
+    "a reviewer from a different organization must review it."
+)
+
+
 def _require_reviewer_authority(current_user: AuthenticatedUser) -> None:
     """The existing Symgov review model (FR-PUB-003): whoever can decide any
     other `ReviewCase` today -- a global `admin` or `reviewer` role, per
@@ -366,10 +376,7 @@ def _refuse_submitting_organization_member(
         )
     ).first()
     if is_member is not None:
-        raise PromotionRequestError(
-            "You are a member of the organization that submitted this promotion request; "
-            "a reviewer from a different organization must review it."
-        )
+        raise PromotionRequestError(SUBMITTING_ORGANIZATION_MEMBER_MESSAGE)
 
 
 def open_promotion_review_case(
@@ -428,3 +435,95 @@ def open_promotion_review_case(
     request.updated_at = now
     session.flush()
     return review_case
+
+
+# --- Unified submission & review WP7: promotion review usability ---
+
+
+@dataclass(frozen=True)
+class PromotionReviewQueueEntry:
+    request: PromotionRequest
+    symbol: GovernedSymbol
+    revision: SymbolRevision | None
+    organization_name: str
+    submitted_by_name: str | None
+    blocked_reason: str | None
+
+
+def list_promotion_review_queue(session: Session, current_user: AuthenticatedUser) -> list[PromotionReviewQueueEntry]:
+    """Every open promotion request, across organizations, for a Public
+    Reviewer (spec FR14). Oldest first, as a queue. A request from an
+    organization the reviewer belongs to is listed with the reason they cannot
+    take it up, rather than hidden, so the queue reads the same to everyone
+    (FR15); the open-review and handoff checks still refuse it."""
+    _require_reviewer_authority(current_user)
+    member_of = set(
+        session.execute(
+            select(OrganizationMembership.organization_id).where(
+                OrganizationMembership.user_id == uuid.UUID(current_user.id),
+                OrganizationMembership.status == "active",
+            )
+        ).scalars()
+    )
+    rows = session.execute(
+        select(PromotionRequest, GovernedSymbol, Organization)
+        .join(GovernedSymbol, GovernedSymbol.id == PromotionRequest.governed_symbol_id)
+        .join(Organization, Organization.id == PromotionRequest.organization_id)
+        .where(PromotionRequest.status.in_(OPEN_STATUSES))
+        .order_by(PromotionRequest.submitted_at, PromotionRequest.id)
+    ).all()
+    entries = []
+    for request, symbol, organization in rows:
+        submitter = session.get(User, request.submitted_by_user_id)
+        entries.append(
+            PromotionReviewQueueEntry(
+                request=request,
+                symbol=symbol,
+                revision=session.get(SymbolRevision, request.symbol_revision_id),
+                organization_name=organization.display_name,
+                submitted_by_name=submitter.display_name if submitter is not None else None,
+                blocked_reason=SUBMITTING_ORGANIZATION_MEMBER_MESSAGE if request.organization_id in member_of else None,
+            )
+        )
+    return entries
+
+
+@dataclass(frozen=True)
+class PromotedSymbol:
+    symbol: GovernedSymbol
+    request: PromotionRequest
+    organization_name: str
+
+
+def list_promoted_symbols(session: Session, current_user: AuthenticatedUser) -> list[PromotedSymbol]:
+    """The active organization's symbols that promotion made public (D1: the
+    same governed symbol, so they leave the private drafts list). Any member
+    may see them; they are public. A symbol demoted since is private again and
+    drops out. Each carries its latest accepted request."""
+    organization_id = _active_organization_id(current_user)
+    organization = session.get(Organization, organization_id)
+    rows = session.execute(
+        select(GovernedSymbol, PromotionRequest)
+        .join(PromotionRequest, PromotionRequest.governed_symbol_id == GovernedSymbol.id)
+        .where(
+            GovernedSymbol.owner_organization_id == organization_id,
+            GovernedSymbol.visibility == "public",
+            PromotionRequest.organization_id == organization_id,
+            PromotionRequest.status == "accepted",
+        )
+        .order_by(PromotionRequest.closed_at.desc(), PromotionRequest.id)
+    ).all()
+    seen: set[uuid.UUID] = set()
+    promoted = []
+    for symbol, request in rows:
+        if symbol.id in seen:
+            continue
+        seen.add(symbol.id)
+        promoted.append(
+            PromotedSymbol(
+                symbol=symbol,
+                request=request,
+                organization_name=organization.display_name if organization is not None else "",
+            )
+        )
+    return promoted

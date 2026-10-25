@@ -6,6 +6,7 @@ import { requestJson } from './api.js';
 import { symbolIdLabelOrState } from './catalogWorkbench.js';
 import { lifecycleLabel, workingRevision } from './OrganizationSymbolDraftsPanel.js';
 import { OrganizationSymbolReviewQueuePanel } from './OrganizationSymbolReviewQueuePanel.js';
+import { PromotionReviewQueuePanel } from './PromotionReviewQueuePanel.js';
 import { canReviewOrganizationSymbols } from './projectContext.js';
 import { ScopeTabs } from './scopeTabs.js';
 
@@ -13,6 +14,7 @@ import { ScopeTabs } from './scopeTabs.js';
 // a Public / Private filter. Each tab appears only for a role that holds it, in
 // whatever session the user is in:
 // - Public: the public review queue, for Public Reviewers (and platform admins).
+//   With the flag on it starts with organizations' promotion requests (WP7).
 // - Private, in an organization session: that organization's queue, for its Org
 //   Reviewers and Org Admins.
 // - Private, for a Platform Admin: a read-only support view of any one
@@ -25,7 +27,8 @@ export function reviewsAccess(auth) {
   const canPublic = roles.includes('admin') || roles.includes('reviewer');
   const canPrivate = workflowV2 && canReviewOrganizationSymbols(auth);
   const canSupport = workflowV2 && !canPrivate && canAccessPlatformAdmin(user);
-  return { canPublic, canPrivate, canSupport, any: canPublic || canPrivate || canSupport };
+  const canPromotion = workflowV2 && canPublic;
+  return { canPublic, canPrivate, canSupport, canPromotion, any: canPublic || canPrivate || canSupport };
 }
 
 const SCOPES = [
@@ -73,6 +76,9 @@ export function ReviewsHub({ auth, renderPublic, renderDenied }) {
     createElement(
       'div',
       { id: 'reviews-scope-panel', role: available.length > 1 ? 'tabpanel' : undefined, 'aria-labelledby': available.length > 1 ? scopeTabId(scope) : undefined },
+      scope === 'public' && access.canPromotion
+        ? createElement('section', { className: 'experience-shell promotion-review-shell' }, createElement(PromotionReviewQueuePanel, {}))
+        : null,
       scope === 'public' ? renderPublic() : null,
       scope === 'private' && access.canPrivate
         ? createElement('section', { className: 'experience-shell' },

@@ -740,6 +740,20 @@ export async function withdrawOrganizationSymbolPromotionRequest(symbolId, reque
   return requireOk(result, 'Promotion request withdrawal failed.');
 }
 
+// Unified submission & review WP7: every open promotion request, for Public Reviewers.
+export async function fetchPromotionReviewQueue() {
+  const result = await requestJson('/organization-symbols/promotion-review-queue', { cache: 'no-store' });
+  const payload = requireOk(result, 'Promotion review queue load failed.');
+  return { items: Array.isArray(payload?.items) ? payload.items : [] };
+}
+
+// WP7: the active organization's symbols that promotion made public.
+export async function listPromotedOrganizationSymbols() {
+  const result = await requestJson('/organization-symbols/promoted', { cache: 'no-store' });
+  const payload = requireOk(result, 'Promoted symbols load failed.');
+  return { items: Array.isArray(payload?.items) ? payload.items : [] };
+}
+
 export async function openOrganizationSymbolPromotionReview(symbolId, requestId) {
   const result = await requestJson(
     `/organization-symbols/${encodeURIComponent(symbolId)}/promotion-requests/${encodeURIComponent(requestId)}/open-review`,

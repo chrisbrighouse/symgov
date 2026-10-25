@@ -27,23 +27,28 @@ function user({ roles = [], orgCode = 'acme', baseRole = 'user', capabilities = 
 
 describe('reviewsAccess', () => {
   it('opens Private to an Org Reviewer and Public to a Public Reviewer, in the same organization session', () => {
-    assert.deepEqual(reviewsAccess(user({ capabilities: ['symbol_reviewer'] })), { canPublic: false, canPrivate: true, canSupport: false, any: true });
-    assert.deepEqual(reviewsAccess(user({ roles: ['reviewer'] })), { canPublic: true, canPrivate: false, canSupport: false, any: true });
+    assert.deepEqual(reviewsAccess(user({ capabilities: ['symbol_reviewer'] })), { canPublic: false, canPrivate: true, canSupport: false, canPromotion: false, any: true });
+    assert.deepEqual(reviewsAccess(user({ roles: ['reviewer'] })), { canPublic: true, canPrivate: false, canSupport: false, canPromotion: true, any: true });
     assert.equal(reviewsAccess(user({ roles: ['reviewer'], capabilities: ['symbol_reviewer'] })).canPrivate, true);
   });
 
   it('gives an Org Admin the private queue but no public review through the global admin role', () => {
-    assert.deepEqual(reviewsAccess(user({ roles: ['admin'], baseRole: 'admin' })), { canPublic: false, canPrivate: true, canSupport: false, any: true });
+    assert.deepEqual(reviewsAccess(user({ roles: ['admin'], baseRole: 'admin' })), { canPublic: false, canPrivate: true, canSupport: false, canPromotion: false, any: true });
   });
 
   it('gives a Platform Admin the read-only support view in the Symgov session', () => {
     const access = reviewsAccess(user({ roles: ['admin'], orgCode: 'symgov', platformAdmin: true }));
-    assert.deepEqual(access, { canPublic: true, canPrivate: false, canSupport: true, any: true });
+    assert.deepEqual(access, { canPublic: true, canPrivate: false, canSupport: true, canPromotion: true, any: true });
   });
 
   it('opens nothing private while the workflow flag is off', () => {
     const access = reviewsAccess(user({ capabilities: ['symbol_reviewer'], v2: false }));
     assert.equal(access.any, false);
+  });
+
+  it('adds promotion requests to Public only with the workflow flag on', () => {
+    assert.equal(reviewsAccess(user({ roles: ['reviewer'], v2: false })).canPromotion, false);
+    assert.equal(reviewsAccess(user({ roles: ['reviewer'], v2: false })).canPublic, true);
   });
 });
 
@@ -71,6 +76,21 @@ describe('ReviewsHub', () => {
 
     await act(async () => tabs[0].props.onClick());
     assert.match(JSON.stringify(renderer.toJSON()), /PUBLIC QUEUE/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('puts promotion requests above the public queue when the flag is on, and not when it is off', async () => {
+    globalThis.fetch = async () => ({ ok: true, json: async () => ({ items: [] }) });
+    let renderer = await mountHub(user({ roles: ['reviewer'] }));
+    let text = JSON.stringify(renderer.toJSON());
+    assert.match(text, /Private symbols proposed for the public Catalog/);
+    assert.ok(text.indexOf('Private symbols proposed') < text.indexOf('PUBLIC QUEUE'));
+    await act(async () => renderer.unmount());
+
+    renderer = await mountHub(user({ roles: ['reviewer'], v2: false }));
+    text = JSON.stringify(renderer.toJSON());
+    assert.doesNotMatch(text, /Private symbols proposed/);
+    assert.match(text, /PUBLIC QUEUE/);
     await act(async () => renderer.unmount());
   });
 
