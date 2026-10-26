@@ -14,6 +14,7 @@ import binascii
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -33,6 +34,7 @@ from ..organization_symbol_drafts import (
     attach_asset,
     create_draft,
     get_draft,
+    get_draft_asset,
     list_drafts,
     remove_asset,
     submission_history,
@@ -61,6 +63,8 @@ from ..promotion_requests import (
     submit_promotion_request,
     withdraw_promotion_request,
 )
+from ..image_content import UnsafeImageContentError, safe_image_response_headers, validate_stored_image
+from ..runtime import download_object_bytes
 from ..user_notifications import notify_decided, notify_submitted, notify_withdrawn
 from ..schemas import (
     OrganizationSymbolAssetResponse,
@@ -400,6 +404,40 @@ def attach_organization_symbol_draft_asset(
         role=body.role,
         sha256=upload.sha256,
         sizeBytes=upload.size_bytes,
+    )
+
+
+@router.get("/{symbol_id}/revisions/{revision_id}/assets/{attachment_id}/preview")
+def get_organization_symbol_draft_asset_preview(
+    symbol_id: str,
+    revision_id: str,
+    attachment_id: str,
+    session: Session = Depends(get_db_session),
+    current_user: AuthenticatedUser = Depends(require_organization_session),
+    settings: SymgovAPISettings = Depends(get_settings),
+) -> Response:
+    """The stored image for one asset of a private symbol, for the Private
+    review queue and the submitter's own Submissions view."""
+    not_found = HTTPException(status_code=404, detail="Organization symbol asset was not found.")
+    try:
+        attachment = get_draft_asset(
+            session,
+            current_user,
+            symbol_id=_parse_uuid(symbol_id),
+            revision_id=_parse_uuid(revision_id),
+            attachment_id=_parse_uuid(attachment_id),
+        )
+    except OrganizationSymbolDraftNotVisible as exc:
+        raise not_found from exc
+    stored = download_object_bytes(object_key=attachment.object_key, env_file=str(settings.storage_env_file))
+    try:
+        media_type = validate_stored_image(stored["payload"], attachment.content_type, stored.get("content_type"))
+    except UnsafeImageContentError as exc:
+        raise not_found from exc
+    return Response(
+        content=stored["payload"],
+        media_type=media_type,
+        headers={"Cache-Control": "private, no-store", **safe_image_response_headers()},
     )
 
 

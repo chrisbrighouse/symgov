@@ -33,6 +33,7 @@ from .catalog_categories import canonical_catalog_category, catalog_category_nam
 from .catalog_facets import CATALOG_DISCIPLINE_ORDER, canonical_discipline
 from .image_content import UnsafeImageContentError, validate_stored_image
 from .models import (
+    Attachment,
     AuditEvent,
     GovernedSymbol,
     OrganizationSymbolReviewDecision,
@@ -413,6 +414,39 @@ def remove_asset(
         session, current_user, action="org_symbol.asset_removed", symbol=symbol, revision_id=revision.id,
         details={"attachment_id": str(attachment_id), "filename": removed.get("filename")},
     )
+
+
+def get_draft_asset(
+    session: Session,
+    current_user: AuthenticatedUser,
+    *,
+    symbol_id: uuid.UUID,
+    revision_id: uuid.UUID,
+    attachment_id: uuid.UUID,
+) -> Attachment:
+    """The stored attachment behind one asset on a revision, for previewing.
+
+    Visible to whoever can see the draft (its owner, Org Reviewers and Org
+    Admins). The asset must still be listed on the revision, so a removed
+    asset stops previewing, and the attachment row must belong to that
+    revision under the same object key."""
+    _symbol, revision = get_draft_revision(session, current_user, symbol_id, revision_id)
+    asset = next(
+        (item for item in (revision.payload_json or {}).get("assets") or []
+         if str(item.get("attachment_id")) == str(attachment_id)),
+        None,
+    )
+    if asset is None:
+        raise OrganizationSymbolDraftNotVisible()
+    attachment = session.get(Attachment, attachment_id)
+    if (
+        attachment is None
+        or attachment.parent_type != "symbol_revision"
+        or attachment.parent_id != revision.id
+        or attachment.object_key != asset.get("object_key")
+    ):
+        raise OrganizationSymbolDraftNotVisible()
+    return attachment
 
 
 @dataclass(frozen=True)

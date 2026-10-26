@@ -619,6 +619,13 @@ export async function attachOrganizationSymbolAsset(symbolId, revisionId, payloa
   return requireOk(result, 'Organization symbol asset upload failed.');
 }
 
+// The stored image behind one asset, for an <img>: the session cookie
+// authorizes it, so only the submitter, Org Reviewers and Org Admins see it.
+export function organizationSymbolAssetPreviewUrl(symbolId, revisionId, attachmentId) {
+  if (!appConfig.apiRoot || !symbolId || !revisionId || !attachmentId) return null;
+  return `${appConfig.apiRoot}/organization-symbols/${encodeURIComponent(symbolId)}/revisions/${encodeURIComponent(revisionId)}/assets/${encodeURIComponent(attachmentId)}/preview`;
+}
+
 export async function submitOrganizationSymbolDraftForReview(symbolId, revisionId, payload = {}) {
   const result = await requestJson(
     `/organization-symbols/${encodeURIComponent(symbolId)}/revisions/${encodeURIComponent(revisionId)}/submit`,

@@ -17,6 +17,7 @@ import {
 } from './api.js';
 import { CATALOG_CATEGORY_ORDER, CATALOG_DISCIPLINE_ORDER, symbolIdLabelOrState } from './catalogWorkbench.js';
 import { CategoryPicker } from './CategoryPicker.js';
+import { OrganizationSymbolAssetPreview } from './OrganizationSymbolAssetPreview.js';
 import { normalizeFacetValues } from './projectContext.js';
 
 const DEFAULT_API = {
@@ -474,6 +475,11 @@ function DraftItem({ draft, showOwner = false, workflowV2, currentUserId, selfAp
         : null,
       canSelfApprove
         ? createElement('p', { className: 'set-admin-muted' }, 'Your organization lets you approve your own submission; it is recorded as self-approved.')
+        : null,
+      (revision?.assets || []).length
+        ? createElement(OrganizationSymbolAssetPreview, {
+          symbolId: draft.id, revisionId: working.id, assets: revision.assets, name, compact: true,
+        })
         : null,
       workflowV2
         ? createElement('div', { className: 'set-admin-muted' },

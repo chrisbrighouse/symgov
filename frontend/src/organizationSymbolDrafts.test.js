@@ -644,3 +644,65 @@ describe('self-approval in the drafts panel and the queue (WP3)', () => {
     await act(async () => renderer.unmount());
   });
 });
+
+describe('the stored image of a private symbol', () => {
+  const PREVIEW = '/organization-symbols/sym-1/revisions/rev-1/assets/';
+  const assets = [{ id: 'att-1', filename: 'hydrant.svg' }, { id: 'att-2', filename: 'hydrant-alt.png' }];
+  const images = (renderer) => renderer.root.findAllByType('img');
+
+  function queued(revision = {}) {
+    return baseDraft({
+      currentRevision: {
+        ...baseDraft().currentRevision, id: 'rev-1', lifecycleState: 'review', assets,
+        pendingSubmissionId: 'sub-1', pendingSubmissionSubmittedAt: '2026-10-26T10:00:00Z', ...revision,
+      },
+    });
+  }
+
+  it('shows the reviewer the first file, and the others on request', async () => {
+    const api = { listDrafts: async () => ({ items: [queued()] }), decide: async () => ({}) };
+    let renderer;
+    await act(async () => { renderer = create(createElement(OrganizationSymbolReviewQueuePanel, { api })); });
+
+    const [image] = images(renderer);
+    assert.ok(image.props.src.endsWith(`${PREVIEW}att-1/preview`), image.props.src);
+    assert.equal(image.props.alt, 'Preview of hydrant.svg for Fire hydrant');
+
+    const other = renderer.root.findByProps({ 'aria-pressed': false });
+    await act(async () => other.props.onClick());
+    assert.ok(images(renderer)[0].props.src.endsWith(`${PREVIEW}att-2/preview`));
+
+    // An image the server will not serve falls back to text, not a broken icon.
+    await act(async () => images(renderer)[0].props.onError());
+    assert.equal(images(renderer).length, 0);
+    assert.match(JSON.stringify(renderer.toJSON()), /Preview unavailable/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('tells the reviewer when no file is attached', async () => {
+    const api = { listDrafts: async () => ({ items: [queued({ assets: [] })] }), decide: async () => ({}) };
+    let renderer;
+    await act(async () => { renderer = create(createElement(OrganizationSymbolReviewQueuePanel, { api })); });
+    assert.equal(images(renderer).length, 0);
+    assert.match(JSON.stringify(renderer.toJSON()), /No file attached/);
+    await act(async () => renderer.unmount());
+  });
+
+  it('shows the submitter the stored image in Submissions, and nothing for a draft with no file', async () => {
+    const withFile = baseDraft({ currentRevision: { ...baseDraft().currentRevision, assets: [assets[0]] } });
+    const withoutFile = baseDraft({ id: 'sym-2', canonicalName: 'Valve', currentRevisionId: 'rev-2' });
+    for (const workflowV2 of [false, true]) {
+      let renderer;
+      await act(async () => {
+        renderer = create(createElement(OrganizationSymbolDraftsPanel, {
+          workflowV2, api: { listDrafts: async () => ({ items: [withFile, withoutFile] }) },
+        }));
+      });
+      const [image, ...rest] = images(renderer);
+      assert.equal(rest.length, 0, `workflowV2=${workflowV2}`);
+      assert.ok(image.props.src.endsWith(`${PREVIEW}att-1/preview`), image.props.src);
+      assert.doesNotMatch(JSON.stringify(renderer.toJSON()), /No file attached/);
+      await act(async () => renderer.unmount());
+    }
+  });
+});

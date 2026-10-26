@@ -3368,6 +3368,40 @@ a:not([class]):active {
   margin-right: 10px;
 }
 
+/* The stored image of a private symbol's file, in the Public review frame. */
+.organization-symbol-preview {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  max-width: 24rem;
+}
+
+.organization-symbol-preview.compact {
+  max-width: 12rem;
+}
+
+.organization-symbol-preview.compact .review-visual-frame {
+  min-height: 6rem;
+}
+
+.organization-symbol-preview.compact .review-source-image {
+  max-height: 6rem;
+}
+
+.organization-symbol-preview .catalog-preview-format-badges {
+  justify-content: flex-start;
+  max-width: none;
+}
+
+.organization-symbol-preview .catalog-preview-format-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.5rem;
+}
+
+.organization-symbol-preview button.catalog-preview-format-badge.active:hover {
+  background: var(--idox-interactive-default);
+}
+
 .organization-symbol-history {
   margin: 4px 0 0;
   padding-left: 20px;

@@ -11,6 +11,7 @@ import { canAccessSemanticReview } from './semanticReviewJourney.js';
 import { formatReviewTimestamp, symbolLabel } from './SemanticReviewPage.js';
 import { symbolIdLabelOrState } from './catalogWorkbench.js';
 import { workingRevision } from './OrganizationSymbolDraftsPanel.js';
+import { OrganizationSymbolAssetPreview } from './OrganizationSymbolAssetPreview.js';
 
 const DEFAULT_API = {
   listDrafts: listOrganizationSymbolDrafts,
@@ -318,6 +319,12 @@ export function OrganizationSymbolReviewQueuePanel({ auth, api = DEFAULT_API }) 
           activeWorking.pending
             ? createElement('p', { className: 'set-admin-muted' }, `New revision of the published symbol ${activeDraft.canonicalName}. Approving it replaces the published version in the organization library.`)
             : null,
+          createElement(OrganizationSymbolAssetPreview, {
+            symbolId: activeDraft.id,
+            revisionId: activeWorking.id,
+            assets: activeRevision.assets,
+            name: activeRevision.name || activeDraft.canonicalName,
+          }),
           createElement('p', { className: 'set-admin-muted' }, `Category: ${(activeWorking.pending && activeRevision.category) || activeDraft.category} · Discipline: ${(activeWorking.pending && activeRevision.discipline) || activeDraft.discipline}`),
           createElement('p', null, activeRevision.summary),
           activeRevision.description
