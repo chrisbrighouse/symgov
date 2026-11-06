@@ -35,11 +35,23 @@ The server-side converter is `backend/symgov_backend/services/btx_converter.py`.
 Current limits:
 
 - direct input or BTX ZIP member: 50 MiB;
-- expanded compressed payload: 16 MiB;
+- expanded compressed payload: 16 MiB individually, with cumulative expansion budgets of 32 MiB per symbol and 64 MiB per library (including repeated annotation passes and failed attempts);
+- resource entries: 128 per symbol / 4,096 per library; only the exact selected appearance body is inflated, not unused resource bodies;
+- decompression calls: 256 per symbol / 8,192 per library;
+- graphics tokens: 100,000 per symbol / 2,000,000 per library, parsed incrementally;
+- dash elements: 128; pending operands: 64; distinct parser warnings: 64 per symbol, plus up to two fixed format notices;
+- style/output work: 100,000 units per symbol / 1,000,000 per library (dash entries charged on parsing, and `8 + dash length` per painted path);
 - symbols: 500;
-- path segments per symbol: 10,000;
+- path segments per symbol: 10,000 cumulatively across painted and discarded paths;
+- nested PDF graphics states: 64;
+- numeric geometry/matrix/operand magnitude: at most 1,000,000, finite only; rectangle and bounding-box dimensions must be positive;
+- PNG allocation: at most 2,048 pixels per side and 4,194,304 pixels total (normal previews target a 512-pixel longest drawing side plus padding);
 - ZIP input: exactly one unencrypted, safe `.btx` member;
-- XML DTD/entity declarations are rejected.
+- XML DTD/entity declarations are rejected before parsing, including UTF-16 markup;
+- zlib streams must be complete, within the expanded limit, and contain no trailing data. Appearance-stream framing preserves binary checksum bytes using a validated direct `/Length` or zlib EOF and a validated PDF suffix, not arbitrary CR/LF trimming;
+- dictionary array and appearance-pointer lookup uses first-exact-key, bounded/anchored parsing. Malformed/nested Rect/BBox/Matrix arrays or malformed first AP dictionaries fail instead of retrying later candidates or silently defaulting a malformed Matrix.
+
+These are conservative service limits for the verified subset, not Bluebeam format maxima or a universal process-memory guarantee. XML is still parsed as a size-bounded DOM, and unselected resource bodies are intentionally not decoded or validated.
 
 For the proven structure, the converter follows this chain:
 
@@ -49,7 +61,16 @@ BTX XML -> hex decode -> zlib inflate -> PDF annotation dictionary
       -> FlateDecode stream -> PDF paths/transforms -> SVG, DXF, PNG
 ```
 
-The `/AP /N` pointer is authoritative; do not substitute the first Form resource. Per-symbol conversion errors are recorded in the manifest so successful symbols can still be reviewed.
+The `/AP /N` pointer is authoritative; do not substitute the first Form resource. Per-symbol conversion errors are recorded in the manifest so successful symbols can still be reviewed. Output names are reserved globally, case-insensitively, including natural suffixes such as `A_2`; duplicate subjects must never overwrite an earlier symbol.
+
+### Rendering and outcome policy
+
+- SVG retains supported paths, fills, cap/join settings and dash styles. Nonuniform/sheared stroke transforms and unsupported PDF effects (including clipping and external graphics state) generate explicit warnings; the output must not be described as an exact PDF rendering.
+- PNG renders single-subpath solid fills and independent stroke subpaths, preserves closure, and bounds image allocation. Curves are approximated with 12 chords; stroke styles and self-intersecting fill rules remain preview approximations reported in symbol warnings.
+- Compound PNG fills/holes are rejected for that symbol with `unsupported_compound_fill`, rather than silently producing an incorrect preview. With the default three-format conversion, the symbol is failed and any assets already emitted for that attempt are removed; only successful manifest entries are eligible for the review handoff.
+- DXF is geometry-only, with separate subpaths and closure edges. Curves use 12-chord outlines; fill areas, colors and stroke styling are not represented. The manifest records this limitation.
+- If no usable symbols are produced (including empty libraries or all entries failing), Vlad records a failed outcome, attributable defects, and no generated review/Libby children. Partial success escalates the successful children for human review and retains failed-symbol diagnostics in `btx_conversion_trace.failed_symbols`; it is not an automatic pass or publication.
+
 
 ## Review-visible asset contract
 
@@ -75,7 +96,7 @@ Focused regression coverage:
 
 ```bash
 cd /data/symgov
-PYTHONPATH=backend pytest -q tests/test_btx_integration.py
+PYTHONPATH=backend pytest -q tests/test_btx_integration.py tests/test_btx_converter_hardening.py tests/test_btx_validation_outcomes.py
 ```
 
 A production-style Vlad job requires persistence and storage configuration:

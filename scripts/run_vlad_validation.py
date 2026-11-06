@@ -1739,9 +1739,17 @@ def run_validation_task(task):
         try:
             manifest = convert_btx(asset_path, output_root)
             children = []
+            failed_symbols = [symbol for symbol in manifest["symbols"] if symbol.get("status") == "failed"]
             for symbol in manifest["symbols"]:
                 if symbol.get("status") == "failed":
-                    add_trace(evidence_trace, "btx_symbol_conversion", "warning", f"BTX symbol {symbol.get('ordinal')} was not converted: {symbol['warnings'][0]['detail']}")
+                    failure_detail = "; ".join(
+                        str(warning.get("detail") or warning.get("code") or "Unspecified conversion failure")
+                        for warning in (symbol.get("warnings") or [])
+                    ) or "Converter returned failed status without diagnostic details."
+                    detail = f"BTX symbol {symbol.get('ordinal')} ({symbol.get('subject') or 'untitled'}) was not converted: {failure_detail}"
+                    add_trace(evidence_trace, "btx_symbol_conversion", "warning" if manifest["successful_symbol_count"] else "failed", detail)
+                    if not manifest["successful_symbol_count"]:
+                        add_defect(defects, "VLAD-BTX-003", "high", detail)
                     continue
                 child_id = f"btx:{manifest['source_sha256']}:{symbol['ordinal']}"
                 assets = []
@@ -1820,6 +1828,7 @@ def run_validation_task(task):
                 "total_symbol_count": len(manifest["symbols"]),
                 "successful_symbol_count": manifest["successful_symbol_count"],
                 "failed_symbol_count": manifest["failed_symbol_count"],
+                "failed_symbols": copy.deepcopy(failed_symbols),
                 "output_directory": str(output_root),
                 "symbols": [
                     {
@@ -1841,9 +1850,14 @@ def run_validation_task(task):
             }
             additional_artifacts.append({"artifact_type": "btx_library_manifest", "payload_json": normalized["btx_library"]})
             additional_artifacts.append({"artifact_type": "derivative_manifest", "payload_json": normalized["derivative_manifest"]})
-            add_trace(evidence_trace, "btx_conversion", "passed", f"BTX conversion trace recorded for {manifest['successful_symbol_count']} successful and {manifest['failed_symbol_count']} failed symbol(s).")
-            add_trace(evidence_trace, "btx_library_expansion", "passed", f"Extracted {len(children)} usable symbol(s) from BTX library; {manifest['failed_symbol_count']} symbol(s) failed.")
-            if children:
+            conversion_status = "failed" if not children else ("warning" if failed_symbols else "passed")
+            add_trace(evidence_trace, "btx_conversion", conversion_status, f"BTX conversion trace recorded for {manifest['successful_symbol_count']} successful and {manifest['failed_symbol_count']} failed symbol(s).")
+            add_trace(evidence_trace, "btx_library_expansion", conversion_status, f"Extracted {len(children)} usable symbol(s) from BTX library; {manifest['failed_symbol_count']} symbol(s) failed.")
+            if not children:
+                add_defect(defects, "VLAD-BTX-002", "high", f"BTX library produced 0 usable symbols from {len(manifest['symbols'])} entries; {manifest['failed_symbol_count']} failed.")
+                decision = "fail"
+                confidence = min(confidence, 0.98)
+            else:
                 decision = "escalate"
                 escalation_target = "human_reviewer"
                 confidence = min(confidence, 0.9)
