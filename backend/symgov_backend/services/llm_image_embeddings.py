@@ -36,6 +36,9 @@ from .llm_telemetry import is_safe_model_identifier
 DEFAULT_MODEL = "google/gemini-embedding-2"
 DEFAULT_DIMENSIONS = 768
 DEFAULT_PROVIDERS = ("google-vertex",)
+# OpenRouter reports the serving provider by its display name, not the routing slug: Vertex is "Google"
+# (every one of the benchmark's 5,284 calls), AI Studio is "Google AI Studio". Unknown names stay unapproved.
+PROVIDER_DISPLAY_NAMES = {"google": "google-vertex", "google vertex": "google-vertex"}
 FEATURE = "visual_match"
 MAX_IMAGE_BYTES = 4_000_000
 
@@ -99,6 +102,7 @@ def request_image_embedding(
             raise EmbeddingError("The embedding response was too large.")
         payload = response.json()
         served_by = str(payload.get("provider") or "").strip().lower() if isinstance(payload, dict) else ""
+        served_by = PROVIDER_DISPLAY_NAMES.get(served_by, served_by)
         if not any(served_by == p or served_by.startswith(p + "/") for p in allowed):
             raise EmbeddingError("The embedding was served by a provider that is not approved.")
         rows = payload.get("data")

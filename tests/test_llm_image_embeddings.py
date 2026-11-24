@@ -58,9 +58,17 @@ def test_vector_is_a_renormalised_prefix():
     assert len(r["vector"]) == 768 and abs(math.sqrt(sum(v * v for v in r["vector"])) - 1) < 1e-9
 
 
+def test_openrouter_display_name_for_vertex_is_approved():
+    # What OpenRouter actually returns for a request pinned to google-vertex (seen in production 2026-11-24).
+    for name in ("Google", "google-vertex", "Google Vertex"):
+        r = module.request_image_embedding(png=png(), transport=transport(ok(provider=name)))
+        assert len(r["vector"]) == 768
+
+
 def test_unapproved_provider_is_a_failure():
-    with pytest.raises(EmbeddingError):
-        module.request_image_embedding(png=png(), transport=transport(ok(provider="google-ai-studio")))
+    for name in ("google-ai-studio", "Google AI Studio", "Amazon Bedrock"):
+        with pytest.raises(EmbeddingError):
+            module.request_image_embedding(png=png(), transport=transport(ok(provider=name)))
     with pytest.raises(EmbeddingError):
         module.request_image_embedding(png=png(), transport=transport(ok(provider="")))
 
