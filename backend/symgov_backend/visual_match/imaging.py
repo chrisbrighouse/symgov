@@ -92,3 +92,17 @@ def rotated(n: Normalized, k: int) -> Normalized:
     dt = np.ascontiguousarray(np.rot90(n.dt, k))
     aspect = n.content_aspect if k % 2 == 0 else 1.0 / n.content_aspect
     return Normalized(sk, dt, np.argwhere(sk).astype(np.int16), aspect)
+
+
+def pack_skeleton(n: Normalized) -> bytes:
+    """The 128 x 128 centreline as a bit array (2048 bytes): all the reranker needs besides the aspect."""
+    return np.packbits(n.skeleton.astype(np.uint8), axis=None).tobytes()
+
+
+def from_skeleton(packed: bytes, content_aspect: float, size: int = SIZE) -> Normalized:
+    """Rebuild a `Normalized` from its stored centreline; the distance field is recomputed exactly."""
+    if len(packed) != size * size // 8:
+        raise ValueError("The stored centreline has the wrong length.")
+    skel = np.unpackbits(np.frombuffer(packed, dtype=np.uint8))[: size * size].reshape(size, size).astype(bool)
+    dt = np.minimum(distance_transform_edt(~skel), DT_CAP).astype(np.float32)
+    return Normalized(skel, dt, np.argwhere(skel).astype(np.int16), float(content_aspect))

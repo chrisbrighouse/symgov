@@ -58,6 +58,7 @@ from .dependencies import (
 )
 from .logging_setup import configure_application_logging
 from .catalog_embedding_worker import run_catalog_embedding_worker
+from .catalog_visual_match_worker import run_visual_match_worker, worker_enabled as visual_match_worker_enabled
 from .catalog_embedding_worker import worker_enabled as catalog_embedding_worker_enabled
 from .usage_maintenance_worker import run_usage_maintenance_worker
 from .usage_maintenance_worker import worker_enabled as usage_maintenance_worker_enabled
@@ -263,6 +264,10 @@ def create_app() -> FastAPI:
             app.state.catalog_embedding_task = asyncio.create_task(
                 run_catalog_embedding_worker(settings, embedding_stop_event)
             )
+        if visual_match_worker_enabled(settings):
+            visual_stop_event = asyncio.Event()
+            app.state.visual_match_stop_event = visual_stop_event
+            app.state.visual_match_task = asyncio.create_task(run_visual_match_worker(settings, visual_stop_event))
         if usage_maintenance_worker_enabled(settings):
             usage_stop_event = asyncio.Event()
             app.state.usage_maintenance_stop_event = usage_stop_event
@@ -312,6 +317,14 @@ def create_app() -> FastAPI:
             embedding_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await embedding_task
+        visual_task = getattr(app.state, "visual_match_task", None)
+        visual_stop_event = getattr(app.state, "visual_match_stop_event", None)
+        if visual_stop_event is not None:
+            visual_stop_event.set()
+        if visual_task is not None:
+            visual_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await visual_task
         usage_task = getattr(app.state, "usage_maintenance_task", None)
         usage_stop_event = getattr(app.state, "usage_maintenance_stop_event", None)
         if usage_stop_event is not None:

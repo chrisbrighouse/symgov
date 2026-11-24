@@ -48,7 +48,7 @@ if str(BACKEND) not in sys.path:
 
 # Moved to head for the DISC DEXPI import: the served-rows query now reads the
 # classification and rights tables, which 20260904_0039 predates.
-NEW_MIGRATION_HEAD = "20261025_0079"
+NEW_MIGRATION_HEAD = "20261123_0080"
 
 psycopg = pytest.importorskip("psycopg")
 

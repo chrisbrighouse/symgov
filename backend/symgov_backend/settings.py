@@ -268,6 +268,20 @@ class SymgovAPISettings:
     catalog_embedding_sync_seconds: float = field(
         default_factory=lambda: _nonnegative_float_env("SYMGOV_CATALOG_EMBEDDING_SYNC_SECONDS", 300.0)
     )
+    # Visual symbol matching (design rev 4). Off by default: 0 seconds means the
+    # descriptor worker does not run (the index can still be built by command).
+    # The image embedding model is an OpenRouter model id, so it can change
+    # without a code change (D17).
+    visual_match_sync_seconds: float = field(
+        default_factory=lambda: _nonnegative_float_env("SYMGOV_VISUAL_MATCH_SYNC_SECONDS", 0.0)
+    )
+    visual_match_embedding_model: str = field(
+        default_factory=lambda: os.environ.get("SYMGOV_VISUAL_MATCH_EMBEDDING_MODEL", "").strip()
+        or "google/gemini-embedding-2"
+    )
+    visual_match_font_dir: str = field(
+        default_factory=lambda: os.environ.get("SYMGOV_VISUAL_MATCH_FONT_DIR", "").strip()
+    )
     # How often the background worker rolls usage counts up, drops raw events
     # past retention and clears old rate windows. 0 turns it off.
     usage_maintenance_seconds: float = field(
