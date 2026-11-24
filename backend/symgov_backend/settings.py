@@ -272,6 +272,10 @@ class SymgovAPISettings:
     # descriptor worker does not run (the index can still be built by command).
     # The image embedding model is an OpenRouter model id, so it can change
     # without a code change (D17).
+    visual_match_enabled: bool = field(
+        default_factory=lambda: os.environ.get("SYMGOV_VISUAL_MATCH_ENABLED", "").strip().lower()
+        in {"1", "true", "yes", "on"}
+    )
     visual_match_sync_seconds: float = field(
         default_factory=lambda: _nonnegative_float_env("SYMGOV_VISUAL_MATCH_SYNC_SECONDS", 0.0)
     )

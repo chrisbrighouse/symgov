@@ -187,6 +187,11 @@ def test_catalog_capabilities_describes_only_public_catalog_integration_surface(
         },
         {
             "method": "POST",
+            "path": "/api/v1/catalog/visual-match",
+            "scope": "catalog.read",
+        },
+        {
+            "method": "POST",
             "path": "/api/v1/catalog/symbols/download",
             "scope": "catalog.read",
         },

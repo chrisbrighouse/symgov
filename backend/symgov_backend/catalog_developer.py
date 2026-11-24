@@ -69,6 +69,7 @@ CATALOG_INTEGRATION_ENDPOINTS = (
     {"method": "GET", "path": "/api/v1/catalog/symbols/{symbol_ref}/thumbnail", "scope": "catalog.read", "summary": "Render the available thumbnail."},
     {"method": "GET", "path": "/api/v1/catalog/symbols/{symbol_ref}/preview", "scope": "catalog.read", "summary": "Render the available preview."},
     {"method": "GET", "path": "/api/v1/catalog/symbols/{symbol_ref}/state-variants/{index}", "scope": "catalog.read", "summary": "Render one option (state) variant of a symbol, by its option number."},
+    {"method": "POST", "path": "/api/v1/catalog/visual-match", "scope": "catalog.read", "summary": "Match a PNG or JPEG image of a symbol against the public Catalog (404 unless the feature is enabled)."},
     {"method": "POST", "path": "/api/v1/catalog/symbols/download", "scope": "catalog.read", "summary": "Download one symbol or a ZIP of selected symbols in one format."},
     {"method": "POST", "path": "/api/v1/catalog/ed/query", "scope": "catalog.ed.query", "summary": "Catalog query interpreter (rule-based): turn a symbol question into a Catalog search."},
     {"method": "POST", "path": "/api/v1/catalog/symbols/{symbol_ref}/feedback", "scope": "catalog.feedback.write", "summary": "Submit integration feedback."},
@@ -87,6 +88,7 @@ GUIDES = (
     {"id": "search", "title": "Choose keyword or contextual search"},
     {"id": "pagination", "title": "Cursor pagination"},
     {"id": "previews", "title": "Thumbnails and previews"},
+    {"id": "visual-match", "title": "Match an image to a symbol"},
     {"id": "downloads", "title": "Download symbol files"},
     {"id": "errors", "title": "Errors and troubleshooting"},
     {"id": "sandbox", "title": "Safe deterministic sandbox"},
@@ -105,6 +107,7 @@ _RESPONSE_SCHEMA_BY_ENDPOINT = {
     ("GET", "/api/v1/catalog/taxonomy"): "TaxonomyResponse",
     ("GET", "/api/v1/catalog/symbols"): "SymbolSearchResponse",
     ("POST", "/api/v1/catalog/search"): "ContextualSearchResponse",
+    ("POST", "/api/v1/catalog/visual-match"): "VisualMatchResponse",
     ("GET", "/api/v1/catalog/symbols/{symbol_ref}"): "SymbolDetailResponse",
     ("POST", "/api/v1/catalog/ed/query"): "EdQueryResponse",
     ("POST", "/api/v1/catalog/symbols/{symbol_ref}/feedback"): "FeedbackResponse",
@@ -216,6 +219,21 @@ def _operation(endpoint: dict) -> dict:
                 )
             },
         }
+    if path == "/api/v1/catalog/visual-match":
+        operation["responses"]["413"] = {"description": "The image is larger than 8 MB."}
+        operation["responses"]["415"] = {"description": "The body is not a PNG or JPEG."}
+        operation["responses"]["422"] = {"$ref": "#/components/responses/ValidationError"}
+        operation["responses"]["503"] = {
+            "description": "The visual index is not ready, or matching is busy. Retry after the Retry-After seconds.",
+            "headers": {"Retry-After": {"schema": {"type": "integer"}}},
+        }
+        parameters.extend([
+            *[{"name": name, "in": "query", "description": f"Repeatable. Narrows the symbols searched ({name}).",
+               "schema": {"type": "array", "items": {"type": "string", "maxLength": 120}, "maxItems": 50}, "style": "form", "explode": True}
+              for name in ("discipline", "category", "useCase", "format")],
+            {"name": "includeWeak", "in": "query", "schema": {"type": "boolean", "default": False}},
+            {"name": "limit", "in": "query", "description": "Groups to return; capped at 25.", "schema": {"type": "integer", "minimum": 1, "default": 10}},
+        ])
     if path == "/api/v1/catalog/symbols/download":
         binary_schema = {"schema": {"type": "string", "format": "binary"}}
         operation["responses"]["200"] = {
@@ -266,7 +284,14 @@ def _operation(endpoint: dict) -> dict:
         })
     if parameters:
         operation["parameters"] = parameters
-    if endpoint["method"] == "POST":
+    if path == "/api/v1/catalog/visual-match":
+        binary = {"schema": {"type": "string", "format": "binary"}}
+        operation["requestBody"] = {
+            "required": True,
+            "description": "The image bytes. It is processed in memory and never stored or logged.",
+            "content": {"image/png": dict(binary), "image/jpeg": dict(binary)},
+        }
+    elif endpoint["method"] == "POST":
         schema_name = (
             "ContextualSearchRequest" if path == "/api/v1/catalog/search"
             else "EdQueryRequest" if path == "/api/v1/catalog/ed/query"
@@ -337,6 +362,26 @@ def catalog_openapi_document() -> dict:
         "ContextualSearchResponse": {
             "type": "object", "required": ["query", "items", "interpretedFilters", "rankingExplanation", "warnings", "downloadAvailable", "downloadEndpoint"],
             "properties": {"query": {"type": "string"}, "items": {"type": "array", "items": object_schema}, "interpretedFilters": object_schema, "rankingExplanation": {"type": "array", "items": {"type": "string"}}, "warnings": {"type": "array", "items": {"type": "string"}}, "downloadAvailable": {"type": "boolean"}, "downloadEndpoint": {"type": "string"}, "noDownloadNotice": {"type": "string"}},
+        },
+        "VisualMatchResponse": {
+            "type": "object", "required": ["matcherVersion", "groups", "degraded", "warnings", "strongerMatchOutsideFilters", "symbolsSearched"],
+            "properties": {
+                "matcherVersion": {"type": "string"},
+                "groups": {"type": "array", "items": {
+                    "type": "object", "required": ["rank", "band", "symbols"],
+                    "properties": {
+                        "rank": {"type": "integer", "minimum": 1},
+                        "band": {"type": "string", "enum": ["likely", "possible", "weak"],
+                                 "description": "Agreement-based confidence, not a probability. Groups hold interchangeable symbols."},
+                        "symbols": {"type": "array", "items": object_schema},
+                    },
+                }},
+                "degraded": {"type": "boolean", "description": "True when the embedding service was unavailable and the local fallback ranked the result; never 'likely'."},
+                "warnings": {"type": "array", "items": {"type": "string"}},
+                "strongerMatchOutsideFilters": {"type": "boolean"},
+                "symbolsSearched": {"type": "integer"},
+                "notice": {"type": "string", "description": "Present when no group is shown."},
+            },
         },
         "SymbolDetailResponse": {
             "type": "object", "required": ["displayId", "symbolId", "slug", "name", "summary", "taxonomy", "rawAudit", "governance", "availableFormats", "downloadAvailable", "preview", "curated", "provenance", "links"],

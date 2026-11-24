@@ -5,6 +5,7 @@ from io import BytesIO
 import json
 from pathlib import Path
 import re
+import threading
 from time import perf_counter
 from typing import cast
 import uuid
@@ -15,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -55,6 +57,8 @@ from ..catalog_taxonomy import (
     catalog_taxonomy_for_symbol,
 )
 from ..catalog_usage import log_catalog_usage_event_best_effort
+from ..catalog_visual_match import MAX_IMAGE_BYTES as VISUAL_MATCH_MAX_BYTES, run_visual_match
+from ..visual_match.errors import VisualMatchInputError, VisualMatchUnavailable
 from ..dependencies import (
     SESSION_COOKIE_NAME,
     enforce_session_access_state,
@@ -351,6 +355,11 @@ def get_catalog_capabilities(
             {
                 "method": "GET",
                 "path": "/api/v1/catalog/symbols/{symbol_ref}/preview",
+                "scope": CATALOG_READ_SCOPE,
+            },
+            {
+                "method": "POST",
+                "path": "/api/v1/catalog/visual-match",
                 "scope": CATALOG_READ_SCOPE,
             },
             {
@@ -1221,6 +1230,75 @@ router.add_api_route(
     contextual_catalog_search,
     methods=["POST"],
 )
+
+
+_VISUAL_MATCH_STATUS = {
+    "image_too_large": 413, "unsupported_format": 415, "invalid_filter": 422,
+}
+_VISUAL_MATCH_SLOTS = threading.BoundedSemaphore(4)  # each request is several seconds of CPU and four provider calls
+_VISUAL_MATCH_FILTER_PARAMS = (
+    ("discipline", "catalogDisciplines"), ("category", "catalogCategories"),
+    ("useCase", "useCases"), ("format", "availableFormats"),
+)
+
+
+async def _read_image_body(request: Request) -> bytes:
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > VISUAL_MATCH_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="The image is larger than the upload limit.")
+    chunks, size = [], 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > VISUAL_MATCH_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="The image is larger than the upload limit.")
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+@router.post("/visual-match")
+async def catalog_visual_match(
+    request: Request,
+    include_weak: bool = Query(default=False, alias="includeWeak"),
+    limit: int = Query(default=10, ge=1),
+    auth_context: IntegrationAuthContext = Depends(require_catalog_scope(CATALOG_READ_SCOPE)),
+    session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
+) -> dict:
+    """Match a pasted PNG or JPEG (the request body) against the symbols the caller may search.
+
+    Filters are repeatable query parameters: discipline, category, useCase, format. The image is processed in
+    memory and never stored or logged.
+    """
+    started_at = perf_counter()
+    if not settings.visual_match_enabled:
+        raise HTTPException(status_code=404, detail="Not found.")
+    media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if media_type not in {"image/png", "image/jpeg"}:
+        raise HTTPException(status_code=415, detail="Send the image as the request body with Content-Type image/png or image/jpeg.")
+    image = await _read_image_body(request)
+    filters = {key: request.query_params.getlist(name) for name, key in _VISUAL_MATCH_FILTER_PARAMS}
+    if not _VISUAL_MATCH_SLOTS.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="Visual matching is busy. Try again shortly.", headers={"Retry-After": "5"})
+    try:
+        response = await run_in_threadpool(
+            run_visual_match, session, settings, image=image, filters=filters,
+            include_weak=include_weak, limit=min(limit, 25),
+        )
+    except VisualMatchInputError as exc:
+        raise HTTPException(status_code=_VISUAL_MATCH_STATUS.get(exc.code, 400), detail=str(exc)) from None
+    except VisualMatchUnavailable:
+        session.rollback()
+        raise HTTPException(
+            status_code=503, detail="Visual matching is not available yet.", headers={"Retry-After": "60"}
+        ) from None
+    finally:
+        _VISUAL_MATCH_SLOTS.release()
+    # The usage event records that a match ran and how many groups came back, never the image or anything derived from it.
+    _log_successful_catalog_read(
+        session, auth_context, request=request, route_name="catalog_visual_match", started_at=started_at,
+        result_count=len(response["groups"]),
+    )
+    return response
 
 
 @router.get("/symbols")

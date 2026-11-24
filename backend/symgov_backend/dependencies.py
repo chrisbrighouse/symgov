@@ -44,6 +44,7 @@ API_KEY_ONLY_MUTATION_OPERATIONS = frozenset(
     {
         ("POST", "/api/v1/catalog/ed/query"),
         ("POST", "/api/v1/catalog/search"),
+        ("POST", "/api/v1/catalog/visual-match"),
         ("POST", "/api/v1/catalog/symbols/{symbol_ref}/feedback"),
     }
 )
@@ -52,9 +53,11 @@ API_KEY_ONLY_MUTATION_OPERATIONS = frozenset(
 class BoundedMutationBodyMiddleware:
     """Bound mutation bodies before routing, parsing, or authentication."""
 
-    def __init__(self, app, *, max_body_bytes: int):
+    def __init__(self, app, *, max_body_bytes: int, path_limits: dict[str, int] | None = None):
         self.app = app
         self.max_body_bytes = max_body_bytes
+        # A route that takes a file (the visual match image) may be given a larger bound of its own.
+        self.path_limits = dict(path_limits or {})
 
     def _must_bound(self, scope: dict) -> bool:
         method = str(scope.get("method", "")).upper()
@@ -65,6 +68,7 @@ class BoundedMutationBodyMiddleware:
             await self.app(scope, receive, send)
             return
 
+        limit = self.path_limits.get(str(scope.get("path", "")), self.max_body_bytes)
         body = bytearray()
         disconnected = False
         while True:
@@ -73,7 +77,7 @@ class BoundedMutationBodyMiddleware:
                 disconnected = True
                 break
             chunk = message.get("body", b"")
-            if len(body) + len(chunk) > self.max_body_bytes:
+            if len(body) + len(chunk) > limit:
                 response_body = b'{"error":"request_error","detail":"Request body is too large."}'
                 await send(
                     {
