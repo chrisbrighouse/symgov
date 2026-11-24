@@ -180,3 +180,27 @@ def test_bad_input_is_a_4xx_style_error_and_an_empty_index_is_unavailable(built,
     with pytest.raises(VisualMatchUnavailable) as caught:
         retrieval.visual_match(session, image=_query_png(SHAPES[0], tmp_path), embed=fake_embed)
     assert caught.value.code == "index_empty"
+
+
+def test_a_symbol_whose_pack_stops_being_public_is_never_returned_or_indexed(built, session, tmp_path):
+    """Cross-tenant guard: a descriptor row is only a ranking aid. Visibility is the live public-Catalog rule."""
+    engine, seeded, names = built
+    target = _revision(seeded, names[0])
+    with engine.begin() as c:
+        pack = c.execute(text("SELECT pk.id FROM publication_packs pk JOIN pack_entries pe ON pe.pack_id = pk.id "
+                              "WHERE pe.symbol_revision_id = :r"), {"r": target}).scalar_one()
+        c.execute(text("UPDATE publication_packs SET audience = 'organization' WHERE id = :p"), {"p": pack})
+    try:
+        retrieval.clear_index_cache()
+        result = retrieval.visual_match(session, image=_query_png(SHAPES[0], tmp_path), embed=fake_embed, min_coverage=0.5)
+        assert target not in {str(m.revision_id) for g in result.groups for m in g.members}
+        report = index_visual_descriptors(session, cfg=_cfg(tmp_path), fetch=lambda k: SHAPES[0], embed=fake_embed,
+                                          apply=True, prune=True)
+        with engine.connect() as c:
+            left = c.execute(text("SELECT count(*) FROM catalog_symbol_visual_descriptors WHERE symbol_revision_id = :r"),
+                             {"r": target}).scalar_one()
+        assert left == 0 and report.pruned >= 1   # the row is pruned the next time the worker runs
+    finally:
+        with engine.begin() as c:
+            c.execute(text("UPDATE publication_packs SET audience = 'public' WHERE audience = 'organization'"))
+        retrieval.clear_index_cache()

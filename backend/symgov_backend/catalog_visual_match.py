@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.dialects.postgresql import UUID
@@ -21,7 +21,10 @@ from .published_catalog import PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
 from .services.llm_image_embeddings import request_image_embedding
 from .settings import SymgovAPISettings
 from .visual_match import MATCHER_VERSION
-from .visual_match.retrieval import VisualMatchResult, visual_match
+from .visual_match.errors import VisualMatchUnavailable
+
+if TYPE_CHECKING:  # the matcher needs numpy, scipy and scikit-image; the API must start without them
+    from .visual_match.retrieval import VisualMatchResult
 
 NO_CLOSE_MATCH = "No close match found among the symbols you can search."
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -81,5 +84,9 @@ def run_visual_match(
     limit: int = 10,
     embed: Callable[[bytes], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    try:
+        from .visual_match.retrieval import visual_match
+    except ImportError:
+        raise VisualMatchUnavailable("dependencies_missing", "The matcher's libraries are not installed.") from None
     result = visual_match(session, image=image, embed=embed or default_embed(settings), filters=filters)
     return build_response(session, result, include_weak=include_weak, limit=limit)

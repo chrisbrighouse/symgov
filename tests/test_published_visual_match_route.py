@@ -120,3 +120,31 @@ def test_symbols_are_served_with_the_session_preview_route_not_the_api_key_links
     symbols = client.post(URL, json={"imageBase64": _b64()}).json()["groups"][0]["symbols"]
     assert symbols[0]["previewUrl"] == "/api/v1/published/symbols/0003-12/preview" and symbols[1]["previewUrl"] is None
     assert all("links" not in s and "preview" not in s for s in symbols)
+
+
+def test_the_api_key_route_and_the_in_app_route_return_the_same_groups(monkeypatch):
+    """Parity: both routes serve one service result; the in-app one only swaps in its own preview links."""
+    from test_catalog_routes_auth import api_key_row, auth_headers, build_client
+    from symgov_backend.routes import catalog as catalog_routes
+    from catalog_key_fakes import switch_off_key_policies
+
+    switch_off_key_policies(monkeypatch)
+    canned = {"matcherVersion": "vm1", "degraded": False, "warnings": [], "strongerMatchOutsideFilters": False,
+              "symbolsSearched": 2, "groups": [{"rank": 1, "band": "likely", "symbols": [
+                  {"displayId": "0003-12", "name": "Gate valve", "symbolId": "s1", "preview": {"x": 1}, "links": {"a": 1}}]}]}
+    import copy
+    monkeypatch.setattr(catalog_routes, "run_visual_match", lambda *a, **k: copy.deepcopy(canned))
+    api, _ = build_client(rows=[api_key_row("valid-token")])
+    real = get_settings()
+    api.app.dependency_overrides[get_settings] = lambda: dataclasses.replace(real, visual_match_enabled=True)
+    via_api = api.post("/api/v1/catalog/visual-match", content=PNG,
+                       headers={**auth_headers(), "Content-Type": "image/png"}).json()
+
+    ui, _ = _client(monkeypatch, runner=lambda **k: copy.deepcopy(canned))
+    via_ui = ui.post(URL, json={"imageBase64": _b64()}).json()
+
+    def core(body):
+        return [(g["rank"], g["band"], [s["displayId"] for s in g["symbols"]]) for g in body["groups"]]
+
+    assert core(via_api) == core(via_ui)
+    assert {k: v for k, v in via_api.items() if k != "groups"} == {k: v for k, v in via_ui.items() if k != "groups"}

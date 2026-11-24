@@ -243,6 +243,22 @@ def build_parser() -> argparse.ArgumentParser:
     embeddings_parser.add_argument("--batch-size", type=int, default=32)
     embeddings_parser.add_argument("--top", type=int, default=10, help="How many to show (probe only).")
 
+    visual_parser = subparsers.add_parser(
+        "visual-match",
+        help=(
+            "The visual symbol matching index. 'status' reports coverage, 'index' renders and embeds the published "
+            "public symbols that are new or changed (dry run unless --apply), 'probe' matches an image file against "
+            "the index and prints the groups (never stores the image)."
+        ),
+    )
+    visual_parser.add_argument("action", choices=["status", "index", "probe"])
+    visual_parser.add_argument("image", nargs="?", help="PNG or JPEG path (probe only).")
+    visual_parser.add_argument("--db-env-file", help="Path to the Symgov database env file.")
+    visual_parser.add_argument("--storage-env-file", help="Path to the Symgov storage env file.")
+    visual_parser.add_argument("--apply", action="store_true", help="Render, embed and write (index only).")
+    visual_parser.add_argument("--limit", type=int, help="Build at most this many (index only).")
+    visual_parser.add_argument("--no-embed", action="store_true", help="Local descriptors only; no provider calls (index only).")
+
     hannah_targets_parser = subparsers.add_parser(
         "hannah-build-targets",
         help=(
@@ -706,6 +722,54 @@ def main(argv: Sequence[str] | None = None):
             except Exception as exc:
                 session.rollback()
                 print(f"Catalog embeddings {args.action} failed: {type(exc).__name__}", file=sys.stderr)
+                return 1
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+
+    if args.command == "visual-match":
+        import tempfile
+
+        from symgov_backend.catalog_visual_match import default_embed
+        from symgov_backend.catalog_visual_match_worker import render_config
+        from symgov_backend.runtime import download_object_bytes
+        from symgov_backend.settings import get_settings
+        from symgov_backend.visual_match.index import MAX_SOURCE_BYTES, index_status, index_visual_descriptors
+        from symgov_backend.visual_match.retrieval import visual_match
+
+        settings = get_settings()
+        session_factory = create_session_factory(env_file=args.db_env_file, nopool=True)
+        storage_env = args.storage_env_file or settings.storage_env_file
+        embed = default_embed(settings, lambda: session_factory)
+        with tempfile.TemporaryDirectory(prefix="symgov-vm-") as resources, session_factory() as session:
+            cfg = render_config(settings, resources)
+            try:
+                if args.action == "status":
+                    result = index_status(session, cfg=cfg)
+                elif args.action == "index":
+                    report = index_visual_descriptors(
+                        session, cfg=cfg, apply=args.apply, limit=args.limit,
+                        embed=None if args.no_embed else (lambda png: embed(png)),
+                        fetch=lambda key: download_object_bytes(
+                            object_key=key, env_file=storage_env, max_bytes=MAX_SOURCE_BYTES + 1)["payload"],
+                    )
+                    result = {**report.__dict__, "applied": bool(args.apply)}
+                else:
+                    if not args.image:
+                        raise SystemExit("probe needs an image path.")
+                    with open(args.image, "rb") as handle:
+                        found = visual_match(session, image=handle.read(), embed=embed)
+                    result = {
+                        "degraded": found.degraded, "eligible": found.eligible, "coverage": found.coverage,
+                        "groups": [
+                            {"rank": g.rank, "band": g.band, "revisions": [str(m.revision_id) for m in g.members]}
+                            for g in found.groups
+                        ],
+                    }
+            except SystemExit:
+                raise
+            except Exception as exc:
+                session.rollback()
+                print(f"Visual match {args.action} failed: {type(exc).__name__}", file=sys.stderr)
                 return 1
         print(json.dumps(result, indent=2, default=str))
         return 0

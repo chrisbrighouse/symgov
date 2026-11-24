@@ -16,7 +16,7 @@ import logging
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
@@ -27,8 +27,9 @@ from .runtime import download_object_bytes
 from .services.llm_image_embeddings import request_image_embedding
 from .services.llm_router import provider_api_key
 from .settings import SymgovAPISettings
-from .visual_match.index import MAX_SOURCE_BYTES, index_visual_descriptors
-from .visual_match.rasterizer import RenderConfig, vendored_font_dir
+
+if TYPE_CHECKING:
+    from .visual_match.rasterizer import RenderConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ FONT_SET_ID = "24ddb36449ea"   # the pinned DejaVu + Liberation set (visual_matc
 
 @dataclass(frozen=True)
 class VisualSyncResult:
-    status: str  # "ran", "skipped_locked" or "skipped_no_key"
+    status: str  # "ran", "skipped_locked", "skipped_no_key" or "skipped_dependencies"
     built: int = 0
     pending: int = 0
     pruned: int = 0
@@ -52,7 +53,10 @@ def worker_enabled(settings: SymgovAPISettings) -> bool:
     return float(settings.visual_match_sync_seconds) > 0
 
 
-def render_config(settings: SymgovAPISettings, resources_dir: str) -> RenderConfig:
+def render_config(settings: SymgovAPISettings, resources_dir: str) -> "RenderConfig":
+    # Imported here: the rasteriser needs numpy and Pillow, and the API must start without the matcher's libraries.
+    from .visual_match.rasterizer import RenderConfig, vendored_font_dir
+
     return RenderConfig(
         font_dirs=(settings.visual_match_font_dir or vendored_font_dir(),),
         resources_dir=resources_dir,
@@ -69,6 +73,10 @@ def sync_once(
     limit: int = MAX_PER_CYCLE,
 ) -> VisualSyncResult:
     """One reconciliation pass. Blocking; run it off the event loop."""
+    try:
+        from .visual_match.index import MAX_SOURCE_BYTES, index_visual_descriptors
+    except ImportError:
+        return VisualSyncResult(status="skipped_dependencies")
     if embed is None and not provider_api_key("openrouter"):
         return VisualSyncResult(status="skipped_no_key")
     own_engine = engine is None
@@ -141,6 +149,8 @@ async def run_visual_match_worker(
         else:
             if result.status == "skipped_no_key":
                 LOGGER.warning("Visual match sync is enabled but no provider key is configured.")
+            if result.status == "skipped_dependencies":
+                LOGGER.warning("Visual match sync is enabled but the matcher's libraries are not installed.")
             # Degraded rows (no stage-1 embedding) are retried on the next pass, with backoff.
             failures = failures + 1 if result.degraded else 0
             if result.built or result.pruned:

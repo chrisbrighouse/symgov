@@ -137,3 +137,34 @@ def test_the_app_starts_and_stops_the_visual_worker_only_with_an_interval(monkey
         assert len(started) == expected
         task = getattr(app.state, "visual_match_task", None)
     assert (task is None) == (expected == 0) and (task is None or task.done())
+
+
+def test_the_api_starts_without_the_matchers_libraries_and_reports_them_missing():
+    """Releases run inside the existing container: if numpy, scipy, scikit-image or resvg are absent, the API must
+    still start, the route must say 503, and the worker must skip, not crash."""
+    import subprocess
+    import sys
+    import textwrap
+
+    code = textwrap.dedent("""
+        import sys
+        for name in ("numpy", "scipy", "skimage", "resvg_py"):
+            sys.modules[name] = None
+        import symgov_backend.catalog_visual_match as service
+        import symgov_backend.catalog_visual_match_worker as worker
+        import symgov_backend.routes.published, symgov_backend.routes.catalog
+        from types import SimpleNamespace
+        from symgov_backend.visual_match.errors import VisualMatchUnavailable
+        try:
+            service.run_visual_match(None, SimpleNamespace(), image=b"x", filters={})
+        except VisualMatchUnavailable as exc:
+            assert exc.code == "dependencies_missing"
+        else:
+            raise SystemExit("no error")
+        assert worker.sync_once(SimpleNamespace()).status == "skipped_dependencies"
+        print("ok")
+    """)
+    import os
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120,
+                            env={**os.environ, "PYTHONPATH": os.path.join(os.path.dirname(__file__), "..", "backend")})
+    assert result.returncode == 0 and result.stdout.strip() == "ok", result.stderr[-2000:]
