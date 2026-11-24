@@ -36,7 +36,7 @@ from sqlalchemy.orm import Session
 from ..published_catalog import PUBLISHED_SYMBOLS_SQL, choose_published_preview_asset
 from . import MATCHER_VERSION
 from .descriptor import descriptor
-from .imaging import normalize, pack_skeleton
+from .imaging import SIZE_FINE, normalize, pack_skeleton
 from .rasterizer import RenderConfig, RenderError, render
 
 MAX_SOURCE_BYTES = 4 * 1024 * 1024
@@ -49,6 +49,7 @@ class Built:
     gemini_model: str | None
     local: np.ndarray
     skeleton: bytes
+    skeleton_fine: bytes
     content_aspect: float
     source_sha256: str
 
@@ -98,6 +99,9 @@ def build_descriptor(
     n = normalize(rendered.image)
     if n is None:
         raise RenderError("The symbol has no usable line work.")
+    fine = normalize(rendered.image, SIZE_FINE)
+    if fine is None:
+        raise RenderError("The symbol has no usable line work.")
     gemini: tuple[float, ...] | None = None
     model: str | None = None
     if embed is not None:
@@ -107,7 +111,7 @@ def build_descriptor(
             model = str(result["model"])
         except Exception:  # noqa: BLE001 - any provider fault means "no stage-1 vector yet"
             gemini, model = None, None
-    return Built(gemini, model, descriptor(n), pack_skeleton(n), float(n.content_aspect), hashlib.sha256(data).hexdigest())
+    return Built(gemini, model, descriptor(n), pack_skeleton(n), pack_skeleton(fine), float(n.content_aspect), hashlib.sha256(data).hexdigest())
 
 
 def _published_rows(session: Session) -> list[Any]:
@@ -186,14 +190,14 @@ def index_visual_descriptors(
         session.execute(
             text(
                 "INSERT INTO catalog_symbol_visual_descriptors (symbol_revision_id, governed_symbol_id, matcher_version, "
-                "scope, embedding_model, dimensions, gemini_embedding, local_descriptor, skeleton, content_aspect, "
+                "scope, embedding_model, dimensions, gemini_embedding, local_descriptor, skeleton, skeleton_fine, content_aspect, "
                 "asset_object_key, source_sha256, renderer_version, font_set_id, built_at) "
-                "VALUES (CAST(:rev AS uuid), CAST(:sym AS uuid), :v, 'public', :model, :dims, :gem, :local, :skel, "
+                "VALUES (CAST(:rev AS uuid), CAST(:sym AS uuid), :v, 'public', :model, :dims, :gem, :local, :skel, :fine, "
                 ":aspect, :key, :sha, :renderer, :fonts, :now) "
                 "ON CONFLICT (symbol_revision_id, matcher_version) DO UPDATE SET "
                 "governed_symbol_id = EXCLUDED.governed_symbol_id, embedding_model = EXCLUDED.embedding_model, "
                 "dimensions = EXCLUDED.dimensions, gemini_embedding = EXCLUDED.gemini_embedding, "
-                "local_descriptor = EXCLUDED.local_descriptor, skeleton = EXCLUDED.skeleton, "
+                "local_descriptor = EXCLUDED.local_descriptor, skeleton = EXCLUDED.skeleton, skeleton_fine = EXCLUDED.skeleton_fine, "
                 "content_aspect = EXCLUDED.content_aspect, asset_object_key = EXCLUDED.asset_object_key, "
                 "source_sha256 = EXCLUDED.source_sha256, renderer_version = EXCLUDED.renderer_version, "
                 "font_set_id = EXCLUDED.font_set_id, built_at = EXCLUDED.built_at"
@@ -202,7 +206,7 @@ def index_visual_descriptors(
                 "rev": str(row.symbol_revision_id), "sym": str(row.symbol_id), "v": matcher_version,
                 "model": built.gemini_model, "dims": len(built.gemini) if built.gemini else None,
                 "gem": pack_floats(built.gemini) if built.gemini else None,
-                "local": pack_floats(built.local), "skel": built.skeleton, "aspect": built.content_aspect,
+                "local": pack_floats(built.local), "skel": built.skeleton, "fine": built.skeleton_fine, "aspect": built.content_aspect,
                 "key": asset["key"], "sha": built.source_sha256, "renderer": cfg.renderer_version,
                 "fonts": cfg.font_set_id, "now": datetime.now(timezone.utc),
             },

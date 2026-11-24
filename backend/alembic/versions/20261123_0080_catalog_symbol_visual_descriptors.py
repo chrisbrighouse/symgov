@@ -13,7 +13,8 @@ everything the matcher needs without touching storage at query time:
   local descriptor still serves the D19 fallback and the worker retries.
 - `local_descriptor`: the 360-value hand-made descriptor (float32, unit length).
 - `skeleton`: the 128 x 128 centreline as a bit array (2048 bytes) and
-  `content_aspect`, which the exact rerank needs.
+  `content_aspect`, which the exact rerank needs, and the 256 x 256 centreline
+  (`skeleton_fine`, 8192 bytes) that the interchangeable-symbol grouping needs.
 - `asset_object_key`, `source_sha256`, `renderer_version`, `font_set_id`: what
   the row was built from. A row is current while the object key, renderer and
   font set are unchanged, so the worker never refetches a current symbol.
@@ -60,6 +61,7 @@ def upgrade() -> None:
         sa.Column("gemini_embedding", sa.LargeBinary(), nullable=True),
         sa.Column("local_descriptor", sa.LargeBinary(), nullable=False),
         sa.Column("skeleton", sa.LargeBinary(), nullable=False),
+        sa.Column("skeleton_fine", sa.LargeBinary(), nullable=False),
         sa.Column("content_aspect", sa.Float(), nullable=False),
         sa.Column("asset_object_key", sa.Text(), nullable=False),
         sa.Column("source_sha256", sa.Text(), nullable=False),
@@ -76,6 +78,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint("length(local_descriptor) > 0 AND length(local_descriptor) % 4 = 0", name="local"),
         sa.CheckConstraint("length(skeleton) = 2048", name="skeleton"),
+        sa.CheckConstraint("length(skeleton_fine) = 8192", name="fine"),
         sa.CheckConstraint("content_aspect > 0", name="aspect"),
         sa.CheckConstraint("source_sha256 ~ '^[0-9a-f]{64}$'", name="hash"),
     )
