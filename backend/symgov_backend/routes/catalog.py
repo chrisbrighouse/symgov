@@ -5,7 +5,6 @@ from io import BytesIO
 import json
 from pathlib import Path
 import re
-import threading
 from time import perf_counter
 from typing import cast
 import uuid
@@ -57,7 +56,7 @@ from ..catalog_taxonomy import (
     catalog_taxonomy_for_symbol,
 )
 from ..catalog_usage import log_catalog_usage_event_best_effort
-from ..catalog_visual_match import MAX_IMAGE_BYTES as VISUAL_MATCH_MAX_BYTES, run_visual_match
+from ..catalog_visual_match import MAX_IMAGE_BYTES as VISUAL_MATCH_MAX_BYTES, SLOTS as VISUAL_MATCH_SLOTS, run_visual_match
 from ..visual_match.errors import VisualMatchInputError, VisualMatchUnavailable
 from ..dependencies import (
     SESSION_COOKIE_NAME,
@@ -1235,7 +1234,7 @@ router.add_api_route(
 _VISUAL_MATCH_STATUS = {
     "image_too_large": 413, "unsupported_format": 415, "invalid_filter": 422,
 }
-_VISUAL_MATCH_SLOTS = threading.BoundedSemaphore(4)  # each request is several seconds of CPU and four provider calls
+_VISUAL_MATCH_SLOTS = VISUAL_MATCH_SLOTS
 _VISUAL_MATCH_FILTER_PARAMS = (
     ("discipline", "catalogDisciplines"), ("category", "catalogCategories"),
     ("useCase", "useCases"), ("format", "availableFormats"),

@@ -7,6 +7,7 @@ query image is held in memory for the request and is not written, logged or put 
 
 from __future__ import annotations
 
+import threading
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -25,6 +26,10 @@ from .visual_match.retrieval import VisualMatchResult, visual_match
 NO_CLOSE_MATCH = "No close match found among the symbols you can search."
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 BANDS_SHOWN = ("likely", "possible")
+# Each match is seconds of CPU and four provider calls, so both the API-key route and the in-app route share
+# one small pool and shed load with a 503 rather than queue.
+SLOTS = threading.BoundedSemaphore(4)
+MAX_JSON_BODY_BYTES = MAX_IMAGE_BYTES * 4 // 3 + 8192
 
 
 def default_embed(settings: SymgovAPISettings, session_factory_provider: Callable[[], Any] | None = None):

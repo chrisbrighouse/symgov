@@ -58,7 +58,10 @@ from .dependencies import (
 )
 from .logging_setup import configure_application_logging
 from .catalog_embedding_worker import run_catalog_embedding_worker
-from .catalog_visual_match import MAX_IMAGE_BYTES as VISUAL_MATCH_MAX_BODY_BYTES
+from .catalog_visual_match import (
+    MAX_IMAGE_BYTES as VISUAL_MATCH_MAX_BODY_BYTES,
+    MAX_JSON_BODY_BYTES as VISUAL_MATCH_MAX_JSON_BODY_BYTES,
+)
 from .catalog_visual_match_worker import run_visual_match_worker, worker_enabled as visual_match_worker_enabled
 from .catalog_embedding_worker import worker_enabled as catalog_embedding_worker_enabled
 from .usage_maintenance_worker import run_usage_maintenance_worker
@@ -101,7 +104,10 @@ def create_app() -> FastAPI:
     app.add_middleware(
         BoundedMutationBodyMiddleware,
         max_body_bytes=settings.mutation_max_body_bytes,
-        path_limits={f"{settings.api_prefix}/catalog/visual-match": VISUAL_MATCH_MAX_BODY_BYTES},
+        path_limits={
+            f"{settings.api_prefix}/catalog/visual-match": VISUAL_MATCH_MAX_BODY_BYTES,
+            f"{settings.api_prefix}/published/symbols/visual-match": VISUAL_MATCH_MAX_JSON_BODY_BYTES,
+        },
     )
 
     ed_chat_path = f"{settings.api_prefix}/ed/chat"

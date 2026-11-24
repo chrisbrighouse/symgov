@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from typing import Literal
@@ -9,11 +11,14 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy import bindparam, func, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..asset_manifest import list_download_assets
+from ..catalog_visual_match import MAX_IMAGE_BYTES as VISUAL_MATCH_MAX_BYTES, SLOTS as VISUAL_MATCH_SLOTS, run_visual_match
+from ..visual_match.errors import VisualMatchInputError, VisualMatchUnavailable
 from ..auth import AuthenticatedUser
 from ..catalog_favourites import (
     add_catalog_favourite,
@@ -843,6 +848,71 @@ def _catalog_search_validation_error(name: str, message: str, value: object = No
     return RequestValidationError(
         [{"type": "value_error", "loc": ["query", name], "msg": message, "input": value}]
     )
+
+
+_VISUAL_MATCH_STATUS = {"image_too_large": 413, "unsupported_format": 415, "invalid_filter": 422}
+_VISUAL_MATCH_FILTER_KEYS = ("catalogDisciplines", "catalogCategories", "useCases", "availableFormats")
+
+
+@router.post("/symbols/visual-match")
+async def match_published_symbol_image(
+    request: Request,
+    current_user: AuthenticatedUser = Depends(require_user),
+    session: Session = Depends(get_db_session),
+    settings: SymgovAPISettings = Depends(get_settings),
+) -> dict:
+    """Match a pasted or uploaded image (base64 in a JSON body) against the public Catalog, for the signed-in app.
+
+    The in-app twin of `POST /api/v1/catalog/visual-match`: same matcher and response, session authentication
+    and the cookie-mutation checks instead of an API key. Public Catalog only for now. The image is held in
+    memory for the request and never stored or logged.
+    """
+    if not settings.visual_match_enabled:
+        raise HTTPException(status_code=404, detail="Not found.")
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Request body must be valid JSON.") from None
+    if not isinstance(body, dict) or not isinstance(body.get("imageBase64"), str):
+        raise HTTPException(status_code=400, detail="imageBase64 must be a base64 string.")
+    try:
+        image = base64.b64decode(body["imageBase64"], validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="imageBase64 is not valid base64.") from None
+    if len(image) > VISUAL_MATCH_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="The image is larger than the upload limit.")
+    raw_filters = body.get("filters", {})
+    if not isinstance(raw_filters, dict) or any(key not in _VISUAL_MATCH_FILTER_KEYS for key in raw_filters):
+        raise HTTPException(status_code=422, detail="Unknown filter.")
+    include_weak = body.get("includeWeak", False)
+    limit = body.get("limit", 10)
+    if not isinstance(include_weak, bool) or isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise HTTPException(status_code=400, detail="includeWeak must be a boolean and limit a positive integer.")
+    if not VISUAL_MATCH_SLOTS.acquire(blocking=False):
+        raise HTTPException(status_code=503, detail="Visual matching is busy. Try again shortly.", headers={"Retry-After": "5"})
+    try:
+        response = await run_in_threadpool(
+            run_visual_match, session, settings, image=image, filters=raw_filters,
+            include_weak=include_weak, limit=min(limit, 25),
+        )
+        # The Catalog summary links to the API-key routes; the signed-in app shows the session preview route.
+        for group in response.get("groups", []):
+            for symbol in group.get("symbols", []):
+                symbol["previewUrl"] = (
+                    f"/api/v1/published/symbols/{symbol['displayId']}/preview" if symbol.get("preview") else None
+                )
+                symbol.pop("links", None)
+                symbol.pop("preview", None)
+        return response
+    except VisualMatchInputError as exc:
+        raise HTTPException(status_code=_VISUAL_MATCH_STATUS.get(exc.code, 400), detail=str(exc)) from None
+    except VisualMatchUnavailable:
+        session.rollback()
+        raise HTTPException(
+            status_code=503, detail="Visual matching is not available yet.", headers={"Retry-After": "60"}
+        ) from None
+    finally:
+        VISUAL_MATCH_SLOTS.release()
 
 
 # Registered before `/symbols/{symbol_id}`, which would otherwise capture it.

@@ -91,6 +91,8 @@ import { canUseEd } from './edChat.js';
 import { ProjectContextBarView } from './ProjectContextBar.js';
 import { useSymbolContext } from './useSymbolContext.js';
 import { useCatalogSearch } from './useCatalogSearch.js';
+import VisualMatchPanel from './VisualMatchPanel.js';
+import { VISUAL_VIEW } from './visualMatch.js';
 import {
   CATALOG_VIEW,
   SET_ORDER_SORT,
@@ -1194,6 +1196,16 @@ function StandardsPage() {
   const requestedView = detailsOpen ? rememberedViewRef.current : normalizeCatalogView(searchParams.get('view'));
   if (!detailsOpen) rememberedViewRef.current = requestedView;
   const dexpiClass = (searchParams.get('dexpiClass') || '').trim();
+  // The Visual match tab, shown only when the server says the feature is on. It leaves the Catalog search
+  // running (its filter options come from it) and replaces the results with the matcher.
+  const visualMatchAvailable = Boolean(appConfig.apiRoot) && auth?.user?.capabilities?.visualMatchEnabled === true;
+  const visualOpen = visualMatchAvailable && !detailsOpen && searchParams.get('view') === VISUAL_VIEW;
+  const catalogTabs = [
+    ...(setsAvailable ? [{ view: SET_VIEW, label: 'Set' }] : []),
+    { view: CATALOG_VIEW, label: 'Catalog' },
+    ...(visualMatchAvailable ? [{ view: VISUAL_VIEW, label: 'Visual match' }] : [])
+  ];
+  const tabsShown = setsAvailable || visualMatchAvailable;
   const [initialView, setInitialView] = useState('');
   useEffect(() => {
     if (!setsAvailable || initialView) return;
@@ -2374,14 +2386,15 @@ function StandardsPage() {
         ) : null}
       </section>
 
-      {setsAvailable ? (
+      {tabsShown ? (
         <CatalogViewTabs
-          view={view}
+          tabs={catalogTabs}
+          view={visualOpen ? VISUAL_VIEW : view}
           onSelect={switchView}
-          total={catalogSearch.loaded && !catalogSearch.loading ? catalogSearch.total : null}
+          total={!visualOpen && catalogSearch.loaded && !catalogSearch.loading ? catalogSearch.total : null}
         />
       ) : null}
-      {view === SET_VIEW ? (
+      {view === SET_VIEW && !visualOpen ? (
         <section className="catalog-set-context" aria-label="Project and Symbol Set shown in the Set tab">
           <ProjectContextBarView state={symbolContext} headingId="catalog-set-context-heading" />
           {setProjectId && catalogSearch.loaded && (setSummary.reason || setSummary.counts) ? (
@@ -2400,9 +2413,18 @@ function StandardsPage() {
         </p>
       ) : null}
 
+      {visualOpen ? (
+        <div id={CATALOG_TAB_PANEL_ID} role="tabpanel" aria-labelledby={catalogTabId(VISUAL_VIEW)}>
+          <VisualMatchPanel
+            filterOptions={facetOptions}
+            renderPreview={(symbol) => <PublishedSymbolPreview symbol={symbol} />}
+            onOpenSymbol={(symbol) => openDetails({ ...symbol, id: symbol.symbolId })}
+          />
+        </div>
+      ) : (
       <div
         className={`standards-browser-grid ${activeId && activeSymbol ? 'has-detail' : ''}`}
-        {...(setsAvailable ? { id: CATALOG_TAB_PANEL_ID, role: 'tabpanel', 'aria-labelledby': catalogTabId(view) } : {})}
+        {...(tabsShown ? { id: CATALOG_TAB_PANEL_ID, role: 'tabpanel', 'aria-labelledby': catalogTabId(view) } : {})}
       >
         <section className="glass-panel pane facets-panel">
           <SectionHeading title="Filter symbols" subtitle="Narrow by properties" />
@@ -2861,6 +2883,7 @@ function StandardsPage() {
           </aside>
         ) : null}
       </div>
+      )}
       {commandDialog ? (
         <div className="modal-backdrop" role="presentation" onClick={closePublishedCommandDialog}>
           <div className="modal-card published-command-dialog" role="dialog" aria-modal="true" aria-labelledby="published-command-title" onClick={(event) => event.stopPropagation()}>
@@ -2931,10 +2954,6 @@ function InActiveSetMarker({ symbol, setCode, emptyLabel = null }) {
 }
 
 const CATALOG_TAB_PANEL_ID = 'catalog-view-panel';
-const CATALOG_VIEW_TABS = [
-  { view: SET_VIEW, label: 'Set' },
-  { view: CATALOG_VIEW, label: 'Catalog' }
-];
 
 function catalogTabId(view) {
   return `catalog-view-tab-${view}`;
@@ -2943,23 +2962,23 @@ function catalogTabId(view) {
 // The Set and Catalog tabs. Roving tabindex, as `role="tablist"` promises:
 // arrow keys move between the tabs and Tab leaves the group. Only the open
 // tab's count is known, since each tab is its own search.
-function CatalogViewTabs({ view, onSelect, total }) {
+function CatalogViewTabs({ tabs, view, onSelect, total }) {
   function onKeyDown(event) {
-    const index = CATALOG_VIEW_TABS.findIndex((tab) => tab.view === view);
+    const index = tabs.findIndex((tab) => tab.view === view);
     let next = null;
-    if (event.key === 'ArrowRight') next = (index + 1) % CATALOG_VIEW_TABS.length;
-    if (event.key === 'ArrowLeft') next = (index - 1 + CATALOG_VIEW_TABS.length) % CATALOG_VIEW_TABS.length;
+    if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+    if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
     if (event.key === 'Home') next = 0;
-    if (event.key === 'End') next = CATALOG_VIEW_TABS.length - 1;
+    if (event.key === 'End') next = tabs.length - 1;
     if (next === null) return;
     event.preventDefault();
-    const target = CATALOG_VIEW_TABS[next].view;
+    const target = tabs[next].view;
     onSelect(target);
     document.getElementById(catalogTabId(target))?.focus();
   }
   return (
     <nav className="catalog-view-tabs" role="tablist" aria-label="Catalog views" onKeyDown={onKeyDown}>
-      {CATALOG_VIEW_TABS.map((tab) => {
+      {tabs.map((tab) => {
         const active = tab.view === view;
         return (
           <button

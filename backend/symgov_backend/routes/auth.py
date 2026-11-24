@@ -145,6 +145,8 @@ def auth_user_response(user: AuthenticatedUser, settings: SymgovAPISettings | No
             # Ed's pilot gate, evaluated exactly as the Ed route does. Like the
             # others, this only tells the frontend whether to show the surface.
             "edEnabled": ed_pilot_allows(user, effective),
+            # Shows the Catalog's Visual match tab. The route itself is the authority.
+            "visualMatchEnabled": bool(effective.visual_match_enabled),
         },
         recentStepUpAt=user.recent_step_up_at.isoformat() if user.recent_step_up_at else None,
     )

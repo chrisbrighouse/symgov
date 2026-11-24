@@ -1893,6 +1893,26 @@ export async function fetchPublishedSymbols() {
   };
 }
 
+// Visual match: the image goes as base64 in a JSON body (the app's cookie-session checks need JSON). The error
+// carries the HTTP status so the panel can say something specific.
+export async function matchSymbolImage(body, { signal } = {}) {
+  const result = await requestJson('/published/symbols/visual-match', {
+    method: 'POST',
+    cache: 'no-store',
+    body: JSON.stringify(body),
+    signal
+  });
+  const payload = requireOkWithStatus(result, 'The image could not be matched.');
+  return {
+    groups: Array.isArray(payload?.groups) ? payload.groups : [],
+    degraded: Boolean(payload?.degraded),
+    warnings: Array.isArray(payload?.warnings) ? payload.warnings : [],
+    strongerMatchOutsideFilters: Boolean(payload?.strongerMatchOutsideFilters),
+    symbolsSearched: Number(payload?.symbolsSearched || 0),
+    notice: payload?.notice || ''
+  };
+}
+
 // One page of the Catalog or Set tab, searched in the database. `query` is a
 // URLSearchParams, since filters repeat (`catalogCategories=a&catalogCategories=b`).
 export async function searchPublishedSymbols(query, { signal } = {}) {
