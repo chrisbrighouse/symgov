@@ -8,9 +8,13 @@ export const VISUAL_FILTER_KEYS = ['catalogDisciplines', 'catalogCategories', 'u
 
 // Said once, above the drop area, so nobody sends an image without knowing where it goes.
 export const VISUAL_MATCH_DISCLOSURE =
-  'The image you add is sent to an external AI embedding service (Google, through OpenRouter) so Symgov can find ' +
-  'similar symbols. It is requested with zero data retention, and Symgov does not store it. Do not add images you ' +
-  'are not allowed to share.';
+  'The image you add is sent to Google\'s embedding service through OpenRouter so Symgov can find similar symbols. ' +
+  'It is not used for training, and Google may keep it briefly only for abuse monitoring. Symgov does not store it. ' +
+  'Do not add images you are not allowed to share.';
+
+export const VISUAL_MATCH_BANDS_NOTE =
+  'The match labels are provisional: they come from whether two matching methods agree, not from a measured ' +
+  'probability, and they have not yet been validated on new drawings. Always check a match against your drawing.';
 
 export const BAND_COPY = {
   likely: {

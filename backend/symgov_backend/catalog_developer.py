@@ -288,7 +288,9 @@ def _operation(endpoint: dict) -> dict:
         binary = {"schema": {"type": "string", "format": "binary"}}
         operation["requestBody"] = {
             "required": True,
-            "description": "The image bytes. It is processed in memory and never stored or logged.",
+            "description": ("The image bytes. Symgov processes them in memory and never stores or logs them. The image is sent to "
+                            "Google's embedding service through OpenRouter; it is not used for training, and Google may keep it "
+                            "briefly only for abuse monitoring."),
             "content": {"image/png": dict(binary), "image/jpeg": dict(binary)},
         }
     elif endpoint["method"] == "POST":
@@ -372,7 +374,7 @@ def catalog_openapi_document() -> dict:
                     "properties": {
                         "rank": {"type": "integer", "minimum": 1},
                         "band": {"type": "string", "enum": ["likely", "possible", "weak"],
-                                 "description": "Agreement-based confidence, not a probability. Groups hold interchangeable symbols."},
+                                 "description": "Provisional agreement-based confidence, not a probability; the cut-offs are not yet validated on new drawings. Groups hold interchangeable symbols."},
                         "symbols": {"type": "array", "items": object_schema},
                     },
                 }},

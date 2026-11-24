@@ -64,7 +64,7 @@ describe('mounted Visual match tab', () => {
     assert.deepEqual(tabLabels(renderer), ['Catalog', 'Visual match']);
     const markup = JSON.stringify(renderer.toJSON());
     assert.match(markup, /Find Catalog symbols that look like one in your drawing/);
-    assert.match(markup, /zero data retention/);
+    assert.match(markup, /Google may keep it briefly only for abuse monitoring/);
     assert.equal(renderer.root.findAllByProps({ className: 'visual-match-panel' }).length, 1);
     assert.equal(renderer.root.findAll((n) => typeof n.props?.className === 'string' && n.props.className.includes('standards-browser-grid')).length, 0);
     assert.ok(requests.some(({ url }) => url.includes('/published/symbols/search')), 'the Catalog search still runs for the filter options');

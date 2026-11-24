@@ -60,6 +60,7 @@ test('pasting an image, then Find matches, sends the base64 body with the ticked
   assert.deepEqual(sent[0], { imageBase64: 'AQIDBA==', filters: { catalogDisciplines: ['Piping'] }, includeWeak: false, limit: 10 });
   const out = text(renderer);
   assert.ok(out.includes('1. Likely match · 2 interchangeable symbols') && out.includes('2. Possible match'));
+  assert.ok(out.includes('The match labels are provisional'), 'the bands are labelled provisional');
   assert.ok(out.includes('0003-12') && out.includes('closer match outside your filters') && out.includes('Searched 120 symbols'));
   renderer.root.findAll((n) => n.type === 'button' && n.props['aria-label']?.startsWith('Open details for 0004-01'))[0].props.onClick();
   assert.deepEqual(opened, ['0004-01']);

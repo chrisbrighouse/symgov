@@ -4,6 +4,7 @@ import { matchSymbolImage } from './api.js';
 import {
   VISUAL_ACCEPTED_TYPES,
   VISUAL_FILTER_KEYS,
+  VISUAL_MATCH_BANDS_NOTE,
   VISUAL_MATCH_DISCLOSURE,
   bandCopy,
   buildVisualMatchBody,
@@ -148,7 +149,7 @@ export default function VisualMatchPanel({ filterOptions = [], onOpenSymbol, ren
         ...resultNotices(response).map((notice) => h('p', { key: notice, className: 'inline-status' }, notice)),
         response.groups.length === 0
           ? h('p', { key: 'none', className: 'copy-block' }, response.notice || 'No close match found among the symbols you can search.')
-          : null,
+          : h('p', { key: 'bands-note', className: 'muted-text visual-match-bands-note' }, VISUAL_MATCH_BANDS_NOTE),
         ...response.groups.map((group, index) => h('section', {
           key: group.rank, className: `visual-match-group band-${group.band}`, 'aria-labelledby': `visual-match-group-${group.rank}`
         },
