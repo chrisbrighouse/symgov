@@ -23,6 +23,7 @@ matching (D5) needs a second scope and is not part of this module yet.
 from __future__ import annotations
 
 import io
+import logging
 import threading
 import time
 import uuid
@@ -45,6 +46,8 @@ from .grouping import group_members
 from .imaging import SIZE, SIZE_FINE, Normalized, decode_gray, from_skeleton, normalize, rotated
 from .index import unpack_floats
 from .rerank import rerank
+
+logger = logging.getLogger(__name__)
 
 SHORTLIST = 300
 RERANK_TOP = 50
@@ -210,7 +213,13 @@ def _embed_rotations(gray: np.ndarray, embed: Callable[[bytes], Mapping[str, Any
         with ThreadPoolExecutor(max_workers=4) as pool:
             results = list(pool.map(embed, pngs))
         return [np.asarray(r["vector"], np.float32) for r in results]
-    except Exception:  # noqa: BLE001 - the provider detail never leaves this module
+    except Exception as exc:  # noqa: BLE001 - the provider detail never leaves this module
+        # The caller degrades silently, so this line is the only record of why: class and our own message
+        # (`request_image_embedding` raises with no provider detail), never the image.
+        logger.warning(
+            "visual match query embedding failed; using the local descriptor error_type=%s error=%s",
+            type(exc).__name__, str(exc)[:200],
+        )
         return None
 
 

@@ -52,3 +52,26 @@ def test_a_symbol_that_stopped_being_published_is_dropped_from_its_group(monkeyp
     result = VisualMatchResult([Group(1, "likely", [a])], False, 1, 1, 1.0)
     response = service.build_response(Rows([]), result, include_weak=False, limit=10)
     assert response["groups"] == [] and response["notice"]
+
+
+def test_default_embed_records_each_query_call_in_the_usage_ledger(monkeypatch):
+    built, calls = [], []
+
+    def fake_factory(**kwargs):
+        built.append(kwargs)
+        return "factory"
+
+    def fake_request(**kwargs):
+        calls.append(kwargs)
+        return {"vector": [1.0]}
+
+    monkeypatch.setattr(service, "create_session_factory", fake_factory)
+    monkeypatch.setattr(service, "request_image_embedding", fake_request)
+    settings = SimpleNamespace(visual_match_embedding_model="google/gemini-embedding-2", db_env_file="/env")
+    embed = service.default_embed(settings)
+    assert built == []  # nothing is built until a call is made
+    for _ in range(4):
+        embed(b"png")
+    assert [c["session_factory_provider"]() for c in calls] == ["factory"] * 4
+    assert built == [{"env_file": "/env", "nopool": True}]  # one factory shared by the match's calls
+    assert {c["initiator_kind"] for c in calls} == {"user"}

@@ -17,6 +17,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Session
 
 from .catalog_search import catalog_symbol_summary
+from .db import create_session_factory
 from .published_catalog import PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL
 from .services.llm_image_embeddings import request_image_embedding
 from .settings import SymgovAPISettings
@@ -36,6 +37,15 @@ MAX_JSON_BODY_BYTES = MAX_IMAGE_BYTES * 4 // 3 + 8192
 
 
 def default_embed(settings: SymgovAPISettings, session_factory_provider: Callable[[], Any] | None = None):
+    """The query embedder for one match. Its calls are recorded in the LLM usage ledger.
+
+    Without a session factory `request_image_embedding` skips the ledger write, which left every user
+    query unrecorded, failures included. One unpooled factory is built on first use and shared by the
+    match's four rotation calls, as the other request-time LLM callers do.
+    """
+    if session_factory_provider is None:
+        session_factory_provider = _shared_session_factory(settings)
+
     def embed(png: bytes) -> Mapping[str, Any]:
         return request_image_embedding(
             png=png, model=settings.visual_match_embedding_model, initiator_kind="user",
@@ -43,6 +53,19 @@ def default_embed(settings: SymgovAPISettings, session_factory_provider: Callabl
         )
 
     return embed
+
+
+def _shared_session_factory(settings: SymgovAPISettings) -> Callable[[], Any]:
+    lock = threading.Lock()
+    built: list[Any] = []
+
+    def provider() -> Any:
+        with lock:
+            if not built:
+                built.append(create_session_factory(env_file=settings.db_env_file, nopool=True))
+            return built[0]
+
+    return provider
 
 
 def build_response(

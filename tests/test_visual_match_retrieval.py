@@ -29,3 +29,21 @@ def test_filters_are_validated_before_any_work():
         with pytest.raises(VisualMatchInputError) as caught:
             validate_filters(bad)
         assert caught.value.code == "invalid_filter"
+
+
+def test_a_failed_query_embedding_degrades_and_logs_why(caplog):
+    import numpy as np
+
+    from symgov_backend.services.llm_embeddings import EmbeddingError
+    from symgov_backend.visual_match.retrieval import _embed_rotations
+
+    def embed(png):
+        raise EmbeddingError("The embedding was served by a provider that is not approved.")
+
+    gray = np.full((64, 96), 255, np.uint8)
+    gray[30:34, 10:80] = 0
+    with caplog.at_level("WARNING", logger="symgov_backend.visual_match.retrieval"):
+        assert _embed_rotations(gray, embed) is None
+    [record] = [r for r in caplog.records if "query embedding failed" in r.getMessage()]
+    assert "error_type=EmbeddingError" in record.getMessage()
+    assert "not approved" in record.getMessage()
