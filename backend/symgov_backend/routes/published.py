@@ -861,11 +861,13 @@ async def match_published_symbol_image(
     session: Session = Depends(get_db_session),
     settings: SymgovAPISettings = Depends(get_settings),
 ) -> dict:
-    """Match a pasted or uploaded image (base64 in a JSON body) against the public Catalog, for the signed-in app.
+    """Match a pasted or uploaded image (base64 in a JSON body) against the Catalog, for the signed-in app.
 
     The in-app twin of `POST /api/v1/catalog/visual-match`: same matcher and response, session authentication
-    and the cookie-mutation checks instead of an API key. Public Catalog only for now. The image is held in
-    memory for the request and never stored or logged.
+    and the cookie-mutation checks instead of an API key. An organization session also matches its own
+    organization's organization-wide private symbols, exactly those its Catalog tab lists (D5); personal
+    sessions and the API-key route see the public Catalog only. The image is held in memory for the request
+    and never stored or logged.
     """
     if not settings.visual_match_enabled:
         raise HTTPException(status_code=404, detail="Not found.")
@@ -888,19 +890,32 @@ async def match_published_symbol_image(
     limit = body.get("limit", 10)
     if not isinstance(include_weak, bool) or isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
         raise HTTPException(status_code=400, detail="includeWeak must be a boolean and limit a positive integer.")
+    # The same condition as the Catalog list's organization-private branch.
+    organization_id = None
+    if (
+        settings.organizations_enabled
+        and settings.organization_symbols_enabled
+        and current_user.session_mode == "organization"
+        and current_user.active_organization_id
+    ):
+        organization_id = uuid.UUID(current_user.active_organization_id)
     if not VISUAL_MATCH_SLOTS.acquire(blocking=False):
         raise HTTPException(status_code=503, detail="Visual matching is busy. Try again shortly.", headers={"Retry-After": "5"})
     try:
         response = await run_in_threadpool(
             run_visual_match, session, settings, image=image, filters=raw_filters,
-            include_weak=include_weak, limit=min(limit, 25),
+            include_weak=include_weak, limit=min(limit, 25), organization_id=organization_id,
         )
         # The Catalog summary links to the API-key routes; the signed-in app shows the session preview route.
+        # A private symbol's summary already names that route, by its governed-symbol UUID.
         for group in response.get("groups", []):
             for symbol in group.get("symbols", []):
-                symbol["previewUrl"] = (
-                    f"/api/v1/published/symbols/{symbol['displayId']}/preview" if symbol.get("preview") else None
-                )
+                if symbol.get("source") == "organization_private":
+                    symbol["previewUrl"] = (symbol.get("preview") or {}).get("previewUrl")
+                else:
+                    symbol["previewUrl"] = (
+                        f"/api/v1/published/symbols/{symbol['displayId']}/preview" if symbol.get("preview") else None
+                    )
                 symbol.pop("links", None)
                 symbol.pop("preview", None)
         return response

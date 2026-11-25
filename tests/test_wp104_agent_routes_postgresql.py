@@ -38,7 +38,7 @@ from symgov_backend.dependencies import get_db_session  # noqa: E402
 from symgov_backend.models import GovernedSymbol, OrganizationSymbolReviewSubmission, SymbolRevision, User  # noqa: E402
 from symgov_backend.settings import SymgovAPISettings, get_settings  # noqa: E402
 
-NEW_MIGRATION_HEAD = "20261123_0080"
+NEW_MIGRATION_HEAD = "20261125_0081"
 
 psycopg = pytest.importorskip("psycopg")
 

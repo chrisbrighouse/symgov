@@ -103,6 +103,12 @@ export function resultNotices(response) {
   if (Array.isArray(response.warnings) && response.warnings.includes('some_symbols_not_embedded')) {
     notices.push('A few symbols have not been indexed yet and were not searched.');
   }
+  const pending = Number(response.privateSymbolsPending || 0);
+  if (pending > 0) {
+    notices.push(pending === 1
+      ? '1 of your organization\'s private symbols is still being indexed and was not searched. Try again in a few minutes.'
+      : `${pending} of your organization's private symbols are still being indexed and were not searched. Try again in a few minutes.`);
+  }
   if (response.strongerMatchOutsideFilters) {
     notices.push('There may be a closer match outside your filters. Clear a filter to see it.');
   }

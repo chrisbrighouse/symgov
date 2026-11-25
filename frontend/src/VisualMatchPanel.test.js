@@ -98,3 +98,28 @@ test('pasting while typing in a field is left alone', () => {
   assert.equal(prevented, false);
   assert.ok(!text(renderer).includes('The image you are matching'));
 });
+
+test('a private match carries the Catalog\'s Organization Private badge and opens with its source', async () => {
+  const response = {
+    groups: [{ rank: 1, band: 'likely', symbols: [
+      { symbolId: 'p1', displayId: 'ACME-7', name: 'Acme strainer', source: 'organization_private' },
+      { symbolId: 's1', displayId: 'S-12', name: 'Strainer', source: 'public' }
+    ] }],
+    degraded: false, warnings: ['private_symbols_pending'], privateSymbolsPending: 2, strongerMatchOutsideFilters: false,
+    symbolsSearched: 9, notice: ''
+  };
+  const opened = [];
+  const renderer = render({ match: async () => response, onOpenSymbol: (s) => opened.push(s) });
+  pasteImage();
+  const find = renderer.root.findAll((n) => n.type === 'button' && n.children.includes('Find matches'))[0];
+  await act(async () => { await find.props.onClick(); });
+
+  const badges = renderer.root.findAll((n) => n.type === 'span' && String(n.props.className || '').startsWith('catalog-scope-badge'));
+  assert.deepEqual(badges.map((b) => [b.props.className, b.children.join('')]), [
+    ['catalog-scope-badge organization-private', 'Organization Private'],
+    ['catalog-scope-badge public', 'Public']
+  ]);
+  assert.ok(text(renderer).includes('2 of your organization'));
+  renderer.root.findAll((n) => n.type === 'button' && n.props['aria-label']?.startsWith('Open details for ACME-7'))[0].props.onClick();
+  assert.equal(opened[0].source, 'organization_private');
+});

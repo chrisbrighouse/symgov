@@ -35,7 +35,7 @@ def test_weak_groups_are_hidden_unless_asked_and_a_notice_replaces_an_empty_list
 
     shown = service.build_response(session, result, include_weak=False, limit=10)
     assert [g["band"] for g in shown["groups"]] == ["likely"] and "notice" not in shown
-    assert shown["groups"][0]["symbols"] == [{"displayId": "TST-A"}]
+    assert shown["groups"][0]["symbols"] == [{"displayId": "TST-A", "source": "public"}]
 
     everything = service.build_response(session, result, include_weak=True, limit=10)
     assert [g["band"] for g in everything["groups"]] == ["likely", "weak"]

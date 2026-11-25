@@ -141,6 +141,18 @@ PUBLISHED_SYMBOLS_SQL = """
 """
 
 
+# The organization-wide private symbols an organization's Catalog tab lists
+# (Stage 8 WP8.1, WP8.7's approved-only rule): over `governed_symbols gs`
+# joined to its current revision `symbol_revisions sr`, scoped by the caller
+# with `gs.owner_organization_id`. The Catalog search and the visual-match
+# index both use it, so there is one rule.
+ORGANIZATION_WIDE_PRIVATE_PREDICATE_SQL = (
+    "gs.visibility = 'organization_private' "
+    "AND gs.organization_wide IS TRUE "
+    "AND sr.lifecycle_state = 'approved'"
+)
+
+
 # The served rows: the same query with the governed-assignment flags and the
 # rights attribution as extra columns. The routes that build what a user sees
 # read this one. `PUBLISHED_SYMBOLS_SQL` stays exactly as it was, because

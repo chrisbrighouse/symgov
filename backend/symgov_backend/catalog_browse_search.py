@@ -51,6 +51,7 @@ from sqlalchemy.orm import Session
 
 from .catalog_facets import CATALOG_FACET_RULES_VERSION, compute_catalog_facets, search_query_terms
 from .published_catalog import (
+    ORGANIZATION_WIDE_PRIVATE_PREDICATE_SQL,
     PUBLISHED_SYMBOLS_SQL,
     PUBLISHED_SYMBOLS_WITH_GOVERNANCE_SQL,
     dexpi_class_parameter,
@@ -305,9 +306,7 @@ def _candidates_sql(scope: CatalogSearchScope) -> str:
         FROM governed_symbols gs
         JOIN symbol_revisions sr ON sr.id = gs.current_revision_id
         WHERE gs.owner_organization_id = :organization_id
-          AND gs.visibility = 'organization_private'
-          AND gs.organization_wide IS TRUE
-          AND sr.lifecycle_state = 'approved'
+          AND {ORGANIZATION_WIDE_PRIVATE_PREDICATE_SQL}
     """
     return f"{public} UNION ALL {private}"
 

@@ -12,7 +12,7 @@ def test_organization_stage1_migration_is_single_linear_head():
     cfg.set_main_option("script_location", "backend/alembic")
     script = ScriptDirectory.from_config(cfg)
 
-    assert script.get_heads() == ["20261123_0080"]
+    assert script.get_heads() == ["20261125_0081"]
     revision = script.get_revision("20260810_0028")
     assert revision is not None
     assert revision.down_revision == "20260808_0027"

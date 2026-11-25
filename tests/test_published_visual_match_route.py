@@ -56,7 +56,8 @@ def test_the_image_filters_and_limit_reach_the_matcher(monkeypatch):
     client, calls = _client(monkeypatch)
     body = {"imageBase64": _b64(), "filters": {"catalogDisciplines": ["Piping"]}, "includeWeak": True, "limit": 99}
     assert client.post(URL, json=body).status_code == 200
-    assert calls[0] == {"image": PNG, "filters": {"catalogDisciplines": ["Piping"]}, "include_weak": True, "limit": 25}
+    assert calls[0] == {"image": PNG, "filters": {"catalogDisciplines": ["Piping"]}, "include_weak": True, "limit": 25,
+                        "organization_id": None}
 
 
 @pytest.mark.parametrize("body", [
@@ -148,3 +149,57 @@ def test_the_api_key_route_and_the_in_app_route_return_the_same_groups(monkeypat
 
     assert core(via_api) == core(via_ui)
     assert {k: v for k, v in via_api.items() if k != "groups"} == {k: v for k, v in via_ui.items() if k != "groups"}
+
+
+def _org_client(monkeypatch, user, *, organizations=True, runner=None):
+    app = create_app()
+    real = get_settings()
+    app.dependency_overrides[get_settings] = lambda: dataclasses.replace(
+        real, visual_match_enabled=True, organizations_enabled=organizations, organization_symbols_enabled=organizations)
+    app.dependency_overrides[get_db_session] = lambda: SimpleNamespace(rollback=lambda: None)
+    app.dependency_overrides[require_user] = lambda: user
+    calls = []
+
+    def fake(session, settings, **kwargs):
+        calls.append(kwargs)
+        if runner:
+            return runner(**kwargs)
+        return {"matcherVersion": "vm1", "groups": [], "degraded": False, "warnings": [],
+                "strongerMatchOutsideFilters": False, "symbolsSearched": 1, "notice": "x"}
+
+    monkeypatch.setattr(routes, "run_visual_match", fake)
+    return TestClient(app), calls
+
+
+def test_only_an_organization_session_with_the_flags_on_passes_its_organization(monkeypatch):
+    org = "11111111-2222-3333-4444-555555555555"
+    member = SimpleNamespace(id="u1", session_mode="organization", active_organization_id=org)
+    client, calls = _org_client(monkeypatch, member)
+    assert client.post(URL, json={"imageBase64": _b64()}).status_code == 200
+    assert str(calls[0]["organization_id"]) == org
+
+    for user, flags in (
+        (SimpleNamespace(id="u1", session_mode="personal", active_organization_id=None), True),
+        (member, False),
+    ):
+        client, calls = _org_client(monkeypatch, user, organizations=flags)
+        assert client.post(URL, json={"imageBase64": _b64()}).status_code == 200
+        assert calls[0]["organization_id"] is None
+
+
+def test_a_private_result_keeps_its_own_session_preview_link(monkeypatch):
+    member = SimpleNamespace(id="u1", session_mode="organization", active_organization_id="11111111-2222-3333-4444-555555555555")
+
+    def runner(**kwargs):
+        return {"matcherVersion": "vm1", "degraded": False, "warnings": [], "strongerMatchOutsideFilters": False,
+                "symbolsSearched": 2, "groups": [{"rank": 1, "band": "likely", "symbols": [
+                    {"displayId": "ACME-1", "symbolId": "p1", "source": "organization_private", "links": {},
+                     "preview": {"previewUrl": "/api/v1/published/symbols/p1/preview"}},
+                    {"displayId": "S-9", "symbolId": "s9", "source": "public", "links": {"api": "x"},
+                     "preview": {"previewUrl": "/api/v1/catalog/symbols/S-9/preview"}},
+                ]}]}
+
+    client, _ = _org_client(monkeypatch, member, runner=runner)
+    symbols = client.post(URL, json={"imageBase64": _b64()}).json()["groups"][0]["symbols"]
+    assert [s["previewUrl"] for s in symbols] == ["/api/v1/published/symbols/p1/preview", "/api/v1/published/symbols/S-9/preview"]
+    assert all("links" not in s and "preview" not in s for s in symbols)

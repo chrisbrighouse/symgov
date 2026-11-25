@@ -70,4 +70,7 @@ test('the result notices cover degraded mode, unindexed symbols and a stronger m
   assert.equal(resultNotices({ warnings: ['some_symbols_not_embedded'] }).length, 1);
   assert.match(resultNotices({ strongerMatchOutsideFilters: true })[0], /outside your filters/);
   assert.deepEqual(resultNotices({ degraded: false, warnings: [], strongerMatchOutsideFilters: false }), []);
+  assert.match(resultNotices({ privateSymbolsPending: 1 })[0], /^1 of your organization's private symbols is still being indexed/);
+  assert.match(resultNotices({ privateSymbolsPending: 3 })[0], /^3 of your organization's private symbols are still being indexed/);
+  assert.deepEqual(resultNotices({ privateSymbolsPending: 0 }), []);
 });

@@ -1,6 +1,7 @@
 import { createElement as h, useCallback, useEffect, useRef, useState } from 'react';
 
 import { matchSymbolImage } from './api.js';
+import { catalogScopeBadge } from './catalogWorkbench.js';
 import {
   VISUAL_ACCEPTED_TYPES,
   VISUAL_FILTER_KEYS,
@@ -22,6 +23,12 @@ const FILTER_LABELS = {
   useCases: 'Use case',
   availableFormats: 'Format'
 };
+
+// The Catalog card's Public / Organization Private badge, so a private match is never mistaken for a public one.
+function scopeBadge(symbol) {
+  const badge = catalogScopeBadge(symbol);
+  return h('span', { className: `catalog-scope-badge ${badge.modifier}` }, badge.label);
+}
 
 // The Catalog's Visual match tab: add an image of a symbol (paste, drop or choose), optionally narrow the
 // search, and get ranked groups of interchangeable Catalog symbols with a plain-language confidence band.
@@ -160,7 +167,8 @@ export default function VisualMatchPanel({ filterOptions = [], onOpenSymbol, ren
               renderPreview ? renderPreview(symbol) : null,
               h('div', null,
                 h('strong', { className: 'visual-match-symbol-id' }, symbol.displayId),
-                h('span', { className: 'visual-match-symbol-name' }, ` ${symbol.name}`)),
+                h('span', { className: 'visual-match-symbol-name' }, ` ${symbol.name}`),
+                ' ', scopeBadge(symbol)),
               h('button', {
                 type: 'button', className: 'action-button secondary compact',
                 'aria-label': `Open details for ${symbol.displayId} ${symbol.name}`,
