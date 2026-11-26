@@ -113,9 +113,7 @@ import {
   withoutFormatFilters
 } from './catalogSearch.js';
 import PanelErrorBoundary from './PanelErrorBoundary.js';
-import { canMountOrganizationSymbolDrafts, canMountProjectContext, canReviewOrganizationSymbols } from './projectContext.js';
-import { OrganizationSymbolDraftsPage } from './OrganizationSymbolDraftsPage.js';
-import { OrganizationSymbolReviewsPage } from './OrganizationSymbolReviewsPage.js';
+import { canMountProjectContext } from './projectContext.js';
 import { ReviewClassificationForecast } from './ReviewClassificationForecast.js';
 import { HannahConceptReview } from './HannahConceptReview.js';
 import SupplementalPhotoStrip from './SupplementalPhotoStrip.js';
@@ -602,18 +600,9 @@ function AppContent() {
           <Route path="/workspace/llm" element={<RequireAdminAccess platformOnly><AdminLlmPage /></RequireAdminAccess>} />
           {adminRouteElements(auth, RequireAuth)}
           {semanticReviewRouteElements(auth, RequireAnyRole)}
-          <Route
-            path="/organization/symbols"
-            element={<RequireAuth>{auth.user?.capabilities?.organizationSymbolWorkflowV2Enabled === true
-              ? <Navigate to="/standards/submit?target=private" replace />
-              : <OrganizationSymbolDraftsPage auth={auth} />}</RequireAuth>}
-          />
-          <Route
-            path="/organization/symbols/review"
-            element={<RequireAuth>{auth.user?.capabilities?.organizationSymbolWorkflowV2Enabled === true
-              ? <Navigate to="/reviews?scope=private" replace />
-              : <OrganizationSymbolReviewsPage auth={auth} />}</RequireAuth>}
-          />
+          {/* Retired pages (WP8): old bookmarks land on their Submissions and Reviews homes. */}
+          <Route path="/organization/symbols" element={<Navigate to="/standards/submit?target=private" replace />} />
+          <Route path="/organization/symbols/review" element={<Navigate to="/reviews?scope=private" replace />} />
           <Route
             path="/reviews"
             element={<RequireAuth><ReviewsHub
@@ -854,13 +843,10 @@ function SideRail() {
   const canReview = hasAnyRole(user, ['admin', 'reviewer']);
   // Reviews also opens for Org Reviewers/Admins (Private) and the platform support view.
   const canOpenReviews = reviewsAccess(auth).any;
-  const workflowV2 = user?.capabilities?.organizationSymbolWorkflowV2Enabled === true;
   const canIntegrate = hasAnyRole(user, ['admin', 'integrator']);
   const canAdmin = Boolean(adminAccessScope(user));
   const canAdminOrganization = canAccessOrganizationAdmin(user);
   const canAdminPlatform = canAccessPlatformAdmin(user);
-  const canUseOrganizationSymbolDrafts = canMountOrganizationSymbolDrafts({ user });
-  const canReviewOrganizationSymbolSubmissions = canReviewOrganizationSymbols({ user });
   const canReviewSemantics = canAccessSemanticReview(user);
   const canAskEd = canUseEd(user);
 
@@ -885,13 +871,6 @@ function SideRail() {
         <nav className="rail-nav rail-nav-admin" aria-label="Organization administration">
           {canAdminOrganization ? <RailNavLink to="/organization/admin" label="Organization" icon="organization" /> : null}
           {canAdminPlatform ? <RailNavLink to="/platform/admin" label="Platform" icon="platform" /> : null}
-        </nav>
-      ) : null}
-      {/* With the unified workflow on, these live in Submissions and Reviews. */}
-      {!workflowV2 && (canUseOrganizationSymbolDrafts || canReviewOrganizationSymbolSubmissions) ? (
-        <nav className="rail-nav rail-nav-admin" aria-label="Organization symbol drafts">
-          {canUseOrganizationSymbolDrafts ? <RailNavLink to="/organization/symbols" label="Org Symbols" icon="symbols" /> : null}
-          {canReviewOrganizationSymbolSubmissions ? <RailNavLink to="/organization/symbols/review" label="Org Symbol Review" icon="reviews" /> : null}
         </nav>
       ) : null}
     </aside>
